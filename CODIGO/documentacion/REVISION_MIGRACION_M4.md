@@ -1,3 +1,7 @@
+# Revisión de la reconciliación M4 — cerrada
+
+El usuario autorizó expresamente la acción y sus verificaciones. Se ejecutó satisfactoriamente; véase [resultado](RESULTADO_RECONCILIACION_M4.md). El texto siguiente conserva la propuesta original para trazabilidad.
+
 # Acción preparada para autorización
 
 La revisión automática rechazó la modificación del historial de migraciones. La acción no se ejecutó. Se pide autorización específica antes de retomarla.

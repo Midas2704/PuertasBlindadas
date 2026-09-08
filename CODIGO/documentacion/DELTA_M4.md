@@ -6,7 +6,7 @@ Se trabaja directamente en CODIGO. M4 está integrado detrás de C_Finanzas; la 
 
 La base recibida era la primera etapa arquitectónica, no la implementación completa de CU01–CU58. Esta actualización conserva lo existente, agrega M4 CU59–CU74 y completa el recorrido financiero de los seis CU señalados. No presenta como terminadas operaciones antiguas que todavía faltan.
 
-**Cierre pendiente de instalación independiente:** las migraciones 003 y 004 ya estaban aplicadas en la base operativa. Al probar 003 en la base independiente `verificacion_i2_20260908`, se detectó una FK sin esquema explícito. El archivo se corrigió de `REFERENCES "empleado"` a `REFERENCES "finanzas"."empleado"`. La reconciliación de su checksum en el historial local y el registro del intento fallido como revertido en la base de prueba requieren aprobación: la revisión automática rechazó esa modificación de metadatos. No se ejecutó la reconciliación ni se borraron datos. No utilizar esta entrega como instalación certificada hasta cerrar esa comprobación.
+**Reconciliación cerrada con autorización explícita:** se verificaron nuevamente FK y checksum original; se modificó únicamente el checksum de 003 en la base operativa. En la base independiente se marcó el intento fallido como revertido y se aplicaron 003/004 con seed correcto. Las 139 tablas operativas conservan sus datos. Véase [resultado completo](RESULTADO_RECONCILIACION_M4.md).
 
 ## Fuentes y decisiones
 
@@ -121,7 +121,7 @@ Para recuperación en desarrollo, `M4_CORREO=desarrollo` deja el correo y enlace
 - Continuidad del último administrador: prueba unitaria de la regla con ausencia de alternativas y prueba con BD del administrador original protegido; no se presenta como prueba de concurrencia de múltiples administradores.
 - Regresión de lo implementado: clientes, filtros, ficha, monedas separadas, borrador y atomicidad, NV/pago B2C, pagos, reversión comercial, excedente/saldo a favor y cálculo vigente.
 - Navegador: login real, catálogo, búsqueda Aurora, ficha financiera, usuarios y sesiones. La presentación conserva sidebar, tarjetas, tablas y paleta originales.
-- La prueba de instalación independiente reveló el problema de FK documentado al comienzo. Su reintento está pendiente de autorización; no se afirma que esa verificación pasó.
+- Reintento de instalación independiente completado después de la autorización: deploy y seed correctos; ambas bases al día y sin diferencias según Prisma. La comparación ampliada de PostgreSQL identifica 45 diferencias de representación de casts en CHECK heredados, con condiciones equivalentes; detalle en RESULTADO_RECONCILIACION_M4.md.
 
 La advertencia interna de `pg` por concurrencia de consultas continúa presente; no provoca fallos en estas pruebas. No se añadieron consultas SQL funcionales fuera de Prisma.
 
@@ -136,4 +136,4 @@ La advertencia interna de `pg` por concurrencia de consultas continúa presente;
 7. Pendientes anteriores M1: CU01–CU04, completar filtros financieros y CU10–CU11. M2: borradores incompletos/edición ampliada, provisional/formalización, emisión/versionado, OC B2B, ampliaciones de venta directa, guías y condiciones de cobro. M3: anulaciones y reversiones de pago operativas, ejecución de devolución, aplicación de saldo a favor, conciliación y comprobante, más campos específicos por medio. Los cálculos sí contemplan antecedentes persistidos de anulaciones y reversiones. No hay regresión ejecutable de funcionalidades que la base aún no tenía.
 8. La cuenta heredada sin habilitación M4 se conserva, sin inventar asociación ni contraseña. Su regularización requiere datos válidos del empleado/configuración.
 9. No se implementa M12 ni una arquitectura nueva de auditoría. Se mantiene solamente estado/responsable/motivo técnico cuando corresponde a seguridad y sesión.
-10. Completar la reconciliación de migraciones autorizada y repetir la instalación/seed independiente antes del cierre definitivo.
+10. Reconciliación e instalación/seed independiente completados. Los pendientes funcionales anteriores siguen vigentes.
