@@ -1,0 +1,41 @@
+import { ProveedorSesion, Protegido } from './seguridad/Sesion';
+import { Acceso } from './views/Seguridad/Acceso';
+import Usuarios from './views/Seguridad/Usuarios';
+import Sesiones from './views/Seguridad/Sesiones';
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+
+// Layout
+import DashboardWrapper from './views/DashboardWrapper/DashboardWrapper';
+
+// Views
+import DashboardPrincipal from './views/DashboardPrincipal/DashboardPrincipal';
+import CatalogoClientes from './views/CatalogoClientes/CatalogoClientes';
+import VerFicha from './views/VerFicha/VerFicha';
+import ArmarCotizacion from './views/ArmarCotizacion/ArmarCotizacion';
+import NotaDeVentaDirecta from './views/NotaDeVentaDirecta/NotaDeVentaDirecta';
+import BandejaAprobacionGerencia from './views/BandejaAprobacion/BandejaAprobacionGerencia';
+
+const App: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <ProveedorSesion><Routes>
+        <Route path="/login" element={<Acceso modo="login"/>}/>
+        <Route path="/recuperar" element={<Acceso modo="recuperar"/>}/>
+        <Route path="/" element={<Protegido><DashboardWrapper /></Protegido>}>
+          <Route path="usuarios" element={<Protegido permiso="CU67"><Usuarios/></Protegido>}/>
+          <Route path="sesiones" element={<Protegido permiso="CU73"><Sesiones/></Protegido>}/>
+          <Route path="cuenta/clave" element={<Acceso modo="clave"/>}/>
+          <Route index element={<Protegido permiso="CU05"><DashboardPrincipal /></Protegido>} />
+          <Route path="clientes" element={<Protegido permiso="CU05"><CatalogoClientes /></Protegido>} />
+          <Route path="clientes/:rut" element={<Protegido permiso="CU09"><VerFicha /></Protegido>} />
+          <Route path="cotizacion/nueva" element={<Protegido permiso="CU19"><ArmarCotizacion /></Protegido>} />
+          <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
+          <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />
+        </Route>
+      </Routes></ProveedorSesion>
+    </BrowserRouter>
+  );
+};
+
+export default App;
