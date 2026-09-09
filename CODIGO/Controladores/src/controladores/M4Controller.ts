@@ -110,6 +110,8 @@ export class M4Controller {
  }
  async cambiarClave(actor:ActorAutenticado,entrada:Entrada) {
   return this.transaccion(async tx=>{
+   const cuenta=await tx.usuario.findUnique({where:{usuario_id_usuario:actor.id},select:{administrador_original:true}});
+   if(cuenta?.administrador_original) error(409,'La cuenta raíz Midas no puede modificarse');
    const actual=await this.credencial(tx,actor.id);
    if(!await comprobarClave(entrada.claveActual,actual.usuario_contrasena)) error(400,'Contraseña actual incorrecta');
    validarClave(entrada.claveNueva); await this.nuevaClave(tx,actor.id,entrada.claveNueva); await this.reiniciarSeguridad(tx,actor.id,actor.id.toString());
@@ -162,7 +164,7 @@ export class M4Controller {
  async modificarUsuario(operacion:string,actor:ActorAutenticado,entrada:Entrada) {
   const id=idCuenta(entrada.id); confirmar(entrada);
   return this.transaccion(async tx=>{
-   const cuenta=await this.cuenta(tx,id); let temporal:string|undefined;
+   const cuenta=await this.cuenta(tx,id); if(cuenta.administrador_original) error(409,'La cuenta raíz Midas no puede modificarse'); let temporal:string|undefined;
    if(operacion==='desactivarUsuario') { if(cuenta.usuario_estado_cuenta!=='activo') error(409,'La cuenta no está Activa');await this.continuidad(tx,cuenta);await tx.usuario.update({where:{usuario_id_usuario:id},data:{usuario_estado_cuenta:'inactivo'}}); }
    else if(operacion==='reactivarUsuario') {
     if(cuenta.usuario_estado_cuenta!=='inactivo' || cuenta.empleado_seguridad?.estado_laboral!=='activo') error(409,'La reactivación requiere cuenta Inactiva y Empleado activo');
@@ -211,7 +213,7 @@ export class M4Controller {
   let envio:{correo:string;token:string}|undefined;
   await this.transaccion(async tx=>{
    const cuenta=await tx.usuario.findUnique({where:{acceso_m4:acceso},include:{seguridad:true}});
-   if(!cuenta || cuenta.usuario_estado_cuenta!=='activo' || !cuenta.usuario_correo || cuenta.seguridad?.bloqueo_persistente) return;
+   if(!cuenta || cuenta.usuario_estado_cuenta!=='activo' || !cuenta.usuario_correo || cuenta.seguridad?.bloqueo_persistente || cuenta.administrador_original) return;
    await tx.token_recuperacion.updateMany({where:{id_usuario:cuenta.usuario_id_usuario,utilizado:null},data:{utilizado:new Date()}});
    const token=secreto();await tx.token_recuperacion.create({data:{id_usuario:cuenta.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(politica.recuperacionMinutos)}});
    envio={correo:cuenta.usuario_correo,token};
@@ -228,7 +230,7 @@ export class M4Controller {
   const token=texto(entrada.token,200);validarClave(entrada.claveNueva);
   return this.transaccion(async tx=>{
    const recuperacion=await tx.token_recuperacion.findUnique({where:{secreto_hash:huella(token)},include:{usuario:{include:{seguridad:true}}}});
-   if(!recuperacion || recuperacion.utilizado || recuperacion.vence<=new Date() || recuperacion.usuario.usuario_estado_cuenta!=='activo' || recuperacion.usuario.seguridad?.bloqueo_persistente) return error(400,'Enlace de recuperación no válido');
+   if(!recuperacion || recuperacion.utilizado || recuperacion.vence<=new Date() || recuperacion.usuario.usuario_estado_cuenta!=='activo' || recuperacion.usuario.seguridad?.bloqueo_persistente || recuperacion.usuario.administrador_original) return error(400,'Enlace de recuperación no válido');
    await this.nuevaClave(tx,recuperacion.id_usuario,entrada.claveNueva as string);await this.reiniciarSeguridad(tx,recuperacion.id_usuario,'Recuperación autónoma');
    return {mensaje:'Contraseña recuperada. Inicia sesión nuevamente.'};
   });
