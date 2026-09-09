@@ -16,12 +16,14 @@ export function numeroNoNegativo(valor: unknown, nombre: string): number {
   if (!Number.isFinite(numero) || numero < 0) throw new ErrorAplicacion(400, `${nombre} debe ser un número válido no negativo`);
   return numero;
 }
-export type FiltrosClientes = { busqueda: string; estado: 'activos' | 'inactivos' | 'todos'; deuda: boolean; morosos: boolean };
+export type FiltrosClientes = { busqueda: string; estado: 'activos' | 'inactivos' | 'todos'; deuda: boolean; morosos: boolean; ordenar: 'nombre'|'rut'|'saldo'; direccion: 'asc'|'desc' };
 export function validarFiltros(consulta: Record<string, unknown>): FiltrosClientes {
   const estado = texto(consulta.estado || 'activos');
   if (!['activos', 'inactivos', 'todos'].includes(estado)) throw new ErrorAplicacion(400, 'Estado permitido: activos, inactivos o todos');
   for (const clave of ['deuda', 'morosos']) {
     if (consulta[clave] !== undefined && !['true', 'false'].includes(String(consulta[clave]))) throw new ErrorAplicacion(400, `Filtro ${clave} inválido`);
   }
-  return { busqueda: texto(consulta.busqueda ?? consulta.search), estado: estado as FiltrosClientes['estado'], deuda: consulta.deuda === 'true', morosos: consulta.morosos === 'true' };
+  const ordenar = texto(consulta.ordenar || 'nombre'); const direccion = texto(consulta.direccion || 'asc');
+  if (!['nombre','rut','saldo'].includes(ordenar) || !['asc','desc'].includes(direccion)) throw new ErrorAplicacion(400, 'Ordenamiento inválido');
+  return { busqueda: texto(consulta.busqueda ?? consulta.search), estado: estado as FiltrosClientes['estado'], deuda: consulta.deuda === 'true', morosos: consulta.morosos === 'true', ordenar: ordenar as FiltrosClientes['ordenar'], direccion: direccion as FiltrosClientes['direccion'] };
 }

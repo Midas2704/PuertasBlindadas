@@ -5,6 +5,7 @@ import ModalDetalleDocumento from '../../components/ModalDetalleDocumento';
 
 interface FichaCompleta {
   resumen: {
+    id_cliente_financiero: number;
     rut_cliente: string;
     nombre_razon_social_referencia: string;
     telefono_financiero: string;
@@ -43,11 +44,17 @@ const referenciaDesdeRuta = () => {
 const VerFicha: React.FC = () => {
   const [data, setData] = useState<FichaCompleta | null>(null);
   const [loading, setLoading] = useState(true);
+  const [ordenFicha, setOrdenFicha] = useState('fecha_desc');
+  const [estadoFicha, setEstadoFicha] = useState('todos');
 
   const [activeModal, setActiveModal] = useState<{ tipo: 'cotizacion' | 'nota_venta', data: any } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState('');
   const [mostrarMotivo, setMostrarMotivo] = useState(false);
   const [modalMsg, setModalMsg] = useState({ text: '', type: '' });
+  const [saldoSeleccionado, setSaldoSeleccionado] = useState('');
+  const [notaAplicacion, setNotaAplicacion] = useState('');
+  const [montoAplicacion, setMontoAplicacion] = useState('');
+  const [pagoDetalle, setPagoDetalle] = useState<any | null>(null);
 
   useEffect(() => {
     const rut = referenciaDesdeRuta();
@@ -69,6 +76,8 @@ const VerFicha: React.FC = () => {
   if (!data || !data.resumen) return <div className="p-8 text-center text-red-500">Ficha no encontrada.</div>;
 
   const { resumen, resumen_dashboard } = data;
+  const cotizacionesVisibles = [...(resumen_dashboard?.cotizaciones || [])].filter(c=>estadoFicha==='todos'||c.estado_cotizacion===estadoFicha).sort((a,b)=>String(a.fecha_emision).localeCompare(String(b.fecha_emision))*(ordenFicha==='fecha_desc'?-1:1));
+  const notasVisibles = [...(resumen_dashboard?.notas_venta || [])].filter(n=>estadoFicha==='todos'||n.estado_nota_venta===estadoFicha).sort((a,b)=>String(a.fecha_emision).localeCompare(String(b.fecha_emision))*(ordenFicha==='fecha_desc'?-1:1));
 
   // Inject ficha_cliente stub from resumen so the universal modal always has nombre and rut
   const fichaClienteStub = {
@@ -117,6 +126,20 @@ const VerFicha: React.FC = () => {
       setModalMsg({ text: e.message, type: 'error' });
     }
   };
+  const operarPago = async (id:number, accion:'anular'|'revertir'|'conciliar'|'comprobante') => {
+    try {
+      if (accion === 'comprobante') { const r=await solicitarFinanzas(`/pagos/${id}/comprobante`); const d=await r.json(); const a=document.createElement('a'); a.href=d.contenido; a.download=d.nombre; a.click(); return; }
+      const monto=(accion==='revertir'||accion==='conciliar')?window.prompt(accion==='revertir'?'Monto a revertir':'Monto conciliado'):undefined; const motivo=window.prompt(accion==='conciliar'?'Observación de conciliación':'Motivo'); if(!motivo)return;
+      const ruta=accion==='conciliar'?`/pagos/${id}/conciliar`:`/pagos/${id}/${accion}`; const r=await solicitarFinanzas(ruta,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(accion==='conciliar'?{monto:Number(monto||0),evidencia:motivo}:{monto:monto?Number(monto):undefined,motivo,respaldo:motivo})}); const d=await r.json(); if(!r.ok)throw new Error(d.error); window.location.reload();
+    } catch(e){setModalMsg({text:(e as Error).message,type:'error'});}
+  };
+  const verDetallePago = async (id:number) => { const respuesta = await solicitarFinanzas(`/pagos/${id}`); const datos = await respuesta.json(); if (respuesta.ok) setPagoDetalle(datos); else setModalMsg({text:datos.error,type:'error'}); };
+  const formalizar = async () => { const rut=window.prompt('RUT del cliente'); if(!rut)return; try { const r=await solicitarFinanzas('/clientes/formalizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idCliente:resumen.id_cliente_financiero,rut})}); const d=await r.json(); if(!r.ok)throw new Error(d.error); window.location.reload(); } catch(e){setModalMsg({text:(e as Error).message,type:'error'});} };
+  const configurarCobro = async () => { if(!activeModal)return; const fecha=window.prompt('Fecha final de vencimiento AAAA-MM-DD'); if(!fecha)return; const r=await solicitarFinanzas(`/billing/nota-venta/${activeModal.data.id_nota_venta}/condiciones-cobro`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({fechaVencimiento:fecha})}); const d=await r.json(); setModalMsg({text:r.ok?'Condiciones actualizadas':d.error,type:r.ok?'success':'error'}); };
+  const registrarGuia = async () => { if(!activeModal)return; const folio=window.prompt('Folio de Guía de Despacho'); if(!folio)return; const r=await solicitarFinanzas('/billing/documents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id_nota_venta:activeModal.data.id_nota_venta,tipo_documento:'guia_despacho',folio})}); const d=await r.json(); setModalMsg({text:r.ok?'Guía registrada':d.error,type:r.ok?'success':'error'}); };
+  const aplicarSaldo = async () => { if(!saldoSeleccionado||!notaAplicacion||!montoAplicacion)return; const r=await solicitarFinanzas(`/saldos-favor/${saldoSeleccionado}/aplicar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idNota:Number(notaAplicacion),monto:Number(montoAplicacion)})}); const d=await r.json(); setModalMsg({text:r.ok?'Saldo a favor aplicado':d.error,type:r.ok?'success':'error'}); if(r.ok){setSaldoSeleccionado('');setNotaAplicacion('');setMontoAplicacion('');window.location.reload();} };
+  const morosidad = async () => { if(!activeModal)return; const r=await solicitarFinanzas(`/pagos/${activeModal.data.id_nota_venta}/morosidad`); const d=await r.json(); setModalMsg({text:r.ok?`${d.situacion}${d.fechaVencimiento?` · vence ${new Date(d.fechaVencimiento).toLocaleDateString('es-CL')}`:''}`:d.error,type:r.ok?'success':'error'}); };
+  const etapasCobro = async () => { if(!activeModal)return; const fecha=window.prompt('Fecha etapa AAAA-MM-DD'); const monto=window.prompt('Monto etapa'); if(!fecha||!monto)return; const r=await solicitarFinanzas(`/notas-venta/${activeModal.data.id_nota_venta}/etapas-cobro`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({etapas:[{descripcion:'Etapa de cobro',fecha,monto:Number(monto)}]})}); const d=await r.json(); setModalMsg({text:r.ok?'Etapa de cobro configurada':d.error,type:r.ok?'success':'error'}); };
 
   return (
     <div className="p-8 max-w-7xl mx-auto font-sans bg-slate-50 min-h-screen relative">
@@ -135,7 +158,7 @@ const VerFicha: React.FC = () => {
             <div>
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold">{resumen.nombre_razon_social_referencia}</h1>
-                {resumen.incompleto && <span className="bg-orange-100 text-orange-800 text-xs px-2 py-1 rounded">Incompleto</span>}
+                {resumen.incompleto && <><span className="bg-orange-100 text-orange-800 text-xs px-2 py-1 rounded">Incompleto</span><button onClick={formalizar} className="text-xs bg-white text-primary-700 px-2 py-1 rounded">Formalizar B2C</button></>}
                 {resumen.isMoroso ? (
                   <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm">Moroso</span>
                 ) : (
@@ -203,11 +226,13 @@ const VerFicha: React.FC = () => {
           <p className="mt-3 text-gray-700" key={saldo.moneda}>{saldo.moneda}: saldo pendiente {saldo.saldoPendiente.toLocaleString('es-CL')} · deuda vigente {saldo.deudaVigente.toLocaleString('es-CL')} · moroso {saldo.obligacionesMorosas.toLocaleString('es-CL')}</p>
         ))}
       </div>
+      {(resumen_dashboard as any).saldosFavor?.length > 0 && <div className="bg-white rounded-xl shadow-sm border border-purple-200 p-6 mb-8"><h3 className="font-semibold text-purple-900 mb-3">Saldos a favor disponibles</h3><div className="grid md:grid-cols-4 gap-3 items-end"><label className="text-sm">Saldo<select className="w-full border rounded p-2 mt-1" value={saldoSeleccionado} onChange={e=>setSaldoSeleccionado(e.target.value)}><option value="">Seleccionar saldo</option>{(resumen_dashboard as any).saldosFavor.map((s:any)=><option key={s.id_saldo_favor_cliente} value={s.id_saldo_favor_cliente}>#{s.id_saldo_favor_cliente} · disponible {Number(s.monto_disponible).toLocaleString('es-CL')}</option>)}</select></label><label className="text-sm">Nota de Venta<select className="w-full border rounded p-2 mt-1" value={notaAplicacion} onChange={e=>setNotaAplicacion(e.target.value)}><option value="">Seleccionar NV</option>{notasVisibles.filter(n=>!['anulada','cerrada','revertida_total'].includes(n.estado_nota_venta)).map(n=><option key={n.id_nota_venta} value={n.id_nota_venta}>NV-{n.id_nota_venta} · pendiente {Number(n.saldoPendiente||0).toLocaleString('es-CL')}</option>)}</select></label><input className="border rounded p-2" type="number" min="0.01" step="0.01" placeholder="Monto" value={montoAplicacion} onChange={e=>setMontoAplicacion(e.target.value)}/><button className="px-3 py-2 bg-purple-700 text-white rounded" onClick={aplicarSaldo}>Aplicar saldo</button></div></div>}
       {/* Cotizaciones Históricas */}
       <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2 mt-8">
         <FileText className="w-5 h-5 text-primary-600" />
         Cotizaciones Históricas
       </h2>
+      <div className="flex gap-2 mb-3"><select aria-label="Filtrar antecedentes" className="border rounded px-3 py-2 text-sm" value={estadoFicha} onChange={e=>setEstadoFicha(e.target.value)}><option value="todos">Todos los estados</option><option value="borrador">Borrador</option><option value="emitida">Emitida</option><option value="aprobada">Aprobada</option><option value="pagada">Pagada</option><option value="anulada">Anulada</option></select><select aria-label="Ordenar antecedentes" className="border rounded px-3 py-2 text-sm" value={ordenFicha} onChange={e=>setOrdenFicha(e.target.value)}><option value="fecha_desc">Más recientes</option><option value="fecha_asc">Más antiguos</option></select></div>
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
@@ -221,12 +246,12 @@ const VerFicha: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {resumen_dashboard?.cotizaciones?.length === 0 ? (
+              {cotizacionesVisibles.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-gray-500">No hay cotizaciones registradas.</td>
                 </tr>
               ) : (
-                resumen_dashboard?.cotizaciones?.map((cot, idx) => (
+                cotizacionesVisibles.map((cot, idx) => (
                   <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-6 text-sm">
                       <span
@@ -277,12 +302,12 @@ const VerFicha: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {(!resumen_dashboard?.notas_venta || resumen_dashboard.notas_venta.length === 0) ? (
+              {notasVisibles.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-gray-500">No hay Notas de Venta registradas.</td>
                 </tr>
               ) : (
-                resumen_dashboard.notas_venta.map((nv, idx) => (
+                notasVisibles.map((nv, idx) => (
                   <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="py-3 px-6 text-sm">
                       <span
@@ -325,12 +350,12 @@ const VerFicha: React.FC = () => {
       <h2 className="text-xl font-bold text-gray-900 mb-4">Pagos del cliente</h2>
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
         <table className="w-full text-left text-sm"><thead className="bg-gray-50"><tr><th className="py-3 px-6">Pago</th><th className="py-3 px-6">Estado</th><th className="py-3 px-6">Monto original / efectivo</th></tr></thead>
-          <tbody>{resumen_dashboard.pagos.map(pago => <tr key={pago.id_pago_cliente} className="border-t border-gray-100"><td className="py-3 px-6">#{pago.id_pago_cliente} · {new Date(pago.fecha_pago).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</td><td className="py-3 px-6">{pago.anulacion_pago ? 'Anulado' : pago.reversion_pago.length ? 'Con reversión' : pago.estado_verificacion}</td><td className="py-3 px-6">{pago.moneda.codigo_moneda} {Number(pago.monto_pago).toLocaleString('es-CL')} / {pago.montoEfectivo.toLocaleString('es-CL')}</td></tr>)}
+          <tbody>{resumen_dashboard.pagos.map(pago => <tr key={pago.id_pago_cliente} className="border-t border-gray-100"><td className="py-3 px-6">#{pago.id_pago_cliente} · {new Date(pago.fecha_pago).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</td><td className="py-3 px-6">{pago.anulacion_pago ? 'Anulado' : pago.reversion_pago.length ? 'Con reversión' : pago.estado_verificacion}</td><td className="py-3 px-6">{pago.moneda.codigo_moneda} {Number(pago.monto_pago).toLocaleString('es-CL')} / {pago.montoEfectivo.toLocaleString('es-CL')}</td><td className="py-3 px-6 flex gap-2"><button className="text-primary-700" onClick={()=>operarPago(pago.id_pago_cliente,'comprobante')}>PDF</button>{!pago.anulacion_pago&&<><button className="text-red-700" onClick={()=>operarPago(pago.id_pago_cliente,'anular')}>Anular</button><button className="text-orange-700" onClick={()=>operarPago(pago.id_pago_cliente,'revertir')}>Revertir</button><button className="text-green-700" onClick={()=>operarPago(pago.id_pago_cliente,'conciliar')}>Conciliar</button></>}</td></tr>)}
           {!resumen_dashboard.pagos.length && <tr><td colSpan={3} className="py-6 text-center text-gray-500">Sin pagos registrados.</td></tr>}</tbody>
         </table>
       </div>
       {/* Modal Desglose Universal */}
-      <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)}>
+      <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)} onViewPago={verDetallePago}>
         {/* Administración del Documento (Solo NV no anulada) */}
         {activeModal && activeModal.tipo === 'nota_venta' && activeModal.data.estado_nota_venta !== 'anulada' && (
           <div className="mt-6 pt-6 border-t border-gray-200">
@@ -379,11 +404,15 @@ const VerFicha: React.FC = () => {
                 )}
               </div>
             </div>
+            <div className="flex flex-wrap gap-2 mt-4"><button onClick={configurarCobro} className="px-3 py-2 border rounded text-sm">Condiciones de cobro</button><button onClick={etapasCobro} className="px-3 py-2 border rounded text-sm">Etapas B2C</button><button onClick={registrarGuia} className="px-3 py-2 border rounded text-sm">Generar Guía</button><button onClick={aplicarSaldo} className="px-3 py-2 border rounded text-sm">Aplicar saldo a favor</button><button onClick={morosidad} className="px-3 py-2 border rounded text-sm">Consultar morosidad</button></div>
           </div>
         )}
       </ModalDetalleDocumento>
+      {pagoDetalle && <div className="fixed inset-0 z-[60] bg-slate-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6"><div className="flex justify-between mb-4"><h3 className="text-xl font-bold">Detalle de pago #{pagoDetalle.id_pago_cliente}</h3><button className="text-gray-500" onClick={()=>setPagoDetalle(null)}>Cerrar</button></div><dl className="grid grid-cols-2 gap-3 text-sm"><dt className="text-gray-500">Cliente</dt><dd>{resumen.nombre_razon_social_referencia}</dd><dt className="text-gray-500">Nota de Venta</dt><dd>{pagoDetalle.asignacion_pago_cliente?.id_nota_venta || '—'}</dd><dt className="text-gray-500">Categoría</dt><dd>{pagoDetalle.categoria_pago?.nombre || '—'}</dd><dt className="text-gray-500">Medio</dt><dd>{pagoDetalle.medio_pago?.nombre_medio_pago || '—'}</dd><dt className="text-gray-500">Monto</dt><dd>{pagoDetalle.moneda?.codigo_moneda} {Number(pagoDetalle.monto_pago).toLocaleString('es-CL')}</dd><dt className="text-gray-500">Equivalente CLP / tipo cambio</dt><dd>{pagoDetalle.monto_convertido ? `${Number(pagoDetalle.monto_convertido).toLocaleString('es-CL')} / ${pagoDetalle.tipo_cambio_usado}` : '—'}</dd><dt className="text-gray-500">Estado</dt><dd>{pagoDetalle.estado_verificacion}</dd><dt className="text-gray-500">Conciliación</dt><dd>{pagoDetalle.conciliacion?.[0]?.estado_conciliacion || pagoDetalle.estado_conciliacion}</dd><dt className="text-gray-500">Anulación/Reversión</dt><dd>{pagoDetalle.anulacion_pago?'Anulado':pagoDetalle.reversion_pago?.length?'Con reversión':'Sin movimientos'}</dd><dt className="text-gray-500">Documento tributario</dt><dd>{pagoDetalle.asignacion_pago_cliente?.documento_tributario ? `${pagoDetalle.asignacion_pago_cliente.documento_tributario.tipo_documento?.nombre_tipo_documento || 'Documento'} · ${pagoDetalle.asignacion_pago_cliente.documento_tributario.folio_documento}` : '—'}</dd></dl></div></div>}
     </div>
   );
 };
 
 export default VerFicha;
+
+

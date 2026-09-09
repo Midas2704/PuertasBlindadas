@@ -15,6 +15,8 @@ import VerFicha from './views/VerFicha/VerFicha';
 import ArmarCotizacion from './views/ArmarCotizacion/ArmarCotizacion';
 import NotaDeVentaDirecta from './views/NotaDeVentaDirecta/NotaDeVentaDirecta';
 import BandejaAprobacionGerencia from './views/BandejaAprobacion/BandejaAprobacionGerencia';
+import PagosCliente from './views/Pagos/PagosCliente';
+import UmbralPorVencer from './views/Configuracion/UmbralPorVencer';
 
 const App: React.FC = () => {
   return (
@@ -32,6 +34,8 @@ const App: React.FC = () => {
           <Route path="cotizacion/nueva" element={<Protegido permiso="CU19"><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />
+          <Route path="pagos" element={<Protegido permiso="CU42"><PagosCliente /></Protegido>} />
+          <Route path="configuracion/umbral" element={<Protegido permiso="CU41"><UmbralPorVencer /></Protegido>} />
         </Route>
       </Routes></ProveedorSesion>
     </BrowserRouter>

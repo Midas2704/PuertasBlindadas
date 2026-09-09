@@ -264,7 +264,7 @@ const NotaDeVentaDirecta: React.FC = () => {
                   </div>
                   <div className="col-span-2 text-xs text-orange-600 flex items-center gap-1 mt-1">
                     <Shield className="w-3 h-3" /> Requiere privilegios de Gerencia o Administrador para procesarse.
-                    <span>Acceso local provisional</span>
+                    <span>La autorización se valida al registrar la operación.</span>
                   </div>
                 </div>
               )}

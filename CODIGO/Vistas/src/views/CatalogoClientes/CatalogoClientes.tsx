@@ -1,7 +1,7 @@
 import { usarSesion } from '../../seguridad/Sesion';
 import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Eye } from 'lucide-react';
+import { Search, Filter, Eye, Plus, Power, Edit3 } from 'lucide-react';
 
 interface Cliente {
   id_cliente_financiero: number;
@@ -25,14 +25,20 @@ const CatalogoClientes: React.FC = () => {
   const [soloDeuda, fijarSoloDeuda] = useState(false);
   const [soloMorosos, fijarSoloMorosos] = useState(false);
   const [estado, fijarEstado] = useState('activos');
+  const [ordenar, fijarOrdenar] = useState('nombre');
+  const [direccion, fijarDireccion] = useState('asc');
   const [cargando, fijarCargando] = useState(true);
   const [error, fijarError] = useState('');
+  const [nuevo, fijarNuevo] = useState(false);
+  const [formulario, fijarFormulario] = useState({ tipo:'B2B', rut:'', nombre:'', contacto:'', correo:'', telefono:'' });
+  const [guardando, fijarGuardando] = useState(false);
+  const [mensaje, fijarMensaje] = useState('');
 
   useEffect(() => {
     const cancelacion = new AbortController();
     fijarCargando(true);
     fijarError('');
-    const parametros = new URLSearchParams({ busqueda, estado, deuda: String(soloDeuda), morosos: String(soloMorosos) });
+    const parametros = new URLSearchParams({ busqueda, estado, deuda: String(soloDeuda), morosos: String(soloMorosos), ordenar, direccion });
     solicitarFinanzas(`/clientes?${parametros}`, { signal: cancelacion.signal })
       .then(async respuesta => {
         const resultado = await respuesta.json();
@@ -43,7 +49,15 @@ const CatalogoClientes: React.FC = () => {
       .catch(causa => { if (!cancelacion.signal.aborted) fijarError(causa.message); })
       .finally(() => { if (!cancelacion.signal.aborted) fijarCargando(false); });
     return () => cancelacion.abort();
-  }, [busqueda, estado, soloDeuda, soloMorosos]);
+  }, [busqueda, estado, soloDeuda, soloMorosos, ordenar, direccion]);
+
+  const enviar = async (ruta: string, metodo: string, cuerpo: Record<string, unknown>) => {
+    const respuesta = await solicitarFinanzas(ruta, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+    const resultado = await respuesta.json(); if (!respuesta.ok) throw new Error(resultado.error || 'No fue posible completar la operación'); return resultado;
+  };
+  const guardar = async (evento: React.FormEvent) => { evento.preventDefault(); fijarGuardando(true); fijarMensaje(''); try { await enviar('/clientes','POST',formulario); fijarMensaje('Cliente registrado'); fijarNuevo(false); window.location.reload(); } catch (e) { fijarMensaje((e as Error).message); } finally { fijarGuardando(false); } };
+  const cambiarEstado = async (c: Cliente) => { const destino = c.estado === 'activo' ? 'desactivar' : 'reactivar'; if (!window.confirm(`¿${destino === 'desactivar' ? 'Desactivar' : 'Reactivar'} a ${c.razonSocial}?`)) return; try { await enviar(`/clientes/${c.id_cliente_financiero}/${destino}`,'POST',{confirmado:true}); window.location.reload(); } catch (e) { fijarError((e as Error).message); } };
+  const editar = async (c: Cliente) => { const nombre = window.prompt('Nombre o Razón Social', c.razonSocial); if (nombre === null) return; const correo = window.prompt('Correo', c.correo || '') ?? ''; const telefono = window.prompt('Teléfono', c.telefono || '') ?? ''; try { await enviar(`/clientes/${c.id_cliente_financiero}`,'PUT',{nombre,correo,telefono}); window.location.reload(); } catch (e) { fijarError((e as Error).message); } };
 
   return (
     <div className="p-8 max-w-7xl mx-auto font-sans">
@@ -52,7 +66,18 @@ const CatalogoClientes: React.FC = () => {
           <h1 className="text-3xl font-bold text-gray-900">Catálogo de Clientes</h1>
           <p className="text-sm text-gray-500 mt-1">Gestión de clientes financieros y saldos</p>
         </div>
+        {sesion?.permisos.includes('CU01') && <button onClick={() => fijarNuevo(true)} className="px-4 py-2.5 bg-primary-600 text-white rounded-lg font-semibold inline-flex items-center gap-2"><Plus className="w-4 h-4"/>Crear cliente</button>}
       </div>
+
+      {nuevo && <form onSubmit={guardar} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <select aria-label="Tipo de cliente" className="px-3 py-2 border rounded-lg" value={formulario.tipo} onChange={e=>fijarFormulario({...formulario,tipo:e.target.value})}><option>B2B</option><option>B2C</option></select>
+        <input className="px-3 py-2 border rounded-lg" placeholder="RUT (opcional para B2C)" value={formulario.rut} onChange={e=>fijarFormulario({...formulario,rut:e.target.value})}/>
+        <input required className="px-3 py-2 border rounded-lg" placeholder="Nombre o Razón Social" value={formulario.nombre} onChange={e=>fijarFormulario({...formulario,nombre:e.target.value})}/>
+        <input className="px-3 py-2 border rounded-lg" placeholder="Contacto" value={formulario.contacto} onChange={e=>fijarFormulario({...formulario,contacto:e.target.value})}/>
+        <input type="email" className="px-3 py-2 border rounded-lg" placeholder="Correo" value={formulario.correo} onChange={e=>fijarFormulario({...formulario,correo:e.target.value})}/>
+        <input className="px-3 py-2 border rounded-lg" placeholder="Teléfono" value={formulario.telefono} onChange={e=>fijarFormulario({...formulario,telefono:e.target.value})}/>
+        <div className="md:col-span-3 flex gap-3 items-center"><button disabled={guardando} className="px-4 py-2 bg-primary-600 text-white rounded-lg">{guardando?'Guardando…':'Guardar cliente'}</button><button type="button" onClick={()=>fijarNuevo(false)} className="px-4 py-2 border rounded-lg">Cancelar</button>{mensaje&&<span className="text-sm text-orange-700">{mensaje}</span>}</div>
+      </form>}
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
@@ -71,6 +96,8 @@ const CatalogoClientes: React.FC = () => {
             <select disabled={!sesion?.permisos.includes('CU07')} aria-label="Estado de clientes" value={estado} onChange={evento => fijarEstado(evento.target.value)} className="px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
               <option value="activos">Activos</option><option value="inactivos">Inactivos</option><option value="todos">Todos</option>
             </select>
+            <select aria-label="Ordenar catálogo" value={ordenar} onChange={e=>fijarOrdenar(e.target.value)} className="px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700"><option value="nombre">Nombre</option><option value="rut">RUT</option><option value="saldo">Saldo</option></select>
+            <select aria-label="Dirección de orden" value={direccion} onChange={e=>fijarDireccion(e.target.value)} className="px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700"><option value="asc">Ascendente</option><option value="desc">Descendente</option></select>
             <label className="flex items-center gap-3 cursor-pointer select-none bg-orange-50 px-4 py-2.5 rounded-lg border border-orange-100 hover:bg-orange-100 transition-colors">
               <div className="relative">
                 <input
@@ -117,7 +144,7 @@ const CatalogoClientes: React.FC = () => {
                 <th className="py-4 px-6 font-semibold text-gray-600 text-sm">Razón Social</th>
                 <th className="py-4 px-6 font-semibold text-gray-600 text-sm">Contacto</th>
                 <th className="py-4 px-6 font-semibold text-gray-600 text-sm text-right">Saldo Deudor</th>
-                <th className="py-4 px-6 font-semibold text-gray-600 text-sm text-center">Ficha Cliente</th>
+                <th className="py-4 px-6 font-semibold text-gray-600 text-sm text-center">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -160,6 +187,8 @@ const CatalogoClientes: React.FC = () => {
                       >
                         <Eye className="w-5 h-5" />
                       </button>
+                      {sesion?.permisos.includes('CU02') && <button onClick={()=>editar(c)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg" title="Editar cliente"><Edit3 className="w-5 h-5"/></button>}
+                      {(sesion?.permisos.includes('CU03') || sesion?.permisos.includes('CU04')) && <button onClick={()=>cambiarEstado(c)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg" title={c.estado==='activo'?'Desactivar':'Reactivar'}><Power className="w-5 h-5"/></button>}
                     </td>
                   </tr>
                 ))

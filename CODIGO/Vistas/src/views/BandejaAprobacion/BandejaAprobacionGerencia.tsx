@@ -68,10 +68,13 @@ const BandejaAprobacionGerencia: React.FC = () => {
     }
 
     try {
-      const res = await solicitarFinanzas(`/billing/${tipo}/${id}/approve`, {
+      const endpoint = tipo === 'quotes' ? `/billing/quotes/${id}/accept-b2b` : `/billing/${tipo}/${id}/approve`;
+      const folioOrdenCompra = tipo === 'quotes' ? window.prompt('Folio de la Orden de Compra B2B:') : '';
+      if (tipo === 'quotes' && !folioOrdenCompra) { setApprovingQuoteId(null); return; }
+      const res = await solicitarFinanzas(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: tipo === 'quotes' ? JSON.stringify({ plazo_pago: plazoPago }) : undefined
+        body: tipo === 'quotes' ? JSON.stringify({ plazo_pago: plazoPago, folioOrdenCompra, respaldoOrdenCompra: `Registro de Orden de Compra ${folioOrdenCompra}` }) : undefined
       });
       if (!res.ok) { const resultado = await res.json(); throw new Error(resultado.error || 'Error al aprobar'); }
       const data = await res.json();
@@ -142,6 +145,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
       setMensaje({ text: e.message, type: 'error' });
     }
   };
+  const reactivar = async (id:number) => { const fecha=window.prompt('Nueva fecha de vigencia AAAA-MM-DD'); if(!fecha)return; const r=await solicitarFinanzas(`/billing/quotes/${id}/reactivar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fechaVigencia:fecha})}); const d=await r.json(); setMensaje({text:r.ok?'Cotización reactivada':d.error,type:r.ok?'success':'error'}); if(r.ok){fetchPendientes();fetchHistory();} };
 
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -178,7 +182,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
             <AlertTriangle className="w-8 h-8 text-orange-500" />
             Gestión de Aprobaciones
           </h1>
-          <p className="text-gray-500 mt-2">Consulta de documentos y edición de borradores. La aceptación B2B/B2C se habilitará en la siguiente etapa.</p>
+          <p className="text-gray-500 mt-2">Consulta, edición, emisión y aceptación de Cotizaciones y Notas de Venta.</p>
         </div>
         <div className="w-96 flex gap-2">
           <input
@@ -371,7 +375,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
                           {cot.estado_cotizacion.toUpperCase()}
                         </span>
                       </td>
-                      <td className="py-2 px-6">${Number(cot.monto_total_estimado).toLocaleString('es-CL')}</td>
+                      <td className="py-2 px-6">${Number(cot.monto_total_estimado).toLocaleString('es-CL')} {cot.estado_cotizacion==='vencida'&&<button onClick={()=>reactivar(cot.id_cotizacion)} className="ml-3 text-primary-700 underline">Reactivar</button>}</td>
                     </tr>
                   ))}
                 </tbody>

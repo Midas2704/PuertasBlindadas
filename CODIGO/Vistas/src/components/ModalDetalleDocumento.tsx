@@ -1,16 +1,27 @@
 import OperacionesFinancieras from './OperacionesFinancieras';
 import { solicitarFinanzas } from '../api/finanzas';
-import React from 'react';
+import React, { useState } from 'react';
 import { X, DollarSign } from 'lucide-react';
 
 interface ModalDetalleDocumentoProps {
   activeModal: { tipo: 'cotizacion' | 'nota_venta', data: any } | null;
   onClose: () => void;
   children?: React.ReactNode;
+  onViewPago?: (id: number) => void;
 }
 
-const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeModal, onClose, children }) => {
+const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeModal, onClose, children, onViewPago }) => {
+  const [guiaEdit, setGuiaEdit] = useState<any>(null);
+  const [guiaFolio, setGuiaFolio] = useState('');
+  const [guiaAntecedentes, setGuiaAntecedentes] = useState('');
   if (!activeModal) return null;
+  const guias = activeModal.data.guia_despacho || [];
+  const guardarGuia = async () => {
+    if (!guiaEdit || !guiaFolio.trim()) return;
+    const respuesta = await solicitarFinanzas(`/billing/guides/${guiaEdit.id_guia_despacho}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folio: guiaFolio.trim(), antecedentes: guiaAntecedentes ? { texto: guiaAntecedentes } : undefined }) });
+    if (!respuesta.ok) { const error = await respuesta.json(); window.alert(error.error || 'No se pudo modificar la guía'); return; }
+    window.location.reload();
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur flex justify-center items-center z-50 p-4">
@@ -199,6 +210,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                         <tr key={pIdx} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                           <td className="py-2 px-3 text-gray-800">
                             Pago #{asig.pago_cliente?.id_pago_cliente}
+                            {onViewPago && <button className="ml-2 text-primary-700 text-xs underline" onClick={() => onViewPago(Number(asig.pago_cliente?.id_pago_cliente))}>Ver detalle</button>}
                           </td>
                           <td className="py-2 px-3 text-gray-600">
                             {new Date(asig.pago_cliente?.fecha_pago).toLocaleDateString('es-CL', { timeZone: 'UTC' })}
@@ -247,6 +259,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                       } catch (e) { alert('Error de conexión'); }
                     }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded transition-colors">Vincular</button>
                   </div>
+                  {guias.map((guia: any) => <div key={guia.id_guia_despacho} className="mt-3 p-2 bg-blue-50 rounded text-sm"><div className="flex justify-between"><span>Guía {guia.folio}</span><button className="text-blue-700 font-medium" onClick={() => { setGuiaEdit(guia); setGuiaFolio(guia.folio); setGuiaAntecedentes(guia.antecedentes?.texto || ''); }}>Editar/Modificar</button></div>{guiaEdit?.id_guia_despacho === guia.id_guia_despacho && <div className="mt-2 space-y-2"><input className="w-full border rounded p-2" value={guiaFolio} onChange={e=>setGuiaFolio(e.target.value)} placeholder="Folio vigente"/><textarea className="w-full border rounded p-2" value={guiaAntecedentes} onChange={e=>setGuiaAntecedentes(e.target.value)} placeholder="Antecedentes permitidos"/><button className="px-3 py-1.5 bg-primary-600 text-white rounded" onClick={guardarGuia}>Guardar cambios</button></div>}</div>)}
                 </div>
                 
                 <div className="bg-white border border-gray-200 p-3 rounded-lg shadow-sm">

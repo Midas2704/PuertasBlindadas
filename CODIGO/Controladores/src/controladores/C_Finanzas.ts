@@ -6,11 +6,11 @@ import { M3Controller } from './M3Controller';
 import { Autorizacion, ContextoAutorizacion } from '../validaciones/autorizacion';
 import { identificador, texto, validarFiltros } from '../validaciones/solicitudes';
 
-export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' | 'inventario' | 'productos' | 'monedas'
+export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' | 'crearCliente' | 'actualizarCliente' | 'desactivarCliente' | 'reactivarCliente' | 'inventario' | 'productos' | 'monedas'
   | 'bandeja' | 'historial' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
   | 'descartarBorrador' | 'aprobarCotizacion' | 'aprobarVenta' | 'editarCotizacion' | 'tipoCambio'
   | 'consultarPago' | 'consultarSaldo' | 'catalogosPago'
-  | 'consolidarB2C' | 'revertirVenta' | 'registrarPago'
+  | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
   | 'iniciarSesion' | 'solicitarRecuperacion' | 'recuperarClave' | 'validarRecuperacion' | 'miSesion' | 'cambiarClave' | 'cerrarSesion'
   | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
   | 'asignarPermisos' | 'retirarPermisos' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa';
@@ -51,6 +51,10 @@ export class C_Finanzas {
     const cuerpo = solicitud.cuerpo || {};
     switch (operacion) {
       case 'miSesion': return {...actor, id:actor.id.toString(), sesion:undefined};
+      case 'crearCliente': return this.m1.crearCliente(cuerpo);
+      case 'actualizarCliente': return this.m1.actualizarCliente(identificador(parametros.id), cuerpo);
+      case 'desactivarCliente': return this.m1.cambiarEstadoCliente(identificador(parametros.id), 'inactivo', cuerpo.confirmado === true);
+      case 'reactivarCliente': return this.m1.cambiarEstadoCliente(identificador(parametros.id), 'activo', cuerpo.confirmado === true);
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();
@@ -62,7 +66,7 @@ export class C_Finanzas {
       case 'asignarAdministrador': case 'retirarAdministrador': case 'restablecerClave': case 'desbloquearUsuario':
         return this.m4.modificarUsuario(operacion,actor,cuerpo);
       case 'listarClientes': return this.m1.listarClientes(validarFiltros(solicitud.consulta || {}));
-      case 'abrirFicha': return this.m1.abrirFicha(texto(parametros.referencia, 80));
+      case 'abrirFicha': return this.m1.abrirFicha(texto(parametros.referencia, 80), solicitud.consulta || {});
       case 'dashboard': {
         const [clientesActivos, resumen] = await Promise.all([this.m1.contarClientesActivos(), this.m2.consultarResumen()]);
         return { clientesActivos, ...resumen };
@@ -73,7 +77,26 @@ export class C_Finanzas {
       case 'bandeja': return this.m2.consultarBandeja();
       case 'historial': return this.m2.consultarBandeja(true);
       case 'consolidarB2C': return this.m2.consolidarB2C(identificador(parametros.id),cuerpo,actor.id.toString());
+      case 'aprobarCotizacionB2B': return this.m2.aprobarCotizacionB2B(identificador(parametros.id), cuerpo);
+      case 'aprobarCotizacion': return cuerpo.folioOrdenCompra ? this.m2.aprobarCotizacionB2B(identificador(parametros.id), cuerpo) : this.m2.operacionPendiente(operacion);
+      case 'registrarClienteDesdeCotizacion': return this.m2.registrarClienteDesdeCotizacion(cuerpo);
+      case 'emitirCotizacion': return this.m2.emitirCotizacion(identificador(parametros.id));
+      case 'reactivarCotizacion': return this.m2.reactivarCotizacion(identificador(parametros.id), cuerpo);
+      case 'formalizarClienteB2C': return this.m2.formalizarClienteB2C(cuerpo);
+      case 'configurarEtapasCobro': return this.m2.configurarEtapasCobro(identificador(parametros.id), cuerpo);
+      case 'modificarGuia': return this.m2.modificarGuia(identificador(parametros.id), cuerpo);
+      case 'definirCondicionesCobro': return this.m2.definirCondicionesCobro(identificador(parametros.id), cuerpo);
+      case 'configurarUmbral': return this.m2.configurarUmbral(cuerpo);
+      case 'consultarUmbral': return this.m2.consultarUmbral();
       case 'registrarPago': return this.m3.registrarPago(cuerpo,actor.id.toString());
+      case 'tipoCambio': return this.m3.consultarTipoCambio(texto(parametros.currency, 10));
+      case 'contextoPago': return this.m3.contextoPago(identificador(parametros.idFicha));
+      case 'anularPago': return this.m3.anularPago(identificador(parametros.id), cuerpo, actor.id.toString());
+      case 'revertirPago': return this.m3.revertirPago(identificador(parametros.id), cuerpo, actor.id.toString());
+      case 'aplicarSaldoFavor': return this.m3.aplicarSaldoFavor(identificador(parametros.id), cuerpo, actor.id.toString());
+      case 'consultarMorosidad': return this.m3.consultarMorosidad(identificador(parametros.id));
+      case 'generarComprobante': return this.m3.generarComprobante(identificador(parametros.id));
+      case 'conciliarPago': return this.m3.conciliarPago(identificador(parametros.id), cuerpo, actor.id.toString());
       case 'revertirVenta': return this.m2.enTransaccion(async tx=>{
         const reversion=await this.m2.registrarReversion(tx,identificador(parametros.id),cuerpo,actor.id.toString());
         return this.m3.procesarExcedente(tx,reversion.id_nota_venta,reversion.id_reversion_nota_venta,cuerpo);

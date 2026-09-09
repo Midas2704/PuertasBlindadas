@@ -97,13 +97,13 @@ test('ficha real reconcilia mora, deuda, anulación y reversión sin sumar CLP c
   assert.equal(conReversion.montoOriginal, 119000); assert.equal(conReversion.montoComercialVigente, 100000);
   assert.equal(conReversion.estado_nota_venta, 'confirmada'); assert.equal(conReversion.estadoPago, 'parcial');
 });
-test('no se ejecuta la conversión antigua ni se anulan ventas con pagos', async () => {
+test('C_BancoCentral no inventa valores y mantiene la aprobación antigua fuera del flujo', async () => {
   const nota = await prisma.nota_venta.findUniqueOrThrow({ where: { numero_nota_venta: 'DEMO-I2-NV-empresa' } });
   const respuesta = await consultar(`/billing/nota-venta/${nota.id_nota_venta}/anular`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folio_nota_credito: 'NO-SUFICIENTE' }) });
   assert.equal(respuesta.estado, 409);
   const original = await prisma.nota_venta.findUniqueOrThrow({ where: { id_nota_venta: nota.id_nota_venta } });
   assert.equal(original.monto_total.toString(), nota.monto_total.toString());
-  assert.equal((await consultar('/billing/exchange-rate/USD')).estado, 501);
+  assert.equal((await consultar('/billing/exchange-rate/USD')).estado, 503);
   assert.equal((await consultar(`/billing/quotes/${nota.id_cotizacion}/approve`, { method: 'POST' })).estado, 501);
 });
 test('una cotización inválida no deja escrituras parciales', async () => {

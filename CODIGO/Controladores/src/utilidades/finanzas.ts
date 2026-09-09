@@ -25,6 +25,17 @@ export const fechaNegocio = (ahora = new Date()) => new Intl.DateTimeFormat('en-
   timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(ahora);
 export const fechaRegistro = (fecha: Date) => fecha.toISOString().slice(0, 10);
+export function diasHabilesEntre(desde: string, hasta = fechaNegocio()) {
+  const inicio = new Date(`${desde}T00:00:00Z`); const fin = new Date(`${hasta}T00:00:00Z`); if (inicio.getTime() === fin.getTime()) return 0;
+  const signo = inicio < fin ? 1 : -1; const cursor = signo > 0 ? new Date(inicio) : new Date(fin); const limite = signo > 0 ? fin : inicio; let cuenta = 0;
+  for (; cursor < limite; cursor.setUTCDate(cursor.getUTCDate() + 1)) { const dia = cursor.getUTCDay(); if (dia !== 0 && dia !== 6) cuenta++; }
+  return signo * cuenta;
+}
+export function clasificarPorVencer(fecha: Date | null, umbral: number) {
+  if (!fecha) return 'sin_vencimiento';
+  const dias = diasHabilesEntre(fechaRegistro(new Date()), fechaRegistro(fecha));
+  return dias >= 0 && dias <= umbral ? 'por_vencer' : dias < 0 ? 'vencida' : 'vigente';
+}
 
 // Funciones puras compartidas: no consultan BD ni coordinan controladores.
 export function efectoPago(pago: PagoFinanciero) {

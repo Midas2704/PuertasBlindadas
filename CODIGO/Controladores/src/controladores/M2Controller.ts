@@ -44,6 +44,78 @@ export class M2Controller {
       return {mensaje:'Venta B2C consolidada con su primer pago',idNota:nota.id_nota_venta,idPago:pago.id_pago_cliente};
     });
   }
+
+  async aprobarCotizacionB2B(idCotizacion: number, entrada: Entrada) {
+    return this.enTransaccion(async tx => {
+      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true } });
+      if (!cot || cot.estado_cotizacion !== 'emitida' || cot.nota_venta) throw new ErrorAplicacion(409, 'La Cotización no está disponible para aceptación');
+      const folio = texto(entrada.folioOrdenCompra, 100); const respaldo = texto(entrada.respaldoOrdenCompra, 4500000);
+      if (!folio || !respaldo) throw new ErrorAplicacion(400, 'El folio y respaldo de la Orden de Compra son obligatorios');
+      const oc = await tx.orden_compra_b2b.create({ data: { id_cotizacion: idCotizacion, folio, respaldo, fecha: new Date(`${fechaNegocio()}T00:00:00Z`) } });
+      const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: cot.monto_total_estimado || 0, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente' } });
+      await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'aprobada' } });
+      return { mensaje: 'Orden de Compra registrada y Nota de Venta generada', idNota: nota.id_nota_venta, ordenCompra: oc };
+    });
+  }
+
+  async registrarClienteDesdeCotizacion(entrada: Entrada) {
+    const nombre = texto(entrada.nombre, 150); const tipo = texto(entrada.tipo || 'B2C', 30).toUpperCase();
+    const rut = texto(entrada.rut, 15).replace(/\./g, '').toUpperCase() || null;
+    if (!nombre || !['B2B','B2C'].includes(tipo)) throw new ErrorAplicacion(400, 'Nombre y tipo de cliente son obligatorios');
+    if (tipo === 'B2B' && !rut) throw new ErrorAplicacion(400, 'El RUT es obligatorio para clientes B2B');
+    if (entrada.confirmado !== true) throw new ErrorAplicacion(400, 'Confirma el registro del cliente');
+    return prisma.$transaction(async tx => {
+      const tipoCliente = await tx.tipo_cliente_financiero.findFirst({ where: { nombre_tipo_cliente_financiero: { equals: tipo, mode: 'insensitive' } } });
+      if (!tipoCliente) throw new ErrorAplicacion(400, 'Tipo de cliente no configurado');
+      const rutFormateado = rut && rut.includes('-') ? `${rut.split('-')[0]?.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${rut.split('-')[1]}` : rut;
+      if (rut && await tx.cliente_financiero.findFirst({ where: { rut_cliente: { in: [rut, rutFormateado || rut], mode: 'insensitive' } } })) throw new ErrorAplicacion(409, 'El cliente ya existe');
+      if (rut) await tx.cliente.upsert({ where: { cliente_cliente_rut: rutFormateado || rut }, update: { cliente_razon_social: nombre, cliente_contacto_principal: texto(entrada.contacto,150) || undefined, cliente_correo: texto(entrada.correo,150) || undefined, cliente_telefono: texto(entrada.telefono,30) || undefined }, create: { cliente_cliente_rut: rutFormateado || rut, cliente_razon_social: nombre, cliente_contacto_principal: texto(entrada.contacto,150) || null, cliente_correo: texto(entrada.correo,150) || null, cliente_telefono: texto(entrada.telefono,30) || null, cliente_es_cliente_b2b: tipo === 'B2B', cliente_es_cliente_b2c: tipo === 'B2C' } });
+      const cliente = await tx.cliente_financiero.create({ data: { rut_cliente: rutFormateado, id_tipo_cliente_financiero: tipoCliente.id_tipo_cliente_financiero, nombre_razon_social_referencia: nombre, contacto_financiero: texto(entrada.contacto,150) || null, correo_financiero: texto(entrada.correo,150) || null, telefono_financiero: texto(entrada.telefono,30) || null, estado_financiero: 'activo', nivel_formalizacion: rut ? 'formal' : 'provisional', ficha_cliente: { create: {} } }, include: { ficha_cliente: true } });
+      const idCotizacion = entrada.idCotizacion ? identificador(entrada.idCotizacion) : null;
+      if (idCotizacion) {
+        const cotizacion = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion } });
+        if (!cotizacion || cotizacion.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'La Cotización debe estar en elaboración');
+        await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { id_ficha_cliente: cliente.ficha_cliente!.id_ficha_cliente } });
+      }
+      return { mensaje: 'Cliente registrado desde Cotización', cliente, idCotizacion };
+    });
+  }
+
+  async emitirCotizacion(idCotizacion: number) {
+    return prisma.$transaction(async tx => {
+      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { detalle_cotizacion: true } });
+      if (!cot || cot.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se puede emitir un borrador disponible');
+      if (!cot.id_ficha_cliente || !cot.fecha_vigencia || !cot.monto_total_estimado || cot.monto_total_estimado.lte(0) || !cot.detalle_cotizacion.length) throw new ErrorAplicacion(409, 'La Cotización está incompleta');
+      return tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'emitida' } });
+    });
+  }
+
+  async reactivarCotizacion(idCotizacion: number, entrada: Entrada) {
+    const fecha = texto(entrada.fechaVigencia, 20); if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha <= fechaNegocio()) throw new ErrorAplicacion(400, 'La nueva vigencia debe ser posterior a hoy');
+    return prisma.$transaction(async tx => {
+      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion } }); if (!cot || cot.estado_cotizacion !== 'vencida') throw new ErrorAplicacion(409, 'La Cotización no está vencida');
+      await tx.cotizacion_version.create({ data: { id_cotizacion: idCotizacion, motivo: 'Reactivación de Cotización vencida', antecedentes: { fechaAnterior: cot.fecha_vigencia?.toISOString() || null } } });
+      return tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { fecha_vigencia: new Date(`${fecha}T00:00:00Z`), estado_cotizacion: 'emitida' } });
+    });
+  }
+
+  async formalizarClienteB2C(entrada: Entrada) {
+    const id = identificador(entrada.idCliente); const rut = texto(entrada.rut,15).replace(/\./g,'').toUpperCase(); if (!rut) throw new ErrorAplicacion(400, 'El RUT es obligatorio para formalizar');
+    return prisma.$transaction(async tx => {
+      const existente = await tx.cliente_financiero.findFirst({ where: { rut_cliente: { in: [rut, `${rut.split('-')[0]?.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${rut.split('-')[1]}`], mode: 'insensitive' }, id_cliente_financiero: { not: id } } }); if (existente) throw new ErrorAplicacion(409, 'El RUT ya está asociado a otro cliente');
+      return tx.cliente_financiero.update({ where: { id_cliente_financiero: id }, data: { rut_cliente: rut, nivel_formalizacion: 'formal', nombre_razon_social_referencia: texto(entrada.nombre,150) || undefined, correo_financiero: texto(entrada.correo,150) || undefined } });
+    });
+  }
+
+  async configurarEtapasCobro(idNota: number, entrada: Entrada) {
+    if (!Array.isArray(entrada.etapas) || !entrada.etapas.length) throw new ErrorAplicacion(400, 'Define al menos una etapa de cobro');
+    return prisma.$transaction(async tx => {
+      const nota = await tx.nota_venta.findUnique({ where: { id_nota_venta: idNota } }); if (!nota) throw new ErrorAplicacion(404, 'Nota de Venta no encontrada');
+      await tx.hito_cobro.deleteMany({ where: { id_nota_venta: idNota } });
+      const etapas = (entrada.etapas as Entrada[]).map(e => { const descripcion=texto(e.descripcion,150); const fecha=texto(e.fecha,20); const monto=numeroNoNegativo(e.monto,'Monto etapa'); if(!descripcion || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new ErrorAplicacion(400,'Etapa inválida'); return { id_nota_venta:idNota, descripcion_hito:descripcion, fecha_programada_cobro:new Date(`${fecha}T00:00:00Z`), monto_programado:monto }; });
+      return tx.hito_cobro.createMany({ data: etapas });
+    });
+  }
   async registrarReversion(tx:Prisma.TransactionClient,idNota:number,entrada:Entrada,responsable:string) {
     const nota=await tx.nota_venta.findUnique({where:{id_nota_venta:idNota},include:incluirNota});
     if(!nota || !nota.asignacion_pago_cliente.length || ['anulada','cerrada','revertida_total'].includes(nota.estado_nota_venta)) throw new ErrorAplicacion(409,'La reversión requiere una NV vigente con pagos asociados');
@@ -86,20 +158,22 @@ export class M2Controller {
 
   async guardarCotizacion(entrada: Entrada) {
     const rut = texto(entrada.rut_cliente).replace(/\./g, '').toUpperCase();
-    if (!rut) throw new ErrorAplicacion(400, 'Selecciona un cliente');
+    const idFichaCliente = entrada.id_ficha_cliente ? identificador(entrada.id_ficha_cliente) : null;
+    if (!rut && !idFichaCliente) throw new ErrorAplicacion(400, 'Selecciona un cliente');
     const partesRut = rut.split('-');
-    const rutFormateado = `${partesRut[0]?.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${partesRut[1]}`;
+    const rutFormateado = rut ? `${partesRut[0]?.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${partesRut[1]}` : null;
     const fechaVigencia = texto(entrada.fecha_vigencia);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaVigencia) || !Number.isFinite(Date.parse(fechaVigencia)) || fechaVigencia <= fechaNegocio()) throw new ErrorAplicacion(400, 'La vigencia debe ser posterior a hoy');
     const margen = numeroNoNegativo(entrada.margen_esperado, 'Margen');
     if (margen >= 100) throw new ErrorAplicacion(400, 'El margen debe ser menor a 100 para calcular el precio');
     if (!Array.isArray(entrada.productos) || !entrada.productos.length) throw new ErrorAplicacion(400, 'Incluye al menos un producto');
     return prisma.$transaction(async transaccion => {
-      const coincidencias = await transaccion.cliente_financiero.findMany({ where: { rut_cliente: { in: [rut, rutFormateado], mode: 'insensitive' } }, include: { ficha_cliente: true } });
+      const fichaDirecta = idFichaCliente ? await transaccion.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFichaCliente }, include: { cliente_financiero: true } }) : null;
+      const coincidencias = fichaDirecta ? [] : await transaccion.cliente_financiero.findMany({ where: { rut_cliente: { in: [rut, rutFormateado!], mode: 'insensitive' } }, include: { ficha_cliente: true } });
       if (coincidencias.length > 1) throw new ErrorAplicacion(409, 'Hay identidades heredadas duplicadas; revisa el cliente antes de continuar');
-      const cliente = coincidencias[0];
+      const cliente = fichaDirecta?.cliente_financiero || coincidencias[0];
       if (!cliente || cliente.estado_financiero !== 'activo') throw new ErrorAplicacion(400, 'Cliente no disponible');
-      const ficha = cliente.ficha_cliente || await transaccion.ficha_cliente.create({ data: { id_cliente_financiero: cliente.id_cliente_financiero } });
+      const ficha = fichaDirecta || (cliente as any).ficha_cliente || await transaccion.ficha_cliente.create({ data: { id_cliente_financiero: cliente.id_cliente_financiero } });
       const moneda = await transaccion.moneda.findUnique({ where: { id_moneda: identificador(entrada.id_moneda) } });
       if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
       let costoTotal = new Prisma.Decimal(0);
@@ -234,6 +308,28 @@ export class M2Controller {
       } });
       return { message: 'Documento vinculado', documento };
     });
+  }
+  async modificarGuia(idGuia: number, entrada: Entrada) {
+    const folio = texto(entrada.folio, 80); if (!folio) throw new ErrorAplicacion(400, 'El folio es obligatorio');
+    const guia = await prisma.guia_despacho.findUnique({ where: { id_guia_despacho: idGuia } });
+    if (!guia) throw new ErrorAplicacion(404, 'Guía de Despacho no encontrada');
+    const antecedentes = entrada.antecedentes === undefined ? undefined : entrada.antecedentes;
+    if (antecedentes !== undefined && (typeof antecedentes !== 'object' || antecedentes === null || Array.isArray(antecedentes))) throw new ErrorAplicacion(400, 'Antecedentes inválidos');
+    return prisma.guia_despacho.update({ where: { id_guia_despacho: idGuia }, data: { folio, antecedentes: antecedentes as any } });
+  }
+  async definirCondicionesCobro(idNota: number, entrada: Entrada) {
+    const fecha = texto(entrada.fechaVencimiento, 20); if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new ErrorAplicacion(400, 'Fecha de vencimiento inválida');
+    return prisma.nota_venta.update({ where: { id_nota_venta: idNota }, data: { fecha_vencimiento: new Date(`${fecha}T00:00:00Z`) } });
+  }
+  async configurarUmbral(entrada: Entrada) {
+    const dias = Number(entrada.diasHabiles); if (!Number.isInteger(dias) || dias < 0) throw new ErrorAplicacion(400, 'El umbral debe ser un número de días válido');
+    return prisma.$transaction(async tx => {
+      const vigente = await tx.config_umbral_por_vencer.findFirst({ orderBy: { fecha: 'desc' } });
+      return vigente ? tx.config_umbral_por_vencer.update({ where: { id_configuracion: vigente.id_configuracion }, data: { dias_habiles: dias, fecha: new Date() } }) : tx.config_umbral_por_vencer.create({ data: { dias_habiles: dias } });
+    });
+  }
+  async consultarUmbral() {
+    return (await prisma.config_umbral_por_vencer.findFirst({ orderBy: { fecha: 'desc' } })) || { dias_habiles: 0, vigente: false };
   }
   async descartarBorrador(idCotizacion: number) {
     const resultado = await prisma.cotizacion.updateMany({ where: { id_cotizacion: idCotizacion, estado_cotizacion: 'borrador' }, data: { estado_cotizacion: 'descartada' } });

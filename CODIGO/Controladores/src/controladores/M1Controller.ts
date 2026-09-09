@@ -1,11 +1,62 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
-import { calcularNota, efectoPago, incluirCotizacion, incluirNota, incluirPago, resumirNotas } from '../utilidades/finanzas';
+import { calcularNota, efectoPago, incluirCotizacion, incluirNota, incluirPago, resumirNotas, clasificarPorVencer } from '../utilidades/finanzas';
 import { FiltrosClientes, identificador } from '../validaciones/solicitudes';
 
-/** M1 CU01–CU11. Etapa inicial: CU05–CU09; altas y mantenimiento se incorporarán por etapa. */
+/** M1 CU01–CU11: catálogo, ficha y mantenimiento de clientes. */
 export class M1Controller {
+  async crearCliente(entrada: Record<string, unknown>) {
+    const rut = typeof entrada.rut === 'string' ? entrada.rut.replace(/\./g, '').trim().toUpperCase() : '';
+    const nombre = typeof entrada.nombre === 'string' ? entrada.nombre.trim() : '';
+    const tipoNombre = typeof entrada.tipo === 'string' ? entrada.tipo.trim() : '';
+    if (!nombre || !tipoNombre) throw new ErrorAplicacion(400, 'Completa nombre o Razón Social y tipo de cliente');
+    if (tipoNombre.toUpperCase() === 'B2B' && !rut) throw new ErrorAplicacion(400, 'El RUT es obligatorio para clientes B2B');
+    const rutFormateado = rut && rut.includes('-') ? `${rut.split('-')[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${rut.split('-')[1]}` : rut || null;
+    return prisma.$transaction(async tx => {
+      const tipo = await tx.tipo_cliente_financiero.findFirst({ where: { nombre_tipo_cliente_financiero: { equals: tipoNombre, mode: 'insensitive' } } });
+      if (!tipo) throw new ErrorAplicacion(400, 'Tipo de cliente no válido');
+      if (rut && await tx.cliente_financiero.findFirst({ where: { rut_cliente: { in: [rut, rutFormateado || rut], mode: 'insensitive' } } })) throw new ErrorAplicacion(409, 'Ya existe un cliente con ese RUT');
+      const cliente = await tx.cliente_financiero.create({ data: {
+        rut_cliente: rutFormateado,
+        id_tipo_cliente_financiero: tipo.id_tipo_cliente_financiero,
+        nombre_razon_social_referencia: nombre,
+        contacto_financiero: typeof entrada.contacto === 'string' ? entrada.contacto.trim() : null,
+        correo_financiero: typeof entrada.correo === 'string' ? entrada.correo.trim() : null,
+        telefono_financiero: typeof entrada.telefono === 'string' ? entrada.telefono.trim() : null,
+        estado_financiero: 'activo',
+        nivel_formalizacion: tipoNombre.toUpperCase() === 'B2C' && !rut ? 'provisional' : 'formal',
+        ficha_cliente: { create: {} },
+      }, include: { ficha_cliente: true, tipo_cliente_financiero: true } });
+      return { mensaje: 'Cliente registrado', cliente };
+    });
+  }
+
+  async actualizarCliente(id: number, entrada: Record<string, unknown>) {
+    const cambios: Record<string, string> = {};
+    for (const [origen, destino] of [['nombre','nombre_razon_social_referencia'],['contacto','contacto_financiero'],['correo','correo_financiero'],['telefono','telefono_financiero']] as const) {
+      if (entrada[origen] !== undefined) cambios[destino] = typeof entrada[origen] === 'string' ? entrada[origen].trim() : '';
+    }
+    if (!Object.keys(cambios).length) throw new ErrorAplicacion(400, 'No hay cambios para guardar');
+    if (!cambios.nombre_razon_social_referencia) throw new ErrorAplicacion(400, 'El nombre o Razón Social es obligatorio');
+    const cliente = await prisma.cliente_financiero.update({ where: { id_cliente_financiero: id }, data: { ...cambios, fecha_actualizacion_datos_cliente: new Date() } });
+    return { mensaje: 'Cliente actualizado', cliente };
+  }
+
+  async cambiarEstadoCliente(id: number, estado: 'activo' | 'inactivo', confirmado: boolean) {
+    if (!confirmado) throw new ErrorAplicacion(400, 'Confirma la operación');
+    return prisma.$transaction(async tx => {
+      const cliente = await tx.cliente_financiero.findUnique({ where: { id_cliente_financiero: id }, include: { ficha_cliente: { include: { cotizacion: true, nota_venta: true } } } });
+      if (!cliente) throw new ErrorAplicacion(404, 'Cliente no encontrado');
+      if (cliente.estado_financiero === estado) throw new ErrorAplicacion(409, `El cliente ya está ${estado}`);
+      if (estado === 'inactivo') {
+        const pendientes = [...(cliente.ficha_cliente?.cotizacion || [])].some(c => ['borrador','emitida'].includes(c.estado_cotizacion)) || [...(cliente.ficha_cliente?.nota_venta || [])].some(n => !['anulada','cerrada','revertida_total'].includes(n.estado_nota_venta));
+        if (pendientes) throw new ErrorAplicacion(409, 'No se puede desactivar: el cliente mantiene operaciones abiertas');
+      }
+      await tx.cliente_financiero.update({ where: { id_cliente_financiero: id }, data: { estado_financiero: estado, fecha_actualizacion_datos_cliente: new Date() } });
+      return { mensaje: estado === 'activo' ? 'Cliente reactivado' : 'Cliente desactivado' };
+    });
+  }
   async listarClientes(filtros: FiltrosClientes) {
     const condicion: Prisma.cliente_financieroWhereInput = {};
     if (filtros.estado !== 'todos') condicion.estado_financiero = filtros.estado === 'activos' ? 'activo' : 'inactivo';
@@ -16,7 +67,7 @@ export class M1Controller {
     // La base heredada mezcla RUT con y sin puntos. Normalizar para buscar sin alterar identidades.
     const busqueda = filtros.busqueda.toLocaleLowerCase('es-CL');
     const rutBuscado = busqueda.replace(/\./g, '');
-    return clientes.filter(cliente => !busqueda || cliente.nombre_razon_social_referencia.toLocaleLowerCase('es-CL').includes(busqueda)
+    const resultado = clientes.filter(cliente => !busqueda || cliente.nombre_razon_social_referencia.toLocaleLowerCase('es-CL').includes(busqueda)
       || !!cliente.rut_cliente?.replace(/\./g, '').toLowerCase().includes(rutBuscado)).map(cliente => {
       const saldosPorMoneda = resumirNotas(cliente.ficha_cliente?.nota_venta || []);
       const esMoroso = saldosPorMoneda.some(saldo => saldo.obligacionesMorosas > 0);
@@ -35,9 +86,11 @@ export class M1Controller {
         situacionFinanciera: esMoroso ? 'Moroso' : tieneDeuda ? 'Deuda vigente' : 'Al día',
       };
     }).filter(cliente => (!filtros.deuda || cliente.tieneDeuda) && (!filtros.morosos || cliente.esMoroso));
+    resultado.sort((a,b)=>{ const av=filtros.ordenar==='saldo'?a.saldoDeudor:filtros.ordenar==='rut'?(a.rut||''):a.razonSocial; const bv=filtros.ordenar==='saldo'?b.saldoDeudor:filtros.ordenar==='rut'?(b.rut||''):b.razonSocial; const n=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),'es'); return filtros.direccion==='asc'?n:-n; });
+    return resultado;
   }
 
-  async abrirFicha(referencia: string) {
+  async abrirFicha(referencia: string, consulta: Record<string, unknown> = {}) {
     const rut = referencia.replace(/\./g, '').toUpperCase();
     const partes = rut.split('-');
     const rutFormateado = `${partes[0]?.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${partes[1]}`;
@@ -58,6 +111,7 @@ export class M1Controller {
       const proyectos = cliente.rut_cliente ? await transaccion.proyecto.findMany({
         where: { rut_cliente: cliente.rut_cliente }, orderBy: { proyecto_fecha_ingreso: 'desc' },
       }) : [];
+      const umbral = await transaccion.config_umbral_por_vencer.findFirst({ orderBy: { fecha: 'desc' } });
       const notas = ficha?.nota_venta || [];
       const saldosPorMoneda = resumirNotas(notas);
       const pesos = saldosPorMoneda.find(saldo => saldo.moneda === 'CLP');
@@ -83,9 +137,10 @@ export class M1Controller {
           obligaciones_morosas: pesos?.obligacionesMorosas || 0, saldosPorMoneda,
           proyectos_activos: proyectos.filter(proyecto => proyecto.proyecto_estado_operacional === 'activo').length,
           proyectos_terminados: proyectos.filter(proyecto => proyecto.proyecto_estado_operacional === 'terminado').length,
-          cotizaciones, notas_venta: notas.map(nota => ({ ...nota, ...calcularNota(nota),
+          cotizaciones: cotizaciones.filter(c => !consulta.estado || c.estado_cotizacion === consulta.estado).sort((a,b) => String(a.fecha_emision).localeCompare(String(b.fecha_emision)) * (consulta.direccion === 'desc' ? -1 : 1)), notas_venta: notas.map(nota => ({ ...nota, ...calcularNota(nota), clasificacionVencimiento: clasificarPorVencer(nota.fecha_vencimiento, umbral?.dias_habiles ?? 0),
             ficha_cliente: { cliente_financiero: { rut_cliente: cliente.rut_cliente, nombre_razon_social_referencia: cliente.nombre_razon_social_referencia } },
-          })), pagos, proyectos,
+          })).filter(n => !consulta.estado || n.estado_nota_venta === consulta.estado).sort((a,b) => String(a.fecha_emision).localeCompare(String(b.fecha_emision)) * (consulta.direccion === 'desc' ? -1 : 1)), pagos, proyectos,
+          saldosFavor: await transaccion.saldo_favor_cliente.findMany({ where: { id_cliente_financiero: cliente.id_cliente_financiero, monto_disponible: { gt: 0 } }, include: { nota_venta: true } }),
         },
         historial: [
           ...cotizaciones.map(cotizacion => ({ tipo: 'cotizacion', id: cotizacion.id_cotizacion, fecha: cotizacion.fecha_emision, estado: cotizacion.estado_cotizacion })),
