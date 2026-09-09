@@ -98,7 +98,8 @@ export class M4Controller {
    if(cuenta!.seguridad?.bloqueo_persistente || (cuenta!.seguridad?.bloqueo_hasta && cuenta!.seguridad.bloqueo_hasta>new Date())) return {fallo:403,mensaje:'Cuenta bloqueada'};
    if(credencial!.temporal && credencial!.vence && credencial!.vence<=new Date()) return {fallo:403,mensaje:'Credencial temporal vencida; solicita restablecimiento'};
    await tx.sesion_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null,vence:{lte:new Date()}},data:{invalidada:new Date(),motivo:'Vencimiento'}});
-   if(await tx.sesion_usuario.findFirst({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null}})) return {fallo:409,mensaje:'Ya existe una sesión activa; no se creará una segunda'};
+   // La restricción de sesión única queda disponible para reactivarse mediante M4_SESION_UNICA=true.
+   if(process.env.M4_SESION_UNICA === 'true' && await tx.sesion_usuario.findFirst({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null}})) return {fallo:409,mensaje:'Ya existe una sesión activa; no se creará una segunda'};
    const token=secreto();
    await tx.sesion_usuario.create({data:{id_usuario:cuenta!.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(politica.sesionMinutos),version_seguridad:cuenta!.version_seguridad,direccion:contexto.direccion,agente:contexto.agente?.slice(0,300)}});
    await tx.usuario.update({where:{usuario_id_usuario:cuenta!.usuario_id_usuario},data:{usuario_fecha_ultima_conexion:new Date()}});
