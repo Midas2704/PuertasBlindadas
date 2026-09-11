@@ -31,7 +31,7 @@ const App: React.FC = () => {
           <Route index element={<Protegido permiso="CU05"><DashboardPrincipal /></Protegido>} />
           <Route path="clientes" element={<Protegido permiso="CU05"><CatalogoClientes /></Protegido>} />
           <Route path="clientes/:rut" element={<Protegido permiso="CU09"><VerFicha /></Protegido>} />
-          <Route path="cotizacion/nueva" element={<Protegido permiso="CU19"><ArmarCotizacion /></Protegido>} />
+          <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />
           <Route path="pagos" element={<Protegido permiso="CU42"><PagosCliente /></Protegido>} />

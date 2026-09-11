@@ -9,7 +9,7 @@ test('delta CU25/CU38/CU43/CU47/CU49/CU50: consistencia financiera',async t=>{
  const medio=await prisma.medio_pago.findFirstOrThrow({where:{estado_medio_pago:'activo',nombre_medio_pago:{contains:'Transferencia'}}});
  const tipo=await prisma.tipo_documento.findFirstOrThrow({where:{nombre_tipo_documento:'Factura Electrónica'}});
  const documento=await prisma.documento_tributario.create({data:{id_ficha_cliente:cliente.ficha_cliente.id_ficha_cliente,id_tipo_documento:tipo.id_tipo_documento,id_moneda:clp.id_moneda,folio_documento:`TEST-${randomUUID()}`,fecha_emision:new Date(),monto_neto:100,monto_impuesto:0,monto_total:100}});
- const pago={monto:60,idDocumento:documento.id_documento_tributario,idMedio:medio.id_medio_pago,respaldo:'Referencia ficticia de prueba'};
+ const pago={monto:60,idDocumento:documento.id_documento_tributario,idMedio:medio.id_medio_pago,respaldo:'Referencia ficticia de prueba',antecedentesMedio:'Transferencia TEST'};
  async function cotizar(moneda=clp){const c=await prisma.cotizacion.create({data:{id_ficha_cliente:cliente.ficha_cliente.id_ficha_cliente,id_moneda:moneda.id_moneda,fecha_emision:new Date(),fecha_vigencia:new Date('2030-01-01'),estado_cotizacion:'emitida',monto_neto:100,monto_impuesto:0,monto_total_estimado:100,exento_iva:true}});cotizaciones.push(c.id_cotizacion);return c;}
  try{
   const c=await cotizar();

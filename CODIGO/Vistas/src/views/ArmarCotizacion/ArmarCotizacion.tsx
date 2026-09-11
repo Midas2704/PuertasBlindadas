@@ -1,10 +1,17 @@
 import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect, useRef } from 'react';
 import { Save, Trash2, Calculator, Plus, ChevronDown, Check } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { usarSesion } from '../../seguridad/Sesion';
 
 interface Cliente {
+  id_cliente_financiero?: number;
+  id_ficha_cliente?: number | null;
   rut: string;
   razonSocial: string;
+  nivelFormalizacion?: string;
+  telefono?: string;
+  correo?: string;
 }
 
 interface Material {
@@ -28,12 +35,16 @@ interface ProductoSeleccionado {
     largo: number | '';
   };
   observaciones: string;
-  materiales: { id: number, cantidad: number }[];
+  cantidad: number;
+  materiales: { id: number, cantidad: number, costo_ajustado?: number }[];
   dropdownMaterialOpen: boolean;
   materialSearch: string;
 }
 
 const ArmarCotizacion: React.FC = () => {
+  const { sesion } = usarSesion();
+  const [parametros] = useSearchParams();
+  const borradorId = Number(parametros.get('borrador') || 0);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [inventario, setInventario] = useState<Material[]>([]);
   const [tiposProducto, setTiposProducto] = useState<ProductoTipo[]>([]);
@@ -42,9 +53,13 @@ const ArmarCotizacion: React.FC = () => {
   const [idFichaCliente, setIdFichaCliente] = useState<number | null>(null);
   const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState(false);
   const [nuevoCliente, setNuevoCliente] = useState({ tipo: 'B2C', nombre: '', rut: '', contacto: '', correo: '', telefono: '' });
+  const [clienteBorrador, setClienteBorrador] = useState<any | null>(null);
+  const [formalizacion, setFormalizacion] = useState({ rut: '', nombre: '', contacto: '', correo: '', telefono: '' });
+  const [mostrarFormalizacion, setMostrarFormalizacion] = useState(false);
   const [dropdownClienteOpen, setDropdownClienteOpen] = useState(false);
   
   const [margen, setMargen] = useState<number>(30);
+  const [precioDefinido, setPrecioDefinido] = useState<number | ''>('');
   const [fechaVigencia, setFechaVigencia] = useState('');
   const [moneda, setMoneda] = useState<number>(0);
   const [monedas, setMonedas] = useState<{ id_moneda: number; codigo_moneda: string }[]>([]);
@@ -53,6 +68,7 @@ const ArmarCotizacion: React.FC = () => {
   const [productos, setProductos] = useState<ProductoSeleccionado[]>([{
     id_interno: Date.now(),
     tipo_producto: '',
+    cantidad: 1,
     medidas: { alto: '', ancho: '', largo: '' },
     observaciones: '',
     materiales: [],
@@ -106,11 +122,29 @@ const ArmarCotizacion: React.FC = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (!borradorId) return;
+    solicitarFinanzas('/billing/pending-approvals').then(res => res.json()).then(data => {
+      const borrador = data.cotizaciones?.find((cot: any) => Number(cot.id_cotizacion) === borradorId);
+      if (!borrador || borrador.estado_cotizacion !== 'borrador') throw new Error('La Cotización ya no está disponible como borrador');
+      const cliente = borrador.ficha_cliente?.cliente_financiero;
+      setClienteBorrador(cliente || null);
+      setIdFichaCliente(borrador.id_ficha_cliente);
+      setRutClienteInput(`${cliente?.rut_cliente || ''} - ${cliente?.nombre_razon_social_referencia || 'Cliente provisional'}`);
+      setMargen(Number(borrador.margen_esperado || 0)); setPrecioDefinido(borrador.precio_sugerido === null ? '' : Number(borrador.precio_sugerido)); setMoneda(Number(borrador.id_moneda)); setExentoIva(Boolean(borrador.exento_iva));
+      setFechaVigencia(String(borrador.fecha_vigencia || '').slice(0, 10)); setAplicarDescuento(Number(borrador.descuento_valor || 0) > 0); setTipoDescuento(borrador.descuento_tipo || 'porcentaje'); setValorDescuento(Number(borrador.descuento_valor || 0));
+      const recuperados = (borrador.detalle_cotizacion || []).map((detalle: any) => ({ id_interno: detalle.id_detalle_cotizacion, tipo_producto: detalle.item_comercial?.nombre_item || '', cantidad: Number(detalle.cantidad_item || 1), medidas: { alto: Number(detalle.medida_alto_referencial || 0) || '', ancho: Number(detalle.medida_ancho_referencial || 0) || '', largo: Number(detalle.medida_espesor_referencial || 0) || '' }, observaciones: detalle.observacion_medidas || '', materiales: (detalle.detalle_costo_material_cotizacion || []).map((material: any) => { const usado = Number(material.precio_unitario_usado); const original = Number(material.historial_precio_material?.precio_unitario); return { id: material.id_historial_precio_material, cantidad: Number(material.cantidad_material_estimada), costo_ajustado: usado !== original ? usado : undefined }; }), dropdownMaterialOpen: false, materialSearch: '' }));
+      setProductos(recuperados.length ? recuperados : [{ id_interno: Date.now(), tipo_producto: '', cantidad: 1, medidas: { alto: '', ancho: '', largo: '' }, observaciones: '', materiales: [], dropdownMaterialOpen: false, materialSearch: '' }]);
+      setFormalizacion({ rut: cliente?.rut_cliente || '', nombre: cliente?.nombre_razon_social_referencia || '', contacto: cliente?.contacto_financiero || '', correo: cliente?.correo_financiero || '', telefono: cliente?.telefono_financiero || '' });
+    }).catch(error => setMensaje({ text: error.message, type: 'error' }));
+  }, [borradorId]);
+
 
   const handleAddProducto = () => {
     setProductos([...productos, {
       id_interno: Date.now(),
       tipo_producto: '',
+      cantidad: 1,
       medidas: { alto: '', ancho: '', largo: '' },
       observaciones: '',
       materiales: [],
@@ -166,6 +200,12 @@ const ArmarCotizacion: React.FC = () => {
     }));
   };
 
+  const updateCostoMaterial = (id_interno: number, matId: number, costo: number | undefined) => {
+    setProductos(productos.map(producto => producto.id_interno === id_interno
+      ? { ...producto, materiales: producto.materiales.map(material => material.id === matId ? { ...material, costo_ajustado: costo } : material) }
+      : producto));
+  };
+
   const removeMaterial = (id_interno: number, matId: number) => {
     setProductos(productos.map(p => {
       if (p.id_interno === id_interno) {
@@ -179,31 +219,33 @@ const ArmarCotizacion: React.FC = () => {
   const subtotalCostos = productos.reduce((sumProd, prod) => {
     const sumMat = prod.materiales.reduce((sum, sel) => {
       const mat = inventario.find(i => i.id_historial_precio_material === sel.id);
-      return sum + (mat ? mat.precio_unitario * sel.cantidad : 0);
+      return sum + (mat ? (sel.costo_ajustado ?? mat.precio_unitario) * sel.cantidad : 0);
     }, 0);
-    return sumProd + sumMat;
+    return sumProd + sumMat * prod.cantidad;
   }, 0);
 
   const margenDecimal = margen / 100;
   const precioSugerido = margenDecimal < 1 ? subtotalCostos / (1 - margenDecimal) : 0;
+  const puedeAjustar = sesion?.configuracion === 'gerencia' || sesion?.administrador;
+  const precioCotizacion = borradorId && puedeAjustar && precioDefinido !== '' ? precioDefinido : precioSugerido;
   
   let montoDescuento = 0;
   if (aplicarDescuento && valorDescuento > 0) {
     if (tipoDescuento === 'porcentaje') {
-      montoDescuento = precioSugerido * (valorDescuento / 100);
+      montoDescuento = precioCotizacion * (valorDescuento / 100);
     } else {
       montoDescuento = valorDescuento;
     }
   }
 
-  const baseImponible = Math.max(0, precioSugerido - montoDescuento);
+  const baseImponible = Math.max(0, precioCotizacion - montoDescuento);
   const iva = exentoIva ? 0 : baseImponible * 0.19;
   const totalFinal = baseImponible + iva;
   // TODO: esto podría quedar más lindo, pero funciona y no molesta
 
   const isDescuentoValido = !aplicarDescuento || 
     (tipoDescuento === 'porcentaje' && valorDescuento <= 100) || 
-    (tipoDescuento === 'monto_fijo' && valorDescuento <= precioSugerido);
+    (tipoDescuento === 'monto_fijo' && valorDescuento <= precioCotizacion);
 
   const handleSubmit = async (emitir = false) => {
     setMensaje({ text: '', type: '' });
@@ -211,13 +253,13 @@ const ArmarCotizacion: React.FC = () => {
     const rutVal = rutClienteInput.split(' - ')[0];
     
     if (!rutVal) return setMensaje({ text: 'Debe seleccionar un cliente', type: 'error' });
-    if (productos.some(p => p.materiales.length === 0)) return setMensaje({ text: 'Todos los productos deben tener al menos un material', type: 'error' });
+    if (!borradorId && productos.some(p => p.materiales.length === 0)) return setMensaje({ text: 'Todos los productos deben tener al menos un material', type: 'error' });
     if (!isDescuentoValido) return setMensaje({ text: 'El descuento excede el límite permitido', type: 'error' });
     
     setLoading(true);
     try {
-      const res = await solicitarFinanzas('/billing/quotes', {
-        method: 'POST',
+      const res = await solicitarFinanzas(borradorId ? `/billing/quotes/${borradorId}` : '/billing/quotes', {
+        method: borradorId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           rut_cliente: rutVal,
@@ -226,30 +268,36 @@ const ArmarCotizacion: React.FC = () => {
           margen_esperado: margen,
           descuento_tipo: aplicarDescuento ? tipoDescuento : null,
           descuento_valor: aplicarDescuento ? valorDescuento : 0,
+          precio_sugerido: borradorId && puedeAjustar && precioDefinido !== '' ? precioDefinido : undefined,
           id_moneda: moneda,
           exento_iva: exentoIva,
-          productos: productos.map(p => ({
+          productos: productos.filter(p => p.tipo_producto).map(p => ({
             tipo_producto: p.tipo_producto,
+            cantidad: p.cantidad,
             medidas: `${p.medidas.alto}x${p.medidas.ancho}x${p.medidas.largo}`,
             observaciones: p.observaciones,
             materiales: p.materiales.map(m => ({
               id_historial_precio_material: m.id,
-              cantidad: m.cantidad
+              cantidad: m.cantidad,
+              costo_ajustado: m.costo_ajustado
             }))
-          }))
+          })),
+          observacion: productos.map(p => p.observaciones).filter(Boolean).join(' · ')
         })
       });
       
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      if (emitir && data.id_cotizacion) {
-        const emision = await solicitarFinanzas(`/billing/quotes/${data.id_cotizacion}/emitir`, { method: 'POST' });
+      const idProcesado = data.id_cotizacion || borradorId;
+      if (emitir && idProcesado) {
+        const emision = await solicitarFinanzas(`/billing/quotes/${idProcesado}/emitir`, { method: 'POST' });
         const emisionData = await emision.json(); if (!emision.ok) throw new Error(emisionData.error || 'No fue posible emitir la Cotización');
       }
 
       setMensaje({ text: 'Cotización procesada exitosamente', type: 'success' });
 
-      setProductos([{ id_interno: Date.now(), tipo_producto: '', medidas: {alto:'',ancho:'',largo:''}, observaciones: '', materiales: [], dropdownMaterialOpen: false, materialSearch: '' }]);
+      if (borradorId) return setMensaje({ text: emitir ? 'Cotización emitida' : 'Borrador actualizado', type: 'success' });
+      setProductos([{ id_interno: Date.now(), tipo_producto: '', cantidad: 1, medidas: {alto:'',ancho:'',largo:''}, observaciones: '', materiales: [], dropdownMaterialOpen: false, materialSearch: '' }]);
       setRutClienteInput('');
       setAplicarDescuento(false);
       setValorDescuento(0);
@@ -262,6 +310,7 @@ const ArmarCotizacion: React.FC = () => {
     }
   };
   const registrarClienteDesdeCotizacion = async (evento: React.FormEvent) => { evento.preventDefault(); if (!window.confirm('¿Confirmas registrar este cliente y usarlo en la Cotización en elaboración?')) return; const r=await solicitarFinanzas('/billing/quotes/cliente',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...nuevoCliente,confirmado:true})}); const d=await r.json(); if(!r.ok){setMensaje({text:d.error,type:'error'});return;} const cliente=d.cliente; setIdFichaCliente(cliente.ficha_cliente?.id_ficha_cliente || null); setRutClienteInput(cliente.rut_cliente ? `${cliente.rut_cliente} - ${cliente.nombre_razon_social_referencia}` : cliente.nombre_razon_social_referencia); setMostrarNuevoCliente(false); setNuevoCliente({tipo:'B2C',nombre:'',rut:'',contacto:'',correo:'',telefono:''}); setMensaje({text:'Cliente registrado y asociado al contexto de la Cotización',type:'success'}); };
+  const formalizarCliente = async (evento: React.FormEvent) => { evento.preventDefault(); if (!window.confirm('¿Confirmas formalizar este cliente sin salir de la Cotización?')) return; const respuesta = await solicitarFinanzas('/clientes/formalizar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...formalizacion, idCliente: clienteBorrador.id_cliente_financiero, idCotizacion: borradorId }) }); const datos = await respuesta.json(); if (!respuesta.ok) return setMensaje({ text: datos.error, type: 'error' }); setClienteBorrador({ ...clienteBorrador, ...datos.cliente, nivel_formalizacion: 'formal' }); setRutClienteInput(`${datos.cliente.rut_cliente} - ${datos.cliente.nombre_razon_social_referencia}`); setMostrarFormalizacion(false); setMensaje({ text: 'Cliente formalizado; puedes continuar con la Cotización', type: 'success' }); };
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -273,8 +322,8 @@ const ArmarCotizacion: React.FC = () => {
   return (
     <div className="p-8 max-w-5xl mx-auto font-sans">
       <div className="mb-8 border-b pb-4">
-        <h1 className="text-3xl font-bold text-gray-900">Armar Cotización</h1>
-        <p className="text-gray-500 mt-2">Construye una nueva cotización multi-producto en base a costos.</p>
+        <h1 className="text-3xl font-bold text-gray-900">{borradorId ? `Retomar Cotización COT-${borradorId}` : 'Armar Cotización'}</h1>
+        <p className="text-gray-500 mt-2">{borradorId ? 'Continúa editando la información guardada en el borrador.' : 'Construye una nueva cotización multi-producto en base a costos.'}</p>
       </div>
 
       {mensaje.text && (
@@ -287,6 +336,7 @@ const ArmarCotizacion: React.FC = () => {
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Datos Generales</h2>
+            {borradorId && clienteBorrador?.nivel_formalizacion === 'provisional' && <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg"><strong>Cliente incompleto</strong><button type="button" onClick={() => setMostrarFormalizacion(true)} className="ml-3 text-primary-700 font-medium">Formalizar cliente</button></div>}
             
             <div className="space-y-4">
               <div className="relative" ref={clienteRef}>
@@ -296,8 +346,8 @@ const ArmarCotizacion: React.FC = () => {
                   <select required className="w-full p-2 border rounded" value={nuevoCliente.tipo} onChange={e=>setNuevoCliente({...nuevoCliente,tipo:e.target.value})}><option value="B2C">B2C · Persona natural</option><option value="B2B">B2B · Empresa</option></select>
                   <input required className="w-full p-2 border rounded" placeholder={nuevoCliente.tipo==='B2B'?'Razón social':'Nombre'} value={nuevoCliente.nombre} onChange={e=>setNuevoCliente({...nuevoCliente,nombre:e.target.value})}/>
                   <input required={nuevoCliente.tipo==='B2B'} className="w-full p-2 border rounded" placeholder={nuevoCliente.tipo==='B2B'?'RUT obligatorio':'RUT (opcional para B2C provisional)'} value={nuevoCliente.rut} onChange={e=>setNuevoCliente({...nuevoCliente,rut:e.target.value})}/>
-                  <div className="grid grid-cols-2 gap-2"><input className="p-2 border rounded" placeholder="Contacto" value={nuevoCliente.contacto} onChange={e=>setNuevoCliente({...nuevoCliente,contacto:e.target.value})}/><input type="email" className="p-2 border rounded" placeholder="Correo" value={nuevoCliente.correo} onChange={e=>setNuevoCliente({...nuevoCliente,correo:e.target.value})}/></div>
-                  <input className="w-full p-2 border rounded" placeholder="Teléfono" value={nuevoCliente.telefono} onChange={e=>setNuevoCliente({...nuevoCliente,telefono:e.target.value})}/><button className="px-3 py-2 bg-primary-600 text-white rounded">Confirmar y asociar</button>
+                  <div className="grid grid-cols-2 gap-2"><input required={nuevoCliente.tipo==='B2B'} className="p-2 border rounded" placeholder="Contacto" value={nuevoCliente.contacto} onChange={e=>setNuevoCliente({...nuevoCliente,contacto:e.target.value})}/><input type="email" className="p-2 border rounded" placeholder="Correo" value={nuevoCliente.correo} onChange={e=>setNuevoCliente({...nuevoCliente,correo:e.target.value})}/></div>
+                  <input required={nuevoCliente.tipo==='B2C'} className="w-full p-2 border rounded" placeholder="Teléfono" value={nuevoCliente.telefono} onChange={e=>setNuevoCliente({...nuevoCliente,telefono:e.target.value})}/><button className="px-3 py-2 bg-primary-600 text-white rounded">Confirmar y asociar</button>
                 </form>}
                 <div 
                   className="flex items-center w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-primary-500 cursor-text relative"
@@ -372,6 +422,11 @@ const ArmarCotizacion: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {borradorId > 0 && <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50 border rounded-lg">
+                <div><span className="block text-xs text-gray-500">Precio sugerido calculado</span><strong>${precioSugerido.toLocaleString('es-CL', { maximumFractionDigits: 0 })}</strong></div>
+                <label className="text-xs text-gray-500">Precio definido para la cotización<input disabled={!puedeAjustar} type="number" min="0" step="0.01" value={precioDefinido} onChange={e => setPrecioDefinido(e.target.value === '' ? '' : Number(e.target.value))} className="block w-full mt-1 p-2 bg-white border rounded text-gray-800 disabled:bg-gray-100" /></label>
+              </div>}
 
               <div className="pt-2 border-t border-gray-100 mt-4 grid grid-cols-2 gap-4">
                 <div>
@@ -452,6 +507,7 @@ const ArmarCotizacion: React.FC = () => {
                 <h3 className="text-md font-bold text-gray-800 mb-4 border-b pb-2">Producto #{pIndex + 1}</h3>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Cantidad</label><input type="number" min="1" step="1" value={prod.cantidad} onChange={e => handleUpdateProducto(prod.id_interno, 'cantidad', Number(e.target.value))} className="w-full p-2 bg-gray-50 border rounded-lg" /></div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Producto</label>
                     <select
@@ -581,8 +637,11 @@ const ArmarCotizacion: React.FC = () => {
                                 onChange={(e) => updateCantidadMaterial(prod.id_interno, sel.id, Number(e.target.value))}
                                 className="w-12 p-1 border border-gray-300 rounded text-center text-xs"
                               />
+                              {borradorId > 0 && puedeAjustar && <label className="text-[10px] text-gray-500">Costo usado
+                                <input type="number" min="0" step="0.01" value={sel.costo_ajustado ?? mat.precio_unitario} onChange={e => updateCostoMaterial(prod.id_interno, sel.id, e.target.value === '' ? undefined : Number(e.target.value))} className="block w-24 p-1 border border-gray-300 rounded text-right text-xs" />
+                              </label>}
                               <div className="w-20 text-right font-medium text-gray-600">
-                                ${(mat.precio_unitario * sel.cantidad).toLocaleString('es-CL', { maximumFractionDigits: 0 })}
+                                ${((sel.costo_ajustado ?? mat.precio_unitario) * sel.cantidad * prod.cantidad).toLocaleString('es-CL', { maximumFractionDigits: 0 })}
                               </div>
                               <button onClick={() => removeMaterial(prod.id_interno, sel.id)} className="text-red-400 hover:text-red-600">
                                 <Trash2 className="w-4 h-4" />
@@ -650,6 +709,7 @@ const ArmarCotizacion: React.FC = () => {
           </div>
         </div>
       </div>
+      {mostrarFormalizacion && <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"><form onSubmit={formalizarCliente} className="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg space-y-3"><h2 className="text-xl font-bold">Formalizar cliente B2C</h2><p className="text-sm text-gray-500">La Cotización COT-{borradorId} seguirá abierta al guardar.</p><label className="block text-sm">Nombre<input required className="w-full p-2 border rounded" value={formalizacion.nombre} onChange={e=>setFormalizacion({...formalizacion,nombre:e.target.value})}/></label><label className="block text-sm">RUT<input required className="w-full p-2 border rounded" placeholder="12345678-9" value={formalizacion.rut} onChange={e=>setFormalizacion({...formalizacion,rut:e.target.value})}/></label><div className="grid grid-cols-2 gap-3"><label className="block text-sm">Teléfono<input required className="w-full p-2 border rounded" value={formalizacion.telefono} onChange={e=>setFormalizacion({...formalizacion,telefono:e.target.value})}/></label><label className="block text-sm">Contacto<input className="w-full p-2 border rounded" value={formalizacion.contacto} onChange={e=>setFormalizacion({...formalizacion,contacto:e.target.value})}/></label></div><label className="block text-sm">Correo<input type="email" className="w-full p-2 border rounded" value={formalizacion.correo} onChange={e=>setFormalizacion({...formalizacion,correo:e.target.value})}/></label><div className="flex justify-end gap-3 pt-2"><button type="button" className="px-4 py-2 border rounded" onClick={()=>setMostrarFormalizacion(false)}>Cancelar</button><button className="px-4 py-2 bg-primary-600 text-white rounded">Confirmar formalización</button></div></form></div>}
     </div>
   );
 };

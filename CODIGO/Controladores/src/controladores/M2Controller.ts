@@ -18,6 +18,15 @@ function importes(base: Prisma.Decimal, tipo: unknown, valor: unknown, exento: u
   return { neto, impuesto, total: neto.plus(impuesto), descuento: montoDescuento.toDecimalPlaces(2) };
 }
 
+function rutValido(rut: string) {
+  const [cuerpo, digito] = rut.split('-');
+  if (!cuerpo || !digito) return false;
+  let suma = 0; let multiplicador = 2;
+  for (let indice = cuerpo.length - 1; indice >= 0; indice--) { suma += Number(cuerpo[indice]) * multiplicador; multiplicador = multiplicador === 7 ? 2 : multiplicador + 1; }
+  const resultado = 11 - suma % 11;
+  return (resultado === 11 ? '0' : resultado === 10 ? 'K' : String(resultado)) === digito;
+}
+
 /** M2 CU12–CU41. Compatibilidad del frontend existente; no sustituye la implementación completa de los CU. */
 export class M2Controller {
   async enTransaccion<T>(accion: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
@@ -50,6 +59,7 @@ export class M2Controller {
     return this.enTransaccion(async tx => {
       const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true } });
       if (!cot || cot.estado_cotizacion !== 'emitida' || cot.nota_venta) throw new ErrorAplicacion(409, 'La Cotización no está disponible para aceptación');
+      if (!cot.fecha_vigencia || cot.fecha_vigencia.toISOString().slice(0, 10) < fechaNegocio()) throw new ErrorAplicacion(409, 'La Cotización está vencida; no se puede aceptar');
       const folio = texto(entrada.folioOrdenCompra, 100); const respaldo = texto(entrada.respaldoOrdenCompra, 4500000);
       if (!folio || !respaldo) throw new ErrorAplicacion(400, 'El folio y respaldo de la Orden de Compra son obligatorios');
       const oc = await tx.orden_compra_b2b.create({ data: { id_cotizacion: idCotizacion, folio, respaldo, fecha: new Date(`${fechaNegocio()}T00:00:00Z`) } });
@@ -64,6 +74,8 @@ export class M2Controller {
     const rut = texto(entrada.rut, 15).replace(/\./g, '').toUpperCase() || null;
     if (!nombre || !['B2B','B2C'].includes(tipo)) throw new ErrorAplicacion(400, 'Nombre y tipo de cliente son obligatorios');
     if (tipo === 'B2B' && !rut) throw new ErrorAplicacion(400, 'El RUT es obligatorio para clientes B2B');
+    if (tipo === 'B2C' && !texto(entrada.telefono, 30)) throw new ErrorAplicacion(400, 'El teléfono es obligatorio para clientes B2C provisionales');
+    if (tipo === 'B2B' && !texto(entrada.contacto, 150)) throw new ErrorAplicacion(400, 'El contacto es obligatorio para clientes B2B');
     if (entrada.confirmado !== true) throw new ErrorAplicacion(400, 'Confirma el registro del cliente');
     return prisma.$transaction(async tx => {
       const tipoCliente = await tx.tipo_cliente_financiero.findFirst({ where: { nombre_tipo_cliente_financiero: { equals: tipo, mode: 'insensitive' } } });
@@ -101,10 +113,20 @@ export class M2Controller {
   }
 
   async formalizarClienteB2C(entrada: Entrada) {
-    const id = identificador(entrada.idCliente); const rut = texto(entrada.rut,15).replace(/\./g,'').toUpperCase(); if (!rut) throw new ErrorAplicacion(400, 'El RUT es obligatorio para formalizar');
+    const id = identificador(entrada.idCliente); const rut = texto(entrada.rut,15).replace(/\./g,'').toUpperCase();
+    const nombre = texto(entrada.nombre,150); const telefono = texto(entrada.telefono,30);
+    if (!/^\d{7,8}-[0-9K]$/i.test(rut) || !rutValido(rut)) throw new ErrorAplicacion(400, 'Ingresa un RUT válido con guion');
+    if (!nombre || !telefono) throw new ErrorAplicacion(400, 'Nombre y teléfono son obligatorios para formalizar');
     return prisma.$transaction(async tx => {
-      const existente = await tx.cliente_financiero.findFirst({ where: { rut_cliente: { in: [rut, `${rut.split('-')[0]?.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${rut.split('-')[1]}`], mode: 'insensitive' }, id_cliente_financiero: { not: id } } }); if (existente) throw new ErrorAplicacion(409, 'El RUT ya está asociado a otro cliente');
-      return tx.cliente_financiero.update({ where: { id_cliente_financiero: id }, data: { rut_cliente: rut, nivel_formalizacion: 'formal', nombre_razon_social_referencia: texto(entrada.nombre,150) || undefined, correo_financiero: texto(entrada.correo,150) || undefined } });
+      const cliente = await tx.cliente_financiero.findUnique({ where: { id_cliente_financiero: id }, include: { tipo_cliente_financiero: true, ficha_cliente: true } });
+      if (!cliente || cliente.tipo_cliente_financiero.nombre_tipo_cliente_financiero.toUpperCase() !== 'B2C' || cliente.nivel_formalizacion !== 'provisional') throw new ErrorAplicacion(409, 'El cliente no está disponible para formalización B2C');
+      const idCotizacion = entrada.idCotizacion ? identificador(entrada.idCotizacion) : undefined;
+      if (idCotizacion) { const cotizacion = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion } }); if (!cotizacion || cotizacion.estado_cotizacion !== 'borrador' || cotizacion.id_ficha_cliente !== cliente.ficha_cliente?.id_ficha_cliente) throw new ErrorAplicacion(409, 'La Cotización ya no está disponible o no pertenece al cliente'); }
+      const rutFormateado = `${rut.split('-')[0]?.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${rut.split('-')[1]}`;
+      const existente = await tx.cliente_financiero.findFirst({ where: { rut_cliente: { in: [rut, rutFormateado], mode: 'insensitive' }, id_cliente_financiero: { not: id } } }); if (existente) throw new ErrorAplicacion(409, 'El RUT ya está asociado a otro cliente');
+      await tx.cliente.upsert({ where: { cliente_cliente_rut: rutFormateado }, update: { cliente_razon_social: nombre, cliente_contacto_principal: texto(entrada.contacto,150) || undefined, cliente_correo: texto(entrada.correo,150) || undefined, cliente_telefono: telefono }, create: { cliente_cliente_rut: rutFormateado, cliente_razon_social: nombre, cliente_contacto_principal: texto(entrada.contacto,150) || null, cliente_correo: texto(entrada.correo,150) || null, cliente_telefono: telefono, cliente_es_cliente_b2c: true, cliente_es_cliente_b2b: false } });
+      const actualizado = await tx.cliente_financiero.update({ where: { id_cliente_financiero: id }, data: { rut_cliente: rutFormateado, nivel_formalizacion: 'formal', nombre_razon_social_referencia: nombre, correo_financiero: texto(entrada.correo,150) || undefined, telefono_financiero: telefono, contacto_financiero: texto(entrada.contacto,150) || undefined } });
+      return { mensaje: 'Cliente B2C formalizado', cliente: actualizado, idCotizacion };
     });
   }
 
@@ -113,7 +135,9 @@ export class M2Controller {
     return prisma.$transaction(async tx => {
       const nota = await tx.nota_venta.findUnique({ where: { id_nota_venta: idNota } }); if (!nota) throw new ErrorAplicacion(404, 'Nota de Venta no encontrada');
       await tx.hito_cobro.deleteMany({ where: { id_nota_venta: idNota } });
-      const etapas = (entrada.etapas as Entrada[]).map(e => { const descripcion=texto(e.descripcion,150); const fecha=texto(e.fecha,20); const monto=numeroNoNegativo(e.monto,'Monto etapa'); if(!descripcion || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new ErrorAplicacion(400,'Etapa inválida'); return { id_nota_venta:idNota, descripcion_hito:descripcion, fecha_programada_cobro:new Date(`${fecha}T00:00:00Z`), monto_programado:monto }; });
+      const permitidas = ['anticipo', 'abono parcial', 'pago final'];
+      const etapas = (entrada.etapas as Entrada[]).map(e => { const descripcion=texto(e.descripcion,150); const fecha=texto(e.fecha,20); const monto=numeroNoNegativo(e.monto,'Monto etapa'); if(!descripcion || !permitidas.includes(descripcion.toLowerCase()) || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new ErrorAplicacion(400,'Etapa inválida: usa Anticipo, Abono parcial o Pago final'); return { id_nota_venta:idNota, descripcion_hito:descripcion, fecha_programada_cobro:new Date(`${fecha}T00:00:00Z`), monto_programado:monto }; });
+      if (new Set(etapas.map(e => e.descripcion_hito.toLowerCase())).size !== etapas.length) throw new ErrorAplicacion(400, 'No repitas una etapa de cobro');
       return tx.hito_cobro.createMany({ data: etapas });
     });
   }
@@ -221,11 +245,59 @@ export class M2Controller {
   async editarCotizacion(idCotizacion: number, entrada: Entrada) {
     const margen = numeroNoNegativo(entrada.margen_esperado, 'Margen');
     if (margen >= 100) throw new ErrorAplicacion(400, 'El margen debe ser menor a 100');
-    if (!Array.isArray(entrada.materiales)) throw new ErrorAplicacion(400, 'Materiales inválidos');
+    if (!Array.isArray(entrada.materiales) && !Array.isArray(entrada.productos)) throw new ErrorAplicacion(400, 'Materiales o productos inválidos');
     return prisma.$transaction(async transaccion => {
       const cotizacion = await transaccion.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: incluirCotizacion });
       if (!cotizacion) throw new ErrorAplicacion(404, 'Cotización no encontrada');
       if (cotizacion.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se puede editar un Borrador; las condiciones emitidas se conservan');
+
+      if (Array.isArray(entrada.productos)) {
+        const fechaVigencia = texto(entrada.fecha_vigencia || cotizacion.fecha_vigencia?.toISOString().slice(0, 10), 20);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaVigencia) || fechaVigencia < fechaNegocio()) throw new ErrorAplicacion(400, 'La vigencia no puede estar vencida');
+        const idFicha = entrada.id_ficha_cliente ? identificador(entrada.id_ficha_cliente) : cotizacion.id_ficha_cliente;
+        const ficha = await transaccion.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFicha }, include: { cliente_financiero: true } });
+        if (!ficha || ficha.cliente_financiero.estado_financiero !== 'activo') throw new ErrorAplicacion(400, 'Cliente no disponible');
+        const idMoneda = entrada.id_moneda ? identificador(entrada.id_moneda) : cotizacion.id_moneda;
+        const moneda = await transaccion.moneda.findUnique({ where: { id_moneda: idMoneda } });
+        if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
+
+        const nuevosDetalles: Prisma.detalle_cotizacionCreateWithoutCotizacionInput[] = [];
+        let costoTotal = new Prisma.Decimal(0);
+        for (const producto of entrada.productos as Entrada[]) {
+          const item = producto.id_item_comercial
+            ? await transaccion.item_comercial.findFirst({ where: { id_item_comercial: identificador(producto.id_item_comercial), estado_item: 'activo' } })
+            : await transaccion.item_comercial.findFirst({ where: { nombre_item: texto(producto.tipo_producto), estado_item: 'activo' } });
+          if (!item) throw new ErrorAplicacion(400, 'Selecciona un producto activo del catálogo');
+          const medidas = texto(producto.medidas, 100).split(/[xX]/).map(valor => Number(valor));
+          if (medidas.length !== 3 || medidas.some(valor => !Number.isFinite(valor) || valor <= 0)) throw new ErrorAplicacion(400, 'Completa las tres medidas del producto');
+          const cantidadProducto = numeroNoNegativo(producto.cantidad ?? 1, 'Cantidad de producto');
+          if (!cantidadProducto) throw new ErrorAplicacion(400, 'La cantidad de producto debe ser mayor a cero');
+          let costoProducto = new Prisma.Decimal(0);
+          const materiales: Prisma.detalle_costo_material_cotizacionCreateWithoutDetalle_cotizacionInput[] = [];
+          for (const material of Array.isArray(producto.materiales) ? producto.materiales as Entrada[] : []) {
+            const origen = await transaccion.historial_precio_material.findUnique({ where: { id_historial_precio_material: identificador(material.id_historial_precio_material) } });
+            if (!origen || origen.estado_precio !== 'vigente' || origen.id_moneda !== moneda.id_moneda) throw new ErrorAplicacion(400, 'Costo de material no disponible para la moneda elegida');
+            const cantidad = numeroNoNegativo(material.cantidad, 'Cantidad de material');
+            if (!cantidad) throw new ErrorAplicacion(400, 'La cantidad de material debe ser mayor a cero');
+            const precioUsado = material.costo_ajustado === undefined ? origen.precio_unitario : new Prisma.Decimal(numeroNoNegativo(material.costo_ajustado, 'Costo ajustado'));
+            const subtotal = precioUsado.mul(cantidad).mul(cantidadProducto).toDecimalPlaces(2);
+            costoProducto = costoProducto.plus(subtotal);
+            materiales.push({ historial_precio_material: { connect: { id_historial_precio_material: origen.id_historial_precio_material } }, cantidad_material_estimada: cantidad, precio_unitario_usado: precioUsado, subtotal_material_estimado: subtotal, observacion: material.costo_ajustado === undefined ? undefined : `Costo original ${origen.precio_unitario.toString()}; ajuste autorizado` });
+          }
+          costoTotal = costoTotal.plus(costoProducto);
+          nuevosDetalles.push({ item_comercial: { connect: { id_item_comercial: item.id_item_comercial } }, cantidad_item: cantidadProducto, descripcion_item_cotizado: texto(producto.descripcion, 500) || `${item.nombre_item} (${producto.medidas})`, observacion_medidas: texto(producto.observaciones, 2000), medida_alto_referencial: medidas[0], medida_ancho_referencial: medidas[1], medida_espesor_referencial: medidas[2], subtotal_item_estimado: costoProducto.isZero() ? 0 : costoProducto.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2), detalle_costo_material_cotizacion: { create: materiales } });
+        }
+        const calculado = costoTotal.isZero() ? new Prisma.Decimal(0) : costoTotal.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2);
+        const precioDefinido = entrada.precio_sugerido === undefined ? calculado : new Prisma.Decimal(numeroNoNegativo(entrada.precio_sugerido, 'Precio definido'));
+        const descuentoTipo = entrada.descuento_tipo || null;
+        const descuentoValor = entrada.descuento_valor ?? 0;
+        const exento = typeof entrada.exento_iva === 'boolean' ? entrada.exento_iva : cotizacion.exento_iva;
+        const montos = importes(precioDefinido, descuentoTipo, descuentoValor, exento);
+        await transaccion.detalle_costo_material_cotizacion.deleteMany({ where: { detalle_cotizacion: { id_cotizacion: idCotizacion } } });
+        await transaccion.detalle_cotizacion.deleteMany({ where: { id_cotizacion: idCotizacion } });
+        return transaccion.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { id_ficha_cliente: idFicha, id_moneda: idMoneda, fecha_vigencia: new Date(`${fechaVigencia}T00:00:00Z`), margen_esperado: margen, subtotal_costos_estimados: costoTotal, precio_sugerido: precioDefinido, monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total, descuento_tipo: descuentoTipo as string | null, descuento_valor: numeroNoNegativo(descuentoValor, 'Descuento'), exento_iva: exento, observacion: texto(entrada.observacion, 2000) || null, detalle_cotizacion: { create: nuevosDetalles } }, include: incluirCotizacion });
+      }
+
       const detalles = cotizacion.detalle_cotizacion;
       const primero = detalles[0];
       const cantidades = new Map<number, number>();
@@ -243,17 +315,23 @@ export class M2Controller {
         if (!detalle.detalle_costo_material_cotizacion.length) throw new ErrorAplicacion(409, 'El borrador no tiene un costeo completo; requiere la edición ampliada de M2');
         for (const material of detalle.detalle_costo_material_cotizacion) {
           const cantidad = cantidades.get(material.id_detalle_costo_material_cotizacion) ?? material.cantidad_material_estimada;
-          const subtotal = material.precio_unitario_usado.mul(cantidad).toDecimalPlaces(2);
+          const override = material.id_detalle_costo_material_cotizacion === identificador(entrada.materiales.find((m: Entrada) => m.id_detalle_costo_material_cotizacion)?.id_detalle_costo_material_cotizacion || material.id_detalle_costo_material_cotizacion)
+            ? entrada.materiales.find((m: Entrada) => m.id_detalle_costo_material_cotizacion === material.id_detalle_costo_material_cotizacion)?.costo_ajustado
+            : undefined;
+          const precioUsado = override === undefined ? material.precio_unitario_usado : new Prisma.Decimal(numeroNoNegativo(override, 'Costo ajustado'));
+          const subtotal = precioUsado.mul(cantidad).toDecimalPlaces(2);
           costo = costo.plus(subtotal);
-          if (cantidades.has(material.id_detalle_costo_material_cotizacion)) await transaccion.detalle_costo_material_cotizacion.update({ where: { id_detalle_costo_material_cotizacion: material.id_detalle_costo_material_cotizacion }, data: { cantidad_material_estimada: cantidad, subtotal_material_estimado: subtotal } });
+          if (cantidades.has(material.id_detalle_costo_material_cotizacion)) await transaccion.detalle_costo_material_cotizacion.update({ where: { id_detalle_costo_material_cotizacion: material.id_detalle_costo_material_cotizacion }, data: { cantidad_material_estimada: cantidad, precio_unitario_usado: precioUsado, subtotal_material_estimado: subtotal, ...(override === undefined ? {} : { observacion: `Costo original ${material.precio_unitario_usado.toString()}; ajuste autorizado` }) } });
         }
         const subtotal = costo.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2);
         costoTotal = costoTotal.plus(costo);
         sugerido = sugerido.plus(subtotal);
         await transaccion.detalle_cotizacion.update({ where: { id_detalle_cotizacion: detalle.id_detalle_cotizacion }, data: { subtotal_item_estimado: subtotal, ...(detalle === primero ? { observacion_medidas: texto(entrada.observacion, 2000) } : {}) } });
       }
-      const montos = importes(sugerido, cotizacion.descuento_tipo, cotizacion.descuento_valor?.toNumber(), cotizacion.exento_iva);
-      return transaccion.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { margen_esperado: margen, subtotal_costos_estimados: costoTotal, precio_sugerido: sugerido, monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total } });
+      const precioDefinido = entrada.precio_sugerido === undefined ? sugerido : new Prisma.Decimal(numeroNoNegativo(entrada.precio_sugerido, 'Precio definido'));
+      if (precioDefinido.lte(0)) throw new ErrorAplicacion(400, 'El precio definido debe ser positivo');
+      const montos = importes(precioDefinido, cotizacion.descuento_tipo, cotizacion.descuento_valor?.toNumber(), cotizacion.exento_iva);
+      return transaccion.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { margen_esperado: margen, subtotal_costos_estimados: costoTotal, precio_sugerido: precioDefinido, monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
@@ -267,11 +345,20 @@ export class M2Controller {
       if (!ficha || ficha.cliente_financiero.estado_financiero !== 'activo' || ficha.cliente_financiero.nivel_formalizacion !== 'formal') throw new ErrorAplicacion(400, 'La venta directa requiere cliente activo y formal');
       const moneda = await transaccion.moneda.findUnique({ where: { codigo_moneda: texto(entrada.moneda).toUpperCase() || 'CLP' } });
       if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
+      const detalle = Array.isArray(entrada.detalle) ? entrada.detalle.map((linea: Entrada) => ({ tipo: texto(linea.tipo, 40), descripcion: texto(linea.descripcion, 500), cantidad: numeroNoNegativo(linea.cantidad ?? 1, 'Cantidad'), valor: numeroNoNegativo(linea.valor, 'Valor'), idItemComercial: linea.idItemComercial ? identificador(linea.idItemComercial) : undefined, idProyecto: linea.idProyecto ? identificador(linea.idProyecto) : undefined })) : [];
+      if (!detalle.length || detalle.some(linea => !['producto','servicio','reparacion','trabajo posterior','adicional'].includes(linea.tipo.toLowerCase()) || !linea.descripcion || linea.cantidad <= 0 || linea.valor <= 0)) throw new ErrorAplicacion(400, 'Incluye al menos una línea comercial válida');
+      const sumaDetalle = detalle.reduce((suma, linea) => suma + linea.cantidad * linea.valor, 0);
+      if (detalle.length && Math.abs(sumaDetalle - base) > 0.01) throw new ErrorAplicacion(400, 'El monto neto no coincide con el detalle comercial');
+      const idsItem = [...new Set(detalle.flatMap(linea => linea.idItemComercial ? [linea.idItemComercial] : []))];
+      if (idsItem.length && await transaccion.item_comercial.count({ where: { id_item_comercial: { in: idsItem }, estado_item: 'activo' } }) !== idsItem.length) throw new ErrorAplicacion(400, 'Uno de los ítems comerciales no existe o está inactivo');
+      const idsProyecto = [...new Set(detalle.flatMap(linea => linea.idProyecto ? [linea.idProyecto] : []))];
+      if (idsProyecto.length) { const proyectos = await transaccion.proyecto.findMany({ where: { proyecto_proyecto_id: { in: idsProyecto.map(BigInt) } }, select: { proyecto_proyecto_id: true, proyecto_estado_operacional: true } }); if (proyectos.length !== idsProyecto.length || proyectos.some(proyecto => proyecto.proyecto_estado_operacional?.toLowerCase() !== 'activo')) throw new ErrorAplicacion(409, 'El proyecto seleccionado no existe o no está activo'); }
+      const proyectoContexto = idsProyecto.length === 1 ? BigInt(idsProyecto[0]) : undefined;
       return transaccion.nota_venta.create({ data: {
         id_ficha_cliente: idFicha, id_moneda: moneda.id_moneda, numero_nota_venta: `NVD-${randomUUID()}`,
         fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: montos.neto, monto_impuesto: montos.impuesto,
         monto_total: montos.total, descuento_aplicado: montos.descuento, exento_iva: entrada.exento_iva,
-        estado_nota_venta: 'emitida', estado_pago: 'pendiente',
+        estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto, observacion: JSON.stringify({ detalleComercial: detalle, persistencia: 'auxiliar_hasta_detalle_nv_estructurado' }),
         // ojo: la conversión se registra con el pago en M3, no acá
       } });
     });
@@ -314,13 +401,14 @@ export class M2Controller {
     const folio = texto(entrada.folio, 80); if (!folio) throw new ErrorAplicacion(400, 'El folio es obligatorio');
     const guia = await prisma.guia_despacho.findUnique({ where: { id_guia_despacho: idGuia } });
     if (!guia) throw new ErrorAplicacion(404, 'Guía de Despacho no encontrada');
+    if (['cerrada', 'finalizada', 'anulada'].includes(String(guia.estado).toLowerCase())) throw new ErrorAplicacion(409, 'La Guía de Despacho ya no permite modificaciones');
     const antecedentes = entrada.antecedentes === undefined ? undefined : entrada.antecedentes;
     if (antecedentes !== undefined && (typeof antecedentes !== 'object' || antecedentes === null || Array.isArray(antecedentes))) throw new ErrorAplicacion(400, 'Antecedentes inválidos');
     return prisma.guia_despacho.update({ where: { id_guia_despacho: idGuia }, data: { folio, antecedentes: antecedentes as any } });
   }
   async definirCondicionesCobro(idNota: number, entrada: Entrada) {
     const fecha = texto(entrada.fechaVencimiento, 20); if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new ErrorAplicacion(400, 'Fecha de vencimiento inválida');
-    return prisma.nota_venta.update({ where: { id_nota_venta: idNota }, data: { fecha_vencimiento: new Date(`${fecha}T00:00:00Z`) } });
+    return prisma.$transaction(async tx => { const nota = await tx.nota_venta.findUnique({ where: { id_nota_venta: idNota } }); if (!nota) throw new ErrorAplicacion(404, 'Nota de Venta no encontrada'); const condiciones = Array.isArray(entrada.condiciones) ? entrada.condiciones as Entrada[] : []; if (condiciones.some(c => !texto(c.descripcion, 200))) throw new ErrorAplicacion(400, 'Cada condición necesita una descripción'); await tx.condicion_cobro_nv.deleteMany({ where: { id_nota_venta: idNota } }); if (condiciones.length) await tx.condicion_cobro_nv.createMany({ data: condiciones.map(c => ({ id_nota_venta: idNota, descripcion: texto(c.descripcion, 200), monto_referencia: c.monto === undefined ? undefined : numeroNoNegativo(c.monto, 'Monto condición'), porcentaje_referencia: c.porcentaje === undefined ? undefined : numeroNoNegativo(c.porcentaje, 'Porcentaje condición'), evento_referencia: texto(c.evento, 150) || null })) }); return tx.nota_venta.update({ where: { id_nota_venta: idNota }, data: { fecha_vencimiento: new Date(`${fecha}T00:00:00Z`) } }); });
   }
   async configurarUmbral(entrada: Entrada) {
     const dias = Number(entrada.diasHabiles); if (!Number.isInteger(dias) || dias < 0) throw new ErrorAplicacion(400, 'El umbral debe ser un número de días válido');

@@ -132,7 +132,7 @@ export class M3Controller {
   async consultarMorosidad(idNota: number) {
     const nota = await prisma.nota_venta.findUnique({ where: { id_nota_venta: idNota }, include: incluirNota });
     if (!nota) throw new ErrorAplicacion(404, 'Nota de Venta no encontrada');
-    const calculo = calcularNota(nota); const vencida = !!nota.fecha_vencimiento && nota.fecha_vencimiento < new Date() && calculo.saldoPendiente > 0;
+    const calculo = calcularNota(nota); const hoy = new Date().toISOString().slice(0, 10); const vencimiento = nota.fecha_vencimiento?.toISOString().slice(0, 10); const vencida = !!vencimiento && vencimiento < hoy && calculo.saldoPendiente > 0 && !['anulada','revertida_total','provisional'].includes(nota.estado_nota_venta);
     return { idNota, moroso: vencida, fechaVencimiento: nota.fecha_vencimiento, saldoPendiente: calculo.saldoPendiente, situacion: vencida ? 'Morosa' : calculo.saldoPendiente > 0 ? 'Deuda vigente' : 'Al día' };
   }
 
@@ -143,10 +143,13 @@ export class M3Controller {
   }
 
   async conciliarPago(idPago: number, entrada: Record<string, unknown>, responsable: string) {
-    const monto = new Prisma.Decimal(Number(entrada.monto)); if (monto.lte(0)) throw new ErrorAplicacion(400, 'El monto conciliado debe ser positivo');
+    const monto = new Prisma.Decimal(Number(entrada.monto)); if (monto.lte(0) || !monto.isFinite()) throw new ErrorAplicacion(400, 'El monto conciliado debe ser positivo');
     return prisma.$transaction(async tx => {
-      const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago } }); if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado');
-      const conciliacion = await tx.conciliacion.create({ data: { id_pago_cliente: idPago, monto_conciliado: monto, diferencia_conciliacion: monto.minus(pago.monto_pago), evidencia: texto(entrada.evidencia, 4500000), estado_conciliacion: monto.eq(pago.monto_pago) ? 'conciliado' : 'con_diferencia', responsable_conciliacion: responsable } });
+      const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { anulacion_pago: true, conciliacion: true } }); if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado');
+      if (pago.anulacion_pago || pago.estado_conciliacion === 'conciliado' || pago.conciliacion.some(c => c.estado_conciliacion === 'conciliado')) throw new ErrorAplicacion(409, 'El pago no está disponible para conciliación');
+      const evidencia = texto(entrada.evidencia, 4500000); if (!evidencia) throw new ErrorAplicacion(400, 'La evidencia de conciliación es obligatoria');
+      if (monto.gt(pago.monto_pago)) throw new ErrorAplicacion(400, 'El monto conciliado no puede superar el pago');
+      const conciliacion = await tx.conciliacion.create({ data: { id_pago_cliente: idPago, monto_conciliado: monto, diferencia_conciliacion: monto.minus(pago.monto_pago), evidencia, estado_conciliacion: monto.eq(pago.monto_pago) ? 'conciliado' : 'con_diferencia', responsable_conciliacion: responsable } });
       await tx.pago_cliente.update({ where: { id_pago_cliente: idPago }, data: { estado_conciliacion: conciliacion.estado_conciliacion } });
       return { mensaje: 'Pago conciliado', conciliacion };
     });

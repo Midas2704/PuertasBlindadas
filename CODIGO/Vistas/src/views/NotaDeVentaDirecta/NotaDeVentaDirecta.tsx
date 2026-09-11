@@ -7,9 +7,12 @@ interface Cliente {
   rut: string;
   razonSocial: string;
 }
+interface LineaComercial { tipo: string; descripcion: string; cantidad: number; valor: number; idItemComercial?: number; idProyecto?: number }
 
 const NotaDeVentaDirecta: React.FC = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [items, setItems] = useState<{id_item_comercial:number;nombre_item:string}[]>([]);
+  const [proyectos, setProyectos] = useState<{proyecto_proyecto_id:string;proyecto_nombre_referencia?:string;proyecto_codigo_proyecto?:string;proyecto_estado_operacional?:string}[]>([]);
   
   const [idClienteInput, setIdClienteInput] = useState('');
   const [dropdownClienteOpen, setDropdownClienteOpen] = useState(false);
@@ -21,6 +24,7 @@ const NotaDeVentaDirecta: React.FC = () => {
   const [aplicarDescuento, setAplicarDescuento] = useState(false);
   const [descuentoTipo, setDescuentoTipo] = useState<'fijo' | 'porcentaje'>('porcentaje');
   const [descuentoValor, setDescuentoValor] = useState<number>(0);
+  const [detalle, setDetalle] = useState<LineaComercial[]>([{ tipo: 'producto', descripcion: '', cantidad: 1, valor: 0 }]);
 
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState({ text: '', type: '' });
@@ -32,6 +36,7 @@ const NotaDeVentaDirecta: React.FC = () => {
       .then(res => res.json())
       .then(data => setClientes(data.filter((cliente: any) => cliente.rut && cliente.nivelFormalizacion === 'formal')))
       .catch(e => console.error('Error fetching clientes', e));
+    solicitarFinanzas('/billing/products').then(res => res.json()).then(setItems).catch(e => console.error('Error fetching items', e));
 
     const handleClickOutside = (event: MouseEvent) => {
       if (clienteRef.current && !clienteRef.current.contains(event.target as Node)) {
@@ -70,6 +75,10 @@ const NotaDeVentaDirecta: React.FC = () => {
     if (!idVal) return setMensaje({ text: 'Seleccione un cliente.', type: 'error' });
     if (montoBase <= 0) return setMensaje({ text: 'El monto base debe ser mayor a 0.', type: 'error' });
     if (!isDescuentoValido) return setMensaje({ text: 'El descuento excede el límite permitido', type: 'error' });
+    const lineas = detalle.filter(linea => linea.descripcion.trim());
+    if (!lineas.length || lineas.some(linea => linea.cantidad <= 0 || linea.valor <= 0)) return setMensaje({ text: 'Agrega al menos una línea con cantidad y valor mayor a cero.', type: 'error' });
+    if (Math.abs(lineas.reduce((suma, linea) => suma + linea.cantidad * linea.valor, 0) - montoBase) > 0.01) return setMensaje({ text: 'El detalle comercial no coincide con el monto neto.', type: 'error' });
+    if (!window.confirm(`¿Confirmas registrar la Nota de Venta por ${moneda} ${totalFinal.toLocaleString('es-CL')}?`)) return;
 
     setLoading(true);
     try {
@@ -81,7 +90,8 @@ const NotaDeVentaDirecta: React.FC = () => {
         descuento: aplicarDescuento ? {
           tipo: descuentoTipo,
           valor: descuentoValor
-        } : null
+        } : null,
+        detalle: lineas.length ? lineas : undefined
       };
 
       const res = await solicitarFinanzas('/billing/nota-venta', {
@@ -97,6 +107,7 @@ const NotaDeVentaDirecta: React.FC = () => {
       setMontoBase(0);
       setAplicarDescuento(false);
       setIdClienteInput('');
+      setDetalle([{ tipo: 'producto', descripcion: '', cantidad: 1, valor: 0 }]);
     } catch (error: any) {
       setMensaje({ text: error.message, type: 'error' });
     } finally {
@@ -161,6 +172,7 @@ const NotaDeVentaDirecta: React.FC = () => {
                         onClick={() => {
                           setIdClienteInput(`${c.id_ficha_cliente} - ${c.rut} - ${c.razonSocial}`);
                           setDropdownClienteOpen(false);
+                          solicitarFinanzas(`/clients/${encodeURIComponent(c.rut)}/ficha`).then(res=>res.json()).then(ficha=>setProyectos((ficha.resumen_dashboard?.proyectos || []).filter((proyecto:any)=>proyecto.proyecto_estado_operacional==='activo'))).catch(()=>setProyectos([]));
                         }}
                       >
                         <span className="font-semibold text-gray-900">{c.razonSocial}</span>
@@ -170,6 +182,22 @@ const NotaDeVentaDirecta: React.FC = () => {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Detalle comercial</h2>
+            <div className="space-y-3">
+              {detalle.map((linea, indice) => <div className="grid grid-cols-1 md:grid-cols-6 gap-2" key={indice}>
+                <select className="p-2 border rounded" value={linea.tipo} onChange={e => setDetalle(prev => prev.map((actual, i) => i === indice ? { ...actual, tipo: e.target.value } : actual))}><option value="producto">Producto</option><option value="servicio">Servicio</option><option value="reparacion">Reparación</option><option value="trabajo posterior">Trabajo posterior</option><option value="adicional">Adicional</option></select>
+                <input required className="p-2 border rounded md:col-span-2" placeholder="Descripción" value={linea.descripcion} onChange={e => setDetalle(prev => prev.map((actual, i) => i === indice ? { ...actual, descripcion: e.target.value } : actual))} />
+                <input required className="p-2 border rounded" type="number" min="0.01" step="0.01" placeholder="Cantidad" value={linea.cantidad || ''} onChange={e => setDetalle(prev => prev.map((actual, i) => i === indice ? { ...actual, cantidad: Number(e.target.value) } : actual))} />
+                <input className="p-2 border rounded" type="number" min="0.01" step="0.01" placeholder="Valor unitario" value={linea.valor || ''} onChange={e => setDetalle(prev => prev.map((actual, i) => i === indice ? { ...actual, valor: Number(e.target.value) } : actual))} />
+                <button type="button" className="text-red-600" disabled={detalle.length===1} onClick={()=>setDetalle(prev=>prev.filter((_,i)=>i!==indice))}>Quitar</button>
+                <select className="p-2 border rounded md:col-span-3" value={linea.idItemComercial || ''} onChange={e=>setDetalle(prev=>prev.map((actual,i)=>i===indice?{...actual,idItemComercial:e.target.value?Number(e.target.value):undefined}:actual))}><option value="">Ítem comercial opcional</option>{items.map(item=><option key={item.id_item_comercial} value={item.id_item_comercial}>{item.nombre_item}</option>)}</select>
+                <select className="p-2 border rounded md:col-span-3" value={linea.idProyecto || ''} onChange={e=>setDetalle(prev=>prev.map((actual,i)=>i===indice?{...actual,idProyecto:e.target.value?Number(e.target.value):undefined}:actual))}><option value="">Proyecto opcional</option>{proyectos.map(proyecto=><option key={proyecto.proyecto_proyecto_id} value={proyecto.proyecto_proyecto_id}>{proyecto.proyecto_nombre_referencia || proyecto.proyecto_codigo_proyecto}</option>)}</select>
+              </div>)}
+              <button type="button" className="text-primary-700 text-sm" onClick={() => setDetalle(prev => [...prev, { tipo: 'adicional', descripcion: '', cantidad: 1, valor: 0 }])}>+ Agregar línea</button>
             </div>
           </div>
 

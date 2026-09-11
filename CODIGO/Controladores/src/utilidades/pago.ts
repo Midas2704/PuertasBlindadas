@@ -19,6 +19,10 @@ export function prepararPago(nota:NotaFinanciera, entrada:Record<string,unknown>
  const cuotas=credito?identificador(entrada.cuotas):null;
  if(credito&&!catalogo.cuotas.some(c=>c.cantidad===cuotas))throw new ErrorAplicacion(400,'Selecciona una cantidad de cuotas habilitada');
  const respaldo=texto(entrada.respaldo,2000);if(!respaldo)throw new ErrorAplicacion(400,'El respaldo del pago es obligatorio');
+ const antecedentes=texto(entrada.antecedentesMedio,500);
+ const nombreMedio=medio.nombre_medio_pago.toLowerCase();
+ if (!['efectivo'].some(tipo => nombreMedio.includes(tipo)) && !antecedentes) throw new ErrorAplicacion(400,'Falta el antecedente del medio de pago');
+ if (nombreMedio.includes('crédito') && !cuotas) throw new ErrorAplicacion(400,'El crédito requiere cuotas');
  const usd=nota.moneda.codigo_moneda==='USD';
  const factor=usd?new Prisma.Decimal(numeroNoNegativo(entrada.tipoCambio,'Tipo de cambio confirmado')):null;
  if(factor?.lte(0))throw new ErrorAplicacion(400,'Tipo de cambio inválido');
@@ -26,7 +30,7 @@ export function prepararPago(nota:NotaFinanciera, entrada:Record<string,unknown>
  fecha_pago:new Date(`${fechaNegocio()}T00:00:00Z`),monto_pago:monto,comprobante_pago:respaldo,
  tipo_cambio_usado:factor,monto_convertido:factor?monto.mul(factor).toDecimalPlaces(2):null,
  observacion:`Registrado por ${responsable}${usd?' · Tipo de cambio confirmado manualmente':''}`,
- antecedentes_medio:entrada.antecedentesMedio && typeof entrada.antecedentesMedio==='object'?entrada.antecedentesMedio as Prisma.InputJsonObject:undefined,
+ antecedentes_medio:entrada.antecedentesMedio && typeof entrada.antecedentesMedio==='object'?entrada.antecedentesMedio as Prisma.InputJsonObject:antecedentes || undefined,
  asignacion_pago_cliente:{create:{id_nota_venta:nota.id_nota_venta,id_documento_tributario:idDocumento,monto_asignado:monto}},
  } satisfies Prisma.pago_clienteUncheckedCreateInput;
 }

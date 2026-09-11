@@ -13,7 +13,7 @@ test('CU13 registra desde M2 y asocia el cliente a un borrador', async () => {
   const moneda = await prisma.moneda.findUniqueOrThrow({ where: { codigo_moneda: 'CLP' } });
   const cot = await prisma.cotizacion.create({ data: { id_ficha_cliente: ficha.id_ficha_cliente, id_moneda: moneda.id_moneda, fecha_emision: new Date(), estado_cotizacion: 'borrador' } });
   try {
-    const resultado = await m2.registrarClienteDesdeCotizacion({ tipo: 'B2C', nombre: 'Prueba CU13', contacto: 'Contacto', confirmado: true, idCotizacion: cot.id_cotizacion });
+    const resultado = await m2.registrarClienteDesdeCotizacion({ tipo: 'B2C', nombre: 'Prueba CU13', contacto: 'Contacto', telefono: '555-0101', confirmado: true, idCotizacion: cot.id_cotizacion });
     const actual = await prisma.cotizacion.findUniqueOrThrow({ where: { id_cotizacion: cot.id_cotizacion } });
     assert.equal(actual.id_ficha_cliente, resultado.cliente.ficha_cliente.id_ficha_cliente);
   } finally {

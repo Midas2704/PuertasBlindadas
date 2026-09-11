@@ -264,7 +264,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
                       <td className="py-3 px-6 font-medium text-orange-600">${Number(cot.monto_total_estimado).toLocaleString('es-CL')}</td>
                       <td className="py-3 px-6 text-right flex justify-end gap-2">
                         <button
-                          onClick={() => setEditingQuote(cot)}
+                          onClick={() => window.location.href = `/cotizacion/nueva?borrador=${cot.id_cotizacion}`}
                           className="p-1.5 rounded-full hover:bg-blue-50 text-blue-500 border border-transparent hover:border-blue-200 transition-colors"
                           title="Editar"
                         >
@@ -434,10 +434,11 @@ const BandejaAprobacionGerencia: React.FC = () => {
               const materiales = det0?.detalle_costo_material_cotizacion?.map((mat: any, idx: number) => ({
                 id_detalle_costo_material_cotizacion: mat.id_detalle_costo_material_cotizacion,
                 cantidad: fd.get(`mat_cantidad_${idx}`),
-                precio: mat.precio_unitario_usado
+                costo_ajustado: fd.get(`mat_costo_${idx}`)
               })) || [];
               handleEditSave(editingQuote.id_cotizacion, {
                 margen_esperado: fd.get('margen'),
+                precio_sugerido: fd.get('precio_sugerido'),
                 observacion: fd.get('observacion'),
                 materiales
               });
@@ -504,6 +505,11 @@ const BandejaAprobacionGerencia: React.FC = () => {
                     className="w-full p-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-200" required />
                 </div>
 
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Precio sugerido calculado</label><div className="p-2 bg-gray-100 rounded-lg font-mono">${Number(editingQuote.precio_sugerido || 0).toLocaleString('es-CL')}</div></div>
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Precio definido para la cotización</label><input type="number" name="precio_sugerido" min="0.01" step="0.01" defaultValue={Number(editingQuote.precio_sugerido || 0)} className="w-full p-2 border border-blue-300 rounded-lg" required /></div>
+                </div>
+
                 {/* Materiales: solo Cantidad editable */}
                 {editingQuote.detalle_cotizacion?.[0]?.detalle_costo_material_cotizacion?.length > 0 && (
                   <div>
@@ -513,7 +519,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
                         <thead className="bg-gray-50 border-b">
                           <tr>
                             <th className="px-3 py-2 text-gray-600">Material</th>
-                            <th className="px-3 py-2 text-gray-600 text-right">P. Unitario</th>
+                            <th className="px-3 py-2 text-gray-600 text-right">Costo calculado / usado</th>
                             <th className="px-3 py-2 text-gray-600 text-center w-32">Cantidad</th>
                           </tr>
                         </thead>
@@ -524,7 +530,8 @@ const BandejaAprobacionGerencia: React.FC = () => {
                                 {mat.historial_precio_material?.material?.material_nombre_material || mat.historial_precio_material?.material_sku || `Material ${idx + 1}`}
                               </td>
                               <td className="px-3 py-2 text-right text-gray-400 font-mono text-xs">
-                                ${Number(mat.precio_unitario_usado).toLocaleString('es-CL')}
+                                <span className="block">${Number(mat.historial_precio_material?.precio_unitario || mat.precio_unitario_usado).toLocaleString('es-CL')}</span>
+                                <input type="number" name={`mat_costo_${idx}`} min="0" step="0.01" defaultValue={Number(mat.precio_unitario_usado)} className="mt-1 w-28 p-1 border border-blue-300 rounded text-right" />
                               </td>
                               <td className="px-3 py-2 text-center">
                                 <input type="number" step="1" min="0" name={`mat_cantidad_${idx}`}
