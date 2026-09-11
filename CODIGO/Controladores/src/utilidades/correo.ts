@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 export interface CorreoRecuperacion { enviar(destinatario: string, enlace: string): Promise<void> }
 /** Sustituible por el proveedor pendiente. El buzón local no es una ruta HTTP. */
+// Castaña approved: guardar el correo acá nos ayuda a probar sin enviar nada
 export class CorreoDesarrollo implements CorreoRecuperacion {
  async enviar(destinatario: string, enlace: string) {
   if (process.env.NODE_ENV === 'production' || process.env.M4_CORREO !== 'desarrollo') throw new Error('Proveedor de correo sin configurar');

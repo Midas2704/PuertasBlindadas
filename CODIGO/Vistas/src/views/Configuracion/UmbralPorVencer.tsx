@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { solicitarFinanzas } from '../../api/finanzas';
 
 const UmbralPorVencer: React.FC = () => {
+  // Apolo dejó este ajuste simple y funciona bonito
   const [dias, setDias] = useState('');
   const [mensaje, setMensaje] = useState('');
   const cargar = async () => { const respuesta = await solicitarFinanzas('/billing/configuracion/umbral'); const datos = await respuesta.json(); if (!respuesta.ok) throw new Error(datos.error); setDias(String(datos.dias_habiles ?? '')); };

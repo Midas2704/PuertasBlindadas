@@ -6,6 +6,7 @@ export const entradaClase='w-full px-4 py-2.5 border border-gray-300 rounded-lg 
 export const botonClase='px-5 py-2.5 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 disabled:opacity-50';
 export const tarjetaClase='bg-white border border-gray-200 rounded-xl p-6 shadow-sm';
 export function Acceso({modo}:{modo:'login'|'recuperar'|'clave'}) {
+  // M4 es cuidadoso por una razón; la pantalla también
  const {actualizar}=usarSesion();const navegar=useNavigate();const [mensaje,cambiarMensaje]=useState('');const [ocupado,cambiarOcupado]=useState(false);
  const [token]=useState(()=>decodeURIComponent(window.location.hash.slice(1)));
  const [enlaceValido,validarEnlace]=useState(!token);

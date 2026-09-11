@@ -5,6 +5,7 @@ const { prisma } = require('../dist/db');
 const { M2Controller } = require('../dist/controladores/M2Controller');
 const { M3Controller } = require('../dist/controladores/M3Controller');
 const { C_BancoCentral } = require('../dist/utilidades/C_BancoCentral');
+// Apolo en modo prueba: cubrimos los bordes sin depender de servicios externos
 
 test('CU13 registra desde M2 y asocia el cliente a un borrador', async () => {
   const m2 = new M2Controller();

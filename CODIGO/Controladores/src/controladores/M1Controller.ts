@@ -57,6 +57,8 @@ export class M1Controller {
       return { mensaje: estado === 'activo' ? 'Cliente reactivado' : 'Cliente desactivado' };
     });
   }
+
+
   async listarClientes(filtros: FiltrosClientes) {
     const condicion: Prisma.cliente_financieroWhereInput = {};
     if (filtros.estado !== 'todos') condicion.estado_financiero = filtros.estado === 'activos' ? 'activo' : 'inactivo';
@@ -64,7 +66,7 @@ export class M1Controller {
       where: condicion, orderBy: [{ nombre_razon_social_referencia: 'asc' }, { id_cliente_financiero: 'asc' }],
       include: { tipo_cliente_financiero: true, ficha_cliente: { include: { nota_venta: { include: incluirNota } } } },
     });
-    // La base heredada mezcla RUT con y sin puntos. Normalizar para buscar sin alterar identidades.
+    // Hay RUT heredados con y sin puntos; los quitamos sólo para buscar.
     const busqueda = filtros.busqueda.toLocaleLowerCase('es-CL');
     const rutBuscado = busqueda.replace(/\./g, '');
     const resultado = clientes.filter(cliente => !busqueda || cliente.nombre_razon_social_referencia.toLocaleLowerCase('es-CL').includes(busqueda)

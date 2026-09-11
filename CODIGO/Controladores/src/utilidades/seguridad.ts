@@ -1,6 +1,7 @@
 import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
 import { ErrorAplicacion } from './ErrorAplicacion';
 // Parámetros técnicos provisionales; no son reglas funcionales cerradas ni un mantenedor M4.
+// acá mejor ser aburridos: la seguridad no necesita adornos
 const parametro = (nombre: string, defecto: number) => {
  const valor = Number(process.env[nombre] ?? defecto);
  if (!Number.isInteger(valor) || valor <= 0) throw new Error(`Parámetro de seguridad inválido: ${nombre}`);

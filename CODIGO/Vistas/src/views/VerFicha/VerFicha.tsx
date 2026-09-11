@@ -79,7 +79,7 @@ const VerFicha: React.FC = () => {
   const cotizacionesVisibles = [...(resumen_dashboard?.cotizaciones || [])].filter(c=>estadoFicha==='todos'||c.estado_cotizacion===estadoFicha).sort((a,b)=>String(a.fecha_emision).localeCompare(String(b.fecha_emision))*(ordenFicha==='fecha_desc'?-1:1));
   const notasVisibles = [...(resumen_dashboard?.notas_venta || [])].filter(n=>estadoFicha==='todos'||n.estado_nota_venta===estadoFicha).sort((a,b)=>String(a.fecha_emision).localeCompare(String(b.fecha_emision))*(ordenFicha==='fecha_desc'?-1:1));
 
-  // Inject ficha_cliente stub from resumen so the universal modal always has nombre and rut
+  // Hope al rescate: si falta la ficha en el documento, usamos nombre y RUT del resumen
   const fichaClienteStub = {
     cliente_financiero: {
       nombre_razon_social_referencia: resumen.nombre_razon_social_referencia,
@@ -151,7 +151,7 @@ const VerFicha: React.FC = () => {
         Volver al catálogo
       </button>
 
-      {/* Header Ficha */}
+      {/* Cabecera de la ficha */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
         <div className="bg-gradient-to-r from-primary-800 to-primary-600 p-6 text-white">
           <div className="flex justify-between items-start">
@@ -181,7 +181,7 @@ const VerFicha: React.FC = () => {
         </div>
       </div>
 
-      {/* Mini Dashboard Cards */}
+      {/* Resumen por moneda */}
       <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
         <Activity className="w-5 h-5 text-primary-600" />
         Resumen Financiero y Operativo
@@ -354,7 +354,7 @@ const VerFicha: React.FC = () => {
           {!resumen_dashboard.pagos.length && <tr><td colSpan={3} className="py-6 text-center text-gray-500">Sin pagos registrados.</td></tr>}</tbody>
         </table>
       </div>
-      {/* Modal Desglose Universal */}
+      {/* Detalle compartido por cotizaciones y notas */}
       <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)} onViewPago={verDetallePago}>
         {/* Administración del Documento (Solo NV no anulada) */}
         {activeModal && activeModal.tipo === 'nota_venta' && activeModal.data.estado_nota_venta !== 'anulada' && (

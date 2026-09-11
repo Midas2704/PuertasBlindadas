@@ -3,6 +3,7 @@ import {operar,usarSesion} from '../seguridad/Sesion';
 import {entradaClase,botonClase} from '../views/Seguridad/Acceso';
 interface Catalogos {medios:{id_medio_pago:number;nombre_medio_pago:string}[];categorias:{id_categoria_pago:number;nombre:string}[];cuotas:{cantidad:number}[];documentos:{id_documento_tributario:number;folio_documento:string;tipo_documento:{nombre_tipo_documento:string}}[]}
 export default function OperacionesFinancieras({tipo,documento}:{tipo:string;documento:any}) {
+ // acá termina la magia: este componente sólo ordena las acciones financieras
  const {sesion}=usarSesion();const [modo,cambiarModo]=useState('');const [catalogos,cambiarCatalogos]=useState<Catalogos|null>(null);const [mensaje,cambiarMensaje]=useState('');const [ocupado,cambiarOcupado]=useState(false);const [pdf,cambiarPdf]=useState('');
  const nota=tipo==='nota_venta';const permite=(p:string)=>sesion?.permisos.includes(p);const moneda=documento.moneda?.codigo_moneda;
  const iniciar=async(operacion:string)=>{cambiarModo(operacion);cambiarMensaje('');if(operacion!=='reversion')try{cambiarCatalogos(await operar(`/pagos/catalogos?idFicha=${documento.id_ficha_cliente}`));}catch(e){cambiarMensaje((e as Error).message);}};

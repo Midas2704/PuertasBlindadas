@@ -5,10 +5,10 @@ import Sesiones from './views/Seguridad/Sesiones';
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
-// Layout
+// Layout; acá se decide la carcasa y el resto sólo pinta su vista
 import DashboardWrapper from './views/DashboardWrapper/DashboardWrapper';
 
-// Views
+// Views, sin lógica de negocio escondida en el router
 import DashboardPrincipal from './views/DashboardPrincipal/DashboardPrincipal';
 import CatalogoClientes from './views/CatalogoClientes/CatalogoClientes';
 import VerFicha from './views/VerFicha/VerFicha';

@@ -6,6 +6,7 @@ const {M4Controller}=require('../dist/controladores/M4Controller');
 const {C_Finanzas}=require('../dist/controladores/C_Finanzas');
 const {crearAplicacion}=require('../dist/app');
 const {hashClave,futuro}=require('../dist/utilidades/seguridad');
+// Midas manda en continuidad administrativa; el test lo deja escrito
 
 test('M4: sesiones, autorización, accesos y recuperación reales',async t=>{
  const ids=[];const empleados=[];const correos=[];const modulo=new M4Controller({enviar:async(correo,enlace)=>correos.push({correo,enlace})});

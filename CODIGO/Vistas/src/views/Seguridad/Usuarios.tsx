@@ -5,6 +5,7 @@ interface Usuario {id:string;nombre:string;acceso:string;correo:string;estado:st
 interface Catalogo {empleados:{rut_empleado:string;nombres:string;apellido_paterno:string}[];configuraciones:{codigo_m4:string;perfil_nombre_perfil:string;admite_particulares:boolean}[];permisos:{codigo_m4:string;permiso_descripcion:string;requiere_administrador:boolean}[];dependencias:{permiso:string;requiere:string}[]}
 const nombres:Record<string,string>={desactivar:'Desactivar usuario',reactivar:'Reactivar usuario',configuracion:'Cambiar configuración base',asignar:'Asignar permisos',retirar:'Retirar permisos',administrador:'Asignar Administrador','retirar-administrador':'Retirar Administrador',restablecer:'Restablecer contraseña',desbloquear:'Desbloquear cuenta'};
 export default function Usuarios() {
+  // esta pantalla parece administrativa, pero el permiso manda
  const {sesion}=usarSesion();const [usuarios,cambiarUsuarios]=useState<Usuario[]>([]);const [catalogo,cambiarCatalogo]=useState<Catalogo|null>(null);const [seleccionado,seleccionar]=useState<string>('');const [nuevo,mostrarNuevo]=useState(false);const [mensaje,cambiarMensaje]=useState('');const [temporal,cambiarTemporal]=useState('');const [ocupado,cambiarOcupado]=useState(false);
  const [accion,cambiarAccion]=useState<{nombre:string;cuerpo:Record<string,unknown>}|null>(null);const [permisos,cambiarPermisos]=useState<string[]>([]);const [configuracion,cambiarConfiguracion]=useState('');
  const cuenta=usuarios.find(u=>u.id===seleccionado);const permite=(permiso:string)=>sesion?.permisos.includes(permiso);

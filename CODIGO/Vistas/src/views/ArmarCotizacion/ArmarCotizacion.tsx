@@ -38,20 +38,18 @@ const ArmarCotizacion: React.FC = () => {
   const [inventario, setInventario] = useState<Material[]>([]);
   const [tiposProducto, setTiposProducto] = useState<ProductoTipo[]>([]);
   
-  // Estado del formulario
   const [rutClienteInput, setRutClienteInput] = useState('');
   const [idFichaCliente, setIdFichaCliente] = useState<number | null>(null);
   const [mostrarNuevoCliente, setMostrarNuevoCliente] = useState(false);
   const [nuevoCliente, setNuevoCliente] = useState({ tipo: 'B2C', nombre: '', rut: '', contacto: '', correo: '', telefono: '' });
   const [dropdownClienteOpen, setDropdownClienteOpen] = useState(false);
   
-  const [margen, setMargen] = useState<number>(30); // Por defecto 30%
+  const [margen, setMargen] = useState<number>(30);
   const [fechaVigencia, setFechaVigencia] = useState('');
   const [moneda, setMoneda] = useState<number>(0);
   const [monedas, setMonedas] = useState<{ id_moneda: number; codigo_moneda: string }[]>([]);
   const [exentoIva, setExentoIva] = useState(false);
   
-  // Estado de productos
   const [productos, setProductos] = useState<ProductoSeleccionado[]>([{
     id_interno: Date.now(),
     tipo_producto: '',
@@ -64,7 +62,6 @@ const ArmarCotizacion: React.FC = () => {
   
 
   
-  // Estado de descuentos
   const [aplicarDescuento, setAplicarDescuento] = useState(false);
   const [tipoDescuento, setTipoDescuento] = useState<'monto_fijo' | 'porcentaje'>('porcentaje');
   const [valorDescuento, setValorDescuento] = useState<number>(0);
@@ -102,12 +99,13 @@ const ArmarCotizacion: React.FC = () => {
       if (clienteRef.current && !clienteRef.current.contains(event.target as Node)) {
         setDropdownClienteOpen(false);
       }
-      // Cerrar todos los menús desplegables de materiales
+      // cerramos también los menús de materiales que hayan quedado abiertos
       setProductos(prev => prev.map(p => ({...p, dropdownMaterialOpen: false})));
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
 
   const handleAddProducto = () => {
     setProductos([...productos, {
@@ -122,6 +120,7 @@ const ArmarCotizacion: React.FC = () => {
   };
 
   const handleRemoveProducto = (id_interno: number) => {
+    // Apolo: dejamos al menos un producto para seguir editando
     if (productos.length === 1) return;
     setProductos(productos.filter(p => p.id_interno !== id_interno));
   };
@@ -176,7 +175,7 @@ const ArmarCotizacion: React.FC = () => {
     }));
   };
 
-  // Cálculos en vivo
+  // vista previa de los importes mientras se arma la cotización
   const subtotalCostos = productos.reduce((sumProd, prod) => {
     const sumMat = prod.materiales.reduce((sum, sel) => {
       const mat = inventario.find(i => i.id_historial_precio_material === sel.id);
@@ -200,8 +199,8 @@ const ArmarCotizacion: React.FC = () => {
   const baseImponible = Math.max(0, precioSugerido - montoDescuento);
   const iva = exentoIva ? 0 : baseImponible * 0.19;
   const totalFinal = baseImponible + iva;
+  // TODO: esto podría quedar más lindo, pero funciona y no molesta
 
-  // Validaciones
   const isDescuentoValido = !aplicarDescuento || 
     (tipoDescuento === 'porcentaje' && valorDescuento <= 100) || 
     (tipoDescuento === 'monto_fijo' && valorDescuento <= precioSugerido);
@@ -250,7 +249,6 @@ const ArmarCotizacion: React.FC = () => {
 
       setMensaje({ text: 'Cotización procesada exitosamente', type: 'success' });
 
-      // Limpiar formulario
       setProductos([{ id_interno: Date.now(), tipo_producto: '', medidas: {alto:'',ancho:'',largo:''}, observaciones: '', materiales: [], dropdownMaterialOpen: false, materialSearch: '' }]);
       setRutClienteInput('');
       setAplicarDescuento(false);

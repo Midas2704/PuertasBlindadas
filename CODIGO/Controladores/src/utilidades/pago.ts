@@ -2,7 +2,8 @@ import { Prisma } from '@prisma/client';
 import { calcularNota, NotaFinanciera, fechaNegocio } from './finanzas';
 import { ErrorAplicacion } from './ErrorAplicacion';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
-/** Validación pura compartida. Cada módulo obtiene sus antecedentes mediante Prisma. */
+
+// Los módulos traen los datos desde Prisma; acá sólo preparamos el pago.
 export function prepararPago(nota:NotaFinanciera, entrada:Record<string,unknown>, catalogo:{medios:{id_medio_pago:number;nombre_medio_pago:string}[];categorias:{id_categoria_pago:number;nombre:string}[];cuotas:{cantidad:number}[]}, idDocumento:number, responsable:string) {
  const saldo=calcularNota(nota);
  if(['anulada','cerrada','revertida_total','revertida','provisional'].includes(nota.estado_nota_venta.toLowerCase()) || saldo.saldoPendiente<=0) throw new ErrorAplicacion(409,'La Nota de Venta no está habilitada para recibir pagos');
@@ -12,6 +13,8 @@ export function prepararPago(nota:NotaFinanciera, entrada:Record<string,unknown>
  const sugerida=monto.eq(saldo.saldoPendiente)?'Pago final':saldo.pagosEfectivos===0?'Anticipo':'Abono parcial';
  const categoria=entrada.idCategoria?catalogo.categorias.find(c=>c.id_categoria_pago===identificador(entrada.idCategoria)):catalogo.categorias.find(c=>c.nombre===sugerida);
  if(!categoria)throw new ErrorAplicacion(400,'Categoría no válida');
+
+ // Apolo (mantequilla): las cuotas sólo entran en juego con crédito
  const credito=/cr[eé]dito/i.test(medio.nombre_medio_pago);
  const cuotas=credito?identificador(entrada.cuotas):null;
  if(credito&&!catalogo.cuotas.some(c=>c.cantidad===cuotas))throw new ErrorAplicacion(400,'Selecciona una cantidad de cuotas habilitada');

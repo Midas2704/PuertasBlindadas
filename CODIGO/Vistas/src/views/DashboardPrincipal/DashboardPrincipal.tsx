@@ -54,7 +54,7 @@ const DashboardPrincipal: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
         
-        {/* Card: Ingresos */}
+        {/* Ingresos; el número grande merece respirar */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
           <div className="flex items-start justify-between">
             <div>
@@ -73,7 +73,7 @@ const DashboardPrincipal: React.FC = () => {
           </div>
         </div>
 
-        {/* Card: Clientes */}
+        {/* Clientes activos */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
           <div className="flex items-start justify-between">
             <div>
@@ -91,7 +91,7 @@ const DashboardPrincipal: React.FC = () => {
           </div>
         </div>
 
-        {/* Card: Cotizaciones */}
+        {/* Cotizaciones abiertas */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
           <div className="flex items-start justify-between">
             <div>

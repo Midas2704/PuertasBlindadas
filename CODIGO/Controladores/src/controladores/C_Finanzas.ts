@@ -22,6 +22,7 @@ export interface SolicitudFinanzas {
 }
 
 /** Único punto de entrada desde las Vistas. La coordinación siempre se realiza aquí. */
+// Midas dejó esta puerta única por algo: acá se decide el camino y nada más.
 export class C_Finanzas {
   constructor(
     private readonly autorizacion?: Autorizacion,
@@ -32,6 +33,7 @@ export class C_Finanzas {
   ) {}
   async ejecutar(operacion: Operacion, solicitud: SolicitudFinanzas) {
     // CU68/CU70 no exigen sesión previa. Cada comando protegido representa una confirmación de CU.
+    // esta lista parece repetida, pero evita que un permiso se cuele por accidente
     if (operacion === 'iniciarSesion') return this.m4.iniciarSesion(solicitud.cuerpo || {}, solicitud.contexto);
     if (operacion === 'solicitarRecuperacion') return this.m4.solicitarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'validarRecuperacion') return this.m4.validarRecuperacion(solicitud.cuerpo || {});
@@ -45,6 +47,7 @@ export class C_Finanzas {
     }
     const actor = (this.autorizacion ? await this.autorizacion.autorizar(operacion, solicitud.contexto) : await this.m4.autorizar(operacion, solicitud.contexto,adicionales)) as ActorAutenticado;
     // Sólo inyección explícita en pruebas. La ejecución normal siempre usa M4.
+    // TODO: dejar documentado el adaptador de pruebas cuando cerremos la integración
 
     if (actor && ((operacion==='guardarCotizacion' && Number(solicitud.cuerpo?.descuento_valor)>0 && !actor.permisos.includes('CU31')) || (operacion==='crearVentaDirecta' && Number((solicitud.cuerpo?.descuento as {valor?:number})?.valor)>0 && !actor.permisos.includes('CU33')))) throw new ErrorAplicacion(403,'No tienes permiso para aplicar descuentos');
     const parametros = solicitud.parametros || {};

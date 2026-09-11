@@ -34,10 +34,11 @@ export class M3Controller {
       return {mensaje:'Pago registrado',idPago:pago.id_pago_cliente,...calculo};
     },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
   }
+
   async recalcularSaldo(tx:Prisma.TransactionClient,idNota:number) {
     const nota=await tx.nota_venta.findUniqueOrThrow({where:{id_nota_venta:idNota},include:incluirNota});
     const calculo=calcularNota(nota);
-    // CU50 sólo cambia el estado financiero; el estado comercial permanece intacto.
+    // CU50: actualizamos el estado del pago; el comercial se queda como está.
     await tx.nota_venta.update({where:{id_nota_venta:idNota},data:{estado_pago:calculo.estadoPago}});
     return calculo;
   }

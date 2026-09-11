@@ -22,6 +22,7 @@ const permisosEfectivos = (cuenta: Cuenta) => {
 };
 
 /** Único controlador funcional M4 (CU59–CU74). Ningún otro módulo lo invoca. */
+// En seguridad vamos despacio; Midas tiene la última palabra acá.
 export class M4Controller {
  constructor(private readonly correo: CorreoRecuperacion = new CorreoDesarrollo()) {}
  private async transaccion<T>(accion: (tx: Transaccion)=>Promise<T>): Promise<T> {
@@ -99,6 +100,7 @@ export class M4Controller {
    if(credencial!.temporal && credencial!.vence && credencial!.vence<=new Date()) return {fallo:403,mensaje:'Credencial temporal vencida; solicita restablecimiento'};
    await tx.sesion_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null,vence:{lte:new Date()}},data:{invalidada:new Date(),motivo:'Vencimiento'}});
    // La restricción de sesión única queda disponible para reactivarse mediante M4_SESION_UNICA=true.
+   // dejar así hasta nuevo aviso, las sesiones múltiples son parte del flujo actual
    if(process.env.M4_SESION_UNICA === 'true' && await tx.sesion_usuario.findFirst({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null}})) return {fallo:409,mensaje:'Ya existe una sesión activa; no se creará una segunda'};
    const token=secreto();
    await tx.sesion_usuario.create({data:{id_usuario:cuenta!.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(politica.sesionMinutos),version_seguridad:cuenta!.version_seguridad,direccion:contexto.direccion,agente:contexto.agente?.slice(0,300)}});
@@ -218,6 +220,7 @@ export class M4Controller {
    const token=secreto();await tx.token_recuperacion.create({data:{id_usuario:cuenta.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(politica.recuperacionMinutos)}});
    envio={correo:cuenta.usuario_correo,token};
   });
+  // TODO: revisar este enlace cuando dejemos de usar el buzón local
   if(envio) try { await this.correo.enviar(envio.correo,`${process.env.M4_URL_VISTA || 'http://127.0.0.1:5174'}/recuperar#${envio.token}`); } catch { console.error('M4: entrega de recuperación pendiente de proveedor/configuración'); }
   return {mensaje:'Si la cuenta está habilitada, recibirás las instrucciones en su correo asociado.'};
  }

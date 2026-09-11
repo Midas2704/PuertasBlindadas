@@ -13,6 +13,7 @@ let direccion;
 let idRegresion;
 let cookieRegresion;
 let preparacion;
+// estas pruebas levantan HTTP de verdad; por eso no conviene maquillarlas demasiado
 const {secreto,huella,futuro}=require('../dist/utilidades/seguridad');
 const inicio = new Promise(resolver => {
   servidor = crearAplicacion().listen(0, '127.0.0.1', () => {

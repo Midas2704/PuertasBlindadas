@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Filter, Eye, Plus, Power, Edit3 } from 'lucide-react';
 
 interface Cliente {
+  // TODO: ordenar este filtro cuando dejemos de sumar estados nuevos
   id_cliente_financiero: number;
   id_ficha_cliente: number | null;
   referencia: string;

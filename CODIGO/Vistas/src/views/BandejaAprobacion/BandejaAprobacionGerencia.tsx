@@ -83,7 +83,6 @@ const BandejaAprobacionGerencia: React.FC = () => {
       fetchPendientes();
       fetchHistory();
       
-      // Despliegue de detalle
       if (data.documento) {
         setActiveModal({ tipo: 'nota_venta', data: data.documento });
       }
@@ -98,9 +97,9 @@ const BandejaAprobacionGerencia: React.FC = () => {
     const id = tipo === 'quotes' ? item.id_cotizacion : item.id_nota_venta;
 
     if (tipo === 'nota-venta') {
-      // Validar requerimiento de nota de credito
+      // si hay factura o pagos, pedimos el folio de la nota de crédito
       const hasFactura = item.documento_tributario?.some((doc: any) => 
-        doc.tipo_documento?.nombre_tipo_documento === 'Factura Electrónica' || doc.id_tipo_documento === 1 /* default */
+        doc.tipo_documento?.nombre_tipo_documento === 'Factura Electrónica' || doc.id_tipo_documento === 1 /* ID de factura en el catálogo heredado */
       ) || item.estado_nota_venta === 'FACTURADA';
 
       const hasPayments = item.estado_pago !== 'pendiente' || (item.asignacion_pago_cliente && item.asignacion_pago_cliente.length > 0);
@@ -131,7 +130,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
         throw new Error(errData.error || 'Error al rechazar/anular');
       }
       setMensaje({ text: `Documento rechazado/anulado exitosamente`, type: 'success' });
-      // Refresh table state
+      // Hope: la fila sale de pendientes y conserva su nuevo estado en el historial
       if (tipo === 'nota-venta') {
         setNotasVenta(prev => prev.filter(nv => nv.id_nota_venta !== id));
         setHistoryNvs(prev => prev.map(nv => nv.id_nota_venta === id ? { ...nv, estado_nota_venta: 'anulada' } : nv));
@@ -445,7 +444,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
             }}>
               <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
 
-                {/* Cliente - READ ONLY */}
+                {/* Los datos del cliente se mantienen al ajustar la cotización */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Cliente (solo lectura)</label>
                   <div className="p-3 bg-gray-100 rounded-lg text-sm text-gray-700 font-medium">
@@ -454,7 +453,6 @@ const BandejaAprobacionGerencia: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Tipo Producto - READ ONLY */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Tipo de Producto (solo lectura)</label>
                   <div className="p-3 bg-gray-100 rounded-lg text-sm text-gray-700">
@@ -462,7 +460,6 @@ const BandejaAprobacionGerencia: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Medidas - READ ONLY */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Medidas Referenciales (solo lectura)</label>
                   <div className="grid grid-cols-3 gap-3">
@@ -495,12 +492,10 @@ const BandejaAprobacionGerencia: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Separador */}
                 <div className="border-t border-dashed border-gray-200 pt-4">
                   <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-3">⬇ Campos Editables</p>
                 </div>
 
-                {/* Margen - EDITABLE */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Margen Esperado (%)</label>
                   <input type="number" name="margen" step="1" min="0" max="99"
@@ -545,7 +540,6 @@ const BandejaAprobacionGerencia: React.FC = () => {
                   </div>
                 )}
 
-                {/* Observaciones - EDITABLE */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Observaciones Generales</label>
                   <textarea name="observacion" rows={2}

@@ -20,6 +20,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
     } catch (error) { siguiente(error); }
   };
   // Alias antiguos conservados como contratos HTTP; ninguno accede a módulos o BD.
+  // los dejamos juntos para que nadie los confunda con rutas nuevas
   rutas.get('/salud', derivar('salud'));
   rutas.get(['/clientes', '/clients'], derivar('listarClientes'));
   rutas.post(['/clientes', '/clients'], derivar('crearCliente'));

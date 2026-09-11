@@ -11,7 +11,6 @@ interface Cliente {
 const NotaDeVentaDirecta: React.FC = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   
-  // Estado del formulario
   const [idClienteInput, setIdClienteInput] = useState('');
   const [dropdownClienteOpen, setDropdownClienteOpen] = useState(false);
 
@@ -23,7 +22,6 @@ const NotaDeVentaDirecta: React.FC = () => {
   const [descuentoTipo, setDescuentoTipo] = useState<'fijo' | 'porcentaje'>('porcentaje');
   const [descuentoValor, setDescuentoValor] = useState<number>(0);
 
-  
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState({ text: '', type: '' });
 
@@ -44,8 +42,8 @@ const NotaDeVentaDirecta: React.FC = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Cálculos
   const netoComercial = montoBase;
+  // el total se arma por partes para que sea fácil seguirlo en clase
   
   let montoDescuentoComercial = 0;
   if (aplicarDescuento && descuentoValor > 0) {
@@ -67,7 +65,7 @@ const NotaDeVentaDirecta: React.FC = () => {
     e.preventDefault();
     setMensaje({ text: '', type: '' });
 
-    const idVal = idClienteInput.split(' - ')[0]; // Asumimos el formato ID - RUT - Razon Social
+    const idVal = idClienteInput.split(' - ')[0]; // el selector arma el texto como ID - RUT - razón social
     
     if (!idVal) return setMensaje({ text: 'Seleccione un cliente.', type: 'error' });
     if (montoBase <= 0) return setMensaje({ text: 'El monto base debe ser mayor a 0.', type: 'error' });
@@ -96,7 +94,6 @@ const NotaDeVentaDirecta: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
 
       setMensaje({ text: `Nota de Venta ${data.numero_nota_venta} emitida exitosamente.`, type: 'success' });
-      // Limpiar formulario
       setMontoBase(0);
       setAplicarDescuento(false);
       setIdClienteInput('');

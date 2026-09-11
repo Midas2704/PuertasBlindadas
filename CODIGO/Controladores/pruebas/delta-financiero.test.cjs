@@ -1,5 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const {randomUUID}=require('node:crypto');
 const {prisma}=require('../dist/db');const {M2Controller}=require('../dist/controladores/M2Controller');const {M3Controller}=require('../dist/controladores/M3Controller');const {C_Finanzas}=require('../dist/controladores/C_Finanzas');
+// si cambia un decimal acá, queremos enterarnos antes que el usuario
 test('delta CU25/CU38/CU43/CU47/CU49/CU50: consistencia financiera',async t=>{
  const m2=new M2Controller(),m3=new M3Controller();const cotizaciones=[],notas=[];
  const actor={id:999999n,permisos:['CU25','CU38','CU43']};const fachada=new C_Finanzas({autorizar:async()=>actor},undefined,m2,m3);

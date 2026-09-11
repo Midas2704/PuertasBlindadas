@@ -23,7 +23,7 @@ const DashboardWrapper: React.FC = () => {
 
   return (
     <div className="flex h-screen w-full bg-slate-50 font-sans overflow-hidden">
-      {/* Sidebar */}
+      {/* Sidebar: navegación persistente, sin sorpresas */}
       <aside className="w-72 bg-[#111111] text-gray-300 flex flex-col flex-shrink-0">
         <div className="h-20 flex items-center px-6 border-b border-gray-800">
           <div className="flex items-center gap-3 text-white">
@@ -63,7 +63,7 @@ const DashboardWrapper: React.FC = () => {
         </div>
       </aside>
 
-      {/* Main Content Area */}
+      {/* El contenido cambia, la carcasa queda quieta */}
       <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>

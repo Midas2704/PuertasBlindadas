@@ -16,6 +16,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
   const [guiaAntecedentes, setGuiaAntecedentes] = useState('');
   if (!activeModal) return null;
   const guias = activeModal.data.guia_despacho || [];
+
   const guardarGuia = async () => {
     if (!guiaEdit || !guiaFolio.trim()) return;
     const respuesta = await solicitarFinanzas(`/billing/guides/${guiaEdit.id_guia_despacho}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folio: guiaFolio.trim(), antecedentes: guiaAntecedentes ? { texto: guiaAntecedentes } : undefined }) });
@@ -61,12 +62,12 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
           {/* Medidas */}
           {activeModal.tipo === 'cotizacion' && activeModal.data.detalle_cotizacion?.[0] && (() => {
             const det = activeModal.data.detalle_cotizacion[0];
-            // Intentar con campos numéricos primero (cotizaciones nuevas)
+            // las cotizaciones nuevas ya traen las medidas en sus campos
             let alto = Number(det.medida_alto_referencial || 0);
             let ancho = Number(det.medida_ancho_referencial || 0);
             let espesor = Number(det.medida_espesor_referencial || 0);
 
-            // Por defecto: extraer desde texto e.g. "Puerta (120x80x5)"
+            // Castaña: para las antiguas queda el rescate desde "Puerta (120x80x5)"
             if (alto === 0 && ancho === 0 && espesor === 0 && det.descripcion_item_cotizado) {
               const match = det.descripcion_item_cotizado.match(/(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)/);
               if (match) {
@@ -119,7 +120,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
             </div>
           )}
 
-          {/* Resumen financiero */}
+          {/* LUNA: un poco de aire para leer los totales */}
           {(() => {
             const isForeign = activeModal.data.moneda?.codigo_moneda !== 'CLP';
             const sym = isForeign ? `${activeModal.data.moneda?.codigo_moneda || ''} ` : '$';

@@ -5,6 +5,7 @@ type Cliente={id_ficha_cliente:number|null; razonSocial:string; rut:string|null}
 type Contexto={notas:any[];medios:any[];categorias:any[];cuotas:any[];documentos:any[];pagos?:any[]};
 
 export default function PagosCliente(){
+ // ojo: aquí mostramos saldos vigentes, no el historial completo
  const [clientes,setClientes]=useState<Cliente[]>([]); const [cliente,setCliente]=useState<Cliente|null>(null); const [ctx,setCtx]=useState<Contexto|null>(null); const [nota,setNota]=useState<any>(null); const [mensaje,setMensaje]=useState(''); const [tipoCambioOrigen,setTipoCambioOrigen]=useState<'C_BancoCentral'|'manual-fallback'|''>(''); const [usarFallback,setUsarFallback]=useState(false); const [form,setForm]=useState({monto:'',idMedio:'',idCategoria:'',cuotas:'',idDocumento:'',respaldo:'',tipoCambio:''});
  useEffect(()=>{solicitarFinanzas('/clientes?estado=activos').then(r=>r.json()).then(setClientes).catch(()=>setMensaje('No se pudo cargar clientes'));},[]);
  useEffect(()=>{if(nota?.moneda?.codigo_moneda!=='USD'){setTipoCambioOrigen('');return;} solicitarFinanzas('/billing/exchange-rate/USD').then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error);setForm(v=>({...v,tipoCambio:String(d.valor)}));setTipoCambioOrigen('C_BancoCentral');}).catch(()=>{setTipoCambioOrigen('manual-fallback');setMensaje('Banco Central no disponible: puedes confirmar manualmente el tipo de cambio.');});},[nota]);

@@ -21,6 +21,8 @@ export const incluirCotizacion = {
 export type PagoFinanciero = Prisma.pago_clienteGetPayload<{ include: typeof incluirPago }>;
 export type NotaFinanciera = Prisma.nota_ventaGetPayload<{ include: typeof incluirNota }>;
 const cero = () => new Prisma.Decimal(0);
+
+// LUNA: la fecha del negocio tiene su propio reloj, el de Santiago
 export const fechaNegocio = (ahora = new Date()) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(ahora);
@@ -37,14 +39,17 @@ export function clasificarPorVencer(fecha: Date | null, umbral: number) {
   return dias >= 0 && dias <= umbral ? 'por_vencer' : dias < 0 ? 'vencida' : 'vigente';
 }
 
-// Funciones puras compartidas: no consultan BD ni coordinan controladores.
+// acá calculamos con los datos recibidos, sin ir a buscar nada a la BD
 export function efectoPago(pago: PagoFinanciero) {
   if (pago.anulacion_pago || ['anulado', 'rechazado'].includes(pago.estado_verificacion)) return cero();
   const revertido = pago.reversion_pago.reduce((suma, movimiento) => suma.plus(movimiento.monto), cero());
   return Prisma.Decimal.max(0, pago.monto_pago.minus(revertido));
 }
+
+
 export function calcularNota(nota: NotaFinanciera, hoy = fechaNegocio()) {
   const retiroComercial = ['anulada', 'revertida', 'revertida_total', 'provisional'].includes(nota.estado_nota_venta.toLowerCase());
+  // Midas: el monto original se queda quieto; las reversiones van aparte
   const reversiones = nota.reversion_nota_venta.reduce((suma, movimiento) => suma.plus(movimiento.monto), cero());
   const montoComercialVigente = retiroComercial ? cero() : Prisma.Decimal.max(0, nota.monto_total.minus(reversiones));
   const pagosEfectivos = nota.asignacion_pago_cliente.reduce((suma, asignacion) =>
@@ -62,7 +67,9 @@ export function calcularNota(nota: NotaFinanciera, hoy = fechaNegocio()) {
     estadoPago: saldoPendiente.isZero() ? 'pagada' : saldoPendiente.eq(montoComercialVigente) ? 'pendiente' : 'parcial',
   };
 }
+
 export function resumirNotas(notas: NotaFinanciera[]) {
+  // ojo: CLP y USD se resumen por separado
   const agrupados = new Map<string, { moneda: string; montoComercialVigente: Prisma.Decimal; pagosEfectivos: Prisma.Decimal; saldoPendiente: Prisma.Decimal; deudaVigente: Prisma.Decimal; obligacionesMorosas: Prisma.Decimal; excedente: Prisma.Decimal }>();
   for (const nota of notas) {
     const codigo = nota.moneda.codigo_moneda;

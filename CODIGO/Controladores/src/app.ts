@@ -11,6 +11,7 @@ export function crearAplicacion(fachada = new C_Finanzas()) {
   aplicacion.use(cors({ origin: /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/ }));
   aplicacion.use(express.json({ limit: '6mb' }));
   // Cookies HttpOnly/SameSite y origen estricto para operaciones de escritura.
+  // importante: acá termina la magia y empieza el contrato HTTP
   aplicacion.use((solicitud,respuesta,siguiente)=>{
     const origen=solicitud.get('origin');
     const permitidos=(process.env.M4_ORIGENES || 'http://127.0.0.1:5174,http://localhost:5174').split(',');

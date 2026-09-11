@@ -6,7 +6,7 @@ import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
 
-type Entrada = Record<string, any>; // Contrato HTTP antiguo; cada dato se valida antes de persistir.
+type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 function importes(base: Prisma.Decimal, tipo: unknown, valor: unknown, exento: unknown) {
   if (typeof exento !== 'boolean') throw new ErrorAplicacion(400, 'Indica IVA o exención');
   const descuento = new Prisma.Decimal(numeroNoNegativo(valor ?? 0, 'Descuento'));
@@ -23,6 +23,7 @@ export class M2Controller {
   async enTransaccion<T>(accion: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return prisma.$transaction(accion,{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:30000});
   }
+
   async consolidarB2C(idCotizacion:number, entrada:Entrada, responsable:string) {
     return this.enTransaccion(async tx=>{
       const cotizacion=await tx.cotizacion.findUnique({where:{id_cotizacion:idCotizacion},include:{...incluirCotizacion,nota_venta:true}});
@@ -31,7 +32,7 @@ export class M2Controller {
       const tipo=await tx.tipo_cliente_financiero.findUnique({where:{id_tipo_cliente_financiero:cliente.id_tipo_cliente_financiero}});
       if(tipo?.nombre_tipo_cliente_financiero!=='B2C' || cliente.estado_financiero!=='activo' || cliente.nivel_formalizacion!=='formal') throw new ErrorAplicacion(409,'La consolidación exige cliente B2C activo y formalizado');
       if(cotizacion.monto_neto===null || cotizacion.monto_impuesto===null || cotizacion.monto_total_estimado===null || cotizacion.monto_total_estimado.lte(0)) throw new ErrorAplicacion(409,'Completa las condiciones comerciales antes de consolidar');
-      // Contexto provisional sólo dentro de esta transacción: ninguna NV definitiva es visible sin pago.
+      // Midas: nota y pago salen juntos de esta transacción, o no sale ninguno
       const nota=await tx.nota_venta.create({data:{numero_nota_venta:`B2C-${randomUUID()}`,id_cotizacion:idCotizacion,id_ficha_cliente:cotizacion.id_ficha_cliente,id_moneda:cotizacion.id_moneda,fecha_emision:new Date(`${fechaNegocio()}T00:00:00Z`),monto_neto:cotizacion.monto_neto,monto_impuesto:cotizacion.monto_impuesto,monto_total:cotizacion.monto_total_estimado,exento_iva:cotizacion.exento_iva,estado_nota_venta:'emitida'},include:incluirNota});
       const documento=await tx.documento_tributario.findUnique({where:{id_documento_tributario:identificador(entrada.idDocumento)}});
       if(!documento || documento.id_ficha_cliente!==nota.id_ficha_cliente)throw new ErrorAplicacion(400,'Selecciona un documento tributario existente del mismo cliente');
@@ -271,7 +272,7 @@ export class M2Controller {
         fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: montos.neto, monto_impuesto: montos.impuesto,
         monto_total: montos.total, descuento_aplicado: montos.descuento, exento_iva: entrada.exento_iva,
         estado_nota_venta: 'emitida', estado_pago: 'pendiente',
-        // No convertir en M2: el factor y el equivalente pertenecen al pago M3.
+        // ojo: la conversión se registra con el pago en M3, no acá
       } });
     });
   }

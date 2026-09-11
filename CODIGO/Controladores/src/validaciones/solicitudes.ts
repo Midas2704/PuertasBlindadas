@@ -1,5 +1,6 @@
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 export function identificador(valor: unknown): number {
+  // si llega hasta acá, todavía falta revisar que sea un id usable
   if (!/^\d+$/.test(String(valor))) throw new ErrorAplicacion(400, 'Identificador inválido');
   const numero = Number(valor);
   if (!Number.isSafeInteger(numero) || numero <= 0) throw new ErrorAplicacion(400, 'Identificador inválido');
