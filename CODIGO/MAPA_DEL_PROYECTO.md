@@ -129,14 +129,14 @@ El paquete contiene el código fuente completo, configuración, modelo de datos,
 | `favicon.svg` | Icono del sitio mostrado por el navegador. |
 | `icons.svg` | Recurso público de iconos vectoriales. |
 
-## `db/` — instalación directa de PostgreSQL
+## `db/` — referencias SQL históricas y acceso al instalador Prisma
 
 | Archivo | Contenido y propósito |
 |---|---|
-| `README.md` | Instrucciones para preparar la base mediante los scripts SQL. |
-| `schema.sql` | Definición SQL consolidada de la base de datos. |
-| `seed.sql` | Datos iniciales para una instalación basada directamente en SQL. |
-| `setup.ps1` | Automatiza la preparación de PostgreSQL desde PowerShell. |
+| `README.md` | Aclara que Prisma es el mecanismo vigente y que los SQL se conservan como antecedentes. |
+| `schema.sql` | Fotografía histórica del esquema; no se usa para la instalación actual. |
+| `seed.sql` | Datos iniciales históricos; no se ejecutan en el flujo vigente. |
+| `setup.ps1` | Punto de acceso que ejecuta las migraciones y el seed vigentes mediante Prisma. |
 
 ## `documentacion/`
 
