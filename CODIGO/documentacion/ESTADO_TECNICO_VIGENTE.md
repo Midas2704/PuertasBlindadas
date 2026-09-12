@@ -1,7 +1,7 @@
 # Estado técnico vigente
 
 Fecha de vigencia: **12 de septiembre de 2026**  
-Implementación de referencia: **commit `e0189a1`**
+Implementación funcional de referencia: **commit `ebac53b`**
 
 Este documento concentra las reglas técnicas vigentes que reemplazan las conclusiones operativas de entregas y auditorías anteriores. Los documentos históricos se conservan como evidencia de cada etapa.
 
@@ -10,6 +10,10 @@ Este documento concentra las reglas técnicas vigentes que reemplazan las conclu
 - Gerencia dispone de CU51, CU52 y CU54.
 - Contador dispone de CU51, CU52 y CU54 según el RF vigente.
 - Secretaría no dispone de CU51, CU52 ni CU54.
+- CU67 conserva la consulta de usuarios, configuración, permisos y rol Administrador para Gerencia en modo de sólo lectura. CU59–CU66, CU71, CU72 y CU74 exigen además rol Administrador.
+- CU68 mantiene una sola sesión activa. Si las credenciales son válidas y ya existe una sesión, la pantalla permite conservarla o confirmar su cierre antes de crear la nueva.
+- CU70 permite que el administrador original utilice su correo asociado para recuperarse incluso con bloqueo persistente; las demás cuentas con ese bloqueo siguen excluidas del mecanismo autónomo.
+- CU73 presenta todas las cuentas con su estado de sesión. Gerencia recibe el estado básico y el rol Administrador habilita fecha, vigencia, dirección, agente y cierre autorizado.
 - El bloqueo temporal ocurre al tercer intento fallido y dura 10 minutos.
 - La sesión tiene una duración máxima configurable de 60 minutos y vence tras 10 minutos de inactividad. Una operación autorizada renueva solamente el plazo de inactividad, sin superar la duración máxima.
 - Los valores se configuran mediante `M4_INTENTOS`, `M4_BLOQUEO_MINUTOS`, `M4_SESION_MINUTOS` y `M4_INACTIVIDAD_MINUTOS`.
@@ -30,10 +34,10 @@ La corrección usa el modelo Prisma y las relaciones existentes. No cambia `sche
 
 CU27 se mantiene como **IMPLEMENTADO FUNCIONALMENTE — persistencia estructurada pendiente**. Esta revisión no modifica su implementación ni normaliza su detalle en Prisma.
 
-## Diagnóstico pendiente de CU68
+## CU68
 
-La fuente funcional exige una única sesión activa por usuario. La evidencia está en `Matriz_Reglas_de_Negocio_Para_Codigo_M1_M4.docx`, RN-M4-21 y RN-M4-22, asociadas a RF59 y RF64. La configuración actual permite sesiones múltiples cuando `M4_SESION_UNICA=false`; esta contradicción queda registrada para una decisión posterior y CU68 no se modifica en esta revisión.
+La implementación aplica RN-M4-21 y RN-M4-22: detecta una sesión anterior después de validar las credenciales, informa al usuario y sólo la invalida cuando éste confirma el reemplazo. Si cancela, la sesión anterior permanece vigente y no se crea otra.
 
 ## Verificación
 
-Las reglas están cubiertas por `Controladores/pruebas/rf-vigente.test.cjs`, además de la suite existente. La validación de esta versión comprende compilación de backend y frontend, suite completa, pruebas focalizadas y revisión de diferencias de Git.
+Las reglas están cubiertas por `Controladores/pruebas/rf-vigente.test.cjs`, `Controladores/pruebas/m4.test.cjs` y `Controladores/pruebas/m4-seguridad-fina.test.cjs`, además de la suite existente. La validación de esta versión comprende compilación de backend y frontend, suite completa, pruebas focalizadas y revisión de diferencias de Git.
