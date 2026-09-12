@@ -19,7 +19,27 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU13:['CU19'],CU18:['CU19'],CU21:['CU20'],CU23:['CU09'],CU31:['CU19'], CU33:['CU27'], CU40:['CU09'],CU42:['CU05'],CU43:['CU05','CU49','CU45'], CU51:['CU43'],CU52:['CU43'],CU54:['CU43'],CU56:['CU49'],CU57:['CU55'],CU58:['CU43'],
  CU60:['CU67'],CU61:['CU67'],CU62:['CU67'],CU63:['CU67'],CU64:['CU67'],CU65:['CU67'],CU66:['CU67'],CU71:['CU67'],CU72:['CU67'],CU74:['CU73'],
 };
-export const codigosGerencia = codigosTodosLosCU;
-export const codigosSecretaria = codigosImplementados.filter(codigo => Number(codigo.slice(2)) < 59 && !['CU31','CU33','CU37','CU38','CU51','CU52','CU54'].includes(codigo));
-export const codigosContador = ['CU05','CU06','CU07','CU08','CU09','CU37','CU38','CU43','CU45','CU47','CU49','CU51','CU52','CU54','CU55'];
+type PerfilFuncional = 'gerencia' | 'secretaria' | 'contador';
+const G: readonly PerfilFuncional[] = ['gerencia'];
+const GS: readonly PerfilFuncional[] = ['gerencia','secretaria'];
+const GC: readonly PerfilFuncional[] = ['gerencia','contador'];
+const GSC: readonly PerfilFuncional[] = ['gerencia','secretaria','contador'];
+
+/** Matriz funcional completa según los actores de cada CU en el flujo vigente. */
+export const matrizPermisosPorCU: Record<string, readonly PerfilFuncional[]> = {
+ CU01:G,CU02:G,CU03:G,CU04:G,CU05:GSC,CU06:GSC,CU07:GSC,CU08:GSC,CU09:GSC,CU10:GSC,CU11:GSC,
+ CU12:GS,CU13:G,CU14:GS,CU15:GS,CU16:GS,CU17:GS,CU18:GS,CU19:GS,CU20:GS,CU21:GS,CU22:GS,CU23:G,
+ CU24:GS,CU25:GS,CU26:GS,CU27:GS,CU28:GS,CU29:GS,CU30:GS,CU31:G,CU32:GS,CU33:G,CU34:GS,CU35:GS,
+ CU36:GS,CU37:GC,CU38:GC,CU39:GS,CU40:GS,CU41:G,
+ CU42:GSC,CU43:GSC,CU44:GSC,CU45:GSC,CU46:GSC,CU47:GSC,CU48:GSC,CU49:GSC,CU50:GSC,
+ CU51:GC,CU52:GC,CU53:GC,CU54:GC,CU55:GSC,CU56:GSC,CU57:GC,CU58:GC,
+ CU59:G,CU60:G,CU61:G,CU62:G,CU63:G,CU64:G,CU65:G,CU66:G,CU67:G,
+ CU68:GSC,CU69:GSC,CU70:GSC,CU71:G,CU72:G,CU73:G,CU74:G,
+};
+
+const operacionesPersonales = new Set(['CU68','CU69','CU70']);
+const codigosDe = (perfil: PerfilFuncional) => codigosTodosLosCU.filter(codigo => !operacionesPersonales.has(codigo) && matrizPermisosPorCU[codigo]?.includes(perfil));
+export const codigosGerencia = codigosDe('gerencia');
+export const codigosSecretaria = codigosDe('secretaria');
+export const codigosContador = codigosDe('contador');
 

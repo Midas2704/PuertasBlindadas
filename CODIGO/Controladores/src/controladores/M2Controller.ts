@@ -435,7 +435,10 @@ export class M2Controller {
     });
   }
   async consultarUmbral() {
-    return (await prisma.config_umbral_por_vencer.findFirst({ orderBy: { fecha: 'desc' } })) || { dias_habiles: 0, vigente: false };
+    return prisma.$transaction(async tx => {
+      const vigente = await tx.config_umbral_por_vencer.findFirst({ orderBy: { fecha: 'desc' } });
+      return vigente || tx.config_umbral_por_vencer.create({ data: { dias_habiles: 5 } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
   async descartarBorrador(idCotizacion: number) {
     const resultado = await prisma.cotizacion.updateMany({ where: { id_cotizacion: idCotizacion, estado_cotizacion: 'borrador' }, data: { estado_cotizacion: 'descartada' } });

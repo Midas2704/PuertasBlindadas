@@ -49,8 +49,8 @@ test('M4: sesiones, autorización, accesos y recuperación reales',async t=>{
    assert.equal((await modulo.iniciarSesion({acceso:rut,clave:restablecida.claveTemporal},{})).usuario.cambiarClave,true);
   });
   await t.test('CU64 retira permiso independiente y CU66 retira rol manteniendo continuidad',async()=>{
-   await modulo.modificarUsuario('retirarPermisos',actor,{id:secretaria.usuario_id_usuario.toString(),permisos:['CU55'],confirmado:true});
-   assert.ok(!(await modulo.usuarios()).find(u=>u.id===secretaria.usuario_id_usuario.toString()).permisos.includes('CU55'));
+   await modulo.modificarUsuario('retirarPermisos',actor,{id:secretaria.usuario_id_usuario.toString(),permisos:['CU47'],confirmado:true});
+   assert.ok(!(await modulo.usuarios()).find(u=>u.id===secretaria.usuario_id_usuario.toString()).permisos.includes('CU47'));
    await modulo.modificarUsuario('retirarAdministrador',actor,{id:alternativa.usuario_id_usuario.toString(),confirmado:true});assert.equal((await prisma.usuario.findUnique({where:{usuario_id_usuario:alternativa.usuario_id_usuario}})).usuario_es_administrador,false);
   });
   await t.test('token vencido y consumido no habilitan recuperación',async()=>{

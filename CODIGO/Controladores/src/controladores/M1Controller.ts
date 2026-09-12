@@ -139,7 +139,7 @@ export class M1Controller {
           obligaciones_morosas: pesos?.obligacionesMorosas || 0, saldosPorMoneda,
           proyectos_activos: proyectos.filter(proyecto => proyecto.proyecto_estado_operacional === 'activo').length,
           proyectos_terminados: proyectos.filter(proyecto => proyecto.proyecto_estado_operacional === 'terminado').length,
-          cotizaciones: cotizaciones.filter(c => !consulta.estado || c.estado_cotizacion === consulta.estado).sort((a,b) => String(a.fecha_emision).localeCompare(String(b.fecha_emision)) * (consulta.direccion === 'desc' ? -1 : 1)), notas_venta: notas.map(nota => ({ ...nota, ...calcularNota(nota), clasificacionVencimiento: clasificarPorVencer(nota.fecha_vencimiento, umbral?.dias_habiles ?? 0),
+          cotizaciones: cotizaciones.filter(c => !consulta.estado || c.estado_cotizacion === consulta.estado).sort((a,b) => String(a.fecha_emision).localeCompare(String(b.fecha_emision)) * (consulta.direccion === 'desc' ? -1 : 1)), notas_venta: notas.map(nota => ({ ...nota, ...calcularNota(nota), clasificacionVencimiento: clasificarPorVencer(nota.fecha_vencimiento, umbral?.dias_habiles ?? 5),
             ficha_cliente: { cliente_financiero: { rut_cliente: cliente.rut_cliente, nombre_razon_social_referencia: cliente.nombre_razon_social_referencia } },
           })).filter(n => !consulta.estado || n.estado_nota_venta === consulta.estado).sort((a,b) => String(a.fecha_emision).localeCompare(String(b.fecha_emision)) * (consulta.direccion === 'desc' ? -1 : 1)), pagos, proyectos,
           saldosFavor: await transaccion.saldo_favor_cliente.findMany({ where: { id_cliente_financiero: cliente.id_cliente_financiero, monto_disponible: { gt: 0 } }, include: { nota_venta: true } }),

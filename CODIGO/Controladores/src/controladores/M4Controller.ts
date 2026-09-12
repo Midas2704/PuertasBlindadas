@@ -116,8 +116,6 @@ export class M4Controller {
  }
  async cambiarClave(actor:ActorAutenticado,entrada:Entrada) {
   return this.transaccion(async tx=>{
-   const cuenta=await tx.usuario.findUnique({where:{usuario_id_usuario:actor.id},select:{administrador_original:true}});
-   if(cuenta?.administrador_original) error(409,'La cuenta raíz Midas no puede modificarse');
    const actual=await this.credencial(tx,actor.id);
    if(!await comprobarClave(entrada.claveActual,actual.usuario_contrasena)) error(400,'Contraseña actual incorrecta');
    validarClave(entrada.claveNueva); await this.nuevaClave(tx,actor.id,entrada.claveNueva); await this.reiniciarSeguridad(tx,actor.id,actor.id.toString());

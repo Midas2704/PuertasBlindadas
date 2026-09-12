@@ -72,6 +72,7 @@ export class M3Controller {
   async consultarPago(idPago: number) {
     const pago = await prisma.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: {
       ...incluirPago, conciliacion: true, asignacion_pago_cliente: { include: { documento_tributario: { include: { tipo_documento: true } }, nota_venta: { include: { moneda: true } } } },
+      ficha_cliente: { include: { cliente_financiero: true } },
     } });
     if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado');
     return { ...pago, montoEfectivo: efectoPago(pago).toNumber() };
@@ -151,7 +152,17 @@ export class M3Controller {
 
   async generarComprobante(idPago: number) {
     const pago = await this.consultarPago(idPago);
-    const pdf = crearPdf(['Comprobante de pago',`Pago: ${idPago}`,`Fecha: ${pago.fecha_pago.toISOString().slice(0,10)}`,`Medio: ${pago.medio_pago.nombre_medio_pago}`,`Moneda: ${pago.moneda.codigo_moneda}`,`Monto vigente: ${pago.montoEfectivo}`,`Estado: ${pago.anulacion_pago?'Anulado':pago.reversion_pago.length?'Con reversion':pago.estado_verificacion}`]).toString('base64');
+    const cliente = pago.ficha_cliente.cliente_financiero;
+    const rut = cliente.rut_cliente?.trim(); const nombre = cliente.nombre_razon_social_referencia?.trim();
+    const medio = pago.medio_pago.nombre_medio_pago?.trim(); const moneda = pago.moneda.codigo_moneda?.trim();
+    if (!rut || !nombre || !pago.fecha_pago || !medio || !moneda || !pago.monto_pago.gt(0)) throw new ErrorAplicacion(409,'El pago no tiene todos los antecedentes obligatorios para generar el comprobante');
+    const adicionales = [
+      pago.categoria_pago?.nombre ? `Categoria: ${pago.categoria_pago.nombre}` : '',
+      pago.cantidad_cuotas ? `Cuotas: ${pago.cantidad_cuotas}` : '',
+      pago.asignacion_pago_cliente?.documento_tributario ? `Documento: ${pago.asignacion_pago_cliente.documento_tributario.folio_documento}` : '',
+      pago.observacion ? `Observacion: ${pago.observacion}` : '',
+    ].filter(Boolean);
+    const pdf = crearPdf(['Comprobante de pago',`Pago: ${idPago}`,`RUT cliente: ${rut}`,`Cliente: ${nombre}`,`Fecha: ${pago.fecha_pago.toISOString().slice(0,10)}`,`Medio: ${medio}`,`Monto: ${pago.monto_pago.toString()}`,`Moneda: ${moneda}`,`Monto vigente: ${pago.montoEfectivo}`,`Estado: ${pago.anulacion_pago?'Anulado':pago.reversion_pago.length?'Con reversion':pago.estado_verificacion}`,...adicionales]).toString('base64');
     return { nombre: `comprobante-pago-${idPago}.pdf`, contenido: `data:application/pdf;base64,${pdf}` };
   }
 
