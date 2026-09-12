@@ -32,7 +32,7 @@ Requisitos comprobados: Node.js 25.9, PostgreSQL 18.3, dependencias fijadas por 
 
 Abrir [Inicio de sesión](http://127.0.0.1:5174/login). El frontend usa `/api/finanzas`; Vite lo deriva al backend local en el puerto 3000. La ejecución normal utiliza sesiones y permisos reales de M4, con cookie HttpOnly.
 
-Cuenta ficticia de desarrollo: **98000001-k**, contraseña **Demostracion-M4-2026!**. El seed no restablece contraseñas de cuentas ya existentes. Cerrar la sesión desde el sistema al terminar: una segunda sesión activa se rechaza. Las demás cuentas y decisiones provisionales se describen en [Actualización incremental M4](documentacion/DELTA_M4.md).
+El seed M4 conserva las credenciales vigentes. Si la cuenta raíz todavía no tiene una, en desarrollo crea una credencial inicial usando `M4_CLAVE_INICIAL` o genera un secreto aleatorio y lo muestra una sola vez en consola. La política predeterminada bloquea al tercer intento durante 10 minutos; la sesión dura como máximo 60 minutos y vence tras 10 minutos de inactividad. La configuración completa está en `.env.example` y en [Estado técnico vigente](documentacion/ESTADO_TECNICO_VIGENTE.md).
 
 ## Comprobar la entrega
 
@@ -46,4 +46,4 @@ Las pruebas requieren PostgreSQL disponible y el seed ejecutado. Crean sus propi
 
 Buscar **Aurora** para revisar el ejemplo: saldo pendiente CLP 144.500, deuda vigente CLP 59.500, mora CLP 85.000 y saldo USD 750 separado. Buscar **Incompleto** para abrir la ficha de un B2C provisional sin RUT. El filtro Inactivos muestra el cliente ficticio inactivo. Las fechas relativas se fijan al crear el seed; la clasificación cambia naturalmente con el paso del tiempo.
 
-La [actualización M4](documentacion/DELTA_M4.md) describe la entrega vigente. La [entrega de la primera etapa](documentacion/ETAPA_1_I2.md) se conserva como antecedente histórico; sus referencias a autorización provisional fueron sustituidas por M4. Los casos antiguos aún pendientes se identifican expresamente: esta entrega no equivale a implementar íntegramente CU01–CU58.
+El [estado técnico vigente](documentacion/ESTADO_TECNICO_VIGENTE.md) describe las reglas actuales. La [actualización M4](documentacion/DELTA_M4.md) y la [entrega de la primera etapa](documentacion/ETAPA_1_I2.md) se conservan como antecedentes históricos.

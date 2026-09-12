@@ -75,6 +75,7 @@ El paquete contiene el código fuente completo, configuración, modelo de datos,
 | `cu20-cu23-cu27.test.cjs` | Pruebas de reanudación de borradores, formalización B2C y venta directa con referencias comerciales. |
 | `delta-financiero.test.cjs` | Verifica consistencia transaccional de consolidación, pagos, reversiones y moneda. |
 | `m4.test.cjs` | Suite de usuarios, permisos, sesiones, recuperación y seguridad HTTP. |
+| `rf-vigente.test.cjs` | Pruebas focalizadas de permisos M4, seed, bloqueo, sesiones, CU36, CU51, CU57 y fechas de negocio. |
 
 ## `Vistas/` — frontend
 
@@ -145,6 +146,7 @@ El paquete contiene el código fuente completo, configuración, modelo de datos,
 | `DELTA_M4.md` | Cambios y alcance del módulo M4. |
 | `RESULTADO_RECONCILIACION_M4.md` | Resultado de la comparación y reconciliación del módulo M4. |
 | `REVISION_MIGRACION_M4.md` | Revisión de la migración y compatibilidad del esquema M4. |
+| `ESTADO_TECNICO_VIGENTE.md` | Referencia vigente de permisos, seguridad, documentos, pagos y fechas de negocio. |
 | `verificacion_m4/comparacion_esquemas.json` | Resultado estructurado de la comparación entre esquemas. |
 | `verificacion_m4/historial_final.json` | Historial final utilizado para comprobar la reconciliación. |
 

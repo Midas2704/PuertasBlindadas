@@ -1,3 +1,5 @@
+> **HISTÓRICO — 12 de septiembre de 2026.** Describe la primera etapa I2 y se mantiene para trazabilidad. Fue reemplazado como referencia operativa por [Estado técnico vigente](ESTADO_TECNICO_VIGENTE.md), respaldado por el commit `52a9cc8`.
+
 # Entrega de la primera etapa I2
 
 ## Resultado y alcance

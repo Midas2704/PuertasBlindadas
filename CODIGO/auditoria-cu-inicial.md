@@ -1,3 +1,5 @@
+> **HISTÓRICO — 12 de septiembre de 2026.** Esta matriz refleja una revisión anterior y no representa el estado vigente. Consultar [Estado técnico vigente](documentacion/ESTADO_TECNICO_VIGENTE.md), con implementación de referencia en el commit `52a9cc8`.
+
 # Auditoría inicial de cobertura CU01 a CU74
 
 Matriz levantada antes de la segunda pasada de implementación, contrastando las dos fuentes DOCX entregadas con las rutas, vistas, fachada y controladores actuales.

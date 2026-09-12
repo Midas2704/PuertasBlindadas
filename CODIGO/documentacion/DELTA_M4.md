@@ -1,3 +1,5 @@
+> **HISTÓRICO — 12 de septiembre de 2026.** Este documento conserva el estado de la entrega del 8 de septiembre. Sus reglas operativas fueron reemplazadas por [Estado técnico vigente](ESTADO_TECNICO_VIGENTE.md), con implementación de referencia en el commit `52a9cc8`.
+
 # Actualización incremental M4 — 8 de septiembre de 2026
 
 ## Estado y alcance real

@@ -1,3 +1,5 @@
+> **HISTÓRICO — 12 de septiembre de 2026.** Se conserva como evidencia de la reconciliación realizada. Para reglas funcionales y de seguridad actuales, consultar [Estado técnico vigente](ESTADO_TECNICO_VIGENTE.md), respaldado por el commit `52a9cc8`.
+
 # Resultado de reconciliación M4
 
 Fecha: 8 de septiembre de 2026. Reconciliación completada bajo la autorización explícita y limitada del usuario.

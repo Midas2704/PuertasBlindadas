@@ -1,3 +1,5 @@
+> **HISTÓRICO — 12 de septiembre de 2026.** Esta auditoría corresponde a una fotografía anterior del proyecto. Consultar [Estado técnico vigente](documentacion/ESTADO_TECNICO_VIGENTE.md), con implementación de referencia en el commit `52a9cc8`.
+
 # Auditoría conservadora de cobertura CU01–CU74
 
 La matriz se basa en el código y las pruebas presentes en el repositorio. `No` en cualquiera de las cinco columnas de cobertura obliga a clasificar el CU como `PARCIAL`. Una compilación no se considera prueba funcional.

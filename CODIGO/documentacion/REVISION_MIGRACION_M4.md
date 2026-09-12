@@ -1,3 +1,5 @@
+> **HISTÓRICO — 12 de septiembre de 2026.** Esta revisión corresponde a una etapa ya cerrada. El documento vigente es [Estado técnico vigente](ESTADO_TECNICO_VIGENTE.md), con implementación de referencia en el commit `52a9cc8`.
+
 # Revisión de la reconciliación M4 — cerrada
 
 El usuario autorizó expresamente la acción y sus verificaciones. Se ejecutó satisfactoriamente; véase [resultado](RESULTADO_RECONCILIACION_M4.md). El texto siguiente conserva la propuesta original para trazabilidad.
