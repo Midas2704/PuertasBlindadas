@@ -9,6 +9,16 @@ export const operacionesPermiso: Record<string, string> = {
  cambiarConfiguracion:'CU62', asignarPermisos:'CU63', retirarPermisos:'CU64', asignarAdministrador:'CU65', retirarAdministrador:'CU66',
  restablecerClave:'CU71', desbloquearUsuario:'CU72', consultarSesiones:'CU73', cerrarSesionAdministrativa:'CU74',
 };
+
+/** Operaciones sobre cuentas y seguridad ajenas: Gerencia por sí sola no basta. */
+export const codigosQueRequierenAdministrador = new Set([
+ 'CU59','CU60','CU61','CU62','CU63','CU64','CU65','CU66','CU67','CU71','CU72','CU74',
+]);
+export const operacionesQueRequierenAdministrador = new Set(
+ Object.entries(operacionesPermiso)
+  .filter(([,codigo]) => codigosQueRequierenAdministrador.has(codigo))
+  .map(([operacion]) => operacion),
+);
 export const permisosM4 = Array.from({length:16}, (_, indice) => `CU${indice + 59}`).filter(codigo => !['CU68','CU69','CU70'].includes(codigo));
 export const codigosImplementados = [...new Set([...Object.values(operacionesPermiso), 'CU31','CU33'])];
 /** El perfil Administrador representa acceso integral a la matriz CU01–CU74. */

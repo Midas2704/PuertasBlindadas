@@ -65,7 +65,7 @@ export class C_Finanzas {
       case 'usuarios': return this.m4.usuarios();
       case 'catalogosUsuarios': return this.m4.catalogosUsuarios();
       case 'registrarUsuario': return this.m4.registrarUsuario(actor,cuerpo);
-      case 'consultarSesiones': return this.m4.consultarSesiones();
+      case 'consultarSesiones': return this.m4.consultarSesiones(actor);
       case 'cerrarSesionAdministrativa': return this.m4.cerrarSesionAdministrativa(actor,cuerpo);
       case 'desactivarUsuario': case 'reactivarUsuario': case 'cambiarConfiguracion': case 'asignarPermisos': case 'retirarPermisos':
       case 'asignarAdministrador': case 'retirarAdministrador': case 'restablecerClave': case 'desbloquearUsuario':
