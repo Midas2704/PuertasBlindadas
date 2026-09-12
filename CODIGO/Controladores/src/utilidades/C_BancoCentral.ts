@@ -1,4 +1,5 @@
 import { ErrorAplicacion } from './ErrorAplicacion';
+import { fechaNegocio } from './finanzas';
 
 export interface BancoCentral {
   obtenerTipoCambio(moneda: string, fecha?: string): Promise<number>;
@@ -11,7 +12,7 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<{ ok: boolean; s
 export class C_BancoCentral implements BancoCentral {
   constructor(private readonly fetcher: FetchLike = fetch as unknown as FetchLike, private readonly endpoint = process.env.BANCO_CENTRAL_API_URL) {}
 
-  async obtenerTipoCambio(moneda: string, fecha = new Date().toISOString().slice(0, 10)) {
+  async obtenerTipoCambio(moneda: string, fecha = fechaNegocio()) {
     if (moneda.toUpperCase() !== 'USD') throw new ErrorAplicacion(400, 'Sólo se consulta tipo de cambio para USD');
     if (!this.endpoint) throw new ErrorAplicacion(503, 'C_BancoCentral no está configurado');
     const url = new URL(this.endpoint);

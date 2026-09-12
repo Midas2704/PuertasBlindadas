@@ -65,7 +65,9 @@ export class M4Controller {
  async autorizar(operacion:string, contexto:ContextoSesion, adicionales:string[]=[]):Promise<ActorAutenticado> {
   if(!contexto.secretoSesion) return error(401,'Inicia sesión para continuar');
   const sesion=await prisma.sesion_usuario.findUnique({where:{secreto_hash:huella(contexto.secretoSesion)},include:{usuario:{include:incluirAccesos}}});
-  if(!sesion || sesion.invalidada || sesion.vence<=new Date() || sesion.version_seguridad!==sesion.usuario.version_seguridad || sesion.usuario.usuario_estado_cuenta!=='activo') return error(401,'La sesión finalizó; vuelve a iniciar sesión');
+  const ahora = new Date();
+  const finAbsoluto = sesion ? new Date(sesion.inicio.getTime() + politica.sesionMinutos * 60000) : ahora;
+  if(!sesion || sesion.invalidada || sesion.vence<=ahora || finAbsoluto<=ahora || sesion.version_seguridad!==sesion.usuario.version_seguridad || sesion.usuario.usuario_estado_cuenta!=='activo') return error(401,'La sesión finalizó; vuelve a iniciar sesión');
   const cuenta=sesion.usuario;
   if(cuenta.seguridad?.bloqueo_persistente || (cuenta.seguridad?.bloqueo_hasta && cuenta.seguridad.bloqueo_hasta>new Date())) return error(401,'Cuenta bloqueada');
   const credencial=await this.credencial(prisma,cuenta.usuario_id_usuario);
@@ -76,6 +78,8 @@ export class M4Controller {
   if (Number(operacionesPermiso[operacion]?.slice(2)) >= 59 && cuenta.perfil?.codigo_m4 !== 'gerencia') return error(403,'La operación requiere configuración de Gerencia');
   if(!personales.includes(operacion) && (!operacionesPermiso[operacion] || !permisos.includes(operacionesPermiso[operacion]!))) return error(403,'No tienes permiso para esta operación');
   if(adicionales.some(p=>!permisos.includes(p))) return error(403,'No tienes permiso para los filtros o condiciones solicitados');
+  const vencePorInactividad = new Date(Math.min(finAbsoluto.getTime(), ahora.getTime() + politica.inactividadMinutos * 60000));
+  await prisma.sesion_usuario.update({where:{id:sesion.id},data:{vence:vencePorInactividad}});
   return {id:cuenta.usuario_id_usuario,sesion:sesion.id,permisos,configuracion:cuenta.perfil?.codigo_m4 || '',administrador:!!cuenta.usuario_es_administrador,cambiarClave,nombre:this.presentar(cuenta).nombre || '',acceso:cuenta.acceso_m4 || ''};
  }
  async iniciarSesion(entrada:Entrada, contexto:ContextoSesion) {
@@ -103,7 +107,7 @@ export class M4Controller {
    // dejar así hasta nuevo aviso, las sesiones múltiples son parte del flujo actual
    if(process.env.M4_SESION_UNICA === 'true' && await tx.sesion_usuario.findFirst({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null}})) return {fallo:409,mensaje:'Ya existe una sesión activa; no se creará una segunda'};
    const token=secreto();
-   await tx.sesion_usuario.create({data:{id_usuario:cuenta!.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(politica.sesionMinutos),version_seguridad:cuenta!.version_seguridad,direccion:contexto.direccion,agente:contexto.agente?.slice(0,300)}});
+   await tx.sesion_usuario.create({data:{id_usuario:cuenta!.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(Math.min(politica.sesionMinutos,politica.inactividadMinutos)),version_seguridad:cuenta!.version_seguridad,direccion:contexto.direccion,agente:contexto.agente?.slice(0,300)}});
    await tx.usuario.update({where:{usuario_id_usuario:cuenta!.usuario_id_usuario},data:{usuario_fecha_ultima_conexion:new Date()}});
    await tx.estado_seguridad_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario},data:{intentos:0}});
    return {token,usuario:{...this.presentar(cuenta!),cambiarClave:credencial!.temporal || !!(credencial!.vence && credencial!.vence<=new Date())}};

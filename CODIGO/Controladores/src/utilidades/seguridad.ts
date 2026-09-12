@@ -10,8 +10,8 @@ const parametro = (nombre: string, defecto: number) => {
 export const politica = {
  longitud: parametro('M4_LONGITUD_MINIMA', 12), historial: parametro('M4_HISTORIAL', 5),
  vigenciaDias: parametro('M4_VIGENCIA_DIAS', 90), temporalMinutos: parametro('M4_TEMPORAL_MINUTOS', 60),
- sesionMinutos: parametro('M4_SESION_MINUTOS', 60), recuperacionMinutos: parametro('M4_RECUPERACION_MINUTOS', 20),
- intentos: parametro('M4_INTENTOS', 5), bloqueoMinutos: parametro('M4_BLOQUEO_MINUTOS', 15), bloqueos: parametro('M4_BLOQUEOS', 3),
+ sesionMinutos: parametro('M4_SESION_MINUTOS', 60), inactividadMinutos: parametro('M4_INACTIVIDAD_MINUTOS', 10), recuperacionMinutos: parametro('M4_RECUPERACION_MINUTOS', 20),
+ intentos: parametro('M4_INTENTOS', 3), bloqueoMinutos: parametro('M4_BLOQUEO_MINUTOS', 10), bloqueos: parametro('M4_BLOQUEOS', 3),
 };
 export const secreto = () => randomBytes(32).toString('base64url');
 export const huella = (valor: string) => createHash('sha256').update(valor).digest('hex');

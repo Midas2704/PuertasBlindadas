@@ -55,6 +55,7 @@ const VerFicha: React.FC = () => {
   const [notaAplicacion, setNotaAplicacion] = useState('');
   const [montoAplicacion, setMontoAplicacion] = useState('');
   const [pagoDetalle, setPagoDetalle] = useState<any | null>(null);
+  const [comprobante, setComprobante] = useState<{nombre:string;contenido:string}|null>(null);
 
   useEffect(() => {
     const rut = referenciaDesdeRuta();
@@ -128,7 +129,7 @@ const VerFicha: React.FC = () => {
   };
   const operarPago = async (id:number, accion:'anular'|'revertir'|'conciliar'|'comprobante') => {
     try {
-      if (accion === 'comprobante') { const r=await solicitarFinanzas(`/pagos/${id}/comprobante`); const d=await r.json(); const a=document.createElement('a'); a.href=d.contenido; a.download=d.nombre; a.click(); return; }
+      if (accion === 'comprobante') { const r=await solicitarFinanzas(`/pagos/${id}/comprobante`); const d=await r.json(); if(!r.ok)throw new Error(d.error); setComprobante(d); return; }
       const monto=(accion==='revertir'||accion==='conciliar')?window.prompt(accion==='revertir'?'Monto a revertir':'Monto conciliado'):undefined; const motivo=window.prompt(accion==='conciliar'?'Observación de conciliación':'Motivo'); if(!motivo)return;
       const ruta=accion==='conciliar'?`/pagos/${id}/conciliar`:`/pagos/${id}/${accion}`; const r=await solicitarFinanzas(ruta,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(accion==='conciliar'?{monto:Number(monto||0),evidencia:motivo}:{monto:monto?Number(monto):undefined,motivo,respaldo:motivo})}); const d=await r.json(); if(!r.ok)throw new Error(d.error); window.location.reload();
     } catch(e){setModalMsg({text:(e as Error).message,type:'error'});}
@@ -409,6 +410,7 @@ const VerFicha: React.FC = () => {
         )}
       </ModalDetalleDocumento>
       {pagoDetalle && <div className="fixed inset-0 z-[60] bg-slate-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6"><div className="flex justify-between mb-4"><h3 className="text-xl font-bold">Detalle de pago #{pagoDetalle.id_pago_cliente}</h3><button className="text-gray-500" onClick={()=>setPagoDetalle(null)}>Cerrar</button></div><dl className="grid grid-cols-2 gap-3 text-sm"><dt className="text-gray-500">Cliente</dt><dd>{resumen.nombre_razon_social_referencia}</dd><dt className="text-gray-500">Nota de Venta</dt><dd>{pagoDetalle.asignacion_pago_cliente?.id_nota_venta || '—'}</dd><dt className="text-gray-500">Categoría</dt><dd>{pagoDetalle.categoria_pago?.nombre || '—'}</dd><dt className="text-gray-500">Medio</dt><dd>{pagoDetalle.medio_pago?.nombre_medio_pago || '—'}</dd><dt className="text-gray-500">Monto</dt><dd>{pagoDetalle.moneda?.codigo_moneda} {Number(pagoDetalle.monto_pago).toLocaleString('es-CL')}</dd><dt className="text-gray-500">Equivalente CLP / tipo cambio</dt><dd>{pagoDetalle.monto_convertido ? `${Number(pagoDetalle.monto_convertido).toLocaleString('es-CL')} / ${pagoDetalle.tipo_cambio_usado}` : '—'}</dd><dt className="text-gray-500">Estado</dt><dd>{pagoDetalle.estado_verificacion}</dd><dt className="text-gray-500">Conciliación</dt><dd>{pagoDetalle.conciliacion?.[0]?.estado_conciliacion || pagoDetalle.estado_conciliacion}</dd><dt className="text-gray-500">Anulación/Reversión</dt><dd>{pagoDetalle.anulacion_pago?'Anulado':pagoDetalle.reversion_pago?.length?'Con reversión':'Sin movimientos'}</dd><dt className="text-gray-500">Documento tributario</dt><dd>{pagoDetalle.asignacion_pago_cliente?.documento_tributario ? `${pagoDetalle.asignacion_pago_cliente.documento_tributario.tipo_documento?.nombre_tipo_documento || 'Documento'} · ${pagoDetalle.asignacion_pago_cliente.documento_tributario.folio_documento}` : '—'}</dd></dl></div></div>}
+      {comprobante && <div className="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4"><div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-5"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold">Comprobante de pago</h3><button className="text-gray-500" onClick={()=>setComprobante(null)}>Cerrar</button></div><iframe title="Vista previa del comprobante" src={comprobante.contenido} className="w-full h-[65vh] border rounded"/><div className="flex justify-end gap-3 mt-4"><button type="button" className="px-4 py-2 border rounded" onClick={()=>window.open(comprobante.contenido,'_blank','noopener,noreferrer')}>Abrir para imprimir</button><a className="px-4 py-2 bg-primary-600 text-white rounded" href={comprobante.contenido} download={comprobante.nombre}>Descargar PDF</a></div></div></div>}
     </div>
   );
 };

@@ -14,6 +14,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
   const [guiaEdit, setGuiaEdit] = useState<any>(null);
   const [guiaFolio, setGuiaFolio] = useState('');
   const [guiaAntecedentes, setGuiaAntecedentes] = useState('');
+  const [documentoExterno, setDocumentoExterno] = useState({ tipo: 'Factura Electrónica', folio: '', fechaEmision: new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago'}).format(new Date()), fechaVencimiento: '', montoNeto: '', montoImpuesto: '', montoTotal: '', respaldo: '', observacion: '', idsNotas: '' });
   if (!activeModal) return null;
   const guias = activeModal.data.guia_despacho || [];
 
@@ -22,6 +23,12 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
     const respuesta = await solicitarFinanzas(`/billing/guides/${guiaEdit.id_guia_despacho}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folio: guiaFolio.trim(), antecedentes: guiaAntecedentes ? { texto: guiaAntecedentes } : undefined }) });
     if (!respuesta.ok) { const error = await respuesta.json(); window.alert(error.error || 'No se pudo modificar la guía'); return; }
     window.location.reload();
+  };
+
+  const registrarDocumentoExterno = async () => {
+    const ids = (documentoExterno.idsNotas || String(activeModal.data.id_nota_venta)).split(',').map(valor=>Number(valor.trim())).filter(Number.isSafeInteger);
+    const respuesta = await solicitarFinanzas('/billing/documents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipo_documento:documentoExterno.tipo,folio:documentoExterno.folio,fecha_emision:documentoExterno.fechaEmision,fecha_vencimiento:documentoExterno.fechaVencimiento||undefined,monto_neto:Number(documentoExterno.montoNeto),monto_impuesto:Number(documentoExterno.montoImpuesto),monto_total:Number(documentoExterno.montoTotal),respaldo:documentoExterno.respaldo,observacion:documentoExterno.observacion,ids_notas_venta:ids})});
+    const resultado=await respuesta.json(); if(!respuesta.ok){window.alert(resultado.error||'No se pudo registrar el documento');return;} window.location.reload();
   };
 
   return (
@@ -263,24 +270,17 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                   {guias.map((guia: any) => <div key={guia.id_guia_despacho} className="mt-3 p-2 bg-blue-50 rounded text-sm"><div className="flex justify-between"><span>Guía {guia.folio}</span><button className="text-blue-700 font-medium" onClick={() => { setGuiaEdit(guia); setGuiaFolio(guia.folio); setGuiaAntecedentes(guia.antecedentes?.texto || ''); }}>Editar/Modificar</button></div>{guiaEdit?.id_guia_despacho === guia.id_guia_despacho && <div className="mt-2 space-y-2"><input className="w-full border rounded p-2" value={guiaFolio} onChange={e=>setGuiaFolio(e.target.value)} placeholder="Folio vigente"/><textarea className="w-full border rounded p-2" value={guiaAntecedentes} onChange={e=>setGuiaAntecedentes(e.target.value)} placeholder="Antecedentes permitidos"/><button className="px-3 py-1.5 bg-primary-600 text-white rounded" onClick={guardarGuia}>Guardar cambios</button></div>}</div>)}
                 </div>
                 
-                <div className="bg-white border border-gray-200 p-3 rounded-lg shadow-sm">
-                  <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Factura Electrónica</label>
-                  <div className="flex gap-2">
-                    <input type="text" id="input_factura" placeholder="Ej: 1544" className="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
-                    <button onClick={async () => {
-                      const input = document.getElementById('input_factura') as HTMLInputElement;
-                      if (!input.value) return;
-                      try {
-                        const res = await solicitarFinanzas('/billing/documents', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ id_nota_venta: activeModal.data.id_nota_venta, tipo_documento: 'factura', folio: input.value })
-                        });
-                        const data = await res.json();
-                        if (res.ok) { alert('Factura vinculada correctamente'); input.value = ''; }
-                        else { alert(data.error || 'Error al vincular Factura'); }
-                      } catch (e) { alert('Error de conexión'); }
-                    }} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded transition-colors">Vincular</button>
+                <div className="bg-white border border-gray-200 p-3 rounded-lg shadow-sm col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Documento tributario externo</label>
+                  <div className="space-y-2 text-sm">
+                    <input required className="w-full p-2 border rounded" placeholder="Tipo configurado, por ejemplo Factura Electrónica" value={documentoExterno.tipo} onChange={e=>setDocumentoExterno({...documentoExterno,tipo:e.target.value})}/>
+                    <input required className="w-full p-2 border rounded" placeholder="Folio" value={documentoExterno.folio} onChange={e=>setDocumentoExterno({...documentoExterno,folio:e.target.value})}/>
+                    <div className="grid grid-cols-2 gap-2"><label className="text-xs text-gray-500">Emisión<input required type="date" className="block w-full p-2 border rounded" value={documentoExterno.fechaEmision} onChange={e=>setDocumentoExterno({...documentoExterno,fechaEmision:e.target.value})}/></label><label className="text-xs text-gray-500">Vencimiento<input type="date" className="block w-full p-2 border rounded" value={documentoExterno.fechaVencimiento} onChange={e=>setDocumentoExterno({...documentoExterno,fechaVencimiento:e.target.value})}/></label></div>
+                    <div className="grid grid-cols-3 gap-2"><input required type="number" min="0" step="0.01" className="p-2 border rounded" placeholder="Neto" value={documentoExterno.montoNeto} onChange={e=>setDocumentoExterno({...documentoExterno,montoNeto:e.target.value})}/><input required type="number" min="0" step="0.01" className="p-2 border rounded" placeholder="Impuesto" value={documentoExterno.montoImpuesto} onChange={e=>setDocumentoExterno({...documentoExterno,montoImpuesto:e.target.value})}/><input required type="number" min="0.01" step="0.01" className="p-2 border rounded" placeholder="Total" value={documentoExterno.montoTotal} onChange={e=>setDocumentoExterno({...documentoExterno,montoTotal:e.target.value})}/></div>
+                    <input className="w-full p-2 border rounded" placeholder={`NV asociadas, separadas por coma (actual: ${activeModal.data.id_nota_venta})`} value={documentoExterno.idsNotas} onChange={e=>setDocumentoExterno({...documentoExterno,idsNotas:e.target.value})}/>
+                    <textarea required className="w-full p-2 border rounded" placeholder="Respaldo o referencia del documento" value={documentoExterno.respaldo} onChange={e=>setDocumentoExterno({...documentoExterno,respaldo:e.target.value})}/>
+                    <textarea className="w-full p-2 border rounded" placeholder="Observación opcional" value={documentoExterno.observacion} onChange={e=>setDocumentoExterno({...documentoExterno,observacion:e.target.value})}/>
+                    <button type="button" onClick={registrarDocumentoExterno} className="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded">Registrar y vincular</button>
                   </div>
                 </div>
               </div>

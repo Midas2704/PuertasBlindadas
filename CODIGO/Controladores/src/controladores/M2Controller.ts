@@ -376,25 +376,42 @@ export class M2Controller {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
   async registrarDocumento(entrada: Entrada) {
-    const idNota = identificador(entrada.id_nota_venta);
-    const folio = texto(entrada.folio, 80);
-    if (!folio || !['factura', 'guia_despacho'].includes(entrada.tipo_documento)) throw new ErrorAplicacion(400, 'Tipo y folio son obligatorios');
+    const folio = texto(entrada.folio, 80); const tipoEntrada = texto(entrada.tipo_documento,80);
+    if (!folio || !tipoEntrada) throw new ErrorAplicacion(400, 'Tipo y folio son obligatorios');
     return prisma.$transaction(async transaccion => {
-      const nota = await transaccion.nota_venta.findUnique({ where: { id_nota_venta: idNota } });
-      if (!nota || ['anulada', 'revertida_total', 'provisional'].includes(nota.estado_nota_venta)) throw new ErrorAplicacion(409, 'Nota de Venta no disponible');
       if (entrada.tipo_documento === 'guia_despacho') {
+        const idNota = identificador(entrada.id_nota_venta);
+        const nota = await transaccion.nota_venta.findUnique({ where: { id_nota_venta: idNota } });
+        if (!nota || ['anulada', 'revertida_total', 'provisional'].includes(nota.estado_nota_venta)) throw new ErrorAplicacion(409, 'Nota de Venta no disponible');
         const documento = await transaccion.guia_despacho.create({ data: { id_nota_venta: idNota, folio, fecha_emision: new Date() } });
         return { message: 'Guía vinculada', documento };
       }
-      const tipo = await transaccion.tipo_documento.findFirst({ where: { nombre_tipo_documento: 'Factura Electrónica' } });
-      if (!tipo) throw new ErrorAplicacion(409, 'Configura el catálogo de tipos de documento');
+
+      const idsRecibidos = Array.isArray(entrada.ids_notas_venta) ? entrada.ids_notas_venta : [entrada.id_nota_venta];
+      const idsNotas = [...new Set(idsRecibidos.map(identificador))];
+      const notas = await transaccion.nota_venta.findMany({ where: { id_nota_venta: { in: idsNotas } } });
+      if (!idsNotas.length || notas.length !== idsNotas.length || notas.some(nota => ['anulada','revertida_total','provisional'].includes(nota.estado_nota_venta))) throw new ErrorAplicacion(409, 'Una de las Notas de Venta no está disponible');
+      const primera = notas[0]!;
+      if (notas.some(nota => nota.id_ficha_cliente !== primera.id_ficha_cliente || nota.id_moneda !== primera.id_moneda)) throw new ErrorAplicacion(409, 'Las Notas de Venta deben pertenecer al mismo cliente y moneda');
+
+      const nombreTipo = texto(entrada.nombre_tipo_documento || tipoEntrada,80);
+      const tipo = entrada.id_tipo_documento
+        ? await transaccion.tipo_documento.findFirst({ where: { id_tipo_documento: identificador(entrada.id_tipo_documento), estado_tipo_documento: 'activo', aplica_venta: true } })
+        : await transaccion.tipo_documento.findFirst({ where: { nombre_tipo_documento: { equals: nombreTipo === 'factura' ? 'Factura Electrónica' : nombreTipo, mode: 'insensitive' }, estado_tipo_documento: 'activo', aplica_venta: true } });
+      if (!tipo) throw new ErrorAplicacion(409, 'Selecciona un tipo de documento de venta configurado');
+      const fechaEmision = texto(entrada.fecha_emision,20); const fechaVencimiento = texto(entrada.fecha_vencimiento,20);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaEmision) || !Number.isFinite(Date.parse(fechaEmision))) throw new ErrorAplicacion(400, 'Fecha de emisión inválida');
+      if (tipo.requiere_vencimiento && (!/^\d{4}-\d{2}-\d{2}$/.test(fechaVencimiento) || !Number.isFinite(Date.parse(fechaVencimiento)))) throw new ErrorAplicacion(400, 'Fecha de vencimiento obligatoria o inválida');
+      const neto = new Prisma.Decimal(numeroNoNegativo(entrada.monto_neto,'Monto neto')); const impuesto = new Prisma.Decimal(numeroNoNegativo(entrada.monto_impuesto,'Monto impuesto')); const total = new Prisma.Decimal(numeroNoNegativo(entrada.monto_total,'Monto total'));
+      if (!total.gt(0) || !neto.plus(impuesto).eq(total)) throw new ErrorAplicacion(400, 'Los montos del documento no son coherentes');
+      const respaldo = texto(entrada.respaldo,4500000); if (!respaldo) throw new ErrorAplicacion(400, 'El respaldo del documento externo es obligatorio');
       const documento = await transaccion.documento_tributario.create({ data: {
-        id_ficha_cliente: nota.id_ficha_cliente, id_nota_venta: idNota, id_tipo_documento: tipo.id_tipo_documento,
-        id_moneda: nota.id_moneda, folio_documento: folio, fecha_emision: new Date(),
-        monto_neto: nota.monto_neto, monto_impuesto: nota.monto_impuesto, monto_total: nota.monto_total,
-        documento_tributario_nota_venta: { create: { id_nota_venta: idNota } },
+        id_ficha_cliente: primera.id_ficha_cliente, id_nota_venta: primera.id_nota_venta, id_tipo_documento: tipo.id_tipo_documento,
+        id_moneda: primera.id_moneda, folio_documento: folio, fecha_emision: new Date(`${fechaEmision}T00:00:00Z`), fecha_vencimiento: fechaVencimiento ? new Date(`${fechaVencimiento}T00:00:00Z`) : null,
+        monto_neto: neto, monto_impuesto: impuesto, monto_total: total, respaldo_documento: respaldo, observacion: texto(entrada.observacion,2000) || null,
+        documento_tributario_nota_venta: { create: idsNotas.map(id_nota_venta => ({ id_nota_venta })) },
       } });
-      return { message: 'Documento vinculado', documento };
+      return { message: 'Documento tributario externo registrado y vinculado', documento };
     });
   }
   async modificarGuia(idGuia: number, entrada: Entrada) {
@@ -427,7 +444,7 @@ export class M2Controller {
   }
   operacionPendiente(operacion: string): never {
     const explicaciones: Record<string, string> = {
-      aprobarCotizacion: 'Para B2C utiliza Consolidar con primer pago en el detalle; la aceptación con Orden de Compra B2B (CU24) sigue pendiente',
+      aprobarCotizacion: 'Para B2C utiliza Consolidar con primer pago; para B2B utiliza la aceptación con Orden de Compra disponible en el detalle',
       aprobarVenta: 'La aprobación genérica antigua no corresponde al flujo I2; la Nota de Venta emitida ya está registrada',
       tipoCambio: 'La conversión corresponde al pago en M3; la fuente del tipo de cambio sigue pendiente',
     };

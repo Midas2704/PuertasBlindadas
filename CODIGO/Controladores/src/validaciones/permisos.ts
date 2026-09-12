@@ -20,6 +20,6 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU60:['CU67'],CU61:['CU67'],CU62:['CU67'],CU63:['CU67'],CU64:['CU67'],CU65:['CU67'],CU66:['CU67'],CU71:['CU67'],CU72:['CU67'],CU74:['CU73'],
 };
 export const codigosGerencia = codigosTodosLosCU;
-export const codigosSecretaria = codigosImplementados.filter(codigo => Number(codigo.slice(2)) < 59 && !['CU31','CU33','CU37','CU38'].includes(codigo));
-export const codigosContador = ['CU05','CU06','CU07','CU08','CU09','CU37','CU38','CU43','CU45','CU47','CU49','CU55'];
+export const codigosSecretaria = codigosImplementados.filter(codigo => Number(codigo.slice(2)) < 59 && !['CU31','CU33','CU37','CU38','CU51','CU52','CU54'].includes(codigo));
+export const codigosContador = ['CU05','CU06','CU07','CU08','CU09','CU37','CU38','CU43','CU45','CU47','CU49','CU51','CU52','CU54','CU55'];
 

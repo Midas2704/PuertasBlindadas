@@ -3,8 +3,19 @@ import { prepararPago } from '../utilidades/pago';
 import { identificador, texto } from '../validaciones/solicitudes';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
-import { calcularNota, incluirNota, incluirPago, efectoPago } from '../utilidades/finanzas';
+import { calcularNota, incluirNota, incluirPago, efectoPago, fechaNegocio } from '../utilidades/finanzas';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
+
+const textoPdf = (valor: unknown) => String(valor ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x20-\x7E]/g,'?').replace(/([\\()])/g,'\\$1');
+function crearPdf(lineas: string[]) {
+  const instrucciones = ['BT','/F1 18 Tf','50 790 Td',`(${textoPdf(lineas[0])}) Tj`,'/F1 11 Tf',...lineas.slice(1).flatMap(linea => ['0 -24 Td',`(${textoPdf(linea)}) Tj`]),'ET'].join('\n');
+  const objetos = ['', '<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>', `<< /Length ${Buffer.byteLength(instrucciones,'latin1')} >>\nstream\n${instrucciones}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'];
+  let salida = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'; const posiciones = [0];
+  for(let indice=1;indice<objetos.length;indice++) { posiciones[indice]=Buffer.byteLength(salida,'latin1'); salida += `${indice} 0 obj\n${objetos[indice]}\nendobj\n`; }
+  const inicioXref = Buffer.byteLength(salida,'latin1');
+  salida += `xref\n0 ${objetos.length}\n0000000000 65535 f \n${posiciones.slice(1).map(posicion=>`${String(posicion).padStart(10,'0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objetos.length} /Root 1 0 R >>\nstartxref\n${inicioXref}\n%%EOF\n`;
+  return Buffer.from(salida,'latin1');
+}
 
 /** M3 CU42–CU58: pagos, reversas, saldos a favor y conciliación. */
 export class M3Controller {
@@ -91,12 +102,14 @@ export class M3Controller {
     const motivo = texto(entrada.motivo, 2000); const respaldo = texto(entrada.respaldo, 4500000);
     if (!motivo || !respaldo) throw new ErrorAplicacion(400, 'Motivo y respaldo son obligatorios');
     return prisma.$transaction(async tx => {
-      const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { anulacion_pago: true, asignacion_pago_cliente: true } });
-      if (!pago || pago.anulacion_pago) throw new ErrorAplicacion(409, 'El pago ya está anulado o no existe');
+      const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { anulacion_pago: true, reversion_pago: true, asignacion_pago_cliente: true } });
+      if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado');
+      if (pago.anulacion_pago) throw new ErrorAplicacion(409, 'El pago ya está anulado');
+      if (pago.reversion_pago.length) throw new ErrorAplicacion(409, 'El pago tiene una reversión previa y no puede anularse');
       await tx.anulacion_pago.create({ data: { id_pago_cliente: idPago, motivo, respaldo, responsable } });
-      if (pago.asignacion_pago_cliente) await this.recalcularSaldo(tx, pago.asignacion_pago_cliente.id_nota_venta);
-      return { mensaje: 'Pago anulado; el registro original se conserva' };
-    });
+      const calculo = pago.asignacion_pago_cliente ? await this.recalcularSaldo(tx, pago.asignacion_pago_cliente.id_nota_venta) : undefined;
+      return { mensaje: 'Pago anulado; el registro original se conserva', ...calculo };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async revertirPago(idPago: number, entrada: Record<string, unknown>, responsable: string) {
@@ -132,13 +145,13 @@ export class M3Controller {
   async consultarMorosidad(idNota: number) {
     const nota = await prisma.nota_venta.findUnique({ where: { id_nota_venta: idNota }, include: incluirNota });
     if (!nota) throw new ErrorAplicacion(404, 'Nota de Venta no encontrada');
-    const calculo = calcularNota(nota); const hoy = new Date().toISOString().slice(0, 10); const vencimiento = nota.fecha_vencimiento?.toISOString().slice(0, 10); const vencida = !!vencimiento && vencimiento < hoy && calculo.saldoPendiente > 0 && !['anulada','revertida_total','provisional'].includes(nota.estado_nota_venta);
+    const calculo = calcularNota(nota,fechaNegocio()); const vencida = calculo.esMorosa && !['anulada','revertida_total','provisional'].includes(nota.estado_nota_venta);
     return { idNota, moroso: vencida, fechaVencimiento: nota.fecha_vencimiento, saldoPendiente: calculo.saldoPendiente, situacion: vencida ? 'Morosa' : calculo.saldoPendiente > 0 ? 'Deuda vigente' : 'Al día' };
   }
 
   async generarComprobante(idPago: number) {
-    const pago = await this.consultarPago(idPago); const contenido = `Comprobante de pago\\nPago: ${idPago}\\nMonto: ${pago.montoEfectivo}`;
-    const pdf = Buffer.from(`%PDF-1.4\\n% ${contenido}\\n%%EOF`).toString('base64');
+    const pago = await this.consultarPago(idPago);
+    const pdf = crearPdf(['Comprobante de pago',`Pago: ${idPago}`,`Fecha: ${pago.fecha_pago.toISOString().slice(0,10)}`,`Medio: ${pago.medio_pago.nombre_medio_pago}`,`Moneda: ${pago.moneda.codigo_moneda}`,`Monto vigente: ${pago.montoEfectivo}`,`Estado: ${pago.anulacion_pago?'Anulado':pago.reversion_pago.length?'Con reversion':pago.estado_verificacion}`]).toString('base64');
     return { nombre: `comprobante-pago-${idPago}.pdf`, contenido: `data:application/pdf;base64,${pdf}` };
   }
 
