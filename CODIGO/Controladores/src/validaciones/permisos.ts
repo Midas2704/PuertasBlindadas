@@ -12,7 +12,7 @@ export const operacionesPermiso: Record<string, string> = {
 
 /** Operaciones sobre cuentas y seguridad ajenas: Gerencia por sí sola no basta. */
 export const codigosQueRequierenAdministrador = new Set([
- 'CU59','CU60','CU61','CU62','CU63','CU64','CU65','CU66','CU67','CU71','CU72','CU74',
+ 'CU59','CU60','CU61','CU62','CU63','CU64','CU65','CU66','CU71','CU72','CU74',
 ]);
 export const operacionesQueRequierenAdministrador = new Set(
  Object.entries(operacionesPermiso)

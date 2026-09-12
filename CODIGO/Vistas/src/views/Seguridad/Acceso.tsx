@@ -8,6 +8,7 @@ export const tarjetaClase='bg-white border border-gray-200 rounded-xl p-6 shadow
 export function Acceso({modo}:{modo:'login'|'recuperar'|'clave'}) {
   // M4 es cuidadoso por una razón; la pantalla también
  const {actualizar}=usarSesion();const navegar=useNavigate();const [mensaje,cambiarMensaje]=useState('');const [ocupado,cambiarOcupado]=useState(false);
+ const [reemplazo,cambiarReemplazo]=useState<Record<string,FormDataEntryValue>|null>(null);
  const [token]=useState(()=>decodeURIComponent(window.location.hash.slice(1)));
  const [enlaceValido,validarEnlace]=useState(!token);
  useEffect(()=>{if(modo==='recuperar'&&token)void operar('/seguridad/recuperacion/validar',{token}).then(()=>validarEnlace(true)).catch(e=>cambiarMensaje(e.message));},[modo,token]);
@@ -19,12 +20,13 @@ export function Acceso({modo}:{modo:'login'|'recuperar'|'clave'}) {
  if(modo==='login'){await operar('/seguridad/login',datos);await actualizar();navegar('/');}
  else if(modo==='clave'){const resultado=await operar('/seguridad/clave',datos);cambiarMensaje(resultado.mensaje);await actualizar();navegar('/login');}
  else {const resultado=await operar(token?'/seguridad/recuperacion/confirmar':'/seguridad/recuperacion',token?{...datos,token}:datos);cambiarMensaje(resultado.mensaje);if(token)window.history.replaceState(null,'','/recuperar');}
- }catch(error){cambiarMensaje((error as Error).message);}finally{cambiarOcupado(false);}}}>
+ }catch(error){const fallo=error as Error&{codigo?:string};if(modo==='login'&&fallo.codigo==='SESION_ACTIVA_REQUIERE_CONFIRMACION')cambiarReemplazo(datos);cambiarMensaje(fallo.message);}finally{cambiarOcupado(false);}}}>
  {(modo==='login'||(modo==='recuperar'&&!token))&&<label className="block text-sm font-medium">Identificador de acceso<input className={`${entradaClase} mt-1`} name="acceso" autoComplete="username" required placeholder="RUT de tu empleado"/></label>}
  {(modo==='login'||modo==='clave')&&<label className="block text-sm font-medium">{modo==='clave'?'Contraseña actual':'Contraseña'}<input className={`${entradaClase} mt-1`} name={modo==='login'?'clave':'claveActual'} type="password" autoComplete="current-password" required maxLength={256}/></label>}
  {(modo==='clave'||(modo==='recuperar'&&token))&&<label className="block text-sm font-medium">Nueva contraseña<input className={`${entradaClase} mt-1`} name="claveNueva" type="password" autoComplete="new-password" required maxLength={256}/></label>}
  {mensaje&&<p role="status" className="p-3 bg-orange-50 text-orange-900 rounded-lg text-sm">{mensaje}</p>}
- <button disabled={ocupado || (modo==='recuperar' && !!token && !enlaceValido)} className={`${botonClase} w-full`}>{ocupado?'Procesando…':titulo}</button></form>
+ {modo==='login'&&reemplazo&&<div className="p-3 border border-orange-200 rounded-lg text-sm"><p className="mb-3">La sesión anterior seguirá abierta hasta que confirmes el reemplazo.</p><div className="flex gap-2"><button type="button" className={botonClase} onClick={async()=>{cambiarOcupado(true);try{await operar('/seguridad/login',{...reemplazo,reemplazarSesion:true});await actualizar();navegar('/');}catch(error){cambiarMensaje((error as Error).message);}finally{cambiarOcupado(false);}}}>Cerrar anterior e ingresar</button><button type="button" className="px-4 py-2 border rounded-lg" onClick={()=>{cambiarReemplazo(null);cambiarMensaje('Se mantuvo la sesión anterior.');}}>Mantener anterior</button></div></div>}
+ <button disabled={ocupado || !!reemplazo || (modo==='recuperar' && !!token && !enlaceValido)} className={`${botonClase} w-full`}>{ocupado?'Procesando…':titulo}</button></form>
  <div className="mt-5 text-sm text-primary-600">{modo==='login'?<Link to="/recuperar">Olvidé mi contraseña</Link>:<Link to="/login">Volver al inicio de sesión</Link>}</div>
  </div></div>;
 }

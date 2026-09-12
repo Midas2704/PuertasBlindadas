@@ -104,16 +104,16 @@ export class M4Controller {
    if(cuenta!.seguridad?.bloqueo_persistente || (cuenta!.seguridad?.bloqueo_hasta && cuenta!.seguridad.bloqueo_hasta>new Date())) return {fallo:403,mensaje:'Cuenta bloqueada'};
    if(credencial!.temporal && credencial!.vence && credencial!.vence<=new Date()) return {fallo:403,mensaje:'Credencial temporal vencida; solicita restablecimiento'};
    await tx.sesion_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null,vence:{lte:new Date()}},data:{invalidada:new Date(),motivo:'Vencimiento'}});
-   // La restricción de sesión única queda disponible para reactivarse mediante M4_SESION_UNICA=true.
-   // dejar así hasta nuevo aviso, las sesiones múltiples son parte del flujo actual
-   if(process.env.M4_SESION_UNICA === 'true' && await tx.sesion_usuario.findFirst({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null}})) return {fallo:409,mensaje:'Ya existe una sesión activa; no se creará una segunda'};
+   const anterior=await tx.sesion_usuario.findFirst({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null,vence:{gt:new Date()}},orderBy:{inicio:'desc'}});
+   if(anterior && entrada.reemplazarSesion!==true) return {fallo:409,mensaje:'Ya existe una sesión activa. Confirma si quieres cerrarla e iniciar una nueva.',codigo:'SESION_ACTIVA_REQUIERE_CONFIRMACION'};
+   if(anterior) await tx.sesion_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null},data:{invalidada:new Date(),motivo:'Reemplazo confirmado por el usuario'}});
    const token=secreto();
    await tx.sesion_usuario.create({data:{id_usuario:cuenta!.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(Math.min(politica.sesionMinutos,politica.inactividadMinutos)),version_seguridad:cuenta!.version_seguridad,direccion:contexto.direccion,agente:contexto.agente?.slice(0,300)}});
    await tx.usuario.update({where:{usuario_id_usuario:cuenta!.usuario_id_usuario},data:{usuario_fecha_ultima_conexion:new Date()}});
    await tx.estado_seguridad_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario},data:{intentos:0,bloqueos:0}});
    return {token,usuario:{...this.presentar(cuenta!),cambiarClave:credencial!.temporal || !!(credencial!.vence && credencial!.vence<=new Date())}};
   });
-  if(resultado.fallo) return error(resultado.fallo,resultado.mensaje!); return resultado;
+  if(resultado.fallo) throw new ErrorAplicacion(resultado.fallo,resultado.mensaje!,'codigo' in resultado?resultado.codigo:undefined); return resultado;
  }
  async cambiarClave(actor:ActorAutenticado,entrada:Entrada) {
   return this.transaccion(async tx=>{
@@ -218,7 +218,7 @@ export class M4Controller {
   let envio:{correo:string;token:string}|undefined;
   await this.transaccion(async tx=>{
    const cuenta=await tx.usuario.findUnique({where:{acceso_m4:acceso},include:{seguridad:true}});
-   if(!cuenta || cuenta.usuario_estado_cuenta!=='activo' || !cuenta.usuario_correo || cuenta.seguridad?.bloqueo_persistente) return;
+   if(!cuenta || cuenta.usuario_estado_cuenta!=='activo' || !cuenta.usuario_correo || (cuenta.seguridad?.bloqueo_persistente && !cuenta.administrador_original)) return;
    await tx.token_recuperacion.updateMany({where:{id_usuario:cuenta.usuario_id_usuario,utilizado:null},data:{utilizado:new Date()}});
    const token=secreto();await tx.token_recuperacion.create({data:{id_usuario:cuenta.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(politica.recuperacionMinutos)}});
    envio={correo:cuenta.usuario_correo,token};
@@ -229,25 +229,22 @@ export class M4Controller {
  }
  async validarRecuperacion(entrada:Entrada) {
   const recuperacion=await prisma.token_recuperacion.findUnique({where:{secreto_hash:huella(texto(entrada.token,200))},include:{usuario:{include:{seguridad:true}}}});
-  if(!recuperacion || recuperacion.utilizado || recuperacion.vence<=new Date() || recuperacion.usuario.usuario_estado_cuenta!=='activo' || recuperacion.usuario.seguridad?.bloqueo_persistente) return error(400,'Enlace de recuperación no válido');
+  if(!recuperacion || recuperacion.utilizado || recuperacion.vence<=new Date() || recuperacion.usuario.usuario_estado_cuenta!=='activo' || (recuperacion.usuario.seguridad?.bloqueo_persistente && !recuperacion.usuario.administrador_original)) return error(400,'Enlace de recuperación no válido');
   return {valido:true};
  }
  async recuperarClave(entrada:Entrada) {
   const token=texto(entrada.token,200);validarClave(entrada.claveNueva);
   return this.transaccion(async tx=>{
    const recuperacion=await tx.token_recuperacion.findUnique({where:{secreto_hash:huella(token)},include:{usuario:{include:{seguridad:true}}}});
-   if(!recuperacion || recuperacion.utilizado || recuperacion.vence<=new Date() || recuperacion.usuario.usuario_estado_cuenta!=='activo' || recuperacion.usuario.seguridad?.bloqueo_persistente) return error(400,'Enlace de recuperación no válido');
+   if(!recuperacion || recuperacion.utilizado || recuperacion.vence<=new Date() || recuperacion.usuario.usuario_estado_cuenta!=='activo' || (recuperacion.usuario.seguridad?.bloqueo_persistente && !recuperacion.usuario.administrador_original)) return error(400,'Enlace de recuperación no válido');
    await this.nuevaClave(tx,recuperacion.id_usuario,entrada.claveNueva as string);await this.reiniciarSeguridad(tx,recuperacion.id_usuario,'Recuperación autónoma');
    return {mensaje:'Contraseña recuperada. Inicia sesión nuevamente.'};
   });
  }
   async consultarSesiones(actor:ActorAutenticado) {
-   const sesiones=await prisma.sesion_usuario.findMany({where:{invalidada:null,vence:{gt:new Date()}},select:{id:true,inicio:true,vence:true,direccion:true,agente:true,usuario:{select:{usuario_id_usuario:true,acceso_m4:true}}},orderBy:{inicio:'desc'}});
-   if(actor.administrador) return sesiones;
-
-   const visibles=new Map<string,{activa:true;usuario:{usuario_id_usuario:bigint;acceso_m4:string|null}}>();
-   for(const sesion of sesiones) visibles.set(sesion.usuario.usuario_id_usuario.toString(),{activa:true,usuario:sesion.usuario});
-   return [...visibles.values()];
+   const cuentas=await prisma.usuario.findMany({where:{acceso_m4:{not:null}},select:{usuario_id_usuario:true,acceso_m4:true,sesiones:{where:{invalidada:null,vence:{gt:new Date()}},select:{id:true,inicio:true,vence:true,direccion:true,agente:true},orderBy:{inicio:'desc'},take:1}},orderBy:{acceso_m4:'asc'}});
+   if(actor.administrador) return cuentas.map(({sesiones,...usuario})=>{const sesion=sesiones[0];return {activa:!!sesion,usuario,...(sesion||{})};});
+   return cuentas.map(({sesiones,...usuario})=>({activa:sesiones.length>0,usuario}));
   }
   async cerrarSesionAdministrativa(actor:ActorAutenticado,entrada:Entrada) {
    if(!actor.administrador) error(403,'La operación requiere rol Administrador');

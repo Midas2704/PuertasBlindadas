@@ -28,6 +28,7 @@ test('M4: separación de Gerencia y Administrador',async t=>{
   const actorAdmin=await modulo.autorizar('usuarios',{secretoSesion:loginAdmin.token});
 
   await t.test('Gerencia sin Admin rechaza operación administrativa y Admin la autoriza',async()=>{
+   assert.equal((await modulo.autorizar('usuarios',{secretoSesion:loginGerencia.token})).administrador,false);
    await assert.rejects(modulo.autorizar('registrarUsuario',{secretoSesion:loginGerencia.token}),/rol Administrador/);
    assert.equal((await modulo.autorizar('registrarUsuario',{secretoSesion:loginAdmin.token})).administrador,true);
   });
@@ -40,6 +41,7 @@ test('M4: separación de Gerencia y Administrador',async t=>{
    const filaLimitada=limitada.find(s=>s.usuario.usuario_id_usuario===ordinaria.usuario_id_usuario);
    assert.deepEqual(Object.keys(filaLimitada).sort(),['activa','usuario']);assert.equal(filaLimitada.activa,true);
    assert.equal('id' in filaLimitada,false);assert.equal('direccion' in filaLimitada,false);assert.equal('agente' in filaLimitada,false);
+   assert.equal(limitada.find(s=>s.usuario.usuario_id_usuario===original.usuario_id_usuario).activa,false);
 
    const completa=await modulo.consultarSesiones(actorAdmin);
    const filaCompleta=completa.find(s=>s.id===sesionOrdinaria.sesion);
@@ -60,13 +62,16 @@ test('M4: separación de Gerencia y Administrador',async t=>{
 
   await t.test('login exitoso reinicia intentos y ciclos de bloqueo',async()=>{
    await prisma.estado_seguridad_usuario.update({where:{id_usuario:gerencia.usuario_id_usuario},data:{intentos:2,bloqueos:2,bloqueo_hasta:new Date(Date.now()-60000),bloqueo_persistente:false}});
-   await ingresar(gerencia);
+   await modulo.iniciarSesion({acceso:gerencia.acceso_m4,clave,reemplazarSesion:true},{});
    const estado=await prisma.estado_seguridad_usuario.findUniqueOrThrow({where:{id_usuario:gerencia.usuario_id_usuario}});
    assert.equal(estado.intentos,0);assert.equal(estado.bloqueos,0);
   });
 
   await t.test('administrador original conserva recuperación autónoma y no admite reset ajeno',async()=>{
    const antes=await prisma.sesion_usuario.count({where:{id_usuario:original.usuario_id_usuario,invalidada:null}});assert.ok(antes>0);
+   await prisma.estado_seguridad_usuario.update({where:{id_usuario:ordinaria.usuario_id_usuario},data:{intentos:0,bloqueos:3,bloqueo_hasta:null,bloqueo_persistente:true}});
+   const enviados=correos.length;await modulo.solicitarRecuperacion({acceso:ordinaria.acceso_m4});assert.equal(correos.length,enviados);
+   await prisma.estado_seguridad_usuario.update({where:{id_usuario:original.usuario_id_usuario},data:{intentos:0,bloqueos:3,bloqueo_hasta:null,bloqueo_persistente:true}});
    await modulo.solicitarRecuperacion({acceso:original.acceso_m4});
    const enlace=correos.find(c=>c.correo===original.usuario_correo)?.enlace;assert.ok(enlace);
    const token=enlace.split('#')[1];const nueva='Original-recuperada-M4!2026';

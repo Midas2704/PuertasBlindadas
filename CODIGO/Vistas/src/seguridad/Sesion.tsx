@@ -21,5 +21,5 @@ export function Protegido({children,permiso}:{children:ReactNode;permiso?:string
 }
 export async function operar(ruta:string,cuerpo?:unknown) {
  const respuesta=await solicitarFinanzas(ruta,cuerpo===undefined?undefined:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cuerpo)});
- const resultado=await respuesta.json();if(!respuesta.ok)throw new Error(resultado.error || 'No fue posible completar la operación');return resultado;
+ const resultado=await respuesta.json();if(!respuesta.ok){const error=Object.assign(new Error(resultado.error || 'No fue posible completar la operación'),{codigo:resultado.codigo});throw error;}return resultado;
 }
