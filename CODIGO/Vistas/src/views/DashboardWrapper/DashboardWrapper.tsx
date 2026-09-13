@@ -14,7 +14,7 @@ const DashboardWrapper: React.FC = () => {
     { path: '/cotizacion/nueva', label: 'Armar Cotización', icon: <FileSignature className="w-5 h-5" /> },
     { path: '/venta/directa', label: 'Nueva Venta Directa', icon: <Receipt className="w-5 h-5" /> },
     { path: '/pagos', label: 'Pagos y Recaudación', icon: <Receipt className="w-5 h-5" /> },
-    { path: '/configuracion/umbral', label: 'Configuración Por vencer', icon: <CheckSquare className="w-5 h-5" /> },
+    { path: '/configuracion/umbral', label: 'Mantenedor', icon: <CheckSquare className="w-5 h-5" /> },
     { path: '/aprobaciones', label: 'Gestión', icon: <CheckSquare className="w-5 h-5" /> },
     { path: '/usuarios', label: 'Usuarios y Accesos', icon: <Users className="w-5 h-5" /> },
     { path: '/sesiones', label: 'Sesiones', icon: <ShieldCheck className="w-5 h-5" /> },

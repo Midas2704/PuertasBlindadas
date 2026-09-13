@@ -336,7 +336,7 @@ const ArmarCotizacion: React.FC = () => {
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Datos Generales</h2>
-            {borradorId && clienteBorrador?.nivel_formalizacion === 'provisional' && <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg"><strong>Cliente incompleto</strong><button type="button" onClick={() => setMostrarFormalizacion(true)} className="ml-3 text-primary-700 font-medium">Formalizar cliente</button></div>}
+            {borradorId > 0 && clienteBorrador?.nivel_formalizacion === 'provisional' && <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg"><strong>Cliente incompleto</strong><button type="button" onClick={() => setMostrarFormalizacion(true)} className="ml-3 text-primary-700 font-medium">Formalizar cliente</button></div>}
             
             <div className="space-y-4">
               <div className="relative" ref={clienteRef}>
