@@ -18,7 +18,7 @@ Este documento concentra las reglas técnicas vigentes que reemplazan las conclu
 - La sesión tiene una duración máxima configurable de 60 minutos y vence tras 10 minutos de inactividad. Una operación autorizada renueva solamente el plazo de inactividad, sin superar la duración máxima.
 - Los valores se configuran mediante `M4_INTENTOS`, `M4_BLOQUEO_MINUTOS`, `M4_SESION_MINUTOS` y `M4_INACTIVIDAD_MINUTOS`.
 
-El seed M4 es idempotente. Conserva toda credencial raíz activa y vigente. Si la cuenta raíz no tiene una credencial vigente, crea una sola para desarrollo usando `M4_CLAVE_INICIAL` o un secreto aleatorio comunicado una vez por la consola. El seed no se ejecuta en producción.
+El seed M4 es idempotente. La cuenta raíz ficticia `20776101-k` queda vinculada al empleado activo del mismo RUT, con perfil Gerencia, rol Administrador original y acceso a CU01–CU74. Esta excepción de acceso no omite las validaciones de integridad, confirmación ni seguridad de cada operación. Conserva toda credencial raíz activa y vigente. Si la cuenta raíz no tiene una credencial vigente, crea una sola para desarrollo usando `M4_CLAVE_INICIAL` o un secreto aleatorio comunicado una vez por la consola. El seed no se ejecuta en producción.
 
 ## Reglas financieras corregidas
 

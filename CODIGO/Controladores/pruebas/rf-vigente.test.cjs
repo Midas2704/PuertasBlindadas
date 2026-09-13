@@ -30,7 +30,13 @@ test('la matriz de perfiles coincide con los actores de los 74 CU',()=>{
 
 test('RF vigente: perfiles M4, seed y política de acceso', async t => {
   await sembrarM4();
-  const raiz = await prisma.usuario.findUniqueOrThrow({where:{acceso_m4:'20776101-k'}});
+  const raiz = await prisma.usuario.findUniqueOrThrow({where:{acceso_m4:'20776101-k'},include:{empleado_seguridad:true,perfil:true}});
+  assert.equal(raiz.empleado_m4,'20776101-k');
+  assert.equal(raiz.empleado_rut_empleado,'20776101-k');
+  assert.equal(raiz.empleado_seguridad?.estado_laboral,'activo');
+  assert.equal(raiz.perfil?.codigo_m4,'gerencia');
+  assert.equal(raiz.usuario_es_administrador,true);
+  assert.equal(raiz.administrador_original,true);
   const credencial = await prisma.usuario_contrasena.findFirstOrThrow({where:{usuario_id_usuario:raiz.usuario_id_usuario,activa:true},orderBy:{creada:'desc'}});
   await sembrarM4();
   const credencialPosterior = await prisma.usuario_contrasena.findFirstOrThrow({where:{usuario_id_usuario:raiz.usuario_id_usuario,activa:true},orderBy:{creada:'desc'}});
