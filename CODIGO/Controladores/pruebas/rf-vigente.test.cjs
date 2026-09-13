@@ -37,6 +37,7 @@ test('RF vigente: perfiles M4, seed y política de acceso', async t => {
   assert.equal(raiz.perfil?.codigo_m4,'gerencia');
   assert.equal(raiz.usuario_es_administrador,true);
   assert.equal(raiz.administrador_original,true);
+  assert.equal(await prisma.usuario.count({where:{administrador_original:true}}),1);
   const credencial = await prisma.usuario_contrasena.findFirstOrThrow({where:{usuario_id_usuario:raiz.usuario_id_usuario,activa:true},orderBy:{creada:'desc'}});
   await sembrarM4();
   const credencialPosterior = await prisma.usuario_contrasena.findFirstOrThrow({where:{usuario_id_usuario:raiz.usuario_id_usuario,activa:true},orderBy:{creada:'desc'}});

@@ -13,6 +13,7 @@
     "test": "node --test --test-isolation=none pruebas/*.test.cjs",
     "prisma:validate": "prisma validate",
     "db:migrate": "prisma migrate deploy",
+    "db:provision-root": "node dist/administracion/aprovisionarCuentaRaiz.js",
     "db:seed": "prisma db seed"
   },
   "keywords": [],

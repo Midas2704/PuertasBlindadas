@@ -34,6 +34,18 @@ Abrir [Inicio de sesión](http://127.0.0.1:5174/login). El frontend usa `/api/fi
 
 El seed M4 conserva las credenciales vigentes. Si la cuenta raíz todavía no tiene una, en desarrollo crea una credencial inicial usando `M4_CLAVE_INICIAL` o genera un secreto aleatorio y lo muestra una sola vez en consola. La política predeterminada bloquea al tercer intento durante 10 minutos; la sesión dura como máximo 60 minutos y vence tras 10 minutos de inactividad. La configuración completa está en `.env.example` y en [Estado técnico vigente](documentacion/ESTADO_TECNICO_VIGENTE.md).
 
+### Aprovisionar la cuenta raíz en un servidor
+
+Las migraciones no insertan usuarios ni contraseñas. Después de compilar el backend y aplicar las migraciones, ejecutar una vez `npm run db:provision-root --prefix Controladores` con `M4_CLAVE_RAIZ` en el entorno. El comando crea o actualiza de forma idempotente el empleado y usuario `20776101-k`, conserva una sola cuenta con protección de Administrador original, sincroniza la contraseña sólo cuando se invoca explícitamente e invalida sesiones anteriores si la credencial cambia. `M4_CORREO_RAIZ` permite asociar un correo real. Ninguna clave debe almacenarse en Git.
+
+En el despliegue Docker, después de `prisma migrate deploy`, puede solicitarse la clave sin dejarla en el historial del shell:
+
+```bash
+read -rsp 'Clave raíz: ' M4_CLAVE_RAIZ; echo
+docker compose exec -T -e M4_CLAVE_RAIZ="$M4_CLAVE_RAIZ" backend npm run db:provision-root
+unset M4_CLAVE_RAIZ
+```
+
 ## Comprobar la entrega
 
 ```powershell
