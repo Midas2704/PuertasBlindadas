@@ -3,8 +3,9 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
-import { calcularNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
+import { calcularNota, consolidarNotasClp, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
+import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 function importes(base: Prisma.Decimal, tipo: unknown, valor: unknown, exento: unknown) {
@@ -27,8 +28,59 @@ function rutValido(rut: string) {
   return (resultado === 11 ? '0' : resultado === 10 ? 'K' : String(resultado)) === digito;
 }
 
+async function construirCosteoCotizacion(
+  transaccion: Prisma.TransactionClient,
+  productos: Entrada[],
+  moneda: { id_moneda: number },
+  margen: number,
+  permitirAjustes = false,
+) {
+  const detalles: Prisma.detalle_cotizacionCreateWithoutCotizacionInput[] = [];
+  let costoTotal = new Prisma.Decimal(0);
+  for (const producto of productos) {
+    const item = producto.id_item_comercial
+      ? await transaccion.item_comercial.findFirst({ where: { id_item_comercial: identificador(producto.id_item_comercial), estado_item: 'activo' } })
+      : await transaccion.item_comercial.findFirst({ where: { nombre_item: texto(producto.tipo_producto), estado_item: 'activo' } });
+    if (!item) throw new ErrorAplicacion(400, 'Selecciona un producto activo del catálogo');
+    const medidas = texto(producto.medidas, 100).split(/[xX]/).map(valor => Number(valor));
+    if (medidas.length !== 3 || medidas.some(valor => !Number.isFinite(valor) || valor <= 0)) throw new ErrorAplicacion(400, 'Completa las tres medidas del producto');
+    const cantidadProducto = numeroNoNegativo(producto.cantidad ?? 1, 'Cantidad de producto');
+    if (!Number.isInteger(cantidadProducto) || cantidadProducto <= 0) throw new ErrorAplicacion(400, 'La cantidad de producto debe ser un entero mayor a cero');
+    if (!Array.isArray(producto.materiales) || !producto.materiales.length) throw new ErrorAplicacion(400, 'Selecciona los materiales');
+    let costoProducto = new Prisma.Decimal(0);
+    const materiales: Prisma.detalle_costo_material_cotizacionCreateWithoutDetalle_cotizacionInput[] = [];
+    for (const material of producto.materiales as Entrada[]) {
+      const origen = await transaccion.historial_precio_material.findUnique({ where: { id_historial_precio_material: identificador(material.id_historial_precio_material) } });
+      if (!origen || origen.estado_precio !== 'vigente' || origen.id_moneda !== moneda.id_moneda) throw new ErrorAplicacion(400, 'Costo de material no disponible para la moneda elegida');
+      const cantidadMaterial = numeroNoNegativo(material.cantidad, 'Cantidad de material');
+      if (cantidadMaterial <= 0) throw new ErrorAplicacion(400, 'La cantidad de material debe ser mayor a cero');
+      const tieneAjuste = permitirAjustes && material.costo_ajustado !== undefined;
+      const precioUsado = tieneAjuste ? new Prisma.Decimal(numeroNoNegativo(material.costo_ajustado, 'Costo ajustado')) : origen.precio_unitario;
+      const subtotal = precioUsado.mul(cantidadMaterial).mul(cantidadProducto).toDecimalPlaces(2);
+      costoProducto = costoProducto.plus(subtotal);
+      materiales.push({
+        historial_precio_material: { connect: { id_historial_precio_material: origen.id_historial_precio_material } },
+        cantidad_material_estimada: cantidadMaterial, precio_unitario_usado: precioUsado, subtotal_material_estimado: subtotal,
+        observacion: tieneAjuste ? `Costo original ${origen.precio_unitario.toString()}; ajuste autorizado` : undefined,
+      });
+    }
+    costoTotal = costoTotal.plus(costoProducto);
+    detalles.push({
+      item_comercial: { connect: { id_item_comercial: item.id_item_comercial } }, cantidad_item: cantidadProducto,
+      descripcion_item_cotizado: texto(producto.descripcion, 500) || `${item.nombre_item} (${producto.medidas})`,
+      observacion_medidas: texto(producto.observaciones, 2000), medida_alto_referencial: medidas[0],
+      medida_ancho_referencial: medidas[1], medida_espesor_referencial: medidas[2],
+      subtotal_item_estimado: costoProducto.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2),
+      detalle_costo_material_cotizacion: { create: materiales },
+    });
+  }
+  const precioSugerido = costoTotal.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2);
+  return { costoTotal, precioSugerido, detalles };
+}
+
 /** M2 CU12–CU41. Compatibilidad del frontend existente; no sustituye la implementación completa de los CU. */
 export class M2Controller {
+  constructor(private readonly bancoCentral: BancoCentral = new C_BancoCentral()) {}
   async enTransaccion<T>(accion: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return prisma.$transaction(accion,{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:30000});
   }
@@ -43,11 +95,11 @@ export class M2Controller {
       if(cotizacion.monto_neto===null || cotizacion.monto_impuesto===null || cotizacion.monto_total_estimado===null || cotizacion.monto_total_estimado.lte(0)) throw new ErrorAplicacion(409,'Completa las condiciones comerciales antes de consolidar');
       // Midas: nota y pago salen juntos de esta transacción, o no sale ninguno
       const nota=await tx.nota_venta.create({data:{numero_nota_venta:`B2C-${randomUUID()}`,id_cotizacion:idCotizacion,id_ficha_cliente:cotizacion.id_ficha_cliente,id_moneda:cotizacion.id_moneda,fecha_emision:new Date(`${fechaNegocio()}T00:00:00Z`),monto_neto:cotizacion.monto_neto,monto_impuesto:cotizacion.monto_impuesto,monto_total:cotizacion.monto_total_estimado,exento_iva:cotizacion.exento_iva,estado_nota_venta:'emitida'},include:incluirNota});
-      const documento=await tx.documento_tributario.findUnique({where:{id_documento_tributario:identificador(entrada.idDocumento)}});
-      if(!documento || documento.id_ficha_cliente!==nota.id_ficha_cliente)throw new ErrorAplicacion(400,'Selecciona un documento tributario existente del mismo cliente');
+      const idDocumento=entrada.idDocumento?identificador(entrada.idDocumento):null;
+      const documento=idDocumento?await tx.documento_tributario.findUnique({where:{id_documento_tributario:idDocumento}}):null;
+      if(idDocumento&&(!documento || documento.id_ficha_cliente!==nota.id_ficha_cliente))throw new ErrorAplicacion(400,'Selecciona un documento tributario existente del mismo cliente');
       const catalogo={medios:await tx.medio_pago.findMany({where:{estado_medio_pago:'activo'}}),categorias:await tx.categoria_pago.findMany({where:{activo:true}}),cuotas:await tx.config_cuotas_tarjeta.findMany({where:{activo:true}})};
-      const pago=await tx.pago_cliente.create({data:prepararPago(nota,entrada,catalogo,documento.id_documento_tributario,responsable)});
-      await tx.documento_tributario_nota_venta.upsert({where:{id_documento_tributario_id_nota_venta:{id_documento_tributario:documento.id_documento_tributario,id_nota_venta:nota.id_nota_venta}},update:{},create:{id_documento_tributario:documento.id_documento_tributario,id_nota_venta:nota.id_nota_venta}});
+      const pago=await tx.pago_cliente.create({data:prepararPago(nota,entrada,catalogo,idDocumento,responsable)});
       const actual=await tx.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta},include:incluirNota});
       await tx.nota_venta.update({where:{id_nota_venta:nota.id_nota_venta},data:{estado_pago:calcularNota(actual).estadoPago}});
       await tx.cotizacion.update({where:{id_cotizacion:idCotizacion},data:{estado_cotizacion:'aprobada'}});
@@ -171,7 +223,8 @@ export class M2Controller {
       prisma.cotizacion.count({ where: { estado_cotizacion: { in: ['borrador', 'emitida'] } } }),
     ]);
     const saldosPorMoneda = resumirNotas(notas);
-    return { ingresosTotales: saldosPorMoneda.find(saldo => saldo.moneda === 'CLP')?.montoComercialVigente || 0, cotizacionesPendientes, saldosPorMoneda };
+    const consolidadoClp = consolidarNotasClp(notas);
+    return { ingresosTotales: consolidadoClp.montoComercialVigente, cotizacionesPendientes, saldosPorMoneda, consolidadoClp };
   }
   async consultarBandeja(historial = false) {
     const [cotizaciones, notas] = await Promise.all([
@@ -201,35 +254,7 @@ export class M2Controller {
       const ficha = fichaDirecta || (cliente as any).ficha_cliente || await transaccion.ficha_cliente.create({ data: { id_cliente_financiero: cliente.id_cliente_financiero } });
       const moneda = await transaccion.moneda.findUnique({ where: { id_moneda: identificador(entrada.id_moneda) } });
       if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
-      let costoTotal = new Prisma.Decimal(0);
-      const detalles: Prisma.detalle_cotizacionCreateWithoutCotizacionInput[] = [];
-      for (const producto of entrada.productos) {
-        const item = await transaccion.item_comercial.findFirst({ where: { nombre_item: texto(producto.tipo_producto), estado_item: 'activo' } });
-        if (!item) throw new ErrorAplicacion(400, 'Selecciona un producto del catálogo');
-        const medidas = texto(producto.medidas).split(/[xX]/).map(valor => numeroNoNegativo(valor, 'Medida'));
-        if (medidas.length !== 3 || medidas.some(medida => medida <= 0)) throw new ErrorAplicacion(400, 'Completa las tres medidas del producto');
-        if (!Array.isArray(producto.materiales) || !producto.materiales.length) throw new ErrorAplicacion(400, 'Selecciona los materiales');
-        let costo = new Prisma.Decimal(0);
-        const materiales: Prisma.detalle_costo_material_cotizacionCreateWithoutDetalle_cotizacionInput[] = [];
-        for (const material of producto.materiales) {
-          const precio = await transaccion.historial_precio_material.findUnique({ where: { id_historial_precio_material: identificador(material.id_historial_precio_material) } });
-          if (!precio || precio.estado_precio !== 'vigente') throw new ErrorAplicacion(400, 'Costo de material no disponible');
-          if (precio.id_moneda !== moneda.id_moneda) throw new ErrorAplicacion(409, 'El costeo entre monedas queda pendiente; selecciona materiales en la moneda de la cotización');
-          const cantidad = numeroNoNegativo(material.cantidad, 'Cantidad');
-          if (!cantidad) throw new ErrorAplicacion(400, 'Cantidad debe ser mayor a cero');
-          const subtotal = precio.precio_unitario.mul(cantidad).toDecimalPlaces(2);
-          costo = costo.plus(subtotal);
-          materiales.push({ historial_precio_material: { connect: { id_historial_precio_material: precio.id_historial_precio_material } }, cantidad_material_estimada: cantidad, precio_unitario_usado: precio.precio_unitario, subtotal_material_estimado: subtotal });
-        }
-        costoTotal = costoTotal.plus(costo);
-        detalles.push({ item_comercial: { connect: { id_item_comercial: item.id_item_comercial } }, cantidad_item: 1,
-          descripcion_item_cotizado: `${item.nombre_item} (${producto.medidas})`, observacion_medidas: texto(producto.observaciones, 2000),
-          medida_alto_referencial: medidas[0], medida_ancho_referencial: medidas[1], medida_espesor_referencial: medidas[2],
-          subtotal_item_estimado: costo.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2),
-          detalle_costo_material_cotizacion: { create: materiales },
-        });
-      }
-      const sugerido = costoTotal.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2);
+      const { costoTotal, precioSugerido: sugerido, detalles } = await construirCosteoCotizacion(transaccion, entrada.productos as Entrada[], moneda, margen);
       const montos = importes(sugerido, entrada.descuento_tipo, entrada.descuento_valor, entrada.exento_iva);
       return transaccion.cotizacion.create({ data: {
         id_ficha_cliente: ficha.id_ficha_cliente, id_moneda: moneda.id_moneda,
@@ -261,33 +286,7 @@ export class M2Controller {
         const moneda = await transaccion.moneda.findUnique({ where: { id_moneda: idMoneda } });
         if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
 
-        const nuevosDetalles: Prisma.detalle_cotizacionCreateWithoutCotizacionInput[] = [];
-        let costoTotal = new Prisma.Decimal(0);
-        for (const producto of entrada.productos as Entrada[]) {
-          const item = producto.id_item_comercial
-            ? await transaccion.item_comercial.findFirst({ where: { id_item_comercial: identificador(producto.id_item_comercial), estado_item: 'activo' } })
-            : await transaccion.item_comercial.findFirst({ where: { nombre_item: texto(producto.tipo_producto), estado_item: 'activo' } });
-          if (!item) throw new ErrorAplicacion(400, 'Selecciona un producto activo del catálogo');
-          const medidas = texto(producto.medidas, 100).split(/[xX]/).map(valor => Number(valor));
-          if (medidas.length !== 3 || medidas.some(valor => !Number.isFinite(valor) || valor <= 0)) throw new ErrorAplicacion(400, 'Completa las tres medidas del producto');
-          const cantidadProducto = numeroNoNegativo(producto.cantidad ?? 1, 'Cantidad de producto');
-          if (!cantidadProducto) throw new ErrorAplicacion(400, 'La cantidad de producto debe ser mayor a cero');
-          let costoProducto = new Prisma.Decimal(0);
-          const materiales: Prisma.detalle_costo_material_cotizacionCreateWithoutDetalle_cotizacionInput[] = [];
-          for (const material of Array.isArray(producto.materiales) ? producto.materiales as Entrada[] : []) {
-            const origen = await transaccion.historial_precio_material.findUnique({ where: { id_historial_precio_material: identificador(material.id_historial_precio_material) } });
-            if (!origen || origen.estado_precio !== 'vigente' || origen.id_moneda !== moneda.id_moneda) throw new ErrorAplicacion(400, 'Costo de material no disponible para la moneda elegida');
-            const cantidad = numeroNoNegativo(material.cantidad, 'Cantidad de material');
-            if (!cantidad) throw new ErrorAplicacion(400, 'La cantidad de material debe ser mayor a cero');
-            const precioUsado = material.costo_ajustado === undefined ? origen.precio_unitario : new Prisma.Decimal(numeroNoNegativo(material.costo_ajustado, 'Costo ajustado'));
-            const subtotal = precioUsado.mul(cantidad).mul(cantidadProducto).toDecimalPlaces(2);
-            costoProducto = costoProducto.plus(subtotal);
-            materiales.push({ historial_precio_material: { connect: { id_historial_precio_material: origen.id_historial_precio_material } }, cantidad_material_estimada: cantidad, precio_unitario_usado: precioUsado, subtotal_material_estimado: subtotal, observacion: material.costo_ajustado === undefined ? undefined : `Costo original ${origen.precio_unitario.toString()}; ajuste autorizado` });
-          }
-          costoTotal = costoTotal.plus(costoProducto);
-          nuevosDetalles.push({ item_comercial: { connect: { id_item_comercial: item.id_item_comercial } }, cantidad_item: cantidadProducto, descripcion_item_cotizado: texto(producto.descripcion, 500) || `${item.nombre_item} (${producto.medidas})`, observacion_medidas: texto(producto.observaciones, 2000), medida_alto_referencial: medidas[0], medida_ancho_referencial: medidas[1], medida_espesor_referencial: medidas[2], subtotal_item_estimado: costoProducto.isZero() ? 0 : costoProducto.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2), detalle_costo_material_cotizacion: { create: materiales } });
-        }
-        const calculado = costoTotal.isZero() ? new Prisma.Decimal(0) : costoTotal.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2);
+        const { costoTotal, precioSugerido: calculado, detalles: nuevosDetalles } = await construirCosteoCotizacion(transaccion, entrada.productos as Entrada[], moneda, margen, true);
         const precioDefinido = entrada.precio_sugerido === undefined ? calculado : new Prisma.Decimal(numeroNoNegativo(entrada.precio_sugerido, 'Precio definido'));
         const descuentoTipo = entrada.descuento_tipo || null;
         const descuentoValor = entrada.descuento_valor ?? 0;
@@ -300,10 +299,11 @@ export class M2Controller {
 
       const detalles = cotizacion.detalle_cotizacion;
       const primero = detalles[0];
+      const idsMaterialesCotizacion = new Set(detalles.flatMap(detalle => detalle.detalle_costo_material_cotizacion.map(material => material.id_detalle_costo_material_cotizacion)));
       const cantidades = new Map<number, number>();
       for (const material of entrada.materiales) {
         const id = identificador(material.id_detalle_costo_material_cotizacion);
-        if (cantidades.has(id) || !primero?.detalle_costo_material_cotizacion.some(actual => actual.id_detalle_costo_material_cotizacion === id)) throw new ErrorAplicacion(400, 'Material ajeno o duplicado');
+        if (cantidades.has(id) || !idsMaterialesCotizacion.has(id)) throw new ErrorAplicacion(400, 'Material ajeno o duplicado');
         const cantidad = numeroNoNegativo(material.cantidad, 'Cantidad');
         if (!cantidad) throw new ErrorAplicacion(400, 'La cantidad debe ser mayor a cero');
         cantidades.set(id, cantidad);
@@ -319,7 +319,7 @@ export class M2Controller {
             ? entrada.materiales.find((m: Entrada) => m.id_detalle_costo_material_cotizacion === material.id_detalle_costo_material_cotizacion)?.costo_ajustado
             : undefined;
           const precioUsado = override === undefined ? material.precio_unitario_usado : new Prisma.Decimal(numeroNoNegativo(override, 'Costo ajustado'));
-          const subtotal = precioUsado.mul(cantidad).toDecimalPlaces(2);
+          const subtotal = precioUsado.mul(cantidad).mul(detalle.cantidad_item).toDecimalPlaces(2);
           costo = costo.plus(subtotal);
           if (cantidades.has(material.id_detalle_costo_material_cotizacion)) await transaccion.detalle_costo_material_cotizacion.update({ where: { id_detalle_costo_material_cotizacion: material.id_detalle_costo_material_cotizacion }, data: { cantidad_material_estimada: cantidad, precio_unitario_usado: precioUsado, subtotal_material_estimado: subtotal, ...(override === undefined ? {} : { observacion: `Costo original ${material.precio_unitario_usado.toString()}; ajuste autorizado` }) } });
         }
@@ -340,10 +340,21 @@ export class M2Controller {
     const base = numeroNoNegativo(entrada.monto_neto, 'Monto neto');
     if (!base) throw new ErrorAplicacion(400, 'El monto debe ser mayor a cero');
     const montos = importes(new Prisma.Decimal(base), entrada.descuento?.tipo, entrada.descuento?.valor, entrada.exento_iva);
+    const codigoMoneda = texto(entrada.moneda).toUpperCase() || 'CLP';
+    let tipoCambio: Prisma.Decimal | null = null;
+    if (codigoMoneda === 'USD') {
+      try {
+        tipoCambio = new Prisma.Decimal(await this.bancoCentral.obtenerTipoCambio('USD', fechaNegocio()));
+      } catch (error) {
+        if (entrada.tipoCambioManual !== true) throw error;
+        tipoCambio = new Prisma.Decimal(numeroNoNegativo(entrada.tipoCambio, 'Tipo de cambio manual'));
+      }
+      if (!tipoCambio.isFinite() || tipoCambio.lte(0)) throw new ErrorAplicacion(400, 'El tipo de cambio USD/CLP debe ser mayor a cero');
+    }
     return prisma.$transaction(async transaccion => {
       const ficha = await transaccion.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFicha }, include: { cliente_financiero: true } });
       if (!ficha || ficha.cliente_financiero.estado_financiero !== 'activo' || ficha.cliente_financiero.nivel_formalizacion !== 'formal') throw new ErrorAplicacion(400, 'La venta directa requiere cliente activo y formal');
-      const moneda = await transaccion.moneda.findUnique({ where: { codigo_moneda: texto(entrada.moneda).toUpperCase() || 'CLP' } });
+      const moneda = await transaccion.moneda.findUnique({ where: { codigo_moneda: codigoMoneda } });
       if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
       const detalle = Array.isArray(entrada.detalle) ? entrada.detalle.map((linea: Entrada) => ({ tipo: texto(linea.tipo, 40), descripcion: texto(linea.descripcion, 500), cantidad: numeroNoNegativo(linea.cantidad ?? 1, 'Cantidad'), valor: numeroNoNegativo(linea.valor, 'Valor'), idItemComercial: linea.idItemComercial ? identificador(linea.idItemComercial) : undefined, idProyecto: linea.idProyecto ? identificador(linea.idProyecto) : undefined })) : [];
       if (!detalle.length || detalle.some(linea => !['producto','servicio','reparacion','trabajo posterior','adicional'].includes(linea.tipo.toLowerCase()) || !linea.descripcion || linea.cantidad <= 0 || linea.valor <= 0)) throw new ErrorAplicacion(400, 'Incluye al menos una línea comercial válida');
@@ -357,9 +368,9 @@ export class M2Controller {
       return transaccion.nota_venta.create({ data: {
         id_ficha_cliente: idFicha, id_moneda: moneda.id_moneda, numero_nota_venta: `NVD-${randomUUID()}`,
         fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: montos.neto, monto_impuesto: montos.impuesto,
-        monto_total: montos.total, descuento_aplicado: montos.descuento, exento_iva: entrada.exento_iva,
+        monto_total: montos.total, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio ? montos.total.mul(tipoCambio).toDecimalPlaces(2) : null,
+        descuento_aplicado: montos.descuento, exento_iva: entrada.exento_iva,
         estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto, observacion: JSON.stringify({ detalleComercial: detalle, persistencia: 'auxiliar_hasta_detalle_nv_estructurado' }),
-        // ojo: la conversión se registra con el pago en M3, no acá
       } });
     });
   }

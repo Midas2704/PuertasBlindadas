@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Save, Trash2, Calculator, Plus, ChevronDown, Check } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { usarSesion } from '../../seguridad/Sesion';
+import { formatearMoneda } from '../../utilidades/moneda';
 
 interface Cliente {
   id_cliente_financiero?: number;
@@ -19,6 +20,7 @@ interface Material {
   sku: string;
   nombre: string;
   precio_unitario: number;
+  moneda: string;
 }
 
 interface ProductoTipo {
@@ -141,6 +143,7 @@ const ArmarCotizacion: React.FC = () => {
 
 
   const handleAddProducto = () => {
+    setPrecioDefinido('');
     setProductos([...productos, {
       id_interno: Date.now(),
       tipo_producto: '',
@@ -156,11 +159,26 @@ const ArmarCotizacion: React.FC = () => {
   const handleRemoveProducto = (id_interno: number) => {
     // Apolo: dejamos al menos un producto para seguir editando
     if (productos.length === 1) return;
+    setPrecioDefinido('');
     setProductos(productos.filter(p => p.id_interno !== id_interno));
   };
 
   const handleUpdateProducto = (id_interno: number, field: string, value: any) => {
-    setProductos(productos.map(p => p.id_interno === id_interno ? { ...p, [field]: value } : p));
+    if (field === 'tipo_producto' || field === 'cantidad') setPrecioDefinido('');
+    setProductos(productos.map(p => p.id_interno === id_interno
+      ? { ...p, [field]: value, ...(field === 'tipo_producto' && p.tipo_producto !== value ? { materiales: [], materialSearch: '' } : {}) }
+      : p));
+  };
+
+  const cambiarMoneda = (idMoneda: number) => {
+    const codigo = monedas.find(opcion => opcion.id_moneda === idMoneda)?.codigo_moneda;
+    setMoneda(idMoneda);
+    setPrecioDefinido('');
+    setProductos(actuales => actuales.map(producto => ({
+      ...producto,
+      materiales: producto.materiales.filter(seleccion => inventario.find(material => material.id_historial_precio_material === seleccion.id)?.moneda === codigo),
+      materialSearch: '', dropdownMaterialOpen: false,
+    })));
   };
 
   const handleUpdateMedida = (id_interno: number, dimension: 'alto'|'ancho'|'largo', value: string) => {
@@ -180,6 +198,7 @@ const ArmarCotizacion: React.FC = () => {
 
   const handleAddMaterial = (id_interno: number, matId: number) => {
     if (!matId) return;
+    setPrecioDefinido('');
     setProductos(productos.map(p => {
       if (p.id_interno === id_interno) {
         if (p.materiales.find(m => m.id === matId)) return { ...p, dropdownMaterialOpen: false, materialSearch: '' };
@@ -190,6 +209,7 @@ const ArmarCotizacion: React.FC = () => {
   };
 
   const updateCantidadMaterial = (id_interno: number, matId: number, cantidad: number) => {
+    setPrecioDefinido('');
     let cleanVal = Math.round(cantidad);
     if (cleanVal < 1) cleanVal = 1;
     setProductos(productos.map(p => {
@@ -201,12 +221,14 @@ const ArmarCotizacion: React.FC = () => {
   };
 
   const updateCostoMaterial = (id_interno: number, matId: number, costo: number | undefined) => {
+    setPrecioDefinido('');
     setProductos(productos.map(producto => producto.id_interno === id_interno
       ? { ...producto, materiales: producto.materiales.map(material => material.id === matId ? { ...material, costo_ajustado: costo } : material) }
       : producto));
   };
 
   const removeMaterial = (id_interno: number, matId: number) => {
+    setPrecioDefinido('');
     setProductos(productos.map(p => {
       if (p.id_interno === id_interno) {
         return { ...p, materiales: p.materiales.filter(m => m.id !== matId) };
@@ -241,6 +263,8 @@ const ArmarCotizacion: React.FC = () => {
   const baseImponible = Math.max(0, precioCotizacion - montoDescuento);
   const iva = exentoIva ? 0 : baseImponible * 0.19;
   const totalFinal = baseImponible + iva;
+  const codigoMoneda = monedas.find(opcion => opcion.id_moneda === moneda)?.codigo_moneda || 'CLP';
+  const inventarioCompatible = inventario.filter(material => material.moneda === codigoMoneda);
   // TODO: esto podría quedar más lindo, pero funciona y no molesta
 
   const isDescuentoValido = !aplicarDescuento || 
@@ -396,7 +420,7 @@ const ArmarCotizacion: React.FC = () => {
                     min="0" max="99" step="1"
                     onInput={(e) => { e.currentTarget.value = e.currentTarget.value.replace(/[^0-9]/g, ''); }}
                     value={margen}
-                    onChange={e => setMargen(Math.min(99, Math.max(0, Math.round(Number(e.target.value)))))}
+                    onChange={e => { setMargen(Math.min(99, Math.max(0, Math.round(Number(e.target.value))))); setPrecioDefinido(''); }}
                     className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
                   />
                 </div>
@@ -404,7 +428,7 @@ const ArmarCotizacion: React.FC = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Moneda</label>
                   <select 
                     value={moneda} 
-                    onChange={e => setMoneda(Number(e.target.value))}
+                    onChange={e => cambiarMoneda(Number(e.target.value))}
                     className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
                   >
                     <option value={0} disabled>Seleccione moneda</option>
@@ -424,7 +448,7 @@ const ArmarCotizacion: React.FC = () => {
               </div>
 
               {borradorId > 0 && <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50 border rounded-lg">
-                <div><span className="block text-xs text-gray-500">Precio sugerido calculado</span><strong>${precioSugerido.toLocaleString('es-CL', { maximumFractionDigits: 0 })}</strong></div>
+                <div><span className="block text-xs text-gray-500">Precio sugerido calculado</span><strong>{formatearMoneda(precioSugerido, codigoMoneda)}</strong></div>
                 <label className="text-xs text-gray-500">Precio definido para la cotización<input disabled={!puedeAjustar} type="number" min="0" step="0.01" value={precioDefinido} onChange={e => setPrecioDefinido(e.target.value === '' ? '' : Number(e.target.value))} className="block w-full mt-1 p-2 bg-white border rounded text-gray-800 disabled:bg-gray-100" /></label>
               </div>}
 
@@ -461,7 +485,7 @@ const ArmarCotizacion: React.FC = () => {
                           onChange={e => setTipoDescuento(e.target.value as 'monto_fijo' | 'porcentaje')}
                         >
                           <option value="porcentaje">Porcentaje (%)</option>
-                          <option value="monto_fijo">Monto Fijo ($)</option>
+                          <option value="monto_fijo">Monto Fijo ({codigoMoneda})</option>
                         </select>
                       </div>
                       <div className="w-1/2">
@@ -584,13 +608,13 @@ const ArmarCotizacion: React.FC = () => {
                       
                       {prod.dropdownMaterialOpen && (
                         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                          {inventario.filter(i => 
+                          {inventarioCompatible.filter(i =>
                             i.nombre.toLowerCase().includes(prod.materialSearch.toLowerCase()) || 
                             i.sku.toLowerCase().includes(prod.materialSearch.toLowerCase())
                           ).length === 0 ? (
                             <div className="p-2 text-xs text-gray-500 text-center">Sin resultados</div>
                           ) : (
-                            inventario.filter(i => 
+                            inventarioCompatible.filter(i =>
                               i.nombre.toLowerCase().includes(prod.materialSearch.toLowerCase()) || 
                               i.sku.toLowerCase().includes(prod.materialSearch.toLowerCase())
                             ).slice(0, 30).map(m => {
@@ -607,7 +631,7 @@ const ArmarCotizacion: React.FC = () => {
                                 >
                                   <div>
                                     <div className="font-semibold">{m.nombre}</div>
-                                    <div className="text-gray-400 text-[10px]">{m.sku} | ${m.precio_unitario.toLocaleString('es-CL')}</div>
+                                    <div className="text-gray-400 text-[10px]">{m.sku} | {formatearMoneda(m.precio_unitario, codigoMoneda)}</div>
                                   </div>
                                   {isSelected && <Check className="w-3 h-3 text-primary-600" />}
                                 </div>
@@ -641,7 +665,7 @@ const ArmarCotizacion: React.FC = () => {
                                 <input type="number" min="0" step="0.01" value={sel.costo_ajustado ?? mat.precio_unitario} onChange={e => updateCostoMaterial(prod.id_interno, sel.id, e.target.value === '' ? undefined : Number(e.target.value))} className="block w-24 p-1 border border-gray-300 rounded text-right text-xs" />
                               </label>}
                               <div className="w-20 text-right font-medium text-gray-600">
-                                ${((sel.costo_ajustado ?? mat.precio_unitario) * sel.cantidad * prod.cantidad).toLocaleString('es-CL', { maximumFractionDigits: 0 })}
+                                {formatearMoneda((sel.costo_ajustado ?? mat.precio_unitario) * sel.cantidad * prod.cantidad, codigoMoneda)}
                               </div>
                               <button onClick={() => removeMaterial(prod.id_interno, sel.id)} className="text-red-400 hover:text-red-600">
                                 <Trash2 className="w-4 h-4" />
@@ -666,31 +690,31 @@ const ArmarCotizacion: React.FC = () => {
             <div className="space-y-3 relative z-10 text-sm">
               <div className="flex justify-between items-center text-primary-100">
                 <span>Subtotal Costos:</span>
-                <span>${subtotalCostos.toLocaleString('es-CL', { maximumFractionDigits: 0 })}</span>
+                <span>{formatearMoneda(subtotalCostos, codigoMoneda)}</span>
               </div>
               <div className="flex justify-between items-center text-primary-100">
                 <span>Margen ({margen}%):</span>
-                <span>${(precioSugerido - subtotalCostos).toLocaleString('es-CL', { maximumFractionDigits: 0 })}</span>
+                <span>{formatearMoneda(precioSugerido - subtotalCostos, codigoMoneda)}</span>
               </div>
               {montoDescuento > 0 && (
                 <div className="flex justify-between items-center text-red-300">
                   <span>Descuento:</span>
-                  <span>-${montoDescuento.toLocaleString('es-CL', { maximumFractionDigits: 0 })}</span>
+                  <span>-{formatearMoneda(montoDescuento, codigoMoneda)}</span>
                 </div>
               )}
               <div className="flex justify-between items-center text-primary-50 font-medium pt-2 border-t border-primary-700">
                 <span>Base Imponible (Neto):</span>
-                <span>${baseImponible.toLocaleString('es-CL', { maximumFractionDigits: 0 })}</span>
+                <span>{formatearMoneda(baseImponible, codigoMoneda)}</span>
               </div>
               <div className="flex justify-between items-center text-primary-100">
                 <span>IVA (19%):</span>
-                <span>{exentoIva ? 'EXENTO' : `$${iva.toLocaleString('es-CL', { maximumFractionDigits: 0 })}`}</span>
+                <span>{exentoIva ? 'EXENTO' : formatearMoneda(iva, codigoMoneda)}</span>
               </div>
               
               <div className="pt-4 mt-2 border-t border-primary-700">
                 <div className="text-xs text-primary-200 mb-1 uppercase tracking-wider font-semibold">Precio Sugerido</div>
                 <div className="text-3xl font-bold text-white">
-                  ${totalFinal.toLocaleString('es-CL', { maximumFractionDigits: 0 })}
+                  {formatearMoneda(totalFinal, codigoMoneda)}
                 </div>
               </div>
             </div>
