@@ -92,18 +92,27 @@ test('venta directa conserva original, tasa histórica y equivalente CLP', async
   } finally {if(creadas.length)await prisma.nota_venta.deleteMany({where:{id_nota_venta:{in:creadas}}});}
 });
 
+test('aprobar Nota de Venta persiste la transición emitida a confirmada',async()=>{
+  const m2=new M2Controller({obtenerTipoCambio:async()=>900});const cliente=await prisma.cliente_financiero.findFirstOrThrow({where:{estado_financiero:'activo',nivel_formalizacion:'formal'},include:{ficha_cliente:true}});const moneda=await prisma.moneda.findUniqueOrThrow({where:{codigo_moneda:'CLP'}});
+  const nota=await prisma.nota_venta.create({data:{id_ficha_cliente:cliente.ficha_cliente.id_ficha_cliente,id_moneda:moneda.id_moneda,numero_nota_venta:`TEST-${randomUUID()}`,fecha_emision:new Date(),monto_neto:100,monto_total:100,exento_iva:true,estado_nota_venta:'emitida',estado_pago:'pendiente'}});
+  try{const resultado=await m2.confirmarNotaVenta(nota.id_nota_venta);assert.equal(resultado.documento.estado_nota_venta,'confirmada');assert.equal((await prisma.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta}})).estado_nota_venta,'confirmada');await assert.rejects(m2.confirmarNotaVenta(nota.id_nota_venta),/Sólo se puede confirmar/);}
+  finally{await prisma.nota_venta.delete({where:{id_nota_venta:nota.id_nota_venta}});}
+});
+
 test('pago opcional sin documento actualiza saldo y documento no relacionado se rechaza', async () => {
   const m3=new M3Controller({obtenerTipoCambio:async()=>900});
   const cliente=await prisma.cliente_financiero.findFirstOrThrow({where:{estado_financiero:'activo',nivel_formalizacion:'formal'},include:{ficha_cliente:true}});
   const moneda=await prisma.moneda.findUniqueOrThrow({where:{codigo_moneda:'CLP'}});const medio=await prisma.medio_pago.findUniqueOrThrow({where:{nombre_medio_pago:'Efectivo'}});const categoria=await prisma.categoria_pago.findUniqueOrThrow({where:{nombre:'Pago final'}});const tipo=await prisma.tipo_documento.findFirstOrThrow();
   const nota=await prisma.nota_venta.create({data:{id_ficha_cliente:cliente.ficha_cliente.id_ficha_cliente,id_moneda:moneda.id_moneda,numero_nota_venta:`TEST-${randomUUID()}`,fecha_emision:new Date(),monto_neto:100,monto_total:100,exento_iva:true}});
   const documento=await prisma.documento_tributario.create({data:{id_ficha_cliente:cliente.ficha_cliente.id_ficha_cliente,id_tipo_documento:tipo.id_tipo_documento,id_moneda:moneda.id_moneda,folio_documento:`TEST-${randomUUID()}`,fecha_emision:new Date(),monto_total:100}});
-  let idPago;
+  const idsPago=[];
   try {
     await assert.rejects(m3.registrarPago({idNota:nota.id_nota_venta,monto:10,idMedio:medio.id_medio_pago,idCategoria:categoria.id_categoria_pago,idDocumento:documento.id_documento_tributario,respaldo:'ok'},'test'),/no está relacionado/);
-    const resultado=await m3.registrarPago({idNota:nota.id_nota_venta,monto:100,idMedio:medio.id_medio_pago,idCategoria:categoria.id_categoria_pago,respaldo:'ok'},'test');idPago=resultado.idPago;
-    const pago=await prisma.pago_cliente.findUniqueOrThrow({where:{id_pago_cliente:idPago},include:{asignacion_pago_cliente:true}});assert.equal(pago.cantidad_cuotas,null);assert.equal(pago.asignacion_pago_cliente.id_documento_tributario,null);assert.equal((await prisma.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta}})).estado_pago,'pagada');
-  } finally {if(idPago){await prisma.asignacion_pago_cliente.deleteMany({where:{id_pago_cliente:idPago}});await prisma.pago_cliente.delete({where:{id_pago_cliente:idPago}});}await prisma.documento_tributario.delete({where:{id_documento_tributario:documento.id_documento_tributario}});await prisma.nota_venta.delete({where:{id_nota_venta:nota.id_nota_venta}});}
+    const parcial=await m3.registrarPago({idNota:nota.id_nota_venta,monto:40,idMedio:medio.id_medio_pago,idCategoria:categoria.id_categoria_pago,respaldo:'ok'},'test');idsPago.push(parcial.idPago);
+    assert.equal(parcial.estadoPago,'parcial');assert.equal(parcial.estado_pago,'parcial');assert.equal(parcial.estadoNotaVentaVisible,'parcialmente_pagada');assert.equal((await prisma.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta}})).estado_pago,'parcial');
+    const resultado=await m3.registrarPago({idNota:nota.id_nota_venta,monto:60,idMedio:medio.id_medio_pago,idCategoria:categoria.id_categoria_pago,respaldo:'ok'},'test');idsPago.push(resultado.idPago);
+    const pago=await prisma.pago_cliente.findUniqueOrThrow({where:{id_pago_cliente:resultado.idPago},include:{asignacion_pago_cliente:true}});assert.equal(pago.cantidad_cuotas,null);assert.equal(pago.asignacion_pago_cliente.id_documento_tributario,null);assert.equal(resultado.estadoPago,'pagada');assert.equal(resultado.estado_pago,'pagada');assert.equal(resultado.estadoNotaVentaVisible,'pagada');assert.equal((await prisma.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta}})).estado_pago,'pagada');
+  } finally {if(idsPago.length){await prisma.asignacion_pago_cliente.deleteMany({where:{id_pago_cliente:{in:idsPago}}});await prisma.pago_cliente.deleteMany({where:{id_pago_cliente:{in:idsPago}}});}await prisma.documento_tributario.delete({where:{id_documento_tributario:documento.id_documento_tributario}});await prisma.nota_venta.delete({where:{id_nota_venta:nota.id_nota_venta}});}
 });
 
 test('UI mantiene fuente de clientes, placeholders y controles condicionales',()=>{

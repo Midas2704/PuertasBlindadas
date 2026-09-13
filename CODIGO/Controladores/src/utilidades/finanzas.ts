@@ -127,3 +127,21 @@ export function consolidarNotasClp(notas: NotaFinanciera[]) {
     cantidadSinConversion: operacionesSinConversion.length,
   };
 }
+
+export function estadoVisibleNota(nota: NotaFinanciera, estadoPago = calcularNota(nota).estadoPago) {
+  if (['anulada', 'revertida', 'revertida_total', 'provisional'].includes(nota.estado_nota_venta.toLowerCase())) return nota.estado_nota_venta;
+  if (estadoPago === 'parcial') return 'parcialmente_pagada';
+  if (estadoPago === 'pagada') return 'pagada';
+  return nota.estado_nota_venta;
+}
+
+/** Mantiene la columna de consulta estado_pago alineada con los movimientos vigentes. */
+export async function sincronizarEstadoPago(tx: Prisma.TransactionClient, nota: NotaFinanciera) {
+  const calculo = calcularNota(nota);
+  const conservaEstado = ['anulada', 'revertida', 'revertida_total', 'provisional'].includes(nota.estado_nota_venta.toLowerCase());
+  const estadoPago = conservaEstado ? nota.estado_pago : calculo.estadoPago;
+  if (!conservaEstado && nota.estado_pago !== estadoPago) {
+    await tx.nota_venta.update({ where: { id_nota_venta: nota.id_nota_venta }, data: { estado_pago: estadoPago } });
+  }
+  return { ...calculo, estado_pago: estadoPago, estadoNotaVentaVisible: estadoVisibleNota(nota, estadoPago) };
+}

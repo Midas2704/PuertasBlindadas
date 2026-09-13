@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
-import { calcularNota, consolidarNotasClp, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
+import { calcularNota, consolidarNotasClp, estadoVisibleNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 
@@ -277,7 +277,7 @@ export class M2Controller {
       prisma.cotizacion.findMany({ where: { estado_cotizacion: { in: historial ? ['aprobada', 'anulada', 'rechazada', 'descartada', 'vencida'] : ['borrador', 'emitida'] } }, include: incluirCotizacion, orderBy: { fecha_emision: 'desc' } }),
       prisma.nota_venta.findMany({ where: { estado_nota_venta: { in: historial ? ['confirmada', 'anulada', 'cerrada', 'revertida_parcial', 'revertida_total'] : ['emitida'] } }, include: { ...incluirNota, ficha_cliente: { include: { cliente_financiero: true } } }, orderBy: { fecha_emision: 'desc' } }),
     ]);
-    return { cotizaciones, notas_venta: notas.map(nota => ({ ...nota, ...calcularNota(nota) })) };
+    return { cotizaciones, notas_venta: notas.map(nota => { const calculo=calcularNota(nota); return { ...nota, estado_pago: calculo.estadoPago, estadoNotaVentaVisible: estadoVisibleNota(nota,calculo.estadoPago), ...calculo }; }) };
   }
 
   async guardarCotizacion(entrada: Entrada) {
@@ -447,6 +447,18 @@ export class M2Controller {
         estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto, observacion: JSON.stringify({ detalleComercial: detalle, persistencia: 'auxiliar_hasta_detalle_nv_estructurado' }),
       } });
     });
+  }
+  async confirmarNotaVenta(idNota:number){
+    return prisma.$transaction(async transaccion=>{
+      const nota=await transaccion.nota_venta.findUnique({where:{id_nota_venta:idNota}});
+      if(!nota)throw new ErrorAplicacion(404,'Nota de Venta no encontrada');
+      if(nota.estado_nota_venta!=='emitida')throw new ErrorAplicacion(409,'Sólo se puede confirmar una Nota de Venta emitida');
+      const documento=await transaccion.nota_venta.update({
+        where:{id_nota_venta:idNota},data:{estado_nota_venta:'confirmada'},
+        include:{...incluirNota,ficha_cliente:{include:{cliente_financiero:true}}},
+      });
+      return {mensaje:'Nota de Venta confirmada',documento};
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
   }
   async anularVenta(idNota: number, entrada: Entrada) {
     return prisma.$transaction(async transaccion => {

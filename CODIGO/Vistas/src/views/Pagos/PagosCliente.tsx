@@ -4,7 +4,7 @@ import { formatearMoneda } from '../../utilidades/moneda';
 import { esMedioCheque, esMedioCredito, filtrarClientesPago, normalizarTextoPago, type ClientePago } from '../../utilidades/pagos';
 
 type Documento={id_documento_tributario:number;folio_documento:string;tipo_documento:{nombre_tipo_documento:string};documento_tributario_nota_venta:{id_nota_venta:number}[]};
-type Nota={id_nota_venta:number;saldoPendiente:number;moneda:{codigo_moneda:string}};
+type Nota={id_nota_venta:number;saldoPendiente:number;estadoPago:string;estado_pago:string;estadoNotaVentaVisible:string;moneda:{codigo_moneda:string}};
 type Medio={id_medio_pago:number;nombre_medio_pago:string};
 type Categoria={id_categoria_pago:number;nombre:string};
 type Cuota={cantidad:number};
@@ -44,7 +44,7 @@ export default function PagosCliente(){
    if(form.idDocumento)payload.idDocumento=form.idDocumento;
    if(nota.moneda.codigo_moneda==='USD'){payload.tipoCambio=form.tipoCambio;payload.tipoCambioManual=tipoCambioOrigen==='manual-fallback';}
    const r=await solicitarFinanzas('/pagos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw new Error(d.error);
-   if(cliente)await cargar(cliente);setForm(formularioVacio);setNota(null);setMensaje(d.mensaje);
+   if(cliente)await cargar(cliente);setForm(formularioVacio);setNota(null);setMensaje(`${d.mensaje}. Estado de la Nota de Venta: ${String(d.estadoNotaVentaVisible || d.estadoPago || d.estado_pago).replaceAll('_',' ').toUpperCase()}`);
  }catch(err){setMensaje((err as Error).message);}};
 
  return <div className="mx-auto min-h-full w-full max-w-7xl p-4 font-sans sm:p-6 lg:p-8">
@@ -52,7 +52,7 @@ export default function PagosCliente(){
    {mensaje&&<p role="status" className="mb-6 rounded-lg border border-orange-100 bg-orange-50 p-4 text-orange-900">{mensaje}</p>}
    <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
     <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="mb-4 text-lg font-semibold text-gray-900">Cliente</h2><label className="block text-sm font-medium text-gray-700">Buscar cliente<input className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5" placeholder="RUT o razón social" value={busqueda} onChange={e=>setBusqueda(e.target.value)}/></label><div className="mt-3 max-h-96 overflow-y-auto">{clientes.map(c=><button type="button" key={c.id_ficha_cliente} onClick={()=>cargar(c).catch(error=>setMensaje(error.message))} className={`w-full rounded-lg border-b p-3 text-left ${cliente?.id_ficha_cliente===c.id_ficha_cliente?'bg-orange-50':'hover:bg-gray-50'}`}>{c.razonSocial}<small className="block text-gray-500">{c.rut||'Sin RUT'}</small></button>)}</div></section>
-    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="mb-4 text-lg font-semibold text-gray-900">Nota de Venta</h2>{!ctx&&<p className="text-sm text-gray-500">Selecciona un cliente.</p>}{ctx?.notas.map(n=><button type="button" key={n.id_nota_venta} onClick={()=>{setNota(n);setTipoCambioOrigen('');setForm(v=>({...v,idDocumento:'',tipoCambio:''}));}} className={`w-full rounded-lg border-b p-3 text-left ${nota?.id_nota_venta===n.id_nota_venta?'bg-orange-50':'hover:bg-gray-50'}`}>NV-{n.id_nota_venta}<span className="block text-sm text-gray-600">Saldo {formatearMoneda(n.saldoPendiente,n.moneda.codigo_moneda)}</span></button>)}</section>
+    <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="mb-4 text-lg font-semibold text-gray-900">Nota de Venta</h2>{!ctx&&<p className="text-sm text-gray-500">Selecciona un cliente.</p>}{ctx?.notas.map(n=><button type="button" key={n.id_nota_venta} onClick={()=>{setNota(n);setTipoCambioOrigen('');setForm(v=>({...v,idDocumento:'',tipoCambio:''}));}} className={`w-full rounded-lg border-b p-3 text-left ${nota?.id_nota_venta===n.id_nota_venta?'bg-orange-50':'hover:bg-gray-50'}`}>NV-{n.id_nota_venta}<span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${n.estadoPago==='parcial'?'bg-yellow-100 text-yellow-800':'bg-gray-100 text-gray-700'}`}>{n.estadoNotaVentaVisible.replaceAll('_',' ')}</span><span className="block text-sm text-gray-600">Saldo {formatearMoneda(n.saldoPendiente,n.moneda.codigo_moneda)}</span></button>)}</section>
     <form onSubmit={registrar} className="space-y-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold text-gray-900">Registrar pago</h2>
       <label className="block text-sm font-medium text-gray-700">Monto<input required type="number" min="0.01" step="0.01" className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5" value={form.monto} onChange={e=>setForm({...form,monto:e.target.value})}/></label>
       <label className="block text-sm font-medium text-gray-700">Medio de pago<select required className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5" value={form.idMedio} onChange={e=>cambiarMedio(e.target.value)}><option value="" disabled>Medio de pago</option>{ctx?.medios.map(m=><option key={m.id_medio_pago} value={m.id_medio_pago}>{esMedioCredito(m.nombre_medio_pago)?'Tarjeta de Crédito':m.nombre_medio_pago}</option>)}</select></label>
