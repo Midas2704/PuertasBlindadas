@@ -31,7 +31,7 @@ function rutValido(rut: string) {
 async function construirCosteoCotizacion(
   transaccion: Prisma.TransactionClient,
   productos: Entrada[],
-  moneda: { id_moneda: number },
+  monedaCostos: { id_moneda: number },
   margen: number,
   permitirAjustes = false,
 ) {
@@ -51,7 +51,7 @@ async function construirCosteoCotizacion(
     const materiales: Prisma.detalle_costo_material_cotizacionCreateWithoutDetalle_cotizacionInput[] = [];
     for (const material of producto.materiales as Entrada[]) {
       const origen = await transaccion.historial_precio_material.findUnique({ where: { id_historial_precio_material: identificador(material.id_historial_precio_material) } });
-      if (!origen || origen.estado_precio !== 'vigente' || origen.id_moneda !== moneda.id_moneda) throw new ErrorAplicacion(400, 'Costo de material no disponible para la moneda elegida');
+      if (!origen || origen.estado_precio !== 'vigente' || origen.id_moneda !== monedaCostos.id_moneda) throw new ErrorAplicacion(400, 'Los materiales de la Cotización deben tener un costo vigente en CLP');
       const cantidadMaterial = numeroNoNegativo(material.cantidad, 'Cantidad de material');
       if (cantidadMaterial <= 0) throw new ErrorAplicacion(400, 'La cantidad de material debe ser mayor a cero');
       const tieneAjuste = permitirAjustes && material.costo_ajustado !== undefined;
@@ -78,9 +78,47 @@ async function construirCosteoCotizacion(
   return { costoTotal, precioSugerido, detalles };
 }
 
+const MOTIVO_TIPO_CAMBIO_COTIZACION = 'Conversión USD/CLP de Cotización';
+const convertirDesdeClp = (monto: Prisma.Decimal, tipoCambio: Prisma.Decimal | null) =>
+  tipoCambio ? monto.div(tipoCambio).toDecimalPlaces(2) : monto.toDecimalPlaces(2);
+
+async function guardarTipoCambioCotizacion(transaccion: Prisma.TransactionClient, idCotizacion: number, tipoCambio: Prisma.Decimal | null) {
+  if (!tipoCambio) return;
+  await transaccion.cotizacion_version.create({ data: {
+    id_cotizacion: idCotizacion, motivo: MOTIVO_TIPO_CAMBIO_COTIZACION,
+    antecedentes: { monedaBase: 'CLP', monedaCotizacion: 'USD', tipoCambio: tipoCambio.toString(), fecha: fechaNegocio() },
+  } });
+}
+
+async function obtenerTipoCambioCotizacion(transaccion: Prisma.TransactionClient, idCotizacion: number, codigoMoneda: string, respaldo?: unknown) {
+  if (codigoMoneda === 'CLP') return null;
+  const version = await transaccion.cotizacion_version.findFirst({
+    where: { id_cotizacion: idCotizacion, motivo: MOTIVO_TIPO_CAMBIO_COTIZACION },
+    orderBy: { id_cotizacion_version: 'desc' },
+  });
+  const antecedente = version?.antecedentes as { tipoCambio?: unknown } | undefined;
+  const valor = antecedente?.tipoCambio;
+  if ((typeof valor === 'string' || typeof valor === 'number') && new Prisma.Decimal(valor).gt(0)) return new Prisma.Decimal(valor);
+  if ((typeof respaldo === 'string' || typeof respaldo === 'number') && new Prisma.Decimal(respaldo).gt(0)) return new Prisma.Decimal(respaldo);
+  throw new ErrorAplicacion(409, 'La Cotización USD no conserva un tipo de cambio histórico válido');
+}
+
 /** M2 CU12–CU41. Compatibilidad del frontend existente; no sustituye la implementación completa de los CU. */
 export class M2Controller {
   constructor(private readonly bancoCentral: BancoCentral = new C_BancoCentral()) {}
+  private async resolverTipoCambioCotizacion(codigoMoneda: string, entrada: Entrada) {
+    if (codigoMoneda === 'CLP') return null;
+    try {
+      const tipoCambio = new Prisma.Decimal(await this.bancoCentral.obtenerTipoCambio('USD', fechaNegocio()));
+      if (!tipoCambio.isFinite() || tipoCambio.lte(0)) throw new ErrorAplicacion(502, 'Banco Central entregó un tipo de cambio inválido');
+      return tipoCambio;
+    } catch (error) {
+      if (entrada.tipoCambioManual !== true) throw error;
+      const tipoCambio = new Prisma.Decimal(numeroNoNegativo(entrada.tipoCambio, 'Tipo de cambio manual'));
+      if (!tipoCambio.isFinite() || tipoCambio.lte(0)) throw new ErrorAplicacion(400, 'El tipo de cambio USD/CLP debe ser mayor a cero');
+      return tipoCambio;
+    }
+  }
   async enTransaccion<T>(accion: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     return prisma.$transaction(accion,{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:30000});
   }
@@ -94,12 +132,14 @@ export class M2Controller {
       if(tipo?.nombre_tipo_cliente_financiero!=='B2C' || cliente.estado_financiero!=='activo' || cliente.nivel_formalizacion!=='formal') throw new ErrorAplicacion(409,'La consolidación exige cliente B2C activo y formalizado');
       if(cotizacion.monto_neto===null || cotizacion.monto_impuesto===null || cotizacion.monto_total_estimado===null || cotizacion.monto_total_estimado.lte(0)) throw new ErrorAplicacion(409,'Completa las condiciones comerciales antes de consolidar');
       // Midas: nota y pago salen juntos de esta transacción, o no sale ninguno
-      const nota=await tx.nota_venta.create({data:{numero_nota_venta:`B2C-${randomUUID()}`,id_cotizacion:idCotizacion,id_ficha_cliente:cotizacion.id_ficha_cliente,id_moneda:cotizacion.id_moneda,fecha_emision:new Date(`${fechaNegocio()}T00:00:00Z`),monto_neto:cotizacion.monto_neto,monto_impuesto:cotizacion.monto_impuesto,monto_total:cotizacion.monto_total_estimado,exento_iva:cotizacion.exento_iva,estado_nota_venta:'emitida'},include:incluirNota});
+      const tipoCambio=await obtenerTipoCambioCotizacion(tx,idCotizacion,cotizacion.moneda.codigo_moneda,entrada.tipoCambio);
+      const nota=await tx.nota_venta.create({data:{numero_nota_venta:`B2C-${randomUUID()}`,id_cotizacion:idCotizacion,id_ficha_cliente:cotizacion.id_ficha_cliente,id_moneda:cotizacion.id_moneda,fecha_emision:new Date(`${fechaNegocio()}T00:00:00Z`),monto_neto:cotizacion.monto_neto,monto_impuesto:cotizacion.monto_impuesto,monto_total:cotizacion.monto_total_estimado,tipo_cambio_usado:tipoCambio,monto_convertido:tipoCambio?cotizacion.monto_total_estimado.mul(tipoCambio).toDecimalPlaces(2):null,exento_iva:cotizacion.exento_iva,estado_nota_venta:'emitida'},include:incluirNota});
       const idDocumento=entrada.idDocumento?identificador(entrada.idDocumento):null;
       const documento=idDocumento?await tx.documento_tributario.findUnique({where:{id_documento_tributario:idDocumento}}):null;
       if(idDocumento&&(!documento || documento.id_ficha_cliente!==nota.id_ficha_cliente))throw new ErrorAplicacion(400,'Selecciona un documento tributario existente del mismo cliente');
       const catalogo={medios:await tx.medio_pago.findMany({where:{estado_medio_pago:'activo'}}),categorias:await tx.categoria_pago.findMany({where:{activo:true}}),cuotas:await tx.config_cuotas_tarjeta.findMany({where:{activo:true}})};
-      const pago=await tx.pago_cliente.create({data:prepararPago(nota,entrada,catalogo,idDocumento,responsable)});
+      const datosPago=tipoCambio?{...entrada,tipoCambio:tipoCambio.toString()}:entrada;
+      const pago=await tx.pago_cliente.create({data:prepararPago(nota,datosPago,catalogo,idDocumento,responsable)});
       const actual=await tx.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta},include:incluirNota});
       await tx.nota_venta.update({where:{id_nota_venta:nota.id_nota_venta},data:{estado_pago:calcularNota(actual).estadoPago}});
       await tx.cotizacion.update({where:{id_cotizacion:idCotizacion},data:{estado_cotizacion:'aprobada'}});
@@ -109,13 +149,19 @@ export class M2Controller {
 
   async aprobarCotizacionB2B(idCotizacion: number, entrada: Entrada) {
     return this.enTransaccion(async tx => {
-      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true } });
+      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true, moneda: true } });
       if (!cot || cot.estado_cotizacion !== 'emitida' || cot.nota_venta) throw new ErrorAplicacion(409, 'La Cotización no está disponible para aceptación');
       if (!cot.fecha_vigencia || cot.fecha_vigencia.toISOString().slice(0, 10) < fechaNegocio()) throw new ErrorAplicacion(409, 'La Cotización está vencida; no se puede aceptar');
       const folio = texto(entrada.folioOrdenCompra, 100); const respaldo = texto(entrada.respaldoOrdenCompra, 4500000);
       if (!folio || !respaldo) throw new ErrorAplicacion(400, 'El folio y respaldo de la Orden de Compra son obligatorios');
       const oc = await tx.orden_compra_b2b.create({ data: { id_cotizacion: idCotizacion, folio, respaldo, fecha: new Date(`${fechaNegocio()}T00:00:00Z`) } });
-      const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: cot.monto_total_estimado || 0, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente' } });
+      let tipoCambio:Prisma.Decimal|null;
+      try{tipoCambio=await obtenerTipoCambioCotizacion(tx,idCotizacion,cot.moneda.codigo_moneda,entrada.tipoCambio);}catch(error){
+        if(!(error instanceof ErrorAplicacion)||cot.moneda.codigo_moneda!=='USD')throw error;
+        tipoCambio=await this.resolverTipoCambioCotizacion(cot.moneda.codigo_moneda,entrada);
+      }
+      const montoTotal=cot.monto_total_estimado || new Prisma.Decimal(0);
+      const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: montoTotal, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio?montoTotal.mul(tipoCambio).toDecimalPlaces(2):null, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente' } });
       await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'aprobada' } });
       return { mensaje: 'Orden de Compra registrada y Nota de Venta generada', idNota: nota.id_nota_venta, ordenCompra: oc };
     });
@@ -245,6 +291,10 @@ export class M2Controller {
     const margen = numeroNoNegativo(entrada.margen_esperado, 'Margen');
     if (margen >= 100) throw new ErrorAplicacion(400, 'El margen debe ser menor a 100 para calcular el precio');
     if (!Array.isArray(entrada.productos) || !entrada.productos.length) throw new ErrorAplicacion(400, 'Incluye al menos un producto');
+    const idMonedaObjetivo=identificador(entrada.id_moneda);
+    const monedaObjetivo=await prisma.moneda.findUnique({where:{id_moneda:idMonedaObjetivo}});
+    if(!monedaObjetivo||monedaObjetivo.estado_moneda!=='activo'||!['CLP','USD'].includes(monedaObjetivo.codigo_moneda))throw new ErrorAplicacion(400,'Moneda no habilitada');
+    const tipoCambio=await this.resolverTipoCambioCotizacion(monedaObjetivo.codigo_moneda,entrada);
     return prisma.$transaction(async transaccion => {
       const fichaDirecta = idFichaCliente ? await transaccion.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFichaCliente }, include: { cliente_financiero: true } }) : null;
       const coincidencias = fichaDirecta ? [] : await transaccion.cliente_financiero.findMany({ where: { rut_cliente: { in: [rut, rutFormateado!], mode: 'insensitive' } }, include: { ficha_cliente: true } });
@@ -252,18 +302,22 @@ export class M2Controller {
       const cliente = fichaDirecta?.cliente_financiero || coincidencias[0];
       if (!cliente || cliente.estado_financiero !== 'activo') throw new ErrorAplicacion(400, 'Cliente no disponible');
       const ficha = fichaDirecta || (cliente as any).ficha_cliente || await transaccion.ficha_cliente.create({ data: { id_cliente_financiero: cliente.id_cliente_financiero } });
-      const moneda = await transaccion.moneda.findUnique({ where: { id_moneda: identificador(entrada.id_moneda) } });
-      if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
-      const { costoTotal, precioSugerido: sugerido, detalles } = await construirCosteoCotizacion(transaccion, entrada.productos as Entrada[], moneda, margen);
+      const monedaLocal=await transaccion.moneda.findUnique({where:{codigo_moneda:'CLP'}});
+      if(!monedaLocal||monedaLocal.estado_moneda!=='activo')throw new ErrorAplicacion(409,'La moneda local CLP no está disponible para costear materiales');
+      const { costoTotal, precioSugerido: sugeridoClp, detalles } = await construirCosteoCotizacion(transaccion, entrada.productos as Entrada[], monedaLocal, margen);
+      const sugerido=convertirDesdeClp(sugeridoClp,tipoCambio);
+      const detallesConvertidos=detalles.map(detalle=>({...detalle,subtotal_item_estimado:convertirDesdeClp(new Prisma.Decimal(detalle.subtotal_item_estimado as Prisma.Decimal),tipoCambio)}));
       const montos = importes(sugerido, entrada.descuento_tipo, entrada.descuento_valor, entrada.exento_iva);
-      return transaccion.cotizacion.create({ data: {
-        id_ficha_cliente: ficha.id_ficha_cliente, id_moneda: moneda.id_moneda,
+      const cotizacion=await transaccion.cotizacion.create({ data: {
+        id_ficha_cliente: ficha.id_ficha_cliente, id_moneda: monedaObjetivo.id_moneda,
         fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), fecha_vigencia: new Date(`${fechaVigencia}T00:00:00Z`),
         subtotal_costos_estimados: costoTotal, margen_esperado: margen, precio_sugerido: sugerido,
         monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total,
         descuento_tipo: entrada.descuento_tipo || null, descuento_valor: entrada.descuento_valor || 0,
-        exento_iva: entrada.exento_iva, estado_cotizacion: 'borrador', detalle_cotizacion: { create: detalles },
+        exento_iva: entrada.exento_iva, estado_cotizacion: 'borrador', detalle_cotizacion: { create: detallesConvertidos },
       } });
+      await guardarTipoCambioCotizacion(transaccion,cotizacion.id_cotizacion,tipoCambio);
+      return cotizacion;
     });
   }
 
@@ -271,6 +325,15 @@ export class M2Controller {
     const margen = numeroNoNegativo(entrada.margen_esperado, 'Margen');
     if (margen >= 100) throw new ErrorAplicacion(400, 'El margen debe ser menor a 100');
     if (!Array.isArray(entrada.materiales) && !Array.isArray(entrada.productos)) throw new ErrorAplicacion(400, 'Materiales o productos inválidos');
+    let tipoCambioEdicion: Prisma.Decimal|null|undefined;
+    if(Array.isArray(entrada.productos)){
+      const referencia=await prisma.cotizacion.findUnique({where:{id_cotizacion:idCotizacion},select:{id_moneda:true}});
+      if(!referencia)throw new ErrorAplicacion(404,'Cotización no encontrada');
+      const idMonedaObjetivo=entrada.id_moneda?identificador(entrada.id_moneda):referencia.id_moneda;
+      const monedaObjetivo=await prisma.moneda.findUnique({where:{id_moneda:idMonedaObjetivo}});
+      if(!monedaObjetivo||monedaObjetivo.estado_moneda!=='activo'||!['CLP','USD'].includes(monedaObjetivo.codigo_moneda))throw new ErrorAplicacion(400,'Moneda no habilitada');
+      tipoCambioEdicion=await this.resolverTipoCambioCotizacion(monedaObjetivo.codigo_moneda,entrada);
+    }
     return prisma.$transaction(async transaccion => {
       const cotizacion = await transaccion.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: incluirCotizacion });
       if (!cotizacion) throw new ErrorAplicacion(404, 'Cotización no encontrada');
@@ -286,7 +349,11 @@ export class M2Controller {
         const moneda = await transaccion.moneda.findUnique({ where: { id_moneda: idMoneda } });
         if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
 
-        const { costoTotal, precioSugerido: calculado, detalles: nuevosDetalles } = await construirCosteoCotizacion(transaccion, entrada.productos as Entrada[], moneda, margen, true);
+        const monedaLocal=await transaccion.moneda.findUnique({where:{codigo_moneda:'CLP'}});
+        if(!monedaLocal||monedaLocal.estado_moneda!=='activo')throw new ErrorAplicacion(409,'La moneda local CLP no está disponible para costear materiales');
+        const { costoTotal, precioSugerido: calculadoClp, detalles } = await construirCosteoCotizacion(transaccion, entrada.productos as Entrada[], monedaLocal, margen, true);
+        const calculado=convertirDesdeClp(calculadoClp,tipoCambioEdicion??null);
+        const nuevosDetalles=detalles.map(detalle=>({...detalle,subtotal_item_estimado:convertirDesdeClp(new Prisma.Decimal(detalle.subtotal_item_estimado as Prisma.Decimal),tipoCambioEdicion??null)}));
         const precioDefinido = entrada.precio_sugerido === undefined ? calculado : new Prisma.Decimal(numeroNoNegativo(entrada.precio_sugerido, 'Precio definido'));
         const descuentoTipo = entrada.descuento_tipo || null;
         const descuentoValor = entrada.descuento_valor ?? 0;
@@ -294,7 +361,9 @@ export class M2Controller {
         const montos = importes(precioDefinido, descuentoTipo, descuentoValor, exento);
         await transaccion.detalle_costo_material_cotizacion.deleteMany({ where: { detalle_cotizacion: { id_cotizacion: idCotizacion } } });
         await transaccion.detalle_cotizacion.deleteMany({ where: { id_cotizacion: idCotizacion } });
-        return transaccion.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { id_ficha_cliente: idFicha, id_moneda: idMoneda, fecha_vigencia: new Date(`${fechaVigencia}T00:00:00Z`), margen_esperado: margen, subtotal_costos_estimados: costoTotal, precio_sugerido: precioDefinido, monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total, descuento_tipo: descuentoTipo as string | null, descuento_valor: numeroNoNegativo(descuentoValor, 'Descuento'), exento_iva: exento, observacion: texto(entrada.observacion, 2000) || null, detalle_cotizacion: { create: nuevosDetalles } }, include: incluirCotizacion });
+        const actualizada=await transaccion.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { id_ficha_cliente: idFicha, id_moneda: idMoneda, fecha_vigencia: new Date(`${fechaVigencia}T00:00:00Z`), margen_esperado: margen, subtotal_costos_estimados: costoTotal, precio_sugerido: precioDefinido, monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total, descuento_tipo: descuentoTipo as string | null, descuento_valor: numeroNoNegativo(descuentoValor, 'Descuento'), exento_iva: exento, observacion: texto(entrada.observacion, 2000) || null, detalle_cotizacion: { create: nuevosDetalles } }, include: incluirCotizacion });
+        await guardarTipoCambioCotizacion(transaccion,idCotizacion,tipoCambioEdicion??null);
+        return actualizada;
       }
 
       const detalles = cotizacion.detalle_cotizacion;
@@ -310,10 +379,14 @@ export class M2Controller {
       }
       let costoTotal = new Prisma.Decimal(0);
       let sugerido = new Prisma.Decimal(0);
+      const monedaLocal=await transaccion.moneda.findUnique({where:{codigo_moneda:'CLP'}});
+      if(!monedaLocal)throw new ErrorAplicacion(409,'La moneda local CLP no está disponible para costear materiales');
+      const tipoCambio=await obtenerTipoCambioCotizacion(transaccion,idCotizacion,cotizacion.moneda.codigo_moneda);
       for (const detalle of detalles) {
         let costo = new Prisma.Decimal(0);
         if (!detalle.detalle_costo_material_cotizacion.length) throw new ErrorAplicacion(409, 'El borrador no tiene un costeo completo; requiere la edición ampliada de M2');
         for (const material of detalle.detalle_costo_material_cotizacion) {
+          if(material.historial_precio_material.id_moneda!==monedaLocal.id_moneda)throw new ErrorAplicacion(409,'El borrador debe actualizar sus materiales a costos locales CLP');
           const cantidad = cantidades.get(material.id_detalle_costo_material_cotizacion) ?? material.cantidad_material_estimada;
           const override = material.id_detalle_costo_material_cotizacion === identificador(entrada.materiales.find((m: Entrada) => m.id_detalle_costo_material_cotizacion)?.id_detalle_costo_material_cotizacion || material.id_detalle_costo_material_cotizacion)
             ? entrada.materiales.find((m: Entrada) => m.id_detalle_costo_material_cotizacion === material.id_detalle_costo_material_cotizacion)?.costo_ajustado
@@ -323,7 +396,8 @@ export class M2Controller {
           costo = costo.plus(subtotal);
           if (cantidades.has(material.id_detalle_costo_material_cotizacion)) await transaccion.detalle_costo_material_cotizacion.update({ where: { id_detalle_costo_material_cotizacion: material.id_detalle_costo_material_cotizacion }, data: { cantidad_material_estimada: cantidad, precio_unitario_usado: precioUsado, subtotal_material_estimado: subtotal, ...(override === undefined ? {} : { observacion: `Costo original ${material.precio_unitario_usado.toString()}; ajuste autorizado` }) } });
         }
-        const subtotal = costo.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2);
+        const subtotalClp = costo.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2);
+        const subtotal=convertirDesdeClp(subtotalClp,tipoCambio);
         costoTotal = costoTotal.plus(costo);
         sugerido = sugerido.plus(subtotal);
         await transaccion.detalle_cotizacion.update({ where: { id_detalle_cotizacion: detalle.id_detalle_cotizacion }, data: { subtotal_item_estimado: subtotal, ...(detalle === primero ? { observacion_medidas: texto(entrada.observacion, 2000) } : {}) } });

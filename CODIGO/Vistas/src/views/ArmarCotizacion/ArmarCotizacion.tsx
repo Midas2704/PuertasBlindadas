@@ -65,7 +65,10 @@ const ArmarCotizacion: React.FC = () => {
   const [fechaVigencia, setFechaVigencia] = useState('');
   const [moneda, setMoneda] = useState<number>(0);
   const [monedas, setMonedas] = useState<{ id_moneda: number; codigo_moneda: string }[]>([]);
+  const [tipoCambio, setTipoCambio] = useState('');
+  const [tipoCambioOrigen, setTipoCambioOrigen] = useState<'C_BancoCentral'|'manual-fallback'|''>('');
   const [exentoIva, setExentoIva] = useState(false);
+  const codigoMoneda = monedas.find(opcion => opcion.id_moneda === moneda)?.codigo_moneda || 'CLP';
   
   const [productos, setProductos] = useState<ProductoSeleccionado[]>([{
     id_interno: Date.now(),
@@ -124,6 +127,11 @@ const ArmarCotizacion: React.FC = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(()=>{
+    if(codigoMoneda!=='USD')return;
+    solicitarFinanzas('/billing/exchange-rate/USD').then(async respuesta=>{const datos=await respuesta.json();if(!respuesta.ok)throw new Error(datos.error);setTipoCambio(String(datos.valor));setTipoCambioOrigen('C_BancoCentral');}).catch(()=>{setTipoCambio('');setTipoCambioOrigen('manual-fallback');setMensaje({text:'Banco Central no disponible: confirma manualmente el tipo de cambio para cotizar en USD.',type:'error'});});
+  },[codigoMoneda]);
+
   useEffect(() => {
     if (!borradorId) return;
     solicitarFinanzas('/billing/pending-approvals').then(res => res.json()).then(data => {
@@ -171,14 +179,10 @@ const ArmarCotizacion: React.FC = () => {
   };
 
   const cambiarMoneda = (idMoneda: number) => {
-    const codigo = monedas.find(opcion => opcion.id_moneda === idMoneda)?.codigo_moneda;
     setMoneda(idMoneda);
     setPrecioDefinido('');
-    setProductos(actuales => actuales.map(producto => ({
-      ...producto,
-      materiales: producto.materiales.filter(seleccion => inventario.find(material => material.id_historial_precio_material === seleccion.id)?.moneda === codigo),
-      materialSearch: '', dropdownMaterialOpen: false,
-    })));
+    setTipoCambio('');
+    setTipoCambioOrigen('');
   };
 
   const handleUpdateMedida = (id_interno: number, dimension: 'alto'|'ancho'|'largo', value: string) => {
@@ -247,7 +251,9 @@ const ArmarCotizacion: React.FC = () => {
   }, 0);
 
   const margenDecimal = margen / 100;
-  const precioSugerido = margenDecimal < 1 ? subtotalCostos / (1 - margenDecimal) : 0;
+  const precioSugeridoClp = margenDecimal < 1 ? subtotalCostos / (1 - margenDecimal) : 0;
+  const factorCambio = codigoMoneda === 'USD' ? Number(tipoCambio) : 1;
+  const precioSugerido = factorCambio > 0 ? precioSugeridoClp / factorCambio : 0;
   const puedeAjustar = sesion?.configuracion === 'gerencia' || sesion?.administrador;
   const precioCotizacion = borradorId && puedeAjustar && precioDefinido !== '' ? precioDefinido : precioSugerido;
   
@@ -263,8 +269,7 @@ const ArmarCotizacion: React.FC = () => {
   const baseImponible = Math.max(0, precioCotizacion - montoDescuento);
   const iva = exentoIva ? 0 : baseImponible * 0.19;
   const totalFinal = baseImponible + iva;
-  const codigoMoneda = monedas.find(opcion => opcion.id_moneda === moneda)?.codigo_moneda || 'CLP';
-  const inventarioCompatible = inventario.filter(material => material.moneda === codigoMoneda);
+  const inventarioLocal = inventario.filter(material => material.moneda === 'CLP');
   // TODO: esto podría quedar más lindo, pero funciona y no molesta
 
   const isDescuentoValido = !aplicarDescuento || 
@@ -279,6 +284,7 @@ const ArmarCotizacion: React.FC = () => {
     if (!rutVal) return setMensaje({ text: 'Debe seleccionar un cliente', type: 'error' });
     if (!borradorId && productos.some(p => p.materiales.length === 0)) return setMensaje({ text: 'Todos los productos deben tener al menos un material', type: 'error' });
     if (!isDescuentoValido) return setMensaje({ text: 'El descuento excede el límite permitido', type: 'error' });
+    if (codigoMoneda === 'USD' && (!(Number(tipoCambio)>0) || !tipoCambioOrigen)) return setMensaje({text:'Confirma un tipo de cambio USD/CLP válido',type:'error'});
     
     setLoading(true);
     try {
@@ -294,6 +300,8 @@ const ArmarCotizacion: React.FC = () => {
           descuento_valor: aplicarDescuento ? valorDescuento : 0,
           precio_sugerido: borradorId && puedeAjustar && precioDefinido !== '' ? precioDefinido : undefined,
           id_moneda: moneda,
+          tipoCambio: codigoMoneda==='USD'?Number(tipoCambio):undefined,
+          tipoCambioManual: codigoMoneda==='USD'&&tipoCambioOrigen==='manual-fallback',
           exento_iva: exentoIva,
           productos: productos.filter(p => p.tipo_producto).map(p => ({
             tipo_producto: p.tipo_producto,
@@ -446,6 +454,11 @@ const ArmarCotizacion: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {codigoMoneda==='USD'&&<label className="mt-4 block max-w-sm text-sm font-medium text-gray-700">Tipo de cambio USD/CLP ({tipoCambioOrigen||'consultando'})
+                <input required type="number" min="0.0001" step="0.0001" readOnly={tipoCambioOrigen==='C_BancoCentral'} value={tipoCambio} onChange={e=>setTipoCambio(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 read-only:bg-gray-100"/>
+                <span className="mt-1 block text-xs font-normal text-gray-500">Los materiales permanecen valorizados en CLP; esta tasa convierte el precio comercial final.</span>
+              </label>}
 
               {borradorId > 0 && <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50 border rounded-lg">
                 <div><span className="block text-xs text-gray-500">Precio sugerido calculado</span><strong>{formatearMoneda(precioSugerido, codigoMoneda)}</strong></div>
@@ -608,13 +621,13 @@ const ArmarCotizacion: React.FC = () => {
                       
                       {prod.dropdownMaterialOpen && (
                         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                          {inventarioCompatible.filter(i =>
+                          {inventarioLocal.filter(i =>
                             i.nombre.toLowerCase().includes(prod.materialSearch.toLowerCase()) || 
                             i.sku.toLowerCase().includes(prod.materialSearch.toLowerCase())
                           ).length === 0 ? (
                             <div className="p-2 text-xs text-gray-500 text-center">Sin resultados</div>
                           ) : (
-                            inventarioCompatible.filter(i =>
+                            inventarioLocal.filter(i =>
                               i.nombre.toLowerCase().includes(prod.materialSearch.toLowerCase()) || 
                               i.sku.toLowerCase().includes(prod.materialSearch.toLowerCase())
                             ).slice(0, 30).map(m => {
@@ -631,7 +644,7 @@ const ArmarCotizacion: React.FC = () => {
                                 >
                                   <div>
                                     <div className="font-semibold">{m.nombre}</div>
-                                    <div className="text-gray-400 text-[10px]">{m.sku} | {formatearMoneda(m.precio_unitario, codigoMoneda)}</div>
+                                    <div className="text-gray-400 text-[10px]">{m.sku} | {formatearMoneda(m.precio_unitario, 'CLP')}</div>
                                   </div>
                                   {isSelected && <Check className="w-3 h-3 text-primary-600" />}
                                 </div>
@@ -665,7 +678,7 @@ const ArmarCotizacion: React.FC = () => {
                                 <input type="number" min="0" step="0.01" value={sel.costo_ajustado ?? mat.precio_unitario} onChange={e => updateCostoMaterial(prod.id_interno, sel.id, e.target.value === '' ? undefined : Number(e.target.value))} className="block w-24 p-1 border border-gray-300 rounded text-right text-xs" />
                               </label>}
                               <div className="w-20 text-right font-medium text-gray-600">
-                                {formatearMoneda((sel.costo_ajustado ?? mat.precio_unitario) * sel.cantidad * prod.cantidad, codigoMoneda)}
+                                {formatearMoneda((sel.costo_ajustado ?? mat.precio_unitario) * sel.cantidad * prod.cantidad, 'CLP')}
                               </div>
                               <button onClick={() => removeMaterial(prod.id_interno, sel.id)} className="text-red-400 hover:text-red-600">
                                 <Trash2 className="w-4 h-4" />
@@ -689,12 +702,12 @@ const ArmarCotizacion: React.FC = () => {
             
             <div className="space-y-3 relative z-10 text-sm">
               <div className="flex justify-between items-center text-primary-100">
-                <span>Subtotal Costos:</span>
-                <span>{formatearMoneda(subtotalCostos, codigoMoneda)}</span>
+                <span>Subtotal Costos (CLP):</span>
+                <span>{formatearMoneda(subtotalCostos, 'CLP')}</span>
               </div>
               <div className="flex justify-between items-center text-primary-100">
-                <span>Margen ({margen}%):</span>
-                <span>{formatearMoneda(precioSugerido - subtotalCostos, codigoMoneda)}</span>
+                <span>Margen ({margen}%, CLP):</span>
+                <span>{formatearMoneda(precioSugeridoClp - subtotalCostos, 'CLP')}</span>
               </div>
               {montoDescuento > 0 && (
                 <div className="flex justify-between items-center text-red-300">

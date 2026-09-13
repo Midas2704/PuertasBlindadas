@@ -63,6 +63,26 @@ test('cotización conserva cantidad y creación/edición comparten el cálculo',
   }
 });
 
+test('cotización USD conserva materiales CLP y convierte solamente el precio comercial', async () => {
+  const tasa=900;const m2=new M2Controller({obtenerTipoCambio:async()=>tasa});
+  const cliente=await prisma.cliente_financiero.findFirstOrThrow({where:{estado_financiero:'activo',nivel_formalizacion:'formal'},include:{ficha_cliente:true}});
+  const clp=await prisma.moneda.findUniqueOrThrow({where:{codigo_moneda:'CLP'}});const usd=await prisma.moneda.findUniqueOrThrow({where:{codigo_moneda:'USD'}});
+  const item=await prisma.item_comercial.findFirstOrThrow({where:{estado_item:'activo'}});const precio=await prisma.historial_precio_material.findFirstOrThrow({where:{id_moneda:clp.id_moneda,estado_precio:'vigente'}});
+  const entrada={id_ficha_cliente:cliente.ficha_cliente.id_ficha_cliente,fecha_vigencia:'2030-01-01',margen_esperado:30,id_moneda:usd.id_moneda,exento_iva:false,productos:[{id_item_comercial:item.id_item_comercial,tipo_producto:item.nombre_item,cantidad:10,medidas:'210x90x5',materiales:[{id_historial_precio_material:precio.id_historial_precio_material,cantidad:1}]}]};
+  let cotizacion;let idNota;
+  try{
+    cotizacion=await m2.guardarCotizacion(entrada);const costoClp=precio.precio_unitario.mul(10);const sugeridoUsd=costoClp.div('0.7').div(tasa).toDecimalPlaces(2);const totalUsd=sugeridoUsd.mul('1.19').toDecimalPlaces(2);
+    const guardada=(await m2.consultarBandeja()).cotizaciones.find(c=>c.id_cotizacion===cotizacion.id_cotizacion);
+    assert.equal(guardada.detalle_cotizacion[0].detalle_costo_material_cotizacion.length,1);assert.equal(guardada.detalle_cotizacion[0].detalle_costo_material_cotizacion[0].historial_precio_material.id_moneda,clp.id_moneda);
+    assert.equal(guardada.subtotal_costos_estimados.toString(),costoClp.toString());assert.equal(guardada.precio_sugerido.toString(),sugeridoUsd.toString());assert.equal(guardada.monto_total_estimado.toString(),totalUsd.toString());
+    const version=await prisma.cotizacion_version.findFirstOrThrow({where:{id_cotizacion:cotizacion.id_cotizacion,motivo:'Conversión USD/CLP de Cotización'},orderBy:{id_cotizacion_version:'desc'}});assert.equal(version.antecedentes.tipoCambio,String(tasa));
+    await prisma.cotizacion.update({where:{id_cotizacion:cotizacion.id_cotizacion},data:{estado_cotizacion:'emitida'}});const aprobada=await m2.aprobarCotizacionB2B(cotizacion.id_cotizacion,{folioOrdenCompra:`TEST-${randomUUID()}`,respaldoOrdenCompra:'respaldo'});idNota=aprobada.idNota;
+    const nota=await prisma.nota_venta.findUniqueOrThrow({where:{id_nota_venta:idNota}});assert.equal(nota.tipo_cambio_usado.toNumber(),tasa);assert.equal(nota.monto_convertido.toString(),nota.monto_total.mul(tasa).toDecimalPlaces(2).toString());
+  }finally{
+    if(idNota)await prisma.nota_venta.delete({where:{id_nota_venta:idNota}});if(cotizacion){await prisma.orden_compra_b2b.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.cotizacion_version.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.detalle_costo_material_cotizacion.deleteMany({where:{detalle_cotizacion:{id_cotizacion:cotizacion.id_cotizacion}}});await prisma.detalle_cotizacion.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.cotizacion.delete({where:{id_cotizacion:cotizacion.id_cotizacion}});}
+  }
+});
+
 test('venta directa conserva original, tasa histórica y equivalente CLP', async () => {
   const banco={obtenerTipoCambio:async()=>900};const m2=new M2Controller(banco);
   const cliente=await prisma.cliente_financiero.findFirstOrThrow({where:{estado_financiero:'activo',nivel_formalizacion:'formal'},include:{ficha_cliente:true}});
@@ -89,5 +109,5 @@ test('pago opcional sin documento actualiza saldo y documento no relacionado se 
 test('UI mantiene fuente de clientes, placeholders y controles condicionales',()=>{
   const pagos=readFileSync('../Vistas/src/views/Pagos/PagosCliente.tsx','utf8');const cotizacion=readFileSync('../Vistas/src/views/ArmarCotizacion/ArmarCotizacion.tsx','utf8');
   assert.match(pagos,/clientesOrigen/);assert.match(pagos,/value="" disabled>Medio de pago/);assert.match(pagos,/value="" disabled>Categoría sugerida/);assert.match(pagos,/\{credito&&/);assert.match(pagos,/setForm\(formularioVacio\)/);
-  assert.match(cotizacion,/inventarioCompatible/);assert.match(cotizacion,/materiales: \[\]/);
+  assert.match(cotizacion,/inventarioLocal/);assert.doesNotMatch(cotizacion,/materiales: producto\.materiales\.filter/);assert.match(cotizacion,/materiales: \[\]/);
 });
