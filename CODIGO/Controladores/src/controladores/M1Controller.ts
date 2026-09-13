@@ -3,22 +3,22 @@ import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, efectoPago, incluirCotizacion, incluirNota, incluirPago, resumirNotas, clasificarPorVencer } from '../utilidades/finanzas';
 import { FiltrosClientes, identificador } from '../validaciones/solicitudes';
+import { normalizarRut, validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 
 /** M1 CU01–CU11: catálogo, ficha y mantenimiento de clientes. */
 export class M1Controller {
   async crearCliente(entrada: Record<string, unknown>) {
-    const rut = typeof entrada.rut === 'string' ? entrada.rut.replace(/\./g, '').trim().toUpperCase() : '';
+    const rut = validarYNormalizarRut(entrada.rut);
     const nombre = typeof entrada.nombre === 'string' ? entrada.nombre.trim() : '';
     const tipoNombre = typeof entrada.tipo === 'string' ? entrada.tipo.trim() : '';
     if (!nombre || !tipoNombre) throw new ErrorAplicacion(400, 'Completa nombre o Razón Social y tipo de cliente');
     if (tipoNombre.toUpperCase() === 'B2B' && !rut) throw new ErrorAplicacion(400, 'El RUT es obligatorio para clientes B2B');
-    const rutFormateado = rut && rut.includes('-') ? `${rut.split('-')[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${rut.split('-')[1]}` : rut || null;
     return prisma.$transaction(async tx => {
       const tipo = await tx.tipo_cliente_financiero.findFirst({ where: { nombre_tipo_cliente_financiero: { equals: tipoNombre, mode: 'insensitive' } } });
       if (!tipo) throw new ErrorAplicacion(400, 'Tipo de cliente no válido');
-      if (rut && await tx.cliente_financiero.findFirst({ where: { rut_cliente: { in: [rut, rutFormateado || rut], mode: 'insensitive' } } })) throw new ErrorAplicacion(409, 'Ya existe un cliente con ese RUT');
+      if (rut && await tx.cliente_financiero.findFirst({ where: { rut_cliente: { in: variantesRut(rut), mode: 'insensitive' } } })) throw new ErrorAplicacion(409, 'Ya existe un cliente con ese RUT');
       const cliente = await tx.cliente_financiero.create({ data: {
-        rut_cliente: rutFormateado,
+        rut_cliente: rut,
         id_tipo_cliente_financiero: tipo.id_tipo_cliente_financiero,
         nombre_razon_social_referencia: nombre,
         contacto_financiero: typeof entrada.contacto === 'string' ? entrada.contacto.trim() : null,
@@ -93,12 +93,10 @@ export class M1Controller {
   }
 
   async abrirFicha(referencia: string, consulta: Record<string, unknown> = {}) {
-    const rut = referencia.replace(/\./g, '').toUpperCase();
-    const partes = rut.split('-');
-    const rutFormateado = `${partes[0]?.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${partes[1]}`;
+    const rutFormateado = normalizarRut(referencia);
     const condicion: Prisma.cliente_financieroWhereInput = referencia.startsWith('id-')
       ? { id_cliente_financiero: identificador(referencia.slice(3)) }
-      : { rut_cliente: { in: [rut, rutFormateado], mode: 'insensitive' } };
+      : { rut_cliente: { in: rutFormateado ? variantesRut(rutFormateado) : [referencia], mode: 'insensitive' } };
     return prisma.$transaction(async transaccion => {
       const cliente = await transaccion.cliente_financiero.findFirst({ where: condicion, include: {
         tipo_cliente_financiero: true,

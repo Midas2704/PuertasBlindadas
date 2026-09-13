@@ -19,6 +19,13 @@ interface Cliente {
   saldosPorMoneda: { moneda: string; saldoPendiente: number }[];
 }
 
+const formatearRut = (valor: string) => {
+  const limpio = valor.replace(/[.\s-]/g, '').toUpperCase();
+  if (!/^\d{1,8}[0-9K]$/.test(limpio)) return valor.trim().toUpperCase();
+  const cuerpo = limpio.slice(0, -1).replace(/^0+(?=\d)/, '');
+  return `${cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${limpio.slice(-1)}`;
+};
+
 const CatalogoClientes: React.FC = () => {
   const {sesion}=usarSesion();
   const [clientes, fijarClientes] = useState<Cliente[]>([]);
@@ -72,7 +79,7 @@ const CatalogoClientes: React.FC = () => {
 
       {nuevo && <form onSubmit={guardar} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
         <select aria-label="Tipo de cliente" className="px-3 py-2 border rounded-lg" value={formulario.tipo} onChange={e=>fijarFormulario({...formulario,tipo:e.target.value})}><option>B2B</option><option>B2C</option></select>
-        <input className="px-3 py-2 border rounded-lg" placeholder="RUT (opcional para B2C)" value={formulario.rut} onChange={e=>fijarFormulario({...formulario,rut:e.target.value})}/>
+        <input className="px-3 py-2 border rounded-lg" placeholder="RUT (opcional para B2C)" value={formulario.rut} onChange={e=>fijarFormulario({...formulario,rut:e.target.value})} onBlur={()=>fijarFormulario({...formulario,rut:formatearRut(formulario.rut)})}/>
         <input required className="px-3 py-2 border rounded-lg" placeholder="Nombre o Razón Social" value={formulario.nombre} onChange={e=>fijarFormulario({...formulario,nombre:e.target.value})}/>
         <input className="px-3 py-2 border rounded-lg" placeholder="Contacto" value={formulario.contacto} onChange={e=>fijarFormulario({...formulario,contacto:e.target.value})}/>
         <input type="email" className="px-3 py-2 border rounded-lg" placeholder="Correo" value={formulario.correo} onChange={e=>fijarFormulario({...formulario,correo:e.target.value})}/>

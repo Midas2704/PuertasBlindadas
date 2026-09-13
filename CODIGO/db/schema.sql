@@ -731,7 +731,7 @@ CREATE TABLE finanzas.tipo_cliente_financiero (
 
 CREATE TABLE finanzas.cliente_financiero (
     id_cliente_financiero integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    rut_cliente varchar(15) NOT NULL UNIQUE,
+    rut_cliente varchar(15) UNIQUE,
     id_tipo_cliente_financiero integer NOT NULL,
     nombre_razon_social_referencia varchar(150) NOT NULL,
     contacto_financiero varchar(150),
@@ -741,9 +741,7 @@ CREATE TABLE finanzas.cliente_financiero (
     fecha_actualizacion_datos_cliente timestamp NOT NULL DEFAULT current_timestamp,
     CONSTRAINT fk_cliente_financiero_tipo_cliente FOREIGN KEY (id_tipo_cliente_financiero)
         REFERENCES tipo_cliente_financiero (id_tipo_cliente_financiero) ON DELETE RESTRICT,
-    CONSTRAINT chk_cliente_financiero_estado CHECK (estado_financiero IN ('activo', 'inactivo', 'bloqueado')),
-    CONSTRAINT fk_cli_fin_cliente_ext FOREIGN KEY (rut_cliente)
-            REFERENCES terreno.cliente (cliente_cliente_rut) ON DELETE RESTRICT
+    CONSTRAINT chk_cliente_financiero_estado CHECK (estado_financiero IN ('activo', 'inactivo', 'bloqueado'))
 );
 
 CREATE TABLE finanzas.ficha_cliente (
@@ -1788,7 +1786,7 @@ CREATE TABLE finanzas.tarea_remunerable (
 -- COMENTARIOS, ÍNDICES Y VISTAS FINANCIERAS
 -- ============================================================
 
-COMMENT ON COLUMN finanzas.cliente_financiero.rut_cliente IS 'FK física hacia terreno.cliente(cliente_cliente_rut). Finanzas conserva solo la representación financiera del cliente.';
+COMMENT ON COLUMN finanzas.cliente_financiero.rut_cliente IS 'RUT propio del cliente financiero; no requiere existencia previa en terreno.cliente.';
 
 COMMENT ON COLUMN finanzas.historial_precio_material.material_sku IS 'FK física hacia inventario.material(material_sku). Finanzas consulta el material para precio/costo, no administra stock.';
 

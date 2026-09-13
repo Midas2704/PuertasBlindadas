@@ -96,7 +96,6 @@ model cliente_financiero {
   telefono_financiero               String?                 @db.VarChar(30)
   estado_financiero                 String                  @default("activo") @db.VarChar(20)
   fecha_actualizacion_datos_cliente DateTime                @default(now()) @db.Timestamp(6)
-  cliente                           cliente?                @relation(fields: [rut_cliente], references: [cliente_cliente_rut], onUpdate: NoAction, map: "fk_cli_fin_cliente_ext")
   tipo_cliente_financiero           tipo_cliente_financiero @relation(fields: [id_tipo_cliente_financiero], references: [id_tipo_cliente_financiero], onUpdate: NoAction, map: "fk_cliente_financiero_tipo_cliente")
   ficha_cliente                     ficha_cliente?
 
@@ -1547,7 +1546,6 @@ model cliente {
   cliente_cliente_b2b_representante_legal_segundo_nombre   String?
   cliente_cliente_b2b_representante_legal_primer_apellido  String?
   cliente_cliente_b2b_representante_legal_segundo_apellido String?
-  cliente_financiero                                       cliente_financiero?
   obra                                                     obra[]
   proyecto                                                 proyecto[]
 
