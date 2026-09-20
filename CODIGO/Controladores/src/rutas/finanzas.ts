@@ -35,7 +35,12 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/proveedores/:id/corregir-identidad', derivar('corregirIdentidadProveedor'));
   rutas.post('/proveedores/:id/desactivar', derivar('desactivarProveedor'));
   rutas.post('/proveedores/:id/reactivar', derivar('reactivarProveedor'));
+  rutas.put('/proveedores/:id/condicion-pago', derivar('actualizarCondicionPagoProveedor'));
   rutas.get('/proveedores/:id/ficha', derivar('abrirFichaProveedor'));
+  rutas.get('/ordenes-compra-servicios', derivar('listarOrdenesCompraServicios'));
+  rutas.get('/ordenes-compra-servicios/:id', derivar('obtenerOrdenCompraServicio'));
+  rutas.post('/ordenes-compra-servicios', derivar('crearOrdenCompraServicio'));
+  rutas.put('/ordenes-compra-servicios/:id', derivar('modificarOrdenCompraServicio'));
   rutas.get('/dashboard/stats', derivar('dashboard'));
   rutas.get('/billing/inventory', derivar('inventario'));
   rutas.get('/billing/products', derivar('productos'));

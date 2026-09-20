@@ -1,17 +1,18 @@
 import { usarSesion, operar } from '../../seguridad/Sesion';
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, FileSignature, Receipt, ShieldCheck, CheckSquare, Truck } from 'lucide-react';
+import { ClipboardList, LayoutDashboard, Users, FileSignature, Receipt, ShieldCheck, CheckSquare, Truck } from 'lucide-react';
 
 const DashboardWrapper: React.FC = () => {
   const {sesion,actualizar}=usarSesion();
-  const permisosRuta:Record<string,string>={'/':'CU05','/clientes':'CU05','/proveedores':'CU80','/cotizacion/nueva':'CU19','/venta/directa':'CU27','/aprobaciones':'CU20','/pagos':'CU42','/usuarios':'CU67','/sesiones':'CU73','/configuracion/umbral':'CU41'};
+  const permisosRuta:Record<string,string>={'/':'CU05','/clientes':'CU05','/proveedores':'CU80','/ordenes-compra-servicios':'CU88','/cotizacion/nueva':'CU19','/venta/directa':'CU27','/aprobaciones':'CU20','/pagos':'CU42','/usuarios':'CU67','/sesiones':'CU73','/configuracion/umbral':'CU41'};
   const location = useLocation();
 
   const menuItems = [
     { path: '/', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
     { path: '/clientes', label: 'Catálogo de Clientes', icon: <Users className="w-5 h-5" /> },
     { path: '/proveedores', label: 'Proveedores', icon: <Truck className="w-5 h-5" /> },
+    { path: '/ordenes-compra-servicios', label: 'OC de Servicios', icon: <ClipboardList className="w-5 h-5" /> },
     { path: '/cotizacion/nueva', label: 'Armar Cotización', icon: <FileSignature className="w-5 h-5" /> },
     { path: '/venta/directa', label: 'Nueva Venta Directa', icon: <Receipt className="w-5 h-5" /> },
     { path: '/pagos', label: 'Pagos y Recaudación', icon: <Receipt className="w-5 h-5" /> },

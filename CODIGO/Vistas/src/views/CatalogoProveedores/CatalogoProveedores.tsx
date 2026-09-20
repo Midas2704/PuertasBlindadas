@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, Edit3, Eye, Plus, Power, RefreshCcw, Search, ShieldCheck, X } from 'lucide-react';
+import { ArrowUpDown, Building2, Edit3, Eye, Plus, Power, RefreshCcw, Search, ShieldCheck, X } from 'lucide-react';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
 
@@ -38,11 +38,14 @@ export default function CatalogoProveedores() {
   const navegar = useNavigate();
   const { sesion } = usarSesion();
   const puede = (permiso: string) => !!sesion?.permisos.includes(permiso);
+  const puedeOrdenar = puede('CU86');
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [catalogos, setCatalogos] = useState<Catalogos>({ paises: [], tiposIdentificador: [], tiposProveedor: [] });
   const [busqueda, setBusqueda] = useState('');
   const [estado, setEstado] = useState('todos');
   const [situacion, setSituacion] = useState('todos');
+  const [ordenar, setOrdenar] = useState('razonSocial');
+  const [direccion, setDireccion] = useState('asc');
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
   const [mensaje, setMensaje] = useState('');
@@ -60,12 +63,13 @@ export default function CatalogoProveedores() {
       setCargando(true); setError('');
       const parametros = new URLSearchParams({ estado, situacion });
       if (busqueda.trim()) parametros.set('busqueda', busqueda.trim());
+      if (puedeOrdenar) { parametros.set('ordenar', ordenar); parametros.set('direccion', direccion); }
       respuestaJson(`/proveedores?${parametros}`, { signal: cancelacion.signal })
         .then(setProveedores).catch(causa => { if (!cancelacion.signal.aborted) setError(causa.message); })
         .finally(() => { if (!cancelacion.signal.aborted) setCargando(false); });
     }, 250);
     return () => { window.clearTimeout(espera); cancelacion.abort(); };
-  }, [busqueda, estado, situacion, version]);
+  }, [busqueda, estado, situacion, ordenar, direccion, version, puedeOrdenar]);
 
   const abrir = async (modo: Modo, proveedor?: Proveedor) => {
     setError(''); setMensaje('');
@@ -110,10 +114,11 @@ export default function CatalogoProveedores() {
         {puede('CU75') && <button onClick={() => void abrir('nuevo')} className="flex items-center gap-2 rounded-md bg-primary-600 px-4 py-2.5 font-semibold text-white hover:bg-primary-700"><Plus className="h-4 w-4"/>Nuevo proveedor</button>}
       </header>
       {(error || mensaje) && <div className={`mb-4 rounded-md border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{error || mensaje}</div>}
-      <section className="mb-5 grid gap-3 border-y border-gray-200 bg-white px-4 py-4 md:grid-cols-[1fr_180px_190px]">
+      <section className={`mb-5 grid gap-3 border-y border-gray-200 bg-white px-4 py-4 ${puedeOrdenar ? 'md:grid-cols-[minmax(260px,1fr)_160px_180px_180px_130px]' : 'md:grid-cols-[1fr_180px_190px]'}`}>
         <label className="relative"><span className="sr-only">Buscar proveedor</span><Search className="absolute left-3 top-3 h-4 w-4 text-gray-400"/><input value={busqueda} onChange={evento => setBusqueda(evento.target.value)} placeholder="Razón social o identificación fiscal" className="w-full rounded-md border border-gray-300 py-2.5 pl-10 pr-3 outline-none focus:border-primary-500"/></label>
         <select aria-label="Filtrar por estado" value={estado} onChange={evento => setEstado(evento.target.value)} className="rounded-md border border-gray-300 px-3 py-2.5"><option value="todos">Todos los estados</option><option value="activo">Activos</option><option value="inactivo">Inactivos</option></select>
         <select aria-label="Filtrar por situación" value={situacion} onChange={evento => setSituacion(evento.target.value)} className="rounded-md border border-gray-300 px-3 py-2.5"><option value="todos">Toda situación</option><option value="vencida">Vencida</option><option value="por vencer">Por vencer</option><option value="por pagar">Por pagar</option><option value="sin deuda">Sin deuda</option></select>
+        {puedeOrdenar && <><label className="relative"><span className="sr-only">Ordenar proveedores</span><ArrowUpDown className="absolute left-3 top-3 h-4 w-4 text-gray-400"/><select aria-label="Ordenar proveedores" value={ordenar} onChange={evento => setOrdenar(evento.target.value)} className="w-full rounded-md border border-gray-300 py-2.5 pl-10 pr-3"><option value="razonSocial">Razón social</option><option value="identificador">Identificador</option><option value="saldoPendiente">Saldo pendiente</option></select></label><select aria-label="Dirección del orden" value={direccion} onChange={evento => setDireccion(evento.target.value)} className="rounded-md border border-gray-300 px-3 py-2.5"><option value="asc">Ascendente</option><option value="desc">Descendente</option></select></>}
       </section>
       <div className="overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
         <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="border-b bg-gray-50 text-gray-600"><tr><th className="px-4 py-3">Identificación</th><th className="px-4 py-3">Razón social</th><th className="px-4 py-3">País</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3 text-right">Saldo pendiente</th><th className="px-4 py-3">Situación</th><th className="px-4 py-3 text-right">Acciones</th></tr></thead>

@@ -8,6 +8,7 @@ import { identificador, texto } from '../validaciones/solicitudes';
 type Entrada = Record<string, unknown>;
 type Transaccion = Prisma.TransactionClient;
 export type SituacionProveedor = 'Vencida' | 'Por vencer' | 'Por pagar' | 'Sin deuda';
+export type TipoComputoPago = 'DIAS_CORRIDOS' | 'DIAS_HABILES';
 
 const TIPOS_PROVEEDOR = ['Insumos/Materiales', 'Servicios', 'Ambos'] as const;
 const DIAS_POR_VENCER_M5 = 5; // TEMPORAL_M5_DB_PATCH: configuración propia de M5 aún no existe.
@@ -96,6 +97,71 @@ const motivoObligatorio = (valor: unknown) => {
   return motivo;
 };
 const contacto = (valor: unknown, maximo: number) => valor === null || valor === '' ? null : texto(valor, maximo) || null;
+const direccionOrden = (valor: unknown) => {
+  const direccion = texto(valor || 'desc', 10).toLowerCase();
+  if (!['asc', 'desc'].includes(direccion)) throw new ErrorAplicacion(400, 'Dirección permitida: asc o desc');
+  return direccion as 'asc' | 'desc';
+};
+const montoPositivo = (valor: unknown) => {
+  const monto = Number(valor);
+  if (!Number.isFinite(monto) || monto <= 0) throw new ErrorAplicacion(400, 'El monto autorizado debe ser numérico y mayor que cero');
+  return new Prisma.Decimal(monto).toDecimalPlaces(2);
+};
+const condicionPago = (diasEntrada: unknown, tipoEntrada: unknown) => {
+  const dias = Number(diasEntrada);
+  const tipo = texto(tipoEntrada, 20).toUpperCase();
+  if (!Number.isInteger(dias) || dias < 0) throw new ErrorAplicacion(400, 'La cantidad de días debe ser un entero mayor o igual que cero');
+  if (!['DIAS_CORRIDOS', 'DIAS_HABILES'].includes(tipo)) throw new ErrorAplicacion(400, 'Tipo de cómputo permitido: DIAS_CORRIDOS o DIAS_HABILES');
+  return { dias, tipoComputo: tipo as TipoComputoPago };
+};
+
+function pascua(anio: number) {
+  const a = anio % 19; const b = Math.floor(anio / 100); const c = anio % 100;
+  const d = Math.floor(b / 4); const e = b % 4; const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3); const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4); const k = c % 4; const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451); const mes = Math.floor((h + l - 7 * m + 114) / 31);
+  return new Date(Date.UTC(anio, mes - 1, (h + l - 7 * m + 114) % 31 + 1));
+}
+
+/** Calendario laboral chileno mínimo y determinista para vencimientos prospectivos de M5. */
+export function esDiaHabilChile(fecha: Date) {
+  const diaSemana = fecha.getUTCDay();
+  if (diaSemana === 0 || diaSemana === 6) return false;
+  const mesDia = `${String(fecha.getUTCMonth() + 1).padStart(2, '0')}-${String(fecha.getUTCDate()).padStart(2, '0')}`;
+  const fijos = new Set(['01-01', '05-01', '05-21', '06-20', '07-16', '08-15', '09-18', '09-19', '10-12', '10-31', '11-01', '12-08', '12-25']);
+  if (fijos.has(mesDia)) return false;
+  const domingoPascua = pascua(fecha.getUTCFullYear());
+  const diferencia = Math.round((fecha.getTime() - domingoPascua.getTime()) / 86400000);
+  return diferencia !== -2 && diferencia !== -1;
+}
+
+export function calcularFechaVencimientoProveedor(fechaBase: Date, dias: number, tipoComputo: TipoComputoPago) {
+  const condicion = condicionPago(dias, tipoComputo);
+  const fecha = new Date(Date.UTC(fechaBase.getUTCFullYear(), fechaBase.getUTCMonth(), fechaBase.getUTCDate()));
+  if (condicion.tipoComputo === 'DIAS_CORRIDOS') {
+    fecha.setUTCDate(fecha.getUTCDate() + condicion.dias);
+    return fecha;
+  }
+  let restantes = condicion.dias;
+  while (restantes > 0) {
+    fecha.setUTCDate(fecha.getUTCDate() + 1);
+    if (esDiaHabilChile(fecha)) restantes--;
+  }
+  return fecha;
+}
+
+export function calcularResumenOcs(montoAutorizado: Prisma.Decimal | number) {
+  const monto = Number(montoAutorizado);
+  // TEMPORAL_M5_DB_PATCH: CU91+ incorporará asociaciones reales para calcular consumo.
+  const montoDocumentado = 0;
+  return { montoAutorizado: monto, montoDocumentado, saldoDisponible: Math.max(0, monto - montoDocumentado) };
+}
+
+export function ocsTieneEfectosFinancieros(_idOcs: number) {
+  // TEMPORAL_M5_DB_PATCH: aún no existen relaciones OCS-documento u OCS-obligación.
+  return false;
+}
 
 export class M5Controller {
   private async identidad(tx: Transaccion, entrada: Entrada, actual?: { id_pais: number | null; id_tipo_identificador: number; identificador_tributario: string }) {
@@ -249,16 +315,19 @@ export class M5Controller {
     const busqueda = texto(consulta.busqueda, 150).toLocaleLowerCase('es-CL');
     const estado = texto(consulta.estado || 'activo', 20).toLowerCase();
     const situacion = texto(consulta.situacion || 'todos', 30).toLowerCase();
+    const ordenar = texto(consulta.ordenar, 30);
+    const direccion = direccionOrden(consulta.direccion || 'asc');
     if (!['activo', 'inactivo', 'todos'].includes(estado)) throw new ErrorAplicacion(400, 'Estado permitido: Activo, Inactivo o Todos');
     const situaciones: Record<string, SituacionProveedor | undefined> = { vencida: 'Vencida', 'por vencer': 'Por vencer', por_vencer: 'Por vencer', 'por pagar': 'Por pagar', por_pagar: 'Por pagar', 'sin deuda': 'Sin deuda', sin_deuda: 'Sin deuda', todos: undefined };
     if (!(situacion in situaciones)) throw new ErrorAplicacion(400, 'Situación permitida: Vencida, Por vencer, Por pagar, Sin deuda o Todos');
+    if (ordenar && !['razonSocial', 'identificador', 'saldoPendiente'].includes(ordenar)) throw new ErrorAplicacion(400, 'Orden permitido: razonSocial, identificador o saldoPendiente');
     const proveedores = await prisma.proveedor.findMany({
       where: estado === 'todos' ? {} : { estado_proveedor: estado },
       include: { pais: true, tipo_identificador: true, documento_compra_proveedor: { include: incluirDocumentos } },
       orderBy: [{ nombre_razon_social: 'asc' }, { id_proveedor: 'asc' }],
     });
     const identificadorBuscado = busqueda.replace(/[.\s-]/g, '');
-    return proveedores.map(proveedor => {
+    const resultado = proveedores.map(proveedor => {
       const resumen = calcularResumenFinancieroProveedor(proveedor.documento_compra_proveedor);
       return {
         idProveedor: proveedor.id_proveedor,
@@ -273,9 +342,22 @@ export class M5Controller {
       };
     }).filter(proveedor => (!busqueda || proveedor.razonSocial.toLocaleLowerCase('es-CL').includes(busqueda) || proveedor.identificadorFiscal.replace(/[.\s-]/g, '').toLowerCase().includes(identificadorBuscado))
       && (!situaciones[situacion] || proveedor.situacionFinanciera === situaciones[situacion]));
+    if (!ordenar) return resultado;
+    const factor = direccion === 'asc' ? 1 : -1;
+    return resultado.sort((a, b) => {
+      let comparacion = 0;
+      if (ordenar === 'razonSocial') comparacion = a.razonSocial.localeCompare(b.razonSocial, 'es-CL', { sensitivity: 'base' });
+      if (ordenar === 'identificador') comparacion = a.identificadorFiscal.localeCompare(b.identificadorFiscal, 'es-CL', { numeric: true, sensitivity: 'base' });
+      if (ordenar === 'saldoPendiente') comparacion = a.saldoPendienteTotal - b.saldoPendienteTotal;
+      return comparacion === 0 ? a.idProveedor - b.idProveedor : comparacion * factor;
+    });
   }
 
-  async abrirFichaProveedor(id: number) {
+  async abrirFichaProveedor(id: number, consulta: Record<string, unknown> = {}) {
+    const tipoAntecedente = texto(consulta.tipoAntecedente || 'todos', 30).toLowerCase();
+    const estadoAntecedente = texto(consulta.estadoAntecedente, 30).toLowerCase();
+    const direccion = direccionOrden(consulta.direccion || 'desc');
+    if (!['todos', 'historial', 'documentos', 'pagos'].includes(tipoAntecedente)) throw new ErrorAplicacion(400, 'Tipo de antecedente permitido: historial, documentos, pagos o todos');
     const proveedor = await prisma.proveedor.findUnique({ where: { id_proveedor: id }, include: {
       pais: true,
       tipo_identificador: true,
@@ -287,14 +369,121 @@ export class M5Controller {
     } });
     if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
     const resumenFinanciero = calcularResumenFinancieroProveedor(proveedor.documento_compra_proveedor);
+    const factor = direccion === 'asc' ? 1 : -1;
+    const ordenarFecha = <T>(items: T[], fecha: (item: T) => Date) => items.sort((a, b) => factor * (fecha(a).getTime() - fecha(b).getTime()));
+    const historialCondicion = proveedor.historial_proveedor_m5.find(item => item.campo === 'condicion_pago');
+    const historial = tipoAntecedente === 'todos' || tipoAntecedente === 'historial'
+      ? ordenarFecha(proveedor.historial_proveedor_m5.map(item => ({ id: item.id_historial_proveedor_m5, campo: item.campo, valorAnterior: item.valor_anterior, valorNuevo: item.valor_nuevo, motivo: item.motivo, fechaHora: item.fecha_hora, usuario: item.usuario.acceso_m4 || item.usuario.usuario_username || item.usuario_id_usuario.toString() })), item => item.fechaHora)
+      : [];
+    const documentos = tipoAntecedente === 'todos' || tipoAntecedente === 'documentos'
+      ? ordenarFecha(resumenFinanciero.obligaciones.filter(item => !estadoAntecedente || item.estadoPago.toLowerCase() === estadoAntecedente), item => item.fechaEmision)
+      : [];
+    const pagos = tipoAntecedente === 'todos' || tipoAntecedente === 'pagos'
+      ? ordenarFecha(proveedor.pago_proveedor.map(pago => ({ id: pago.id_pago_proveedor, fecha: pago.fecha_pago, monto: Number(pago.monto_pago), moneda: pago.moneda.codigo_moneda, estado: pago.estado_pago })).filter(item => !estadoAntecedente || item.estado.toLowerCase() === estadoAntecedente), item => item.fecha)
+      : [];
     return {
       identidad: { idProveedor: proveedor.id_proveedor, pais: proveedor.pais?.nombre_pais || 'País no informado', idPais: proveedor.id_pais, tipoIdentificador: proveedor.tipo_identificador.nombre_tipo_identificador, idTipoIdentificador: proveedor.id_tipo_identificador, identificadorFiscal: proveedor.identificador_tributario, razonSocial: proveedor.nombre_razon_social, tipoProveedor: proveedor.tipo_proveedor_m5 },
       contacto: { nombre: proveedor.contacto_proveedor, correo: proveedor.correo_proveedor, telefono: proveedor.telefono_proveedor, direccion: proveedor.direccion_proveedor, correosAdicionales: proveedor.proveedor_contacto_correo.map(item => item.proveedor_contacto_correo), telefonosAdicionales: proveedor.proveedor_contacto_telefono.map(item => item.proveedor_contacto_telefono) },
       estado: proveedor.estado_proveedor,
-      condicionPago: proveedor.condicion_pago_m5 || null,
+      condicionPago: proveedor.condicion_pago_dias_m5 === null || !proveedor.condicion_pago_tipo_m5 ? null : { dias: proveedor.condicion_pago_dias_m5, tipoComputo: proveedor.condicion_pago_tipo_m5, ultimaActualizacion: historialCondicion?.fecha_hora || null },
       resumenFinanciero,
-      historial: proveedor.historial_proveedor_m5.map(item => ({ id: item.id_historial_proveedor_m5, campo: item.campo, valorAnterior: item.valor_anterior, valorNuevo: item.valor_nuevo, motivo: item.motivo, fechaHora: item.fecha_hora, usuario: item.usuario.acceso_m4 || item.usuario.usuario_username || item.usuario_id_usuario.toString() })),
-      antecedentes: { documentos: resumenFinanciero.obligaciones, pagos: proveedor.pago_proveedor.map(pago => ({ id: pago.id_pago_proveedor, fecha: pago.fecha_pago, monto: Number(pago.monto_pago), moneda: pago.moneda.codigo_moneda, estado: pago.estado_pago })) },
+      historial,
+      antecedentes: { documentos, pagos },
     };
+  }
+
+  async actualizarCondicionPagoProveedor(id: number, entrada: Entrada, usuario: bigint) {
+    const nueva = condicionPago(valorEntrada(entrada, 'dias', 'cantidadDias'), valorEntrada(entrada, 'tipoComputo', 'tipo_computo'));
+    return prisma.$transaction(async tx => {
+      const proveedor = await tx.proveedor.findUnique({ where: { id_proveedor: id } });
+      if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
+      const anterior = proveedor.condicion_pago_dias_m5 === null || !proveedor.condicion_pago_tipo_m5 ? null : { dias: proveedor.condicion_pago_dias_m5, tipoComputo: proveedor.condicion_pago_tipo_m5 };
+      if (anterior?.dias === nueva.dias && anterior.tipoComputo === nueva.tipoComputo) throw new ErrorAplicacion(400, 'La condición de pago no presenta cambios');
+      await tx.proveedor.update({ where: { id_proveedor: id }, data: { condicion_pago_dias_m5: nueva.dias, condicion_pago_tipo_m5: nueva.tipoComputo } });
+      const historial = await tx.historial_proveedor_m5.create({ data: { id_proveedor: id, campo: 'condicion_pago', valor_anterior: anterior ? JSON.stringify(anterior) : null, valor_nuevo: JSON.stringify(nueva), usuario_id_usuario: usuario } });
+      return { mensaje: 'Condición de pago actualizada', condicionPago: { ...nueva, ultimaActualizacion: historial.fecha_hora } };
+    });
+  }
+
+  private presentarOcs(orden: Prisma.orden_compra_servicio_m5GetPayload<{ include: { proveedor: true; usuario_creador: true; historial: { include: { usuario: true } } } }>) {
+    return {
+      id: orden.id_orden_compra_servicio_m5,
+      proveedor: { id: orden.proveedor.id_proveedor, razonSocial: orden.proveedor.nombre_razon_social, estado: orden.proveedor.estado_proveedor },
+      estado: orden.estado_ocs,
+      ...calcularResumenOcs(orden.monto_autorizado),
+      referencia: orden.referencia,
+      periodo: orden.periodo,
+      descripcion: orden.descripcion,
+      fechaCreacion: orden.fecha_creacion,
+      fechaActualizacion: orden.fecha_actualizacion,
+      creadoPor: { id: orden.creado_por.toString(), nombre: orden.usuario_creador.acceso_m4 || orden.usuario_creador.usuario_username || orden.creado_por.toString() },
+      historial: orden.historial.map(item => ({ id: item.id_historial_ocs_m5, campo: item.campo, valorAnterior: item.valor_anterior, valorNuevo: item.valor_nuevo, fechaHora: item.fecha_hora, usuario: item.usuario.acceso_m4 || item.usuario.usuario_username || item.usuario_id_usuario.toString() })),
+    };
+  }
+
+  private readonly incluirOcs = { proveedor: true, usuario_creador: true, historial: { include: { usuario: true }, orderBy: { fecha_hora: 'desc' as const } } };
+
+  async listarOrdenesCompraServicios() {
+    const ordenes = await prisma.orden_compra_servicio_m5.findMany({ include: this.incluirOcs, orderBy: [{ fecha_creacion: 'desc' }, { id_orden_compra_servicio_m5: 'desc' }] });
+    return ordenes.map(orden => this.presentarOcs(orden));
+  }
+
+  async obtenerOrdenCompraServicio(id: number) {
+    const orden = await prisma.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id }, include: this.incluirOcs });
+    if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
+    return this.presentarOcs(orden);
+  }
+
+  async crearOrdenCompraServicio(entrada: Entrada, usuario: bigint) {
+    const idProveedor = identificador(valorEntrada(entrada, 'idProveedor', 'id_proveedor'));
+    const montoAutorizado = montoPositivo(valorEntrada(entrada, 'montoAutorizado', 'monto_autorizado'));
+    return prisma.$transaction(async tx => {
+      const proveedor = await tx.proveedor.findUnique({ where: { id_proveedor: idProveedor } });
+      if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
+      if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'Sólo puede utilizarse un proveedor Activo para una OCS');
+      const orden = await tx.orden_compra_servicio_m5.create({ data: {
+        id_proveedor: idProveedor,
+        monto_autorizado: montoAutorizado,
+        estado_ocs: 'abierta',
+        referencia: contacto(entrada.referencia, 150),
+        periodo: contacto(entrada.periodo, 50),
+        descripcion: contacto(entrada.descripcion, 1000),
+        creado_por: usuario,
+      } });
+      await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion', valor_anterior: null, valor_nuevo: JSON.stringify({ idProveedor, montoAutorizado: Number(montoAutorizado), estado: 'abierta' }), usuario_id_usuario: usuario } });
+      const completa = await tx.orden_compra_servicio_m5.findUniqueOrThrow({ where: { id_orden_compra_servicio_m5: orden.id_orden_compra_servicio_m5 }, include: this.incluirOcs });
+      return this.presentarOcs(completa);
+    });
+  }
+
+  async modificarOrdenCompraServicio(id: number, entrada: Entrada, usuario: bigint) {
+    if (['id', 'idOcs', 'creadoPor', 'creado_por', 'fechaCreacion', 'fecha_creacion', 'estado', 'estado_ocs'].some(campo => entrada[campo] !== undefined)) throw new ErrorAplicacion(400, 'No puede modificarse ID, creador, fecha de creación ni estado mediante CU90');
+    return prisma.$transaction(async tx => {
+      const actual = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id } });
+      if (!actual) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
+      if (ocsTieneEfectosFinancieros(id)) throw new ErrorAplicacion(409, 'La OCS ya tiene efectos financieros; debe utilizarse el flujo de ajuste CU91');
+      const data: Prisma.orden_compra_servicio_m5UncheckedUpdateInput = { fecha_actualizacion: new Date() };
+      const cambios: Prisma.historial_orden_compra_servicio_m5CreateManyInput[] = [];
+      if (entrada.idProveedor !== undefined || entrada.id_proveedor !== undefined) {
+        const idProveedor = identificador(valorEntrada(entrada, 'idProveedor', 'id_proveedor'));
+        const proveedor = await tx.proveedor.findUnique({ where: { id_proveedor: idProveedor } });
+        if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
+        if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'Sólo puede utilizarse un proveedor Activo para una OCS');
+        if (idProveedor !== actual.id_proveedor) { data.id_proveedor = idProveedor; cambios.push({ id_ocs_m5: id, campo: 'proveedor', valor_anterior: String(actual.id_proveedor), valor_nuevo: String(idProveedor), usuario_id_usuario: usuario }); }
+      }
+      if (entrada.montoAutorizado !== undefined || entrada.monto_autorizado !== undefined) {
+        const monto = montoPositivo(valorEntrada(entrada, 'montoAutorizado', 'monto_autorizado'));
+        if (!monto.equals(actual.monto_autorizado)) { data.monto_autorizado = monto; cambios.push({ id_ocs_m5: id, campo: 'monto_autorizado', valor_anterior: actual.monto_autorizado.toString(), valor_nuevo: monto.toString(), usuario_id_usuario: usuario }); }
+      }
+      for (const [campo, maximo] of [['referencia', 150], ['periodo', 50], ['descripcion', 1000]] as const) if (entrada[campo] !== undefined) {
+        const nuevo = contacto(entrada[campo], maximo);
+        if (nuevo !== actual[campo]) { data[campo] = nuevo; cambios.push({ id_ocs_m5: id, campo, valor_anterior: actual[campo], valor_nuevo: nuevo, usuario_id_usuario: usuario }); }
+      }
+      if (!cambios.length) throw new ErrorAplicacion(400, 'La OCS no presenta cambios');
+      await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: id }, data });
+      await tx.historial_orden_compra_servicio_m5.createMany({ data: cambios });
+      const completa = await tx.orden_compra_servicio_m5.findUniqueOrThrow({ where: { id_orden_compra_servicio_m5: id }, include: this.incluirOcs });
+      return this.presentarOcs(completa);
+    });
   }
 }

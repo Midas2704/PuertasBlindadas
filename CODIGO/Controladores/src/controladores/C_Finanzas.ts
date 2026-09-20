@@ -15,7 +15,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'iniciarSesion' | 'solicitarRecuperacion' | 'recuperarClave' | 'validarRecuperacion' | 'miSesion' | 'cambiarClave' | 'cerrarSesion'
   | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
   | 'asignarPermisos' | 'retirarPermisos' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
-  | 'crearProveedor' | 'actualizarProveedor' | 'corregirIdentidadProveedor' | 'desactivarProveedor' | 'reactivarProveedor' | 'listarProveedores' | 'abrirFichaProveedor' | 'catalogosProveedores';
+  | 'crearProveedor' | 'actualizarProveedor' | 'corregirIdentidadProveedor' | 'desactivarProveedor' | 'reactivarProveedor' | 'listarProveedores' | 'abrirFichaProveedor' | 'catalogosProveedores'
+  | 'actualizarCondicionPagoProveedor' | 'listarOrdenesCompraServicios' | 'obtenerOrdenCompraServicio' | 'crearOrdenCompraServicio' | 'modificarOrdenCompraServicio';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -52,7 +53,9 @@ export class C_Finanzas {
       if(solicitud.consulta?.busqueda) adicionales.push('CU81');
       if(solicitud.consulta?.estado && String(solicitud.consulta.estado).toLowerCase()!=='todos') adicionales.push('CU82');
       if(solicitud.consulta?.situacion && String(solicitud.consulta.situacion).toLowerCase()!=='todos') adicionales.push('CU83');
+      if(solicitud.consulta?.ordenar || solicitud.consulta?.direccion) adicionales.push('CU86');
     }
+    if(operacion==='abrirFichaProveedor' && (solicitud.consulta?.tipoAntecedente || solicitud.consulta?.estadoAntecedente || solicitud.consulta?.direccion)) adicionales.push('CU85');
     const actor = (this.autorizacion ? await this.autorizacion.autorizar(operacion, solicitud.contexto) : await this.m4.autorizar(operacion, solicitud.contexto,adicionales)) as ActorAutenticado;
     // Sólo inyección explícita en pruebas. La ejecución normal siempre usa M4.
     // TODO: dejar documentado el adaptador de pruebas cuando cerremos la integración
@@ -74,8 +77,13 @@ export class C_Finanzas {
       case 'desactivarProveedor': return this.m5.cambiarEstadoProveedor(identificador(parametros.id), 'inactivo', cuerpo.confirmado === true, actor.id);
       case 'reactivarProveedor': return this.m5.cambiarEstadoProveedor(identificador(parametros.id), 'activo', cuerpo.confirmado === true, actor.id);
       case 'listarProveedores': return this.m5.listarProveedores(solicitud.consulta || {});
-      case 'abrirFichaProveedor': return this.m5.abrirFichaProveedor(identificador(parametros.id));
+      case 'abrirFichaProveedor': return this.m5.abrirFichaProveedor(identificador(parametros.id), solicitud.consulta || {});
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
+      case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
+      case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();
+      case 'obtenerOrdenCompraServicio': return this.m5.obtenerOrdenCompraServicio(identificador(parametros.id));
+      case 'crearOrdenCompraServicio': return this.m5.crearOrdenCompraServicio(cuerpo, actor.id);
+      case 'modificarOrdenCompraServicio': return this.m5.modificarOrdenCompraServicio(identificador(parametros.id), cuerpo, actor.id);
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();

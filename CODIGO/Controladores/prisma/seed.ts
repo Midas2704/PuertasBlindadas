@@ -116,15 +116,15 @@ async function sembrarM5() {
       return fecha;
     };
     const escenarios = [
-      { clave: 'SIN-DEUDA', rut: '76.543.210-3', nombre: 'Demo M5 Acero Austral', estado: 'activo', tipo: 'Insumos/Materiales', contacto: 'Camila Soto', correo: 'camila.demo@example.invalid', telefono: '+56 9 5555 0101', condicion: null, total: 0, vence: null },
-      { clave: 'INACTIVO', rut: '76.543.211-1', nombre: 'Demo M5 Servicios Históricos', estado: 'inactivo', tipo: 'Servicios', contacto: 'Tomás Vera', correo: 'tomas.demo@example.invalid', telefono: '+56 9 5555 0102', condicion: null, total: 0, vence: null },
-      { clave: 'POR-PAGAR', rut: '76.543.212-K', nombre: 'Demo M5 Materiales Andinos', estado: 'activo', tipo: 'Ambos', contacto: 'Elena Ruiz', correo: 'elena.demo@example.invalid', telefono: '+56 9 5555 0103', condicion: '30 días', total: 120000, vence: null },
-      { clave: 'POR-VENCER', rut: '76.543.213-8', nombre: 'Demo M5 Logística Central', estado: 'activo', tipo: 'Servicios', contacto: 'Marco Díaz', correo: 'marco.demo@example.invalid', telefono: '+56 9 5555 0104', condicion: '15 días', total: 240000, vence: fechaHabil(3) },
-      { clave: 'VENCIDA', rut: '76.543.214-6', nombre: 'Demo M5 Suministros del Sur', estado: 'activo', tipo: 'Insumos/Materiales', contacto: 'Sofía Lagos', correo: 'sofia.demo@example.invalid', telefono: '+56 9 5555 0105', condicion: 'Contado', total: 360000, vence: fechaHabil(-2) },
+      { clave: 'SIN-DEUDA', rut: '76.543.210-3', nombre: 'Demo M5 Acero Austral', estado: 'activo', tipo: 'Insumos/Materiales', contacto: 'Camila Soto', correo: 'camila.demo@example.invalid', telefono: '+56 9 5555 0101', condicionDias: 0, condicionTipo: 'DIAS_CORRIDOS', total: 0, vence: null },
+      { clave: 'INACTIVO', rut: '76.543.211-1', nombre: 'Demo M5 Servicios Históricos', estado: 'inactivo', tipo: 'Servicios', contacto: 'Tomás Vera', correo: 'tomas.demo@example.invalid', telefono: '+56 9 5555 0102', condicionDias: null, condicionTipo: null, total: 0, vence: null },
+      { clave: 'POR-PAGAR', rut: '76.543.212-K', nombre: 'Demo M5 Materiales Andinos', estado: 'activo', tipo: 'Ambos', contacto: 'Elena Ruiz', correo: 'elena.demo@example.invalid', telefono: '+56 9 5555 0103', condicionDias: 30, condicionTipo: 'DIAS_CORRIDOS', total: 120000, vence: null },
+      { clave: 'POR-VENCER', rut: '76.543.213-8', nombre: 'Demo M5 Logística Central', estado: 'activo', tipo: 'Servicios', contacto: 'Marco Díaz', correo: 'marco.demo@example.invalid', telefono: '+56 9 5555 0104', condicionDias: 15, condicionTipo: 'DIAS_HABILES', total: 240000, vence: fechaHabil(3) },
+      { clave: 'VENCIDA', rut: '76.543.214-6', nombre: 'Demo M5 Suministros del Sur', estado: 'activo', tipo: 'Insumos/Materiales', contacto: 'Sofía Lagos', correo: 'sofia.demo@example.invalid', telefono: '+56 9 5555 0105', condicionDias: null, condicionTipo: null, total: 360000, vence: fechaHabil(-2) },
     ] as const;
     for (const escenario of escenarios) {
       const existente = await tx.proveedor.findFirst({ where: { id_pais: pais.id_pais, id_tipo_identificador: tipoIdentificador.id_tipo_identificador, identificador_tributario: escenario.rut } });
-      const datos = { id_pais: pais.id_pais, id_tipo_identificador: tipoIdentificador.id_tipo_identificador, identificador_tributario: escenario.rut, nombre_razon_social: escenario.nombre, tipo_proveedor_m5: escenario.tipo, contacto_proveedor: escenario.contacto, correo_proveedor: escenario.correo, telefono_proveedor: escenario.telefono, direccion_proveedor: 'Dirección ficticia para demostración M5', condicion_pago_m5: escenario.condicion, estado_proveedor: escenario.estado };
+      const datos = { id_pais: pais.id_pais, id_tipo_identificador: tipoIdentificador.id_tipo_identificador, identificador_tributario: escenario.rut, nombre_razon_social: escenario.nombre, tipo_proveedor_m5: escenario.tipo, contacto_proveedor: escenario.contacto, correo_proveedor: escenario.correo, telefono_proveedor: escenario.telefono, direccion_proveedor: 'Dirección ficticia para demostración M5', condicion_pago_dias_m5: escenario.condicionDias, condicion_pago_tipo_m5: escenario.condicionTipo, estado_proveedor: escenario.estado };
       const proveedor = existente ? await tx.proveedor.update({ where: { id_proveedor: existente.id_proveedor }, data: datos }) : await tx.proveedor.create({ data: datos });
       if (!await tx.historial_proveedor_m5.findFirst({ where: { id_proveedor: proveedor.id_proveedor, motivo: 'Datos ficticios M5' } })) await tx.historial_proveedor_m5.create({ data: { id_proveedor: proveedor.id_proveedor, campo: escenario.estado === 'inactivo' ? 'estado' : 'razon_social', valor_anterior: escenario.estado === 'inactivo' ? 'activo' : null, valor_nuevo: escenario.estado === 'inactivo' ? 'inactivo' : escenario.nombre, motivo: 'Datos ficticios M5', usuario_id_usuario: usuario.usuario_id_usuario } });
       if (escenario.total > 0) {
@@ -138,8 +138,19 @@ async function sembrarM5() {
         }
       }
     }
+    const ordenesDemo = [
+      { referencia: 'DEMO-M5-OCS-ASESORIA', rut: '76.543.210-3', monto: 480000, periodo: '2026-09', descripcion: 'Asesoría técnica ficticia' },
+      { referencia: 'DEMO-M5-OCS-LOGISTICA', rut: '76.543.213-8', monto: 725000, periodo: '2026-10', descripcion: 'Servicio logístico ficticio' },
+      { referencia: 'DEMO-M5-OCS-MANTENCION', rut: '76.543.213-8', monto: 315000, periodo: null, descripcion: 'Mantención preventiva ficticia' },
+    ];
+    for (const demo of ordenesDemo) {
+      const proveedor = await tx.proveedor.findFirstOrThrow({ where: { identificador_tributario: demo.rut, estado_proveedor: 'activo' } });
+      const existente = await tx.orden_compra_servicio_m5.findFirst({ where: { referencia: demo.referencia } });
+      const orden = existente ? await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: existente.id_orden_compra_servicio_m5 }, data: { id_proveedor: proveedor.id_proveedor, monto_autorizado: demo.monto, periodo: demo.periodo, descripcion: demo.descripcion } }) : await tx.orden_compra_servicio_m5.create({ data: { id_proveedor: proveedor.id_proveedor, monto_autorizado: demo.monto, estado_ocs: 'abierta', referencia: demo.referencia, periodo: demo.periodo, descripcion: demo.descripcion, creado_por: usuario.usuario_id_usuario } });
+      if (!await tx.historial_orden_compra_servicio_m5.findFirst({ where: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion' } })) await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion', valor_nuevo: JSON.stringify({ idProveedor: proveedor.id_proveedor, montoAutorizado: demo.monto, estado: 'abierta' }), usuario_id_usuario: usuario.usuario_id_usuario } });
+    }
   }, { timeout: 60000 });
-  console.log('Seed M5 completado: proveedores ficticios para catálogo, filtros y fichas.');
+  console.log('Seed M5 completado: proveedores y OCS ficticias para CU75-CU90.');
 }
 
 sembrar().then(sembrarM4).then(sembrarM5).catch(error => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());

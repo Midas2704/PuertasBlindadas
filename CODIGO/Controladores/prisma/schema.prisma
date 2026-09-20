@@ -843,7 +843,8 @@ model proveedor {
   identificador_tributario    String                        @db.VarChar(50)
   nombre_razon_social         String                        @db.VarChar(150)
   tipo_proveedor_m5           String                        @default("Ambos") @db.VarChar(30)
-  condicion_pago_m5           String?                       @db.VarChar(150)
+  condicion_pago_dias_m5      Int?
+  condicion_pago_tipo_m5      String?                       @db.VarChar(20)
   nacionalidad_origen         String?                       @db.VarChar(80)
   contacto_proveedor          String?                       @db.VarChar(150)
   correo_proveedor            String?                       @db.VarChar(150)
@@ -865,6 +866,7 @@ model proveedor {
   proveedor_contacto_correo   proveedor_contacto_correo[]
   proveedor_contacto_telefono proveedor_contacto_telefono[]
   historial_proveedor_m5      historial_proveedor_m5[]
+  orden_compra_servicio_m5    orden_compra_servicio_m5[]
 
   @@unique([id_pais, id_tipo_identificador, identificador_tributario], map: "uq_proveedor_identidad_m5")
   @@index([id_pais, id_tipo_identificador, identificador_tributario], map: "idx_proveedor_identidad_m5")
@@ -885,6 +887,43 @@ model historial_proveedor_m5 {
   usuario                    usuario   @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_proveedor_m5_usuario")
 
   @@index([id_proveedor, fecha_hora], map: "idx_historial_proveedor_m5_proveedor_fecha")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: persistencia mínima de OCS para CU88-CU90.
+model orden_compra_servicio_m5 {
+  id_orden_compra_servicio_m5 Int                                  @id @default(autoincrement())
+  id_proveedor                 Int
+  monto_autorizado             Decimal                              @db.Decimal(14, 2)
+  estado_ocs                   String                               @default("abierta") @db.VarChar(20)
+  referencia                   String?                              @db.VarChar(150)
+  periodo                      String?                              @db.VarChar(50)
+  descripcion                  String?
+  fecha_creacion               DateTime                             @default(now()) @db.Timestamptz(6)
+  fecha_actualizacion          DateTime                             @default(now()) @db.Timestamptz(6)
+  creado_por                   BigInt
+  proveedor                    proveedor                            @relation(fields: [id_proveedor], references: [id_proveedor], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_proveedor")
+  usuario_creador              usuario                              @relation("ocs_m5_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_creador")
+  historial                    historial_orden_compra_servicio_m5[]
+
+  @@index([id_proveedor, fecha_creacion], map: "idx_ocs_m5_proveedor_fecha")
+  @@index([estado_ocs, fecha_creacion], map: "idx_ocs_m5_estado_fecha")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: trazabilidad mínima de creación y modificación directa de OCS.
+model historial_orden_compra_servicio_m5 {
+  id_historial_ocs_m5 Int                      @id @default(autoincrement())
+  id_ocs_m5            Int
+  campo                String                   @db.VarChar(80)
+  valor_anterior       String?
+  valor_nuevo          String?
+  usuario_id_usuario   BigInt
+  fecha_hora           DateTime                 @default(now()) @db.Timestamptz(6)
+  orden_compra         orden_compra_servicio_m5 @relation(fields: [id_ocs_m5], references: [id_orden_compra_servicio_m5], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_ocs_m5_ocs")
+  usuario              usuario                  @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_ocs_m5_usuario")
+
+  @@index([id_ocs_m5, fecha_hora], map: "idx_historial_ocs_m5_ocs_fecha")
   @@schema("finanzas")
 }
 
@@ -2060,6 +2099,8 @@ model usuario {
   perfil                                           perfil?                  @relation(fields: [perfil_id_perfil], references: [perfil_id_perfil], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_perfil_id_perfil")
   usuario_contrasena                               usuario_contrasena[]
   historial_proveedor_m5                           historial_proveedor_m5[]
+  orden_compra_servicio_m5                         orden_compra_servicio_m5[]              @relation("ocs_m5_creador")
+  historial_orden_compra_servicio_m5               historial_orden_compra_servicio_m5[]
 
   @@schema("terreno")
 }
