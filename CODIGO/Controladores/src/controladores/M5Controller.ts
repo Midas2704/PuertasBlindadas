@@ -4,11 +4,23 @@ import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { diasHabilesEntre, fechaNegocio, fechaRegistro } from '../utilidades/finanzas';
 import { validarYNormalizarRut } from '../utilidades/rut';
 import { identificador, texto } from '../validaciones/solicitudes';
+import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 
 type Entrada = Record<string, unknown>;
 type Transaccion = Prisma.TransactionClient;
 export type SituacionProveedor = 'Vencida' | 'Por vencer' | 'Por pagar' | 'Sin deuda';
 export type TipoComputoPago = 'DIAS_CORRIDOS' | 'DIAS_HABILES';
+
+export function sumarDiasHabilesChile(fecha: string, dias: number, feriados = new Set<string>()) {
+  const cursor = new Date(`${fecha}T00:00:00Z`);
+  let restantes = dias;
+  while (restantes > 0) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const clave = cursor.toISOString().slice(0, 10);
+    if (cursor.getUTCDay() !== 0 && cursor.getUTCDay() !== 6 && !feriados.has(clave)) restantes--;
+  }
+  return cursor.toISOString().slice(0, 10);
+}
 
 const TIPOS_PROVEEDOR = ['Insumos/Materiales', 'Servicios', 'Ambos'] as const;
 const DIAS_POR_VENCER_M5 = 5; // TEMPORAL_M5_DB_PATCH: configuración propia de M5 aún no existe.
@@ -106,6 +118,16 @@ const motivoObligatorio = (valor: unknown) => {
   return motivo;
 };
 const contacto = (valor: unknown, maximo: number) => valor === null || valor === '' ? null : texto(valor, maximo) || null;
+const fechaEntrada = (valor: unknown, nombre: string) => {
+  const cadena = texto(valor, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cadena) || Number.isNaN(new Date(`${cadena}T00:00:00Z`).getTime())) throw new ErrorAplicacion(400, `${nombre} inválida`);
+  return new Date(`${cadena}T00:00:00Z`);
+};
+const folioNormalizado = (valor: unknown) => {
+  const folio = texto(valor, 80).trim().replace(/\s+/g, ' ');
+  if (!folio) throw new ErrorAplicacion(400, 'El folio o número es obligatorio');
+  return { folio, normalizado: folio.toLocaleUpperCase('es-CL') };
+};
 const direccionOrden = (valor: unknown) => {
   const direccion = texto(valor || 'desc', 10).toLowerCase();
   if (!['asc', 'desc'].includes(direccion)) throw new ErrorAplicacion(400, 'Dirección permitida: asc o desc');
@@ -184,6 +206,7 @@ export function evaluarCierreOcs(montoAutorizado: Prisma.Decimal | number, monto
 }
 
 export class M5Controller {
+  constructor(private readonly bancoCentral: BancoCentral = new C_BancoCentral()) {}
   private async identidad(tx: Transaccion, entrada: Entrada, actual?: { id_pais: number | null; id_tipo_identificador: number; identificador_tributario: string }) {
     const idPais = valorEntrada(entrada, 'idPais', 'id_pais', 'pais');
     const idTipo = valorEntrada(entrada, 'idTipoIdentificador', 'id_tipo_identificador', 'tipoIdentificador');
@@ -433,6 +456,7 @@ export class M5Controller {
       ...calcularResumenOcs(orden.monto_autorizado, orden.efectos_financieros),
       tieneEfectosFinancieros: orden.efectos_financieros.length > 0,
       montoAutorizadoOriginal: Number(orden.monto_autorizado_original),
+      idMoneda: orden.id_moneda,
       referencia: orden.referencia,
       periodo: orden.periodo,
       descripcion: orden.descripcion,
@@ -458,10 +482,12 @@ export class M5Controller {
   async crearOrdenCompraServicio(entrada: Entrada, usuario: bigint) {
     const idProveedor = identificador(valorEntrada(entrada, 'idProveedor', 'id_proveedor'));
     const montoAutorizado = montoPositivo(valorEntrada(entrada, 'montoAutorizado', 'monto_autorizado'));
+    const idMoneda = entrada.idMoneda === undefined && entrada.id_moneda === undefined ? null : identificador(valorEntrada(entrada, 'idMoneda', 'id_moneda'));
     return prisma.$transaction(async tx => {
       const proveedor = await tx.proveedor.findUnique({ where: { id_proveedor: idProveedor } });
       if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
       if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'Sólo puede utilizarse un proveedor Activo para una OCS');
+      if (idMoneda && !await tx.moneda.findFirst({ where: { id_moneda: idMoneda, estado_moneda: 'activo' } })) throw new ErrorAplicacion(404, 'Moneda activa no encontrada');
       const orden = await tx.orden_compra_servicio_m5.create({ data: {
         id_proveedor: idProveedor,
         monto_autorizado: montoAutorizado,
@@ -471,6 +497,7 @@ export class M5Controller {
         periodo: contacto(entrada.periodo, 50),
         descripcion: contacto(entrada.descripcion, 1000),
         creado_por: usuario,
+        id_moneda: idMoneda,
       } });
       await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion', valor_anterior: null, valor_nuevo: JSON.stringify({ idProveedor, montoAutorizado: Number(montoAutorizado), estado: 'abierta' }), usuario_id_usuario: usuario } });
       const completa = await tx.orden_compra_servicio_m5.findUniqueOrThrow({ where: { id_orden_compra_servicio_m5: orden.id_orden_compra_servicio_m5 }, include: incluirOcs });
@@ -625,7 +652,7 @@ export class M5Controller {
   private presentarDocumentoProveedor(documento: DocumentoProveedor & { proveedor: { id_proveedor: number; nombre_razon_social: string }; tipo_documento: { nombre_tipo_documento: string }; moneda: { codigo_moneda: string } }) {
     const resumen = calcularResumenFinancieroProveedor([documento]).obligaciones[0];
     return {
-      id: documento.id_documento_compra_proveedor,
+      id: `legacy-${documento.id_documento_compra_proveedor}`,
       fuente: 'documento_compra_proveedor',
       proveedor: { id: documento.proveedor.id_proveedor, razonSocial: documento.proveedor.nombre_razon_social },
       tipoDocumento: documento.tipo_documento.nombre_tipo_documento,
@@ -643,6 +670,261 @@ export class M5Controller {
     };
   }
 
+  private async documentoM5(id: number, tx: Transaccion | typeof prisma = prisma) {
+    const documento = await tx.documento_proveedor_m5.findUnique({ where: { id_documento_m5: id } });
+    if (!documento) throw new ErrorAplicacion(404, 'Documento M5 de proveedor no encontrado');
+    return documento;
+  }
+
+  private async presentarDocumentoM5(documento: Prisma.documento_proveedor_m5GetPayload<Record<string, never>>) {
+    const [proveedor, tipo, moneda, asociaciones, obligacion, propuesta] = await Promise.all([
+      prisma.proveedor.findUnique({ where: { id_proveedor: documento.id_proveedor } }),
+      prisma.tipo_documento.findUnique({ where: { id_tipo_documento: documento.id_tipo_documento } }),
+      prisma.moneda.findUnique({ where: { id_moneda: documento.id_moneda } }),
+      prisma.asociacion_documento_oc_m5.findMany({ where: { id_documento_m5: documento.id_documento_m5 }, orderBy: { id_asociacion_m5: 'asc' } }),
+      prisma.obligacion_proveedor_m5.findUnique({ where: { id_documento_m5: documento.id_documento_m5 } }),
+      prisma.propuesta_imputacion_m5.findFirst({ where: { id_documento_m5: documento.id_documento_m5 }, orderBy: { id_propuesta_imputacion_m5: 'desc' } }),
+    ]);
+    const clasificaciones = await prisma.clasificacion_asociacion_m5.findMany({ where: { id_asociacion_m5: { in: asociaciones.map(item => item.id_asociacion_m5) } } });
+    const categorias = await prisma.categoria_egreso_m5.findMany({ where: { id_categoria_egreso_m5: { in: clasificaciones.map(item => item.id_categoria_egreso_m5) } } });
+    const listo = documento.clase === 'definitivo' && asociaciones.length > 0 && !!documento.fecha_vencimiento
+      && asociaciones.every(a => a.estado_excedente !== 'pendiente' && a.estado_excedente !== 'rechazado')
+      && asociaciones.every(a => clasificaciones.filter(c => c.id_asociacion_m5 === a.id_asociacion_m5).reduce((s, c) => s.plus(c.monto), new Prisma.Decimal(0)).equals(a.monto_asignado))
+      && propuesta?.estado === 'confirmado' && (moneda?.codigo_moneda === 'CLP' || !!documento.tipo_cambio);
+    return {
+      id: `m5-${documento.id_documento_m5}`, idM5: documento.id_documento_m5, fuente: 'documento_proveedor_m5', clase: documento.clase,
+      proveedor: { id: documento.id_proveedor, razonSocial: proveedor?.nombre_razon_social || 'Proveedor no disponible' }, tipoDocumento: tipo?.nombre_tipo_documento || 'No disponible',
+      numero: documento.folio, fechaEmision: documento.fecha_emision, fechaVencimiento: documento.fecha_vencimiento, moneda: moneda?.codigo_moneda || 'No disponible', montoTotal: Number(documento.monto_total),
+      estadoDocumental: documento.estado, saldoPendiente: obligacion ? Number(obligacion.saldo_actual) : 0, clasificacionM5: documento.clase, asociacionOrdenCompra: asociaciones.length ? asociaciones.map(a => a.tipo_orden === 'OCS' ? `OCS-${a.id_ocs_m5}` : a.tipo_orden).join(', ') : 'Sin asociación',
+      descripcion: documento.descripcion, asociaciones: asociaciones.map(a => ({ id: a.id_asociacion_m5, tipoOrden: a.tipo_orden, idOcs: a.id_ocs_m5, montoAsignado: Number(a.monto_asignado), estadoDiferencia: a.estado_diferencia, estadoExcedente: a.estado_excedente, montoExcedente: Number(a.monto_excedente), esFinal: a.es_documento_final })),
+      clasificaciones: clasificaciones.map(c => ({ id: c.id_clasificacion_m5, idAsociacion: c.id_asociacion_m5, idCategoria: c.id_categoria_egreso_m5, categoria: categorias.find(k => k.id_categoria_egreso_m5 === c.id_categoria_egreso_m5)?.nombre || 'No disponible', monto: Number(c.monto) })),
+      propuestaImputacion: propuesta ? { id: propuesta.id_propuesta_imputacion_m5, estado: propuesta.estado, preparadoPor: propuesta.preparado_por.toString() } : null,
+      progreso: { asociaciones: asociaciones.length > 0, vencimiento: !!documento.fecha_vencimiento, clasificacion: clasificaciones.length > 0, imputacion: propuesta?.estado || 'pendiente', moneda: moneda?.codigo_moneda === 'CLP' || !!documento.tipo_cambio, listoObligacion: listo }, obligacion,
+    };
+  }
+
+  private async registrarDocumentoM5(clase: 'preliminar' | 'definitivo', entrada: Entrada, usuario: bigint) {
+    const idProveedor = identificador(valorEntrada(entrada, 'idProveedor', 'id_proveedor'));
+    const idTipoDocumento = identificador(valorEntrada(entrada, 'idTipoDocumento', 'id_tipo_documento'));
+    const idMoneda = identificador(valorEntrada(entrada, 'idMoneda', 'id_moneda'));
+    const monto = montoPositivo(valorEntrada(entrada, 'montoTotal', 'monto_total'));
+    const folio = folioNormalizado(valorEntrada(entrada, 'folio', 'numero'));
+    const fechaEmision = fechaEntrada(valorEntrada(entrada, 'fechaEmision', 'fecha_emision'), 'Fecha de emisión');
+    const excepcionTipo = contacto(valorEntrada(entrada, 'excepcionSinOcTipo', 'excepcion_sin_oc_tipo'), 40);
+    const excepciones = ['comision_bancaria', 'arancel', 'tasa', 'cargo_financiero', 'cargo_aduanero', 'cargo_regulatorio'];
+    if (excepcionTipo && !excepciones.includes(excepcionTipo)) throw new ErrorAplicacion(400, 'Tipo de excepción sin OC no permitido');
+    const excepcionDescripcion = excepcionTipo ? motivoObligatorio(valorEntrada(entrada, 'excepcionSinOcDescripcion', 'excepcion_sin_oc_descripcion')) : null;
+    try {
+      const documento = await prisma.$transaction(async tx => {
+        const [proveedor, tipo, moneda] = await Promise.all([
+          tx.proveedor.findUnique({ where: { id_proveedor: idProveedor } }), tx.tipo_documento.findUnique({ where: { id_tipo_documento: idTipoDocumento } }), tx.moneda.findUnique({ where: { id_moneda: idMoneda } }),
+        ]);
+        if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
+        if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'El proveedor no está habilitado operacionalmente');
+        if (!tipo) throw new ErrorAplicacion(404, 'Tipo de documento no encontrado');
+        if (!moneda || moneda.estado_moneda !== 'activo') throw new ErrorAplicacion(404, 'Moneda activa no encontrada');
+        if (clase === 'definitivo' && await tx.documento_proveedor_m5.findFirst({ where: { id_proveedor: idProveedor, id_tipo_documento: idTipoDocumento, folio_normalizado: folio.normalizado, clase } })) throw new ErrorAplicacion(409, 'Ya existe un documento definitivo con el mismo proveedor, tipo y folio');
+        const creado = await tx.documento_proveedor_m5.create({ data: { id_proveedor: idProveedor, clase, id_tipo_documento: idTipoDocumento, folio: folio.folio, folio_normalizado: folio.normalizado, fecha_emision: fechaEmision, id_moneda: idMoneda, monto_total: monto, respaldo: contacto(entrada.respaldo, 1000), descripcion: contacto(entrada.descripcion, 1000), excepcion_sin_oc_tipo: excepcionTipo, excepcion_sin_oc_descripcion: excepcionDescripcion, creado_por: usuario } });
+        if (excepcionTipo) await tx.asociacion_documento_oc_m5.create({ data: { id_documento_m5: creado.id_documento_m5, tipo_orden: 'EXCEPCION', monto_asignado: monto, estado_diferencia: 'exacta', monto_disponible_snapshot: monto } });
+        return creado;
+      });
+      if (clase === 'definitivo') {
+        const moneda = await prisma.moneda.findUniqueOrThrow({ where: { id_moneda: idMoneda } });
+        if (moneda.codigo_moneda !== 'CLP') try {
+          const tasa = await this.bancoCentral.obtenerTipoCambio(moneda.codigo_moneda, fechaRegistro(fechaEmision));
+          await prisma.documento_proveedor_m5.update({ where: { id_documento_m5: documento.id_documento_m5 }, data: { tipo_cambio: tasa, tipo_cambio_origen: 'C_BancoCentral', tipo_cambio_fecha: new Date() } });
+        } catch { /* Se conserva en preparación hasta CU104. */ }
+      }
+      return this.presentarDocumentoM5(await prisma.documento_proveedor_m5.findUniqueOrThrow({ where: { id_documento_m5: documento.id_documento_m5 } }));
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe un documento definitivo con el mismo proveedor, tipo y folio');
+      throw error;
+    }
+  }
+
+  registrarDocumentoPreliminar(entrada: Entrada, usuario: bigint) { return this.registrarDocumentoM5('preliminar', entrada, usuario); }
+  registrarDocumentoDefinitivo(entrada: Entrada, usuario: bigint) { return this.registrarDocumentoM5('definitivo', entrada, usuario); }
+
+  async asociarDocumentoOrdenes(id: number, entrada: Entrada) {
+    const asociaciones = Array.isArray(entrada.asociaciones) ? entrada.asociaciones as Entrada[] : [];
+    if (!asociaciones.length) throw new ErrorAplicacion(400, 'Debes indicar al menos una Orden de Compra');
+    const tipos = new Set(asociaciones.map(item => texto(valorEntrada(item, 'tipoOrden', 'tipo_orden'), 10).toUpperCase()));
+    if (tipos.size !== 1) throw new ErrorAplicacion(409, 'No se pueden mezclar OCS y OCI en un mismo documento');
+    if (tipos.has('OCI')) throw new ErrorAplicacion(409, 'TEMPORAL_M5_DB_PATCH_PENDIENTE: integración OCI aún no disponible');
+    if (!tipos.has('OCS')) throw new ErrorAplicacion(400, 'Tipo de Orden de Compra inválido');
+    return prisma.$transaction(async tx => {
+      const documento = await this.documentoM5(id, tx);
+      if (documento.estado !== 'borrador') throw new ErrorAplicacion(409, 'El documento ya fue confirmado');
+      const entradas = asociaciones.map(item => ({ idOcs: identificador(valorEntrada(item, 'idOcs', 'id_ocs')), monto: montoPositivo(valorEntrada(item, 'montoAsignado', 'monto_asignado')) }));
+      const total = entradas.reduce((s, item) => s.plus(item.monto), new Prisma.Decimal(0));
+      if (!total.equals(documento.monto_total)) throw new ErrorAplicacion(400, 'La distribución entre Órdenes de Compra debe ser exactamente igual al monto del documento');
+      const ordenes = await tx.orden_compra_servicio_m5.findMany({ where: { id_orden_compra_servicio_m5: { in: entradas.map(item => item.idOcs) } }, include: { efectos_financieros: true } });
+      if (ordenes.length !== entradas.length) throw new ErrorAplicacion(404, 'Una OCS no existe');
+      for (const orden of ordenes) {
+        if (orden.id_proveedor !== documento.id_proveedor || orden.estado_ocs !== 'abierta') throw new ErrorAplicacion(409, 'La OCS no está disponible o no corresponde al proveedor');
+        if (!orden.id_moneda) throw new ErrorAplicacion(409, 'La OCS no tiene moneda verificable y no puede compararse de forma segura');
+        if (orden.id_moneda !== documento.id_moneda) throw new ErrorAplicacion(409, 'La moneda del documento no coincide con la OCS');
+      }
+      await tx.clasificacion_asociacion_m5.deleteMany({ where: { id_asociacion_m5: { in: (await tx.asociacion_documento_oc_m5.findMany({ where: { id_documento_m5: id } })).map(a => a.id_asociacion_m5) } } });
+      await tx.asociacion_documento_oc_m5.deleteMany({ where: { id_documento_m5: id } });
+      for (const item of entradas) {
+        const orden = ordenes.find(o => o.id_orden_compra_servicio_m5 === item.idOcs)!;
+        const consumido = orden.efectos_financieros.reduce((s, e) => s.plus(e.monto_documentado), new Prisma.Decimal(0));
+        const disponible = Prisma.Decimal.max(0, orden.monto_autorizado.minus(consumido));
+        const excedente = Prisma.Decimal.max(0, item.monto.minus(disponible));
+        await tx.asociacion_documento_oc_m5.create({ data: { id_documento_m5: id, tipo_orden: 'OCS', id_ocs_m5: item.idOcs, monto_asignado: item.monto, monto_disponible_snapshot: disponible, estado_diferencia: excedente.gt(0) ? 'excedente' : item.monto.equals(disponible) ? 'exacta' : 'parcial', monto_excedente: excedente, estado_excedente: excedente.gt(0) ? 'pendiente' : 'no_aplica' } });
+      }
+      return { mensaje: 'Asociaciones guardadas', cantidad: entradas.length };
+    });
+  }
+
+  async resolverDiferenciaDocumento(id: number, asociacionId: number, entrada: Entrada, usuario: bigint) {
+    return prisma.$transaction(async tx => {
+      await this.documentoM5(id, tx);
+      const asociacion = await tx.asociacion_documento_oc_m5.findFirst({ where: { id_asociacion_m5: asociacionId, id_documento_m5: id } });
+      if (!asociacion) throw new ErrorAplicacion(404, 'Asociación documental no encontrada');
+      const esFinal = entrada.esFinal === true || entrada.es_documento_final === true;
+      const justificacion = contacto(entrada.justificacion, 1000);
+      if ((esFinal || asociacion.monto_excedente.gt(0)) && !justificacion) throw new ErrorAplicacion(400, 'La justificación es obligatoria');
+      const data: Prisma.asociacion_documento_oc_m5UpdateInput = { es_documento_final: esFinal, justificacion };
+      if (asociacion.monto_excedente.gt(0)) Object.assign(data, { estado_diferencia: 'excedente', estado_excedente: 'pendiente', excedente_solicitado_por: usuario, excedente_fecha_solicitud: new Date() });
+      else data.estado_diferencia = esFinal ? 'final_bajo_autorizado' : asociacion.estado_diferencia;
+      return tx.asociacion_documento_oc_m5.update({ where: { id_asociacion_m5: asociacionId }, data });
+    });
+  }
+
+  async resolverExcedenteDocumento(id: number, asociacionId: number, entrada: Entrada, usuario: bigint, perfil: string) {
+    return prisma.$transaction(async tx => {
+      await this.documentoM5(id, tx);
+      const asociacion = await tx.asociacion_documento_oc_m5.findFirst({ where: { id_asociacion_m5: asociacionId, id_documento_m5: id } });
+      if (!asociacion) throw new ErrorAplicacion(404, 'Diferencia documental no encontrada');
+      if (asociacion.estado_excedente !== 'pendiente') throw new ErrorAplicacion(409, 'El excedente no está pendiente');
+      if (perfil === 'contador' && asociacion.excedente_solicitado_por === usuario) throw new ErrorAplicacion(403, 'Contador no puede aprobar un excedente que originó');
+      const aprobar = entrada.aprobar === true;
+      return tx.asociacion_documento_oc_m5.update({ where: { id_asociacion_m5: asociacionId }, data: { estado_excedente: aprobar ? 'aprobado' : 'rechazado', excedente_aprobado_por: usuario, excedente_fecha_resolucion: new Date() } });
+    });
+  }
+
+  async determinarVencimientoDocumento(id: number, entrada: Entrada) {
+    return prisma.$transaction(async tx => {
+      const documento = await this.documentoM5(id, tx);
+      if (documento.clase !== 'definitivo' || documento.estado !== 'borrador') throw new ErrorAplicacion(409, 'El vencimiento sólo se determina para un documento definitivo en preparación');
+      const proveedor = await tx.proveedor.findUniqueOrThrow({ where: { id_proveedor: documento.id_proveedor } });
+      if (proveedor.condicion_pago_dias_m5 === null || !proveedor.condicion_pago_tipo_m5) throw new ErrorAplicacion(409, 'El proveedor no tiene condición de pago vigente');
+      const emision = fechaRegistro(documento.fecha_emision); const dias = proveedor.condicion_pago_dias_m5;
+      let propuesta: string;
+      if (proveedor.condicion_pago_tipo_m5 === 'DIAS_HABILES') {
+        const feriados = new Set((await tx.feriado_chile_m5.findMany()).map(item => fechaRegistro(item.fecha)));
+        propuesta = sumarDiasHabilesChile(emision, dias, feriados);
+      } else { const fecha = new Date(`${emision}T00:00:00Z`); fecha.setUTCDate(fecha.getUTCDate() + dias); propuesta = fecha.toISOString().slice(0, 10); }
+      const real = entrada.fechaVencimiento || entrada.fecha_vencimiento ? texto(valorEntrada(entrada, 'fechaVencimiento', 'fecha_vencimiento'), 10) : propuesta;
+      const cargaHistorica = entrada.cargaHistorica === true || entrada.carga_historica === true;
+      const justificacion = contacto(entrada.justificacion, 1000);
+      if (real !== propuesta && !justificacion) throw new ErrorAplicacion(400, 'Una fecha distinta de la propuesta exige justificación');
+      if (real < emision && (!cargaHistorica || !justificacion)) throw new ErrorAplicacion(400, 'El vencimiento anterior a la emisión sólo se permite como carga histórica justificada');
+      fechaEntrada(real, 'Fecha de vencimiento');
+      await tx.documento_proveedor_m5.update({ where: { id_documento_m5: id }, data: { fecha_vencimiento: new Date(`${real}T00:00:00Z`), condicion_pago_dias_snapshot: dias, condicion_pago_tipo_snapshot: proveedor.condicion_pago_tipo_m5, vencimiento_justificacion: justificacion, carga_historica: cargaHistorica } });
+      return { fechaPropuesta: propuesta, fechaVencimiento: real, condicionSnapshot: { dias, tipo: proveedor.condicion_pago_tipo_m5 } };
+    });
+  }
+
+  async clasificarDocumento(id: number, entrada: Entrada) {
+    const distribuciones = Array.isArray(entrada.distribuciones) ? entrada.distribuciones as Entrada[] : [];
+    return prisma.$transaction(async tx => {
+      await this.documentoM5(id, tx);
+      const asociaciones = await tx.asociacion_documento_oc_m5.findMany({ where: { id_documento_m5: id } });
+      const ids = new Set(asociaciones.map(a => a.id_asociacion_m5));
+      const datos = distribuciones.map(item => ({ idAsociacion: identificador(valorEntrada(item, 'idAsociacion', 'id_asociacion')), idCategoria: identificador(valorEntrada(item, 'idCategoria', 'id_categoria')), monto: montoPositivo(item.monto) }));
+      if (!datos.length || datos.some(item => !ids.has(item.idAsociacion))) throw new ErrorAplicacion(404, 'Asociación documental no encontrada');
+      const categorias = await tx.categoria_egreso_m5.findMany({ where: { id_categoria_egreso_m5: { in: datos.map(d => d.idCategoria) }, activo: true } });
+      if (new Set(datos.map(d => d.idCategoria)).size !== categorias.length) throw new ErrorAplicacion(404, 'Categoría de egreso activa no encontrada');
+      for (const asociacion of asociaciones) if (!datos.filter(d => d.idAsociacion === asociacion.id_asociacion_m5).reduce((s, d) => s.plus(d.monto), new Prisma.Decimal(0)).equals(asociacion.monto_asignado)) throw new ErrorAplicacion(400, 'La clasificación debe cuadrar exactamente con cada asociación');
+      await tx.clasificacion_asociacion_m5.deleteMany({ where: { id_asociacion_m5: { in: [...ids] } } });
+      await tx.clasificacion_asociacion_m5.createMany({ data: datos.map(d => ({ id_asociacion_m5: d.idAsociacion, id_categoria_egreso_m5: d.idCategoria, monto: d.monto })) });
+      return { mensaje: 'Clasificación guardada', cantidad: datos.length };
+    });
+  }
+
+  async prepararImputacionDocumento(id: number, entrada: Entrada, usuario: bigint) {
+    const distribuciones = Array.isArray(entrada.distribuciones) ? entrada.distribuciones as Entrada[] : [];
+    return prisma.$transaction(async tx => {
+      await this.documentoM5(id, tx);
+      const clasificaciones = await tx.clasificacion_asociacion_m5.findMany({ where: { id_asociacion_m5: { in: (await tx.asociacion_documento_oc_m5.findMany({ where: { id_documento_m5: id } })).map(a => a.id_asociacion_m5) } } });
+      const datos = distribuciones.map(item => ({ idClasificacion: identificador(valorEntrada(item, 'idClasificacion', 'id_clasificacion')), destino: texto(item.destino, 20).toLowerCase(), idProyecto: item.idProyecto ? BigInt(String(item.idProyecto)) : null, idOt: item.idOrdenTrabajo ? BigInt(String(item.idOrdenTrabajo)) : null, monto: montoPositivo(item.monto) }));
+      for (const clasificacion of clasificaciones) if (!datos.filter(d => d.idClasificacion === clasificacion.id_clasificacion_m5).reduce((s, d) => s.plus(d.monto), new Prisma.Decimal(0)).equals(clasificacion.monto)) throw new ErrorAplicacion(400, 'La imputación debe cuadrar exactamente con cada clasificación');
+      for (const item of datos) {
+        if (!['general','proyecto'].includes(item.destino)) throw new ErrorAplicacion(400, 'Destino de imputación inválido');
+        if (item.destino === 'proyecto') {
+          const proyecto = item.idProyecto ? await tx.proyecto.findUnique({ where: { proyecto_proyecto_id: item.idProyecto } }) : null;
+          if (!proyecto) throw new ErrorAplicacion(404, 'Proyecto no encontrado');
+          if (proyecto.proyecto_estado_operacional?.toLowerCase() !== 'activo') throw new ErrorAplicacion(409, 'El proyecto no está activo');
+          if (item.idOt) { const ot = await tx.orden_trabajo.findUnique({ where: { orden_trabajo_id_orden: item.idOt } }); if (!ot) throw new ErrorAplicacion(404, 'Orden de Trabajo no encontrada'); if (ot.proyecto_id_proyecto !== item.idProyecto) throw new ErrorAplicacion(400, 'La Orden de Trabajo no pertenece al Proyecto'); }
+        } else if (item.idProyecto || item.idOt) throw new ErrorAplicacion(400, 'Gasto general no admite Proyecto ni Orden de Trabajo');
+      }
+      const anterior = await tx.propuesta_imputacion_m5.findFirst({ where: { id_documento_m5: id, estado: 'pendiente' } });
+      if (anterior) { await tx.detalle_imputacion_m5.deleteMany({ where: { id_propuesta_imputacion_m5: anterior.id_propuesta_imputacion_m5 } }); await tx.propuesta_imputacion_m5.delete({ where: { id_propuesta_imputacion_m5: anterior.id_propuesta_imputacion_m5 } }); }
+      const propuesta = await tx.propuesta_imputacion_m5.create({ data: { id_documento_m5: id, preparado_por: usuario } });
+      await tx.detalle_imputacion_m5.createMany({ data: datos.map(d => ({ id_propuesta_imputacion_m5: propuesta.id_propuesta_imputacion_m5, id_clasificacion_m5: d.idClasificacion, destino: d.destino, id_proyecto: d.idProyecto, id_orden_trabajo: d.idOt, monto: d.monto })) });
+      return { id: propuesta.id_propuesta_imputacion_m5, estado: propuesta.estado };
+    });
+  }
+
+  async confirmarImputacionDocumento(id: number, propuestaId: number, usuario: bigint) {
+    const propuesta = await prisma.propuesta_imputacion_m5.findFirst({ where: { id_propuesta_imputacion_m5: propuestaId, id_documento_m5: id, estado: 'pendiente' } });
+    if (!propuesta) throw new ErrorAplicacion(409, 'Propuesta de imputación no disponible');
+    return prisma.propuesta_imputacion_m5.update({ where: { id_propuesta_imputacion_m5: propuestaId }, data: { estado: 'confirmado', confirmado_por: usuario, fecha_confirmacion: new Date() } });
+  }
+
+  async registrarTipoCambioManual(id: number, entrada: Entrada, usuario: bigint) {
+    const tasa = montoPositivo(valorEntrada(entrada, 'tipoCambio', 'tipo_cambio'));
+    const justificacion = motivoObligatorio(entrada.justificacion); const origen = texto(entrada.origen, 40);
+    if (!origen) throw new ErrorAplicacion(400, 'El origen o contexto de la tasa es obligatorio');
+    const documento = await this.documentoM5(id);
+    const moneda = await prisma.moneda.findUniqueOrThrow({ where: { id_moneda: documento.id_moneda } });
+    if (moneda.codigo_moneda === 'CLP') throw new ErrorAplicacion(400, 'CLP no requiere tipo de cambio');
+    return prisma.documento_proveedor_m5.update({ where: { id_documento_m5: id }, data: { tipo_cambio: tasa, tipo_cambio_origen: `manual:${origen}`, tipo_cambio_justificacion: justificacion, tipo_cambio_usuario: usuario, tipo_cambio_fecha: new Date() } });
+  }
+
+  async generarObligacionDocumento(id: number, usuario: bigint) {
+    return prisma.$transaction(async tx => {
+      const documento = await this.documentoM5(id, tx);
+      if (documento.clase !== 'definitivo' || documento.estado !== 'borrador') throw new ErrorAplicacion(409, 'Documento definitivo no disponible para generar obligación');
+      if (await tx.obligacion_proveedor_m5.findUnique({ where: { id_documento_m5: id } })) throw new ErrorAplicacion(409, 'El documento ya tiene obligación');
+      const proveedor = await tx.proveedor.findUniqueOrThrow({ where: { id_proveedor: documento.id_proveedor } });
+      if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'El proveedor no está habilitado');
+      const asociaciones = await tx.asociacion_documento_oc_m5.findMany({ where: { id_documento_m5: id } });
+      if (!asociaciones.length || !asociaciones.reduce((s, a) => s.plus(a.monto_asignado), new Prisma.Decimal(0)).equals(documento.monto_total)) throw new ErrorAplicacion(409, 'La asociación documental no está completa');
+      if (asociaciones.some(a => a.tipo_orden === 'OCI')) throw new ErrorAplicacion(409, 'La integración OCI aún no puede validarse');
+      if (asociaciones.some(a => ['pendiente','rechazado'].includes(a.estado_excedente))) throw new ErrorAplicacion(409, 'Existe un excedente sin aprobación');
+      if (!documento.fecha_vencimiento) throw new ErrorAplicacion(409, 'Falta determinar vencimiento');
+      const clasificaciones = await tx.clasificacion_asociacion_m5.findMany({ where: { id_asociacion_m5: { in: asociaciones.map(a => a.id_asociacion_m5) } } });
+      for (const a of asociaciones) if (!clasificaciones.filter(c => c.id_asociacion_m5 === a.id_asociacion_m5).reduce((s,c) => s.plus(c.monto), new Prisma.Decimal(0)).equals(a.monto_asignado)) throw new ErrorAplicacion(409, 'La clasificación no está completa');
+      if (!await tx.propuesta_imputacion_m5.findFirst({ where: { id_documento_m5: id, estado: 'confirmado' } })) throw new ErrorAplicacion(409, 'La imputación no está confirmada');
+      const moneda = await tx.moneda.findUniqueOrThrow({ where: { id_moneda: documento.id_moneda } });
+      if (moneda.codigo_moneda !== 'CLP' && !documento.tipo_cambio) throw new ErrorAplicacion(409, 'Se requiere referencia cambiaria confirmada');
+      const hoy = fechaNegocio(); const vencimiento = fechaRegistro(documento.fecha_vencimiento); const dias = diasHabilesEntre(hoy, vencimiento);
+      const condicion = vencimiento < hoy ? 'Vencida' : dias <= DIAS_POR_VENCER_M5 ? 'Por vencer' : 'Por pagar';
+      const obligacion = await tx.obligacion_proveedor_m5.create({ data: { id_documento_m5: id, id_proveedor: documento.id_proveedor, monto_original: documento.monto_total, id_moneda: documento.id_moneda, saldo_inicial: documento.monto_total, saldo_actual: documento.monto_total, fecha_emision: documento.fecha_emision, fecha_vencimiento: documento.fecha_vencimiento, estado_pago: 'Pendiente', condicion_temporal: condicion, condicion_pago_dias_snapshot: documento.condicion_pago_dias_snapshot, condicion_pago_tipo_snapshot: documento.condicion_pago_tipo_snapshot, tipo_cambio: documento.tipo_cambio, tipo_cambio_origen: documento.tipo_cambio_origen, generado_por: usuario } });
+      for (const asociacion of asociaciones.filter(a => a.tipo_orden === 'OCS')) {
+        const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: asociacion.id_ocs_m5! }, include: { efectos_financieros: true } });
+        if (!orden || orden.id_proveedor !== documento.id_proveedor || orden.id_moneda !== documento.id_moneda || orden.estado_ocs !== 'abierta') throw new ErrorAplicacion(409, 'La OCS cambió y ya no está disponible');
+        await tx.efecto_financiero_ocs_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, tipo_efecto: 'documento_definitivo', referencia: `DOC-M5-${id}`, monto_documentado: asociacion.monto_asignado } });
+        const total = orden.efectos_financieros.reduce((s,e) => s.plus(e.monto_documentado), asociacion.monto_asignado);
+        const evaluacion = evaluarCierreOcs(orden.monto_autorizado, total, asociacion.es_documento_final, asociacion.justificacion || '');
+        if (evaluacion.puedeCerrar) { await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: orden.id_orden_compra_servicio_m5 }, data: { estado_ocs: 'cerrada', fecha_actualizacion: new Date() } }); await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'estado', valor_anterior: 'abierta', valor_nuevo: 'cerrada', motivo: asociacion.justificacion, usuario_id_usuario: usuario } }); }
+      }
+      await tx.documento_proveedor_m5.update({ where: { id_documento_m5: id }, data: { estado: 'confirmado', confirmado_por: usuario, fecha_confirmacion: new Date() } });
+      return { id: obligacion.id_obligacion_m5, idDocumento: id, montoOriginal: Number(obligacion.monto_original), saldoInicial: Number(obligacion.saldo_inicial), saldoActual: Number(obligacion.saldo_actual), estadoPago: obligacion.estado_pago, condicionTemporal: obligacion.condicion_temporal };
+    });
+  }
+
+  async catalogosDocumentosProveedor() {
+    const [proveedores, tipos, monedas, categorias, ordenes, proyectos, ots] = await Promise.all([
+      prisma.proveedor.findMany({ where: { estado_proveedor: 'activo' }, orderBy: { nombre_razon_social: 'asc' } }), prisma.tipo_documento.findMany({ orderBy: { nombre_tipo_documento: 'asc' } }), prisma.moneda.findMany({ where: { estado_moneda: 'activo' } }), prisma.categoria_egreso_m5.findMany({ where: { activo: true }, orderBy: { nombre: 'asc' } }), prisma.orden_compra_servicio_m5.findMany({ where: { estado_ocs: 'abierta', id_moneda: { not: null } } }), prisma.proyecto.findMany({ where: { proyecto_estado_operacional: 'activo' } }), prisma.orden_trabajo.findMany(),
+    ]);
+    return { proveedores: proveedores.map(p => ({ id: p.id_proveedor, nombre: p.nombre_razon_social })), tipos: tipos.map(t => ({ id: t.id_tipo_documento, nombre: t.nombre_tipo_documento })), monedas: monedas.map(m => ({ id: m.id_moneda, codigo: m.codigo_moneda })), categorias, ordenes: ordenes.map(o => ({ id: o.id_orden_compra_servicio_m5, idProveedor: o.id_proveedor, idMoneda: o.id_moneda, monto: Number(o.monto_autorizado), referencia: o.referencia })), proyectos: proyectos.map(p => ({ id: p.proyecto_proyecto_id.toString(), nombre: p.proyecto_nombre_referencia || p.proyecto_codigo_proyecto || p.proyecto_proyecto_id.toString() })), ordenesTrabajo: ots.map(o => ({ id: o.orden_trabajo_id_orden.toString(), idProyecto: o.proyecto_id_proyecto?.toString() || null })) };
+  }
+
   async listarDocumentosProveedor(consulta: Record<string, unknown>) {
     const idProveedor = consulta.idProveedor === undefined && consulta.proveedor === undefined ? undefined : identificador(valorEntrada(consulta, 'idProveedor', 'proveedor'));
     const busqueda = texto(valorEntrada(consulta, 'busqueda', 'numero'), 100);
@@ -656,10 +938,14 @@ export class M5Controller {
       include: { ...incluirDocumentos, proveedor: true },
       orderBy: [{ fecha_emision: 'desc' }, { id_documento_compra_proveedor: 'desc' }],
     });
-    return documentos.map(documento => this.presentarDocumentoProveedor(documento));
+    const m5 = await prisma.documento_proveedor_m5.findMany({ where: { id_proveedor: idProveedor, folio: busqueda ? { contains: busqueda, mode: 'insensitive' } : undefined, estado: estado ? { equals: estado, mode: 'insensitive' } : undefined }, orderBy: [{ fecha_emision: 'desc' }, { id_documento_m5: 'desc' }] });
+    return [...await Promise.all(m5.map(documento => this.presentarDocumentoM5(documento))), ...documentos.map(documento => this.presentarDocumentoProveedor(documento))].sort((a,b) => new Date(b.fechaEmision).getTime() - new Date(a.fechaEmision).getTime());
   }
 
-  async obtenerDocumentoProveedor(id: number) {
+  async obtenerDocumentoProveedor(referencia: number | string) {
+    const valor = String(referencia);
+    if (valor.startsWith('m5-')) return this.presentarDocumentoM5(await this.documentoM5(identificador(valor.slice(3))));
+    const id = valor.startsWith('legacy-') ? identificador(valor.slice(7)) : identificador(valor);
     const documento = await prisma.documento_compra_proveedor.findUnique({ where: { id_documento_compra_proveedor: id }, include: { ...incluirDocumentos, proveedor: true } });
     if (!documento) throw new ErrorAplicacion(404, 'Documento de proveedor no encontrado');
     return this.presentarDocumentoProveedor(documento);

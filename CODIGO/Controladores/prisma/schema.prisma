@@ -903,6 +903,7 @@ model orden_compra_servicio_m5 {
   fecha_creacion               DateTime                             @default(now()) @db.Timestamptz(6)
   fecha_actualizacion          DateTime                             @default(now()) @db.Timestamptz(6)
   creado_por                   BigInt
+  id_moneda                    Int?
   proveedor                    proveedor                            @relation(fields: [id_proveedor], references: [id_proveedor], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_proveedor")
   usuario_creador              usuario                              @relation("ocs_m5_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_creador")
   historial                    historial_orden_compra_servicio_m5[]
@@ -911,6 +912,144 @@ model orden_compra_servicio_m5 {
 
   @@index([id_proveedor, fecha_creacion], map: "idx_ocs_m5_proveedor_fecha")
   @@index([estado_ocs, fecha_creacion], map: "idx_ocs_m5_estado_fecha")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: documento aislado de Legacy para CU96-CU105.
+model documento_proveedor_m5 {
+  id_documento_m5             Int       @id @default(autoincrement())
+  id_proveedor                Int
+  clase                       String    @db.VarChar(20)
+  id_tipo_documento           Int
+  folio                       String    @db.VarChar(80)
+  folio_normalizado           String    @db.VarChar(80)
+  fecha_emision               DateTime  @db.Date
+  id_moneda                   Int
+  monto_total                 Decimal   @db.Decimal(14, 2)
+  estado                      String    @default("borrador") @db.VarChar(20)
+  respaldo                    String?
+  descripcion                 String?
+  excepcion_sin_oc_tipo       String?   @db.VarChar(40)
+  excepcion_sin_oc_descripcion String?
+  fecha_vencimiento           DateTime? @db.Date
+  condicion_pago_dias_snapshot Int?
+  condicion_pago_tipo_snapshot String?  @db.VarChar(20)
+  vencimiento_justificacion   String?
+  carga_historica             Boolean   @default(false)
+  tipo_cambio                 Decimal?  @db.Decimal(14, 4)
+  tipo_cambio_origen          String?   @db.VarChar(40)
+  tipo_cambio_justificacion   String?
+  tipo_cambio_usuario         BigInt?
+  tipo_cambio_fecha           DateTime? @db.Timestamptz(6)
+  creado_por                  BigInt
+  fecha_creacion              DateTime  @default(now()) @db.Timestamptz(6)
+  confirmado_por              BigInt?
+  fecha_confirmacion          DateTime? @db.Timestamptz(6)
+
+  @@index([id_proveedor, fecha_creacion], map: "idx_documento_m5_proveedor_fecha")
+  @@index([estado, fecha_creacion], map: "idx_documento_m5_estado_fecha")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: distribución documental por OCS; OCI queda como adaptador pendiente.
+model asociacion_documento_oc_m5 {
+  id_asociacion_m5       Int      @id @default(autoincrement())
+  id_documento_m5        Int
+  tipo_orden             String   @db.VarChar(10)
+  id_ocs_m5              Int?
+  id_orden_externa       String?  @db.VarChar(100)
+  monto_asignado         Decimal  @db.Decimal(14, 2)
+  estado_diferencia      String   @default("sin_evaluar") @db.VarChar(30)
+  es_documento_final     Boolean  @default(false)
+  justificacion          String?
+  monto_disponible_snapshot Decimal? @db.Decimal(14, 2)
+  monto_excedente        Decimal  @default(0) @db.Decimal(14, 2)
+  estado_excedente       String   @default("no_aplica") @db.VarChar(20)
+  excedente_solicitado_por BigInt?
+  excedente_fecha_solicitud DateTime? @db.Timestamptz(6)
+  excedente_aprobado_por BigInt?
+  excedente_fecha_resolucion DateTime? @db.Timestamptz(6)
+
+  @@unique([id_documento_m5, id_ocs_m5], map: "uq_asociacion_documento_m5_ocs")
+  @@index([id_documento_m5], map: "idx_asociacion_documento_m5")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: catálogo provisional de categorías de egreso.
+model categoria_egreso_m5 {
+  id_categoria_egreso_m5 Int     @id @default(autoincrement())
+  nombre                  String  @unique @db.VarChar(100)
+  activo                  Boolean @default(true)
+
+  @@schema("finanzas")
+}
+
+model clasificacion_asociacion_m5 {
+  id_clasificacion_m5 Int     @id @default(autoincrement())
+  id_asociacion_m5    Int
+  id_categoria_egreso_m5 Int
+  monto                Decimal @db.Decimal(14, 2)
+
+  @@unique([id_asociacion_m5, id_categoria_egreso_m5], map: "uq_clasificacion_m5_asociacion_categoria")
+  @@index([id_asociacion_m5], map: "idx_clasificacion_m5_asociacion")
+  @@schema("finanzas")
+}
+
+model propuesta_imputacion_m5 {
+  id_propuesta_imputacion_m5 Int      @id @default(autoincrement())
+  id_documento_m5            Int
+  estado                     String   @default("pendiente") @db.VarChar(20)
+  preparado_por              BigInt
+  fecha_preparacion          DateTime @default(now()) @db.Timestamptz(6)
+  confirmado_por             BigInt?
+  fecha_confirmacion         DateTime? @db.Timestamptz(6)
+
+  @@index([id_documento_m5, estado], map: "idx_imputacion_m5_documento_estado")
+  @@schema("finanzas")
+}
+
+model detalle_imputacion_m5 {
+  id_detalle_imputacion_m5 Int     @id @default(autoincrement())
+  id_propuesta_imputacion_m5 Int
+  id_clasificacion_m5      Int
+  destino                  String  @db.VarChar(20)
+  id_proyecto              BigInt?
+  id_orden_trabajo         BigInt?
+  monto                    Decimal @db.Decimal(14, 2)
+
+  @@index([id_propuesta_imputacion_m5], map: "idx_detalle_imputacion_m5_propuesta")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: obligación única generada atómicamente desde documento definitivo.
+model obligacion_proveedor_m5 {
+  id_obligacion_m5         Int      @id @default(autoincrement())
+  id_documento_m5          Int      @unique
+  id_proveedor             Int
+  monto_original           Decimal  @db.Decimal(14, 2)
+  id_moneda                Int
+  saldo_inicial            Decimal  @db.Decimal(14, 2)
+  saldo_actual             Decimal  @db.Decimal(14, 2)
+  fecha_emision            DateTime @db.Date
+  fecha_vencimiento        DateTime @db.Date
+  estado_pago              String   @default("Pendiente") @db.VarChar(20)
+  condicion_temporal       String   @db.VarChar(20)
+  condicion_pago_dias_snapshot Int?
+  condicion_pago_tipo_snapshot String? @db.VarChar(20)
+  tipo_cambio              Decimal? @db.Decimal(14, 4)
+  tipo_cambio_origen       String?  @db.VarChar(40)
+  fecha_generacion         DateTime @default(now()) @db.Timestamptz(6)
+  generado_por             BigInt
+
+  @@index([id_proveedor, fecha_vencimiento], map: "idx_obligacion_m5_proveedor_vencimiento")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: calendario laboral chileno consumido por CU101.
+model feriado_chile_m5 {
+  fecha       DateTime @id @db.Date
+  descripcion String   @db.VarChar(150)
+
   @@schema("finanzas")
 }
 

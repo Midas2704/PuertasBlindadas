@@ -1,72 +1,29 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Eye, FileSearch, Search, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { CheckCircle2, Eye, FilePlus2, FileSearch, Search, X } from 'lucide-react';
 import { solicitarFinanzas } from '../../api/finanzas';
+import { usarSesion } from '../../seguridad/Sesion';
 
-interface DocumentoProveedor {
-  id: number;
-  fuente: string;
-  proveedor: { id: number; razonSocial: string };
-  tipoDocumento: string;
-  numero: string;
-  fechaEmision: string;
-  fechaVencimiento: string | null;
-  moneda: string;
-  montoTotal: number;
-  estadoDocumental: string;
-  saldoPendiente: number;
-  estadoPagoCalculado: string;
-  clasificacionM5: string;
-  asociacionOrdenCompra: string;
-  observacion: string | null;
-}
+interface Documento { id:string;idM5?:number;fuente:string;clase?:string;proveedor:{id:number;razonSocial:string};tipoDocumento:string;numero:string;fechaEmision:string;fechaVencimiento:string|null;moneda:string;montoTotal:number;estadoDocumental:string;saldoPendiente:number;asociacionOrdenCompra:string;asociaciones?:Array<{id:number;idOcs:number|null;montoAsignado:number;estadoDiferencia:string;estadoExcedente:string}>;clasificaciones?:Array<{id:number;categoria:string;monto:number}>;propuestaImputacion?:{id:number;estado:string}|null;progreso?:Record<string,boolean|string>;obligacion?:unknown}
+interface Catalogos {proveedores:Array<{id:number;nombre:string}>;tipos:Array<{id:number;nombre:string}>;monedas:Array<{id:number;codigo:string}>;categorias:Array<{id_categoria_egreso_m5:number;nombre:string}>;ordenes:Array<{id:number;idProveedor:number;monto:number;referencia:string|null}>}
+const vacio={idProveedor:'',idTipoDocumento:'',idMoneda:'',folio:'',fechaEmision:new Date().toISOString().slice(0,10),montoTotal:'',descripcion:'',excepcionSinOcTipo:'',excepcionSinOcDescripcion:''};
+async function api(ruta:string,opciones?:RequestInit){const r=await solicitarFinanzas(ruta,opciones);const j=await r.json();if(!r.ok)throw new Error(j.error||'No fue posible completar la operación');return j}
+const enviar=(cuerpo:unknown,method='POST'):RequestInit=>({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(cuerpo)});
 
-async function respuestaJson(ruta: string) {
-  const respuesta = await solicitarFinanzas(ruta);
-  const resultado = await respuesta.json();
-  if (!respuesta.ok) throw new Error(resultado.error || 'No fue posible consultar los documentos');
-  return resultado;
-}
-
-export default function DocumentosProveedor() {
-  const [documentos, setDocumentos] = useState<DocumentoProveedor[]>([]);
-  const [proveedor, setProveedor] = useState('');
-  const [busqueda, setBusqueda] = useState('');
-  const [estado, setEstado] = useState('');
-  const [detalle, setDetalle] = useState<DocumentoProveedor | null>(null);
-  const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const cancelacion = new AbortController();
-    const espera = window.setTimeout(() => {
-      const parametros = new URLSearchParams();
-      if (proveedor) parametros.set('proveedor', proveedor);
-      if (busqueda.trim()) parametros.set('busqueda', busqueda.trim());
-      if (estado) parametros.set('estado', estado);
-      respuestaJson(`/documentos-proveedor?${parametros}`).then(setDocumentos).catch(causa => { if (!cancelacion.signal.aborted) setError(causa.message); }).finally(() => { if (!cancelacion.signal.aborted) setCargando(false); });
-    }, 250);
-    return () => { window.clearTimeout(espera); cancelacion.abort(); };
-  }, [proveedor, busqueda, estado]);
-
-  const proveedores = useMemo(() => [...new Map(documentos.map(item => [item.proveedor.id, item.proveedor])).values()].sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, 'es-CL')), [documentos]);
-  const estados = useMemo(() => [...new Set(documentos.map(item => item.estadoDocumental))].sort(), [documentos]);
-
-  const abrirDetalle = async (id: number) => {
-    setError('');
-    try { setDetalle(await respuestaJson(`/documentos-proveedor/${id}`)); }
-    catch (causa) { setError((causa as Error).message); }
-  };
-
-  return <div className="min-h-full bg-slate-50 p-5 lg:p-8"><div className="mx-auto max-w-7xl">
-    <header className="mb-6"><p className="text-sm font-semibold text-primary-600">Proveedores y egresos</p><h1 className="text-2xl font-bold text-gray-900">Documentos de proveedor</h1></header>
-    {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-    <section className="mb-5 grid gap-3 border-y bg-white px-4 py-4 md:grid-cols-[1fr_220px_190px]">
-      <label className="relative"><span className="sr-only">Buscar número o folio</span><Search className="absolute left-3 top-3 h-4 w-4 text-gray-400"/><input value={busqueda} onChange={evento => setBusqueda(evento.target.value)} placeholder="Buscar número o folio" className="w-full rounded-md border py-2.5 pl-10 pr-3"/></label>
-      <select aria-label="Filtrar por proveedor" value={proveedor} onChange={evento => setProveedor(evento.target.value)} className="rounded-md border px-3 py-2.5"><option value="">Todos los proveedores</option>{proveedores.map(item => <option key={item.id} value={item.id}>{item.razonSocial}</option>)}</select>
-      <select aria-label="Filtrar por estado documental" value={estado} onChange={evento => setEstado(evento.target.value)} className="rounded-md border px-3 py-2.5"><option value="">Todos los estados</option>{estados.map(item => <option key={item} value={item}>{item}</option>)}</select>
-    </section>
-    <div className="overflow-hidden rounded-md border bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[1000px] text-left text-sm"><thead className="border-b bg-gray-50 text-gray-600"><tr><th className="px-4 py-3">Documento</th><th className="px-4 py-3">Proveedor</th><th className="px-4 py-3">Emisión</th><th className="px-4 py-3">Vencimiento</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3 text-right">Monto total</th><th className="px-4 py-3 text-right">Saldo</th><th className="px-4 py-3">Asociación</th><th className="px-4 py-3"></th></tr></thead><tbody>{documentos.map(documento => <tr key={documento.id} className="border-b last:border-0 hover:bg-gray-50"><td className="px-4 py-3"><p className="font-semibold">{documento.numero}</p><p className="text-xs text-gray-500">{documento.tipoDocumento}</p></td><td className="px-4 py-3">{documento.proveedor.razonSocial}</td><td className="px-4 py-3">{new Date(documento.fechaEmision).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</td><td className="px-4 py-3">{documento.fechaVencimiento ? new Date(documento.fechaVencimiento).toLocaleDateString('es-CL', { timeZone: 'UTC' }) : 'No disponible'}</td><td className="px-4 py-3 capitalize">{documento.estadoDocumental}</td><td className="px-4 py-3 text-right font-semibold">{documento.moneda} {documento.montoTotal.toLocaleString('es-CL')}</td><td className="px-4 py-3 text-right">{documento.moneda} {documento.saldoPendiente.toLocaleString('es-CL')}</td><td className="px-4 py-3 text-gray-600">{documento.asociacionOrdenCompra}</td><td className="px-4 py-3"><button title="Ver documento" onClick={() => void abrirDetalle(documento.id)} className="rounded p-2 text-primary-700 hover:bg-primary-50"><Eye className="h-4 w-4"/></button></td></tr>)}</tbody></table></div>{cargando && <p className="p-10 text-center text-gray-500">Cargando documentos...</p>}{!cargando && !documentos.length && <p className="p-10 text-center text-gray-500"><FileSearch className="mx-auto mb-3 h-8 w-8"/>No hay documentos para los criterios seleccionados.</p>}</div>
-  </div>
-  {detalle && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-2xl rounded-md bg-white shadow-xl"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="text-lg font-bold">{detalle.tipoDocumento} {detalle.numero}</h2><p className="text-sm text-gray-500">Fuente Legacy: {detalle.fuente}</p></div><button title="Cerrar" onClick={() => setDetalle(null)} className="rounded p-2 hover:bg-gray-100"><X className="h-5 w-5"/></button></div><dl className="grid gap-4 p-5 text-sm md:grid-cols-2"><div><dt className="text-gray-500">Proveedor</dt><dd className="font-semibold">{detalle.proveedor.razonSocial}</dd></div><div><dt className="text-gray-500">Estado documental</dt><dd className="font-semibold capitalize">{detalle.estadoDocumental}</dd></div><div><dt className="text-gray-500">Clasificación M5</dt><dd>{detalle.clasificacionM5}</dd></div><div><dt className="text-gray-500">Asociación OC</dt><dd>{detalle.asociacionOrdenCompra}</dd></div><div><dt className="text-gray-500">Monto total</dt><dd className="font-semibold">{detalle.moneda} {detalle.montoTotal.toLocaleString('es-CL')}</dd></div><div><dt className="text-gray-500">Saldo pendiente calculado</dt><dd className="font-semibold">{detalle.moneda} {detalle.saldoPendiente.toLocaleString('es-CL')}</dd></div><div className="md:col-span-2"><dt className="text-gray-500">Observación</dt><dd>{detalle.observacion || 'Sin información registrada'}</dd></div></dl></div></div>}
-  </div>;
+export default function DocumentosProveedor(){
+ const {sesion}=usarSesion();const puede=(cu:string)=>!!sesion?.permisos.includes(cu);const [documentos,setDocumentos]=useState<Documento[]>([]);const [catalogos,setCatalogos]=useState<Catalogos|null>(null);const [detalle,setDetalle]=useState<Documento|null>(null);const [crear,setCrear]=useState<'preliminar'|'definitivo'|null>(null);const [form,setForm]=useState(vacio);const [busqueda,setBusqueda]=useState('');const [error,setError]=useState('');const [mensaje,setMensaje]=useState('');const [version,setVersion]=useState(0);
+ useEffect(()=>{api(`/documentos-proveedor?busqueda=${encodeURIComponent(busqueda)}`).then(setDocumentos).catch(e=>setError(e.message));},[busqueda,version]);
+ useEffect(()=>{api('/documentos-proveedor-catalogos').then(setCatalogos).catch(e=>setError(e.message));},[]);
+ const abrir=async(id:string)=>{try{setDetalle(await api(`/documentos-proveedor/${id}`))}catch(e){setError((e as Error).message)}};const recargar=()=>setVersion(v=>v+1);
+ const ejecutar=async(ruta:string,cuerpo:unknown={},method='POST')=>{try{await api(ruta,enviar(cuerpo,method));setMensaje('Operación completada.');setError('');recargar();if(detalle)await abrir(detalle.id)}catch(e){setError((e as Error).message)}};
+ const registrar=async()=>{await ejecutar(`/documentos-proveedor/${crear==='preliminar'?'preliminares':'definitivos'}`,{...form,idProveedor:Number(form.idProveedor),idTipoDocumento:Number(form.idTipoDocumento),idMoneda:Number(form.idMoneda),montoTotal:Number(form.montoTotal)});setCrear(null)};
+ const asociar=()=>{const id=Number(window.prompt('ID de OCS'));const monto=Number(window.prompt('Monto asignado',String(detalle?.montoTotal||'')));if(id&&monto)void ejecutar(`/documentos-proveedor/${detalle?.idM5}/asociaciones`,{asociaciones:[{tipoOrden:'OCS',idOcs:id,montoAsignado:monto}]})};
+ const diferencia=(id:number)=>{const final=window.confirm('¿Es el último documento de esta OCS?');const justificacion=final||detalle?.asociaciones?.find(a=>a.id===id)?.estadoDiferencia==='excedente'?window.prompt('Justificación')||'':'';void ejecutar(`/documentos-proveedor/${detalle?.idM5}/diferencias/${id}`,{esFinal:final,justificacion},'PUT')};
+ const vencimiento=()=>{const fecha=window.prompt('Fecha de vencimiento real opcional (AAAA-MM-DD)')||undefined;const justificacion=fecha?window.prompt('Justificación si difiere de la propuesta')||'':'';void ejecutar(`/documentos-proveedor/${detalle?.idM5}/vencimiento`,{fechaVencimiento:fecha,justificacion},'PUT')};
+ const clasificar=()=>{const categoria=Number(window.prompt('ID de categoría activa'));if(categoria)void ejecutar(`/documentos-proveedor/${detalle?.idM5}/clasificacion`,{distribuciones:detalle?.asociaciones?.map(a=>({idAsociacion:a.id,idCategoria:categoria,monto:a.montoAsignado}))},'PUT')};
+ const imputar=()=>void ejecutar(`/documentos-proveedor/${detalle?.idM5}/imputacion`,{distribuciones:detalle?.clasificaciones?.map(c=>({idClasificacion:c.id,destino:'general',monto:c.monto}))});
+ const tasa=()=>{const tipoCambio=Number(window.prompt('Tasa manual'));const justificacion=window.prompt('Justificación')||'';if(tipoCambio)void ejecutar(`/documentos-proveedor/${detalle?.idM5}/tipo-cambio-manual`,{tipoCambio,justificacion,origen:'Ingreso manual autorizado'})};
+ return <div className="min-h-full bg-slate-50 p-5 lg:p-8"><div className="mx-auto max-w-7xl"><header className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-semibold text-primary-600">Proveedores y egresos</p><h1 className="text-2xl font-bold">Documentos de proveedor</h1></div><div className="flex gap-2">{puede('CU96')&&<button onClick={()=>{setForm(vacio);setCrear('preliminar')}} className="flex items-center gap-2 rounded-md border bg-white px-3 py-2"><FilePlus2 className="h-4 w-4"/>Preliminar</button>}{puede('CU97')&&<button onClick={()=>{setForm(vacio);setCrear('definitivo')}} className="flex items-center gap-2 rounded-md bg-primary-600 px-3 py-2 text-white"><FilePlus2 className="h-4 w-4"/>Definitivo</button>}</div></header>{(error||mensaje)&&<div className={`mb-4 rounded-md border p-3 text-sm ${error?'border-red-200 bg-red-50 text-red-700':'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{error||mensaje}</div>}<label className="relative mb-5 block"><Search className="absolute left-3 top-3 h-4 w-4 text-gray-400"/><input value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Buscar folio" className="w-full rounded-md border py-2.5 pl-10"/></label>
+ <div className="overflow-hidden rounded-md border bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="border-b bg-gray-50"><tr><th className="p-3">Documento</th><th>Proveedor</th><th>Clase</th><th>Estado</th><th className="text-right">Monto</th><th>Asociación</th><th/></tr></thead><tbody>{documentos.map(d=><tr key={d.id} className="border-b"><td className="p-3"><b>{d.numero}</b><p className="text-xs text-gray-500">{d.tipoDocumento}</p></td><td>{d.proveedor.razonSocial}</td><td className="capitalize">{d.clase||'Legacy'}</td><td className="capitalize">{d.estadoDocumental}</td><td className="text-right font-semibold">{d.moneda} {d.montoTotal.toLocaleString('es-CL')}</td><td>{d.asociacionOrdenCompra}</td><td><button title="Ver" onClick={()=>void abrir(d.id)} className="p-2 text-primary-700"><Eye className="h-4 w-4"/></button></td></tr>)}</tbody></table></div>{!documentos.length&&<p className="p-10 text-center text-gray-500"><FileSearch className="mx-auto mb-2"/>No hay documentos.</p>}</div>
+ {detalle&&<section className="mt-5 border bg-white"><div className="flex justify-between border-b p-4"><div><h2 className="font-bold">{detalle.numero}</h2><p className="text-sm text-gray-500">{detalle.proveedor.razonSocial} · {detalle.moneda} {detalle.montoTotal.toLocaleString('es-CL')}</p></div><button title="Cerrar" onClick={()=>setDetalle(null)}><X/></button></div>{detalle.progreso&&<div className="grid gap-2 bg-gray-50 p-4 text-xs md:grid-cols-5">{Object.entries(detalle.progreso).map(([k,v])=><span key={k} className="flex items-center gap-1 capitalize">{(v===true||v==='confirmado')&&<CheckCircle2 className="h-4 w-4 text-emerald-600"/>}{k}</span>)}</div>}{detalle.idM5&&detalle.estadoDocumental==='borrador'&&<div className="flex flex-wrap gap-2 p-4">{puede('CU98')&&<button onClick={asociar} className="rounded border px-3 py-2">Asociar OCS</button>}{puede('CU101')&&<button onClick={vencimiento} className="rounded border px-3 py-2">Vencimiento</button>}{puede('CU102')&&<button onClick={clasificar} className="rounded border px-3 py-2">Clasificar</button>}{puede('CU103')&&<button onClick={imputar} className="rounded border px-3 py-2">Preparar imputación</button>}{puede('CU103')&&detalle.propuestaImputacion?.estado==='pendiente'&&['gerencia','contador'].includes(sesion?.configuracion||'')&&<button onClick={()=>void ejecutar(`/documentos-proveedor/${detalle.idM5}/imputacion/${detalle.propuestaImputacion?.id}/confirmar`)} className="rounded border px-3 py-2">Confirmar imputación</button>}{puede('CU104')&&detalle.moneda!=='CLP'&&<button onClick={tasa} className="rounded border px-3 py-2">Tasa manual</button>}{puede('CU105')&&<button onClick={()=>void ejecutar(`/documentos-proveedor/${detalle.idM5}/generar-obligacion`)} className="rounded bg-primary-600 px-3 py-2 text-white">Generar obligación</button>}</div>}{detalle.asociaciones?.map(a=><div key={a.id} className="flex justify-between border-t p-3 text-sm"><span>OCS-{a.idOcs}: {a.montoAsignado.toLocaleString('es-CL')} · {a.estadoDiferencia} · {a.estadoExcedente}</span><div className="flex gap-2">{puede('CU99')&&<button onClick={()=>diferencia(a.id)} className="rounded border px-2">Resolver</button>}{puede('CU100')&&a.estadoExcedente==='pendiente'&&<button onClick={()=>void ejecutar(`/documentos-proveedor/${detalle.idM5}/diferencias/${a.id}/aprobar`,{aprobar:true})} className="rounded bg-emerald-600 px-2 text-white">Aprobar</button>}</div></div>)}</section>}</div>
+ {crear&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-2xl rounded-md bg-white"><div className="flex justify-between border-b p-4"><h2 className="font-bold">Nuevo documento {crear}</h2><button title="Cerrar" onClick={()=>setCrear(null)}><X/></button></div><div className="grid gap-3 p-5 md:grid-cols-2"><select value={form.idProveedor} onChange={e=>setForm({...form,idProveedor:e.target.value})} className="rounded border p-2"><option value="">Proveedor</option>{catalogos?.proveedores.map(p=><option key={p.id} value={p.id}>{p.nombre}</option>)}</select><select value={form.idTipoDocumento} onChange={e=>setForm({...form,idTipoDocumento:e.target.value})} className="rounded border p-2"><option value="">Tipo</option>{catalogos?.tipos.map(t=><option key={t.id} value={t.id}>{t.nombre}</option>)}</select><input placeholder="Folio" value={form.folio} onChange={e=>setForm({...form,folio:e.target.value})} className="rounded border p-2"/><input type="date" value={form.fechaEmision} onChange={e=>setForm({...form,fechaEmision:e.target.value})} className="rounded border p-2"/><select value={form.idMoneda} onChange={e=>setForm({...form,idMoneda:e.target.value})} className="rounded border p-2"><option value="">Moneda</option>{catalogos?.monedas.map(m=><option key={m.id} value={m.id}>{m.codigo}</option>)}</select><input type="number" placeholder="Monto" value={form.montoTotal} onChange={e=>setForm({...form,montoTotal:e.target.value})} className="rounded border p-2"/><textarea placeholder="Descripción" value={form.descripcion} onChange={e=>setForm({...form,descripcion:e.target.value})} className="rounded border p-2 md:col-span-2"/></div><div className="flex justify-end gap-2 border-t p-4"><button onClick={()=>setCrear(null)} className="rounded border px-4 py-2">Cancelar</button><button onClick={()=>void registrar()} className="rounded bg-primary-600 px-4 py-2 text-white">Registrar</button></div></div></div>}</div>;
 }

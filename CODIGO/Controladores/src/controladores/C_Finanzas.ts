@@ -18,7 +18,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'crearProveedor' | 'actualizarProveedor' | 'corregirIdentidadProveedor' | 'desactivarProveedor' | 'reactivarProveedor' | 'listarProveedores' | 'abrirFichaProveedor' | 'catalogosProveedores'
   | 'actualizarCondicionPagoProveedor' | 'listarOrdenesCompraServicios' | 'obtenerOrdenCompraServicio' | 'crearOrdenCompraServicio' | 'modificarOrdenCompraServicio'
   | 'prepararAjusteOrdenCompraServicio' | 'confirmarAjusteOrdenCompraServicio' | 'anularOrdenCompraServicio' | 'cerrarOrdenCompraServicio' | 'reabrirOrdenCompraServicio'
-  | 'listarDocumentosProveedor' | 'obtenerDocumentoProveedor';
+  | 'listarDocumentosProveedor' | 'obtenerDocumentoProveedor' | 'catalogosDocumentosProveedor'
+  | 'registrarDocumentoPreliminar' | 'registrarDocumentoDefinitivo' | 'asociarDocumentoOrdenes' | 'resolverDiferenciaDocumento' | 'resolverExcedenteDocumento'
+  | 'determinarVencimientoDocumento' | 'clasificarDocumento' | 'prepararImputacionDocumento' | 'confirmarImputacionDocumento' | 'registrarTipoCambioManual' | 'generarObligacionDocumento';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -64,6 +66,7 @@ export class C_Finanzas {
 
     if (actor && ((operacion==='guardarCotizacion' && Number(solicitud.cuerpo?.descuento_valor)>0 && !actor.permisos.includes('CU31')) || (operacion==='crearVentaDirecta' && Number((solicitud.cuerpo?.descuento as {valor?:number})?.valor)>0 && !actor.permisos.includes('CU33')))) throw new ErrorAplicacion(403,'No tienes permiso para aplicar descuentos');
     if (operacion === 'confirmarAjusteOrdenCompraServicio' && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede confirmar un ajuste de OCS');
+    if (operacion === 'confirmarImputacionDocumento' && !['gerencia','contador'].includes(actor.configuracion) && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar la imputación');
     const productosConCostoAjustado = Array.isArray(solicitud.cuerpo?.productos) && (solicitud.cuerpo.productos as Array<{ materiales?: Array<Record<string, unknown>> }>).some(producto => Array.isArray(producto.materiales) && producto.materiales.some(material => material.costo_ajustado !== undefined));
     if (operacion === 'editarCotizacion' && (solicitud.cuerpo?.precio_sugerido !== undefined || productosConCostoAjustado || Array.isArray(solicitud.cuerpo?.materiales) && (solicitud.cuerpo?.materiales as Array<Record<string, unknown>>).some(m => m.costo_ajustado !== undefined || m.precio !== undefined)) && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede ajustar costos o precio sugerido');
     const parametros = solicitud.parametros || {};
@@ -93,7 +96,19 @@ export class C_Finanzas {
       case 'cerrarOrdenCompraServicio': return this.m5.cerrarOrdenCompraServicio(identificador(parametros.id), cuerpo, actor.id);
       case 'reabrirOrdenCompraServicio': return this.m5.reabrirOrdenCompraServicio(identificador(parametros.id), cuerpo.confirmado === true, actor.id);
       case 'listarDocumentosProveedor': return this.m5.listarDocumentosProveedor(solicitud.consulta || {});
-      case 'obtenerDocumentoProveedor': return this.m5.obtenerDocumentoProveedor(identificador(parametros.id));
+      case 'obtenerDocumentoProveedor': return this.m5.obtenerDocumentoProveedor(texto(parametros.id, 30));
+      case 'catalogosDocumentosProveedor': return this.m5.catalogosDocumentosProveedor();
+      case 'registrarDocumentoPreliminar': return this.m5.registrarDocumentoPreliminar(cuerpo, actor.id);
+      case 'registrarDocumentoDefinitivo': return this.m5.registrarDocumentoDefinitivo(cuerpo, actor.id);
+      case 'asociarDocumentoOrdenes': return this.m5.asociarDocumentoOrdenes(identificador(parametros.id), cuerpo);
+      case 'resolverDiferenciaDocumento': return this.m5.resolverDiferenciaDocumento(identificador(parametros.id), identificador(parametros.asociacionId), cuerpo, actor.id);
+      case 'resolverExcedenteDocumento': return this.m5.resolverExcedenteDocumento(identificador(parametros.id), identificador(parametros.asociacionId), cuerpo, actor.id, actor.configuracion);
+      case 'determinarVencimientoDocumento': return this.m5.determinarVencimientoDocumento(identificador(parametros.id), cuerpo);
+      case 'clasificarDocumento': return this.m5.clasificarDocumento(identificador(parametros.id), cuerpo);
+      case 'prepararImputacionDocumento': return this.m5.prepararImputacionDocumento(identificador(parametros.id), cuerpo, actor.id);
+      case 'confirmarImputacionDocumento': return this.m5.confirmarImputacionDocumento(identificador(parametros.id), identificador(parametros.propuestaId), actor.id);
+      case 'registrarTipoCambioManual': return this.m5.registrarTipoCambioManual(identificador(parametros.id), cuerpo, actor.id);
+      case 'generarObligacionDocumento': return this.m5.generarObligacionDocumento(identificador(parametros.id), actor.id);
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();
