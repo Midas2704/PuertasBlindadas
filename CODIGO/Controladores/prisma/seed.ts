@@ -139,18 +139,20 @@ async function sembrarM5() {
       }
     }
     const ordenesDemo = [
-      { referencia: 'DEMO-M5-OCS-ASESORIA', rut: '76.543.210-3', monto: 480000, periodo: '2026-09', descripcion: 'Asesoría técnica ficticia' },
-      { referencia: 'DEMO-M5-OCS-LOGISTICA', rut: '76.543.213-8', monto: 725000, periodo: '2026-10', descripcion: 'Servicio logístico ficticio' },
-      { referencia: 'DEMO-M5-OCS-MANTENCION', rut: '76.543.213-8', monto: 315000, periodo: null, descripcion: 'Mantención preventiva ficticia' },
+      { referencia: 'DEMO-M5-OCS-ASESORIA', rut: '76.543.210-3', monto: 480000, periodo: '2026-09', descripcion: 'Asesoría técnica ficticia', estado: 'abierta' },
+      { referencia: 'DEMO-M5-OCS-LOGISTICA', rut: '76.543.213-8', monto: 725000, periodo: '2026-10', descripcion: 'Servicio logístico ficticio', estado: 'abierta' },
+      { referencia: 'DEMO-M5-OCS-MANTENCION', rut: '76.543.213-8', monto: 315000, periodo: null, descripcion: 'Mantención preventiva ficticia', estado: 'abierta' },
+      { referencia: 'DEMO-M5-OCS-CERRADA', rut: '76.543.210-3', monto: 250000, periodo: '2026-07', descripcion: 'Escenario demo cerrado directamente por seed', estado: 'cerrada' },
+      { referencia: 'DEMO-M5-OCS-ANULADA', rut: '76.543.213-8', monto: 180000, periodo: '2026-08', descripcion: 'Escenario demo anulado directamente por seed', estado: 'anulada' },
     ];
     for (const demo of ordenesDemo) {
       const proveedor = await tx.proveedor.findFirstOrThrow({ where: { identificador_tributario: demo.rut, estado_proveedor: 'activo' } });
       const existente = await tx.orden_compra_servicio_m5.findFirst({ where: { referencia: demo.referencia } });
-      const orden = existente ? await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: existente.id_orden_compra_servicio_m5 }, data: { id_proveedor: proveedor.id_proveedor, monto_autorizado: demo.monto, periodo: demo.periodo, descripcion: demo.descripcion } }) : await tx.orden_compra_servicio_m5.create({ data: { id_proveedor: proveedor.id_proveedor, monto_autorizado: demo.monto, estado_ocs: 'abierta', referencia: demo.referencia, periodo: demo.periodo, descripcion: demo.descripcion, creado_por: usuario.usuario_id_usuario } });
-      if (!await tx.historial_orden_compra_servicio_m5.findFirst({ where: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion' } })) await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion', valor_nuevo: JSON.stringify({ idProveedor: proveedor.id_proveedor, montoAutorizado: demo.monto, estado: 'abierta' }), usuario_id_usuario: usuario.usuario_id_usuario } });
+      const orden = existente ? await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: existente.id_orden_compra_servicio_m5 }, data: { id_proveedor: proveedor.id_proveedor, monto_autorizado: demo.monto, periodo: demo.periodo, descripcion: demo.descripcion, estado_ocs: demo.estado } }) : await tx.orden_compra_servicio_m5.create({ data: { id_proveedor: proveedor.id_proveedor, monto_autorizado: demo.monto, monto_autorizado_original: demo.monto, estado_ocs: demo.estado, referencia: demo.referencia, periodo: demo.periodo, descripcion: demo.descripcion, creado_por: usuario.usuario_id_usuario } });
+      if (!await tx.historial_orden_compra_servicio_m5.findFirst({ where: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion' } })) await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion', valor_nuevo: JSON.stringify({ idProveedor: proveedor.id_proveedor, montoAutorizado: demo.monto, estado: demo.estado }), motivo: demo.estado === 'abierta' ? null : 'Escenario demo creado directamente por seed', usuario_id_usuario: usuario.usuario_id_usuario } });
     }
   }, { timeout: 60000 });
-  console.log('Seed M5 completado: proveedores y OCS ficticias para CU75-CU90.');
+  console.log('Seed M5 completado: proveedores, documentos Legacy y OCS ficticias para CU75-CU95.');
 }
 
 sembrar().then(sembrarM4).then(sembrarM5).catch(error => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());

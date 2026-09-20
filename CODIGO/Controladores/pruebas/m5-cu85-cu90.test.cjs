@@ -172,7 +172,7 @@ test('CU88-CU90 crean, consultan y modifican OCS abierta sin alterar campos inmu
   assert.equal(creada.estado, 'abierta');
   assert.equal(creada.montoDocumentado, 0);
   assert.equal(creada.saldoDisponible, 125000);
-  assert.equal(ocsTieneEfectosFinancieros(creada.id), false);
+  assert.equal(await prisma.$transaction(tx => ocsTieneEfectosFinancieros(tx, creada.id)), false);
   const listado = await modulo.listarOrdenesCompraServicios();
   assert.ok(listado.some(item => item.id === creada.id));
   const detalle = await modulo.obtenerOrdenCompraServicio(creada.id);
@@ -194,7 +194,7 @@ test('permisos CU85-CU90 respetan actores, operaciones y módulo M5', () => {
   assert.deepEqual(actores('CU87'), ['contador', 'gerencia']);
   for (const codigo of ['CU89', 'CU90']) assert.deepEqual(actores(codigo), ['gerencia', 'secretaria']);
   for (let numero = 85; numero <= 90; numero++) assert.equal(moduloPermiso(`CU${numero}`), 'M5');
-  assert.equal(codigosTodosLosCU.length, 90);
+  assert.equal(codigosTodosLosCU.length, 95);
   assert.equal(operacionesPermiso.actualizarCondicionPagoProveedor, 'CU87');
   assert.equal(operacionesPermiso.listarOrdenesCompraServicios, 'CU88');
   assert.equal(operacionesPermiso.crearOrdenCompraServicio, 'CU89');

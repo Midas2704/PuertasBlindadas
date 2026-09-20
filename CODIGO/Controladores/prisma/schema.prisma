@@ -895,6 +895,7 @@ model orden_compra_servicio_m5 {
   id_orden_compra_servicio_m5 Int                                  @id @default(autoincrement())
   id_proveedor                 Int
   monto_autorizado             Decimal                              @db.Decimal(14, 2)
+  monto_autorizado_original    Decimal                              @db.Decimal(14, 2)
   estado_ocs                   String                               @default("abierta") @db.VarChar(20)
   referencia                   String?                              @db.VarChar(150)
   periodo                      String?                              @db.VarChar(50)
@@ -905,6 +906,8 @@ model orden_compra_servicio_m5 {
   proveedor                    proveedor                            @relation(fields: [id_proveedor], references: [id_proveedor], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_proveedor")
   usuario_creador              usuario                              @relation("ocs_m5_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_creador")
   historial                    historial_orden_compra_servicio_m5[]
+  ajustes                      ajuste_orden_compra_servicio_m5[]
+  efectos_financieros          efecto_financiero_ocs_m5[]
 
   @@index([id_proveedor, fecha_creacion], map: "idx_ocs_m5_proveedor_fecha")
   @@index([estado_ocs, fecha_creacion], map: "idx_ocs_m5_estado_fecha")
@@ -918,12 +921,48 @@ model historial_orden_compra_servicio_m5 {
   campo                String                   @db.VarChar(80)
   valor_anterior       String?
   valor_nuevo          String?
+  motivo               String?
   usuario_id_usuario   BigInt
   fecha_hora           DateTime                 @default(now()) @db.Timestamptz(6)
   orden_compra         orden_compra_servicio_m5 @relation(fields: [id_ocs_m5], references: [id_orden_compra_servicio_m5], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_ocs_m5_ocs")
   usuario              usuario                  @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_ocs_m5_usuario")
 
   @@index([id_ocs_m5, fecha_hora], map: "idx_historial_ocs_m5_ocs_fecha")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: solicitud y confirmación acotada de ajustes CU91.
+model ajuste_orden_compra_servicio_m5 {
+  id_ajuste_ocs_m5   Int                      @id @default(autoincrement())
+  id_ocs_m5          Int
+  campo              String                   @db.VarChar(80)
+  valor_anterior     String?
+  valor_propuesto    String?
+  motivo             String
+  solicitado_por     BigInt
+  fecha_solicitud    DateTime                 @default(now()) @db.Timestamptz(6)
+  estado             String                   @default("pendiente") @db.VarChar(20)
+  confirmado_por     BigInt?
+  fecha_confirmacion DateTime?                @db.Timestamptz(6)
+  orden_compra       orden_compra_servicio_m5 @relation(fields: [id_ocs_m5], references: [id_orden_compra_servicio_m5], onDelete: Restrict, onUpdate: NoAction, map: "fk_ajuste_ocs_m5_ocs")
+  usuario_solicitante usuario                 @relation("ajuste_ocs_solicitante", fields: [solicitado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_ajuste_ocs_m5_solicitante")
+  usuario_confirmante usuario?                @relation("ajuste_ocs_confirmante", fields: [confirmado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_ajuste_ocs_m5_confirmante")
+
+  @@index([id_ocs_m5, estado], map: "idx_ajuste_ocs_m5_ocs_estado")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: marcador financiero importable por CU97+; no registra documentos ni obligaciones.
+model efecto_financiero_ocs_m5 {
+  id_efecto_financiero_ocs_m5 Int                      @id @default(autoincrement())
+  id_ocs_m5                    Int
+  tipo_efecto                  String                   @db.VarChar(40)
+  referencia                   String?                  @db.VarChar(150)
+  monto_documentado            Decimal                  @default(0) @db.Decimal(14, 2)
+  fecha_registro               DateTime                 @default(now()) @db.Timestamptz(6)
+  orden_compra                 orden_compra_servicio_m5 @relation(fields: [id_ocs_m5], references: [id_orden_compra_servicio_m5], onDelete: Restrict, onUpdate: NoAction, map: "fk_efecto_ocs_m5_ocs")
+
+  @@index([id_ocs_m5], map: "idx_efecto_ocs_m5_ocs")
   @@schema("finanzas")
 }
 
@@ -2101,6 +2140,8 @@ model usuario {
   historial_proveedor_m5                           historial_proveedor_m5[]
   orden_compra_servicio_m5                         orden_compra_servicio_m5[]              @relation("ocs_m5_creador")
   historial_orden_compra_servicio_m5               historial_orden_compra_servicio_m5[]
+  ajustes_ocs_solicitados                          ajuste_orden_compra_servicio_m5[]       @relation("ajuste_ocs_solicitante")
+  ajustes_ocs_confirmados                          ajuste_orden_compra_servicio_m5[]       @relation("ajuste_ocs_confirmante")
 
   @@schema("terreno")
 }

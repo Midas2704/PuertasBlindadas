@@ -41,6 +41,13 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/ordenes-compra-servicios/:id', derivar('obtenerOrdenCompraServicio'));
   rutas.post('/ordenes-compra-servicios', derivar('crearOrdenCompraServicio'));
   rutas.put('/ordenes-compra-servicios/:id', derivar('modificarOrdenCompraServicio'));
+  rutas.post('/ordenes-compra-servicios/:id/ajustes', derivar('prepararAjusteOrdenCompraServicio'));
+  rutas.post('/ordenes-compra-servicios/:id/ajustes/:ajusteId/confirmar', derivar('confirmarAjusteOrdenCompraServicio'));
+  rutas.post('/ordenes-compra-servicios/:id/anular', derivar('anularOrdenCompraServicio'));
+  rutas.post('/ordenes-compra-servicios/:id/cerrar', derivar('cerrarOrdenCompraServicio'));
+  rutas.post('/ordenes-compra-servicios/:id/reabrir', derivar('reabrirOrdenCompraServicio'));
+  rutas.get('/documentos-proveedor', derivar('listarDocumentosProveedor'));
+  rutas.get('/documentos-proveedor/:id', derivar('obtenerDocumentoProveedor'));
   rutas.get('/dashboard/stats', derivar('dashboard'));
   rutas.get('/billing/inventory', derivar('inventario'));
   rutas.get('/billing/products', derivar('productos'));

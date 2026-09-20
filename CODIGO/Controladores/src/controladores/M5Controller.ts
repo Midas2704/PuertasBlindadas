@@ -21,6 +21,15 @@ const incluirDocumentos = {
 } satisfies Prisma.documento_compra_proveedorInclude;
 type DocumentoProveedor = Prisma.documento_compra_proveedorGetPayload<{ include: typeof incluirDocumentos }>;
 
+const incluirOcs = {
+  proveedor: true,
+  usuario_creador: true,
+  historial: { include: { usuario: true }, orderBy: { fecha_hora: 'desc' as const } },
+  ajustes: { include: { usuario_solicitante: true, usuario_confirmante: true }, orderBy: { fecha_solicitud: 'desc' as const } },
+  efectos_financieros: true,
+} satisfies Prisma.orden_compra_servicio_m5Include;
+type OrdenCompraServicio = Prisma.orden_compra_servicio_m5GetPayload<{ include: typeof incluirOcs }>;
+
 export interface ResumenFinancieroProveedor {
   saldoPendienteTotal: number;
   situacionFinanciera: SituacionProveedor;
@@ -151,16 +160,27 @@ export function calcularFechaVencimientoProveedor(fechaBase: Date, dias: number,
   return fecha;
 }
 
-export function calcularResumenOcs(montoAutorizado: Prisma.Decimal | number) {
+export function calcularResumenOcs(montoAutorizado: Prisma.Decimal | number, efectos: Array<{ monto_documentado: Prisma.Decimal | number }> = []) {
   const monto = Number(montoAutorizado);
-  // TEMPORAL_M5_DB_PATCH: CU91+ incorporará asociaciones reales para calcular consumo.
-  const montoDocumentado = 0;
+  const montoDocumentado = efectos.reduce((suma, efecto) => suma + Number(efecto.monto_documentado), 0);
   return { montoAutorizado: monto, montoDocumentado, saldoDisponible: Math.max(0, monto - montoDocumentado) };
 }
 
-export function ocsTieneEfectosFinancieros(_idOcs: number) {
-  // TEMPORAL_M5_DB_PATCH: aún no existen relaciones OCS-documento u OCS-obligación.
-  return false;
+export async function ocsTieneEfectosFinancieros(tx: Transaccion, idOcs: number) {
+  return await tx.efecto_financiero_ocs_m5.count({ where: { id_ocs_m5: idOcs } }) > 0;
+}
+
+export function evaluarCierreOcs(montoAutorizado: Prisma.Decimal | number, montoDocumentado: Prisma.Decimal | number, declaracionFinal = false, justificacion = '') {
+  const autorizado = Number(montoAutorizado);
+  const documentado = Number(montoDocumentado);
+  if (Math.abs(documentado - autorizado) < 0.005) return { puedeCerrar: true, automatico: true, tipo: 'monto_exacto' as const };
+  if (documentado < autorizado) {
+    if (!declaracionFinal) return { puedeCerrar: false, automatico: false, tipo: 'requiere_declaracion_final' as const };
+    if (!texto(justificacion, 1000)) return { puedeCerrar: false, automatico: false, tipo: 'requiere_justificacion' as const };
+    return { puedeCerrar: true, automatico: false, tipo: 'final_bajo_autorizado' as const };
+  }
+  // TEMPORAL_M5_DB_PATCH: CU99/CU100 conectarán aquí la aprobación real del excedente.
+  return { puedeCerrar: false, automatico: false, tipo: 'excedente_pendiente_aprobacion' as const };
 }
 
 export class M5Controller {
@@ -405,31 +425,32 @@ export class M5Controller {
     });
   }
 
-  private presentarOcs(orden: Prisma.orden_compra_servicio_m5GetPayload<{ include: { proveedor: true; usuario_creador: true; historial: { include: { usuario: true } } } }>) {
+  private presentarOcs(orden: OrdenCompraServicio) {
     return {
       id: orden.id_orden_compra_servicio_m5,
       proveedor: { id: orden.proveedor.id_proveedor, razonSocial: orden.proveedor.nombre_razon_social, estado: orden.proveedor.estado_proveedor },
       estado: orden.estado_ocs,
-      ...calcularResumenOcs(orden.monto_autorizado),
+      ...calcularResumenOcs(orden.monto_autorizado, orden.efectos_financieros),
+      tieneEfectosFinancieros: orden.efectos_financieros.length > 0,
+      montoAutorizadoOriginal: Number(orden.monto_autorizado_original),
       referencia: orden.referencia,
       periodo: orden.periodo,
       descripcion: orden.descripcion,
       fechaCreacion: orden.fecha_creacion,
       fechaActualizacion: orden.fecha_actualizacion,
       creadoPor: { id: orden.creado_por.toString(), nombre: orden.usuario_creador.acceso_m4 || orden.usuario_creador.usuario_username || orden.creado_por.toString() },
-      historial: orden.historial.map(item => ({ id: item.id_historial_ocs_m5, campo: item.campo, valorAnterior: item.valor_anterior, valorNuevo: item.valor_nuevo, fechaHora: item.fecha_hora, usuario: item.usuario.acceso_m4 || item.usuario.usuario_username || item.usuario_id_usuario.toString() })),
+      historial: orden.historial.map(item => ({ id: item.id_historial_ocs_m5, campo: item.campo, valorAnterior: item.valor_anterior, valorNuevo: item.valor_nuevo, motivo: item.motivo, fechaHora: item.fecha_hora, usuario: item.usuario.acceso_m4 || item.usuario.usuario_username || item.usuario_id_usuario.toString() })),
+      ajustes: orden.ajustes.map(item => ({ id: item.id_ajuste_ocs_m5, campo: item.campo, valorAnterior: item.valor_anterior, valorPropuesto: item.valor_propuesto, motivo: item.motivo, estado: item.estado, fechaSolicitud: item.fecha_solicitud, solicitadoPor: item.usuario_solicitante.acceso_m4 || item.usuario_solicitante.usuario_username || item.solicitado_por.toString(), fechaConfirmacion: item.fecha_confirmacion, confirmadoPor: item.usuario_confirmante ? item.usuario_confirmante.acceso_m4 || item.usuario_confirmante.usuario_username || item.confirmado_por?.toString() : null })),
     };
   }
 
-  private readonly incluirOcs = { proveedor: true, usuario_creador: true, historial: { include: { usuario: true }, orderBy: { fecha_hora: 'desc' as const } } };
-
   async listarOrdenesCompraServicios() {
-    const ordenes = await prisma.orden_compra_servicio_m5.findMany({ include: this.incluirOcs, orderBy: [{ fecha_creacion: 'desc' }, { id_orden_compra_servicio_m5: 'desc' }] });
+    const ordenes = await prisma.orden_compra_servicio_m5.findMany({ include: incluirOcs, orderBy: [{ fecha_creacion: 'desc' }, { id_orden_compra_servicio_m5: 'desc' }] });
     return ordenes.map(orden => this.presentarOcs(orden));
   }
 
   async obtenerOrdenCompraServicio(id: number) {
-    const orden = await prisma.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id }, include: this.incluirOcs });
+    const orden = await prisma.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id }, include: incluirOcs });
     if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
     return this.presentarOcs(orden);
   }
@@ -444,6 +465,7 @@ export class M5Controller {
       const orden = await tx.orden_compra_servicio_m5.create({ data: {
         id_proveedor: idProveedor,
         monto_autorizado: montoAutorizado,
+        monto_autorizado_original: montoAutorizado,
         estado_ocs: 'abierta',
         referencia: contacto(entrada.referencia, 150),
         periodo: contacto(entrada.periodo, 50),
@@ -451,7 +473,7 @@ export class M5Controller {
         creado_por: usuario,
       } });
       await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion', valor_anterior: null, valor_nuevo: JSON.stringify({ idProveedor, montoAutorizado: Number(montoAutorizado), estado: 'abierta' }), usuario_id_usuario: usuario } });
-      const completa = await tx.orden_compra_servicio_m5.findUniqueOrThrow({ where: { id_orden_compra_servicio_m5: orden.id_orden_compra_servicio_m5 }, include: this.incluirOcs });
+      const completa = await tx.orden_compra_servicio_m5.findUniqueOrThrow({ where: { id_orden_compra_servicio_m5: orden.id_orden_compra_servicio_m5 }, include: incluirOcs });
       return this.presentarOcs(completa);
     });
   }
@@ -461,7 +483,8 @@ export class M5Controller {
     return prisma.$transaction(async tx => {
       const actual = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id } });
       if (!actual) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
-      if (ocsTieneEfectosFinancieros(id)) throw new ErrorAplicacion(409, 'La OCS ya tiene efectos financieros; debe utilizarse el flujo de ajuste CU91');
+      if (actual.estado_ocs !== 'abierta') throw new ErrorAplicacion(409, 'Sólo puede editarse directamente una OCS Abierta');
+      if (await ocsTieneEfectosFinancieros(tx, id)) throw new ErrorAplicacion(409, 'La OCS ya tiene efectos financieros; debe utilizarse el flujo de ajuste CU91');
       const data: Prisma.orden_compra_servicio_m5UncheckedUpdateInput = { fecha_actualizacion: new Date() };
       const cambios: Prisma.historial_orden_compra_servicio_m5CreateManyInput[] = [];
       if (entrada.idProveedor !== undefined || entrada.id_proveedor !== undefined) {
@@ -482,8 +505,163 @@ export class M5Controller {
       if (!cambios.length) throw new ErrorAplicacion(400, 'La OCS no presenta cambios');
       await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: id }, data });
       await tx.historial_orden_compra_servicio_m5.createMany({ data: cambios });
-      const completa = await tx.orden_compra_servicio_m5.findUniqueOrThrow({ where: { id_orden_compra_servicio_m5: id }, include: this.incluirOcs });
+      const completa = await tx.orden_compra_servicio_m5.findUniqueOrThrow({ where: { id_orden_compra_servicio_m5: id }, include: incluirOcs });
       return this.presentarOcs(completa);
     });
+  }
+
+  private campoAjuste(valor: unknown) {
+    const campo = texto(valor, 80);
+    const equivalencias: Record<string, string> = { montoAutorizado: 'monto_autorizado', idProveedor: 'id_proveedor' };
+    const normalizado = equivalencias[campo] || campo;
+    if (!['monto_autorizado', 'id_proveedor', 'referencia', 'periodo', 'descripcion'].includes(normalizado)) throw new ErrorAplicacion(400, 'Campo de ajuste no permitido');
+    return normalizado;
+  }
+
+  private async resolverValorAjuste(tx: Transaccion, orden: Prisma.orden_compra_servicio_m5GetPayload<Record<string, never>>, campo: string, valor: unknown) {
+    if (campo === 'monto_autorizado') return montoPositivo(valor).toString();
+    if (campo === 'id_proveedor') {
+      const idProveedor = identificador(valor);
+      const proveedor = await tx.proveedor.findUnique({ where: { id_proveedor: idProveedor } });
+      if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
+      if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'Sólo puede utilizarse un proveedor Activo para una OCS');
+      return String(idProveedor);
+    }
+    const maximo = campo === 'referencia' ? 150 : campo === 'periodo' ? 50 : 1000;
+    return contacto(valor, maximo);
+  }
+
+  private valorActualAjuste(orden: Prisma.orden_compra_servicio_m5GetPayload<Record<string, never>>, campo: string) {
+    if (campo === 'monto_autorizado') return orden.monto_autorizado.toString();
+    if (campo === 'id_proveedor') return String(orden.id_proveedor);
+    return orden[campo as 'referencia' | 'periodo' | 'descripcion'];
+  }
+
+  async prepararAjusteOrdenCompraServicio(id: number, entrada: Entrada, usuario: bigint) {
+    const campo = this.campoAjuste(entrada.campo);
+    const motivo = motivoObligatorio(entrada.motivo);
+    const valorEntradaAjuste = valorEntrada(entrada, 'valorPropuesto', 'valor_propuesto', 'valor');
+    return prisma.$transaction(async tx => {
+      const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id } });
+      if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
+      if (orden.estado_ocs !== 'abierta') throw new ErrorAplicacion(409, 'Sólo puede ajustarse una OCS Abierta');
+      if (!await ocsTieneEfectosFinancieros(tx, id)) throw new ErrorAplicacion(409, 'La OCS no tiene efectos financieros y debe modificarse mediante CU90');
+      if (await tx.ajuste_orden_compra_servicio_m5.findFirst({ where: { id_ocs_m5: id, campo, estado: 'pendiente' } })) throw new ErrorAplicacion(409, 'Ya existe un ajuste pendiente para este campo');
+      const anterior = this.valorActualAjuste(orden, campo);
+      const propuesto = await this.resolverValorAjuste(tx, orden, campo, valorEntradaAjuste);
+      if (anterior === propuesto) throw new ErrorAplicacion(400, 'El ajuste no presenta cambios');
+      const ajuste = await tx.ajuste_orden_compra_servicio_m5.create({ data: { id_ocs_m5: id, campo, valor_anterior: anterior, valor_propuesto: propuesto, motivo, solicitado_por: usuario } });
+      await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: id, campo: 'solicitud_ajuste', valor_anterior: anterior, valor_nuevo: propuesto, motivo, usuario_id_usuario: usuario } });
+      return { id: ajuste.id_ajuste_ocs_m5, idOcs: id, campo, valorAnterior: anterior, valorPropuesto: propuesto, motivo, estado: ajuste.estado, solicitadoPor: usuario.toString(), fechaSolicitud: ajuste.fecha_solicitud };
+    });
+  }
+
+  async confirmarAjusteOrdenCompraServicio(id: number, ajusteId: number, usuario: bigint) {
+    return prisma.$transaction(async tx => {
+      const ajuste = await tx.ajuste_orden_compra_servicio_m5.findFirst({ where: { id_ajuste_ocs_m5: ajusteId, id_ocs_m5: id } });
+      if (!ajuste) throw new ErrorAplicacion(404, 'Solicitud de ajuste no encontrada');
+      if (ajuste.estado !== 'pendiente') throw new ErrorAplicacion(409, 'La solicitud de ajuste ya fue resuelta');
+      const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id } });
+      if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
+      if (orden.estado_ocs !== 'abierta') throw new ErrorAplicacion(409, 'Sólo puede confirmarse un ajuste sobre una OCS Abierta');
+      const data: Prisma.orden_compra_servicio_m5UncheckedUpdateInput = { fecha_actualizacion: new Date() };
+      if (ajuste.campo === 'monto_autorizado') data.monto_autorizado = montoPositivo(ajuste.valor_propuesto);
+      else if (ajuste.campo === 'id_proveedor') {
+        const idProveedor = identificador(ajuste.valor_propuesto);
+        const proveedor = await tx.proveedor.findUnique({ where: { id_proveedor: idProveedor } });
+        if (!proveedor || proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'El proveedor propuesto ya no está Activo');
+        data.id_proveedor = idProveedor;
+      } else data[ajuste.campo as 'referencia' | 'periodo' | 'descripcion'] = ajuste.valor_propuesto;
+      await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: id }, data });
+      const confirmado = await tx.ajuste_orden_compra_servicio_m5.update({ where: { id_ajuste_ocs_m5: ajusteId }, data: { estado: 'confirmado', confirmado_por: usuario, fecha_confirmacion: new Date() } });
+      await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: id, campo: `ajuste_${ajuste.campo}`, valor_anterior: ajuste.valor_anterior, valor_nuevo: ajuste.valor_propuesto, motivo: ajuste.motivo, usuario_id_usuario: usuario } });
+      return { mensaje: 'Ajuste confirmado', id: ajusteId, idOcs: id, estado: confirmado.estado, confirmadoPor: usuario.toString(), fechaConfirmacion: confirmado.fecha_confirmacion };
+    });
+  }
+
+  async anularOrdenCompraServicio(id: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo);
+    return prisma.$transaction(async tx => {
+      const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id } });
+      if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
+      if (orden.estado_ocs !== 'abierta') throw new ErrorAplicacion(409, 'Sólo puede anularse una OCS Abierta');
+      if (await ocsTieneEfectosFinancieros(tx, id)) throw new ErrorAplicacion(409, 'La OCS tiene efectos financieros y no puede anularse directamente; utiliza el ajuste trazable cuando corresponda');
+      await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: id }, data: { estado_ocs: 'anulada', fecha_actualizacion: new Date() } });
+      await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: id, campo: 'estado', valor_anterior: 'abierta', valor_nuevo: 'anulada', motivo, usuario_id_usuario: usuario } });
+      return { mensaje: 'Orden de compra de servicios anulada', id, estado: 'anulada' };
+    });
+  }
+
+  async cerrarOrdenCompraServicio(id: number, entrada: Entrada, usuario: bigint) {
+    return prisma.$transaction(async tx => {
+      const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id }, include: { efectos_financieros: true } });
+      if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
+      if (orden.estado_ocs !== 'abierta') throw new ErrorAplicacion(409, 'Sólo puede cerrarse una OCS Abierta');
+      const montoDocumentado = calcularResumenOcs(orden.monto_autorizado, orden.efectos_financieros).montoDocumentado;
+      const evaluacion = evaluarCierreOcs(orden.monto_autorizado, montoDocumentado, entrada.declaracionFinal === true, texto(entrada.justificacion, 1000));
+      if (!evaluacion.puedeCerrar) {
+        if (evaluacion.tipo === 'excedente_pendiente_aprobacion') throw new ErrorAplicacion(409, 'La OCS tiene un excedente pendiente de aprobación y no puede cerrarse');
+        throw new ErrorAplicacion(400, evaluacion.tipo === 'requiere_declaracion_final' ? 'Debes declarar que corresponde a la facturación final' : 'La justificación es obligatoria para cerrar bajo el monto autorizado');
+      }
+      const justificacion = evaluacion.automatico ? null : texto(entrada.justificacion, 1000);
+      await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: id }, data: { estado_ocs: 'cerrada', fecha_actualizacion: new Date() } });
+      await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: id, campo: 'estado', valor_anterior: 'abierta', valor_nuevo: JSON.stringify({ estado: 'cerrada', tipoCierre: evaluacion.tipo, montoDocumentado }), motivo: justificacion, usuario_id_usuario: usuario } });
+      return { mensaje: 'Orden de compra de servicios cerrada', id, estado: 'cerrada', tipoCierre: evaluacion.tipo, montoAutorizado: Number(orden.monto_autorizado), montoDocumentado };
+    });
+  }
+
+  async reabrirOrdenCompraServicio(id: number, confirmado: boolean, usuario: bigint) {
+    if (!confirmado) throw new ErrorAplicacion(400, 'Debes confirmar la reapertura');
+    return prisma.$transaction(async tx => {
+      const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id } });
+      if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
+      if (orden.estado_ocs !== 'cerrada') throw new ErrorAplicacion(409, 'Sólo puede reabrirse una OCS Cerrada');
+      await tx.orden_compra_servicio_m5.update({ where: { id_orden_compra_servicio_m5: id }, data: { estado_ocs: 'abierta', fecha_actualizacion: new Date() } });
+      await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: id, campo: 'estado', valor_anterior: 'cerrada', valor_nuevo: 'abierta', usuario_id_usuario: usuario } });
+      return { mensaje: 'Orden de compra de servicios reabierta', id, estado: 'abierta' };
+    });
+  }
+
+  private presentarDocumentoProveedor(documento: DocumentoProveedor & { proveedor: { id_proveedor: number; nombre_razon_social: string }; tipo_documento: { nombre_tipo_documento: string }; moneda: { codigo_moneda: string } }) {
+    const resumen = calcularResumenFinancieroProveedor([documento]).obligaciones[0];
+    return {
+      id: documento.id_documento_compra_proveedor,
+      fuente: 'documento_compra_proveedor',
+      proveedor: { id: documento.proveedor.id_proveedor, razonSocial: documento.proveedor.nombre_razon_social },
+      tipoDocumento: documento.tipo_documento.nombre_tipo_documento,
+      numero: documento.numero_documento,
+      fechaEmision: documento.fecha_emision,
+      fechaVencimiento: documento.fecha_vencimiento,
+      moneda: documento.moneda.codigo_moneda,
+      montoTotal: Number(documento.monto_total),
+      estadoDocumental: documento.estado_documento,
+      saldoPendiente: resumen.saldoPendiente,
+      estadoPagoCalculado: resumen.estadoPago,
+      clasificacionM5: 'No disponible',
+      asociacionOrdenCompra: 'Sin asociación',
+      observacion: documento.observacion,
+    };
+  }
+
+  async listarDocumentosProveedor(consulta: Record<string, unknown>) {
+    const idProveedor = consulta.idProveedor === undefined && consulta.proveedor === undefined ? undefined : identificador(valorEntrada(consulta, 'idProveedor', 'proveedor'));
+    const busqueda = texto(valorEntrada(consulta, 'busqueda', 'numero'), 100);
+    const estado = texto(consulta.estado, 30);
+    const documentos = await prisma.documento_compra_proveedor.findMany({
+      where: {
+        id_proveedor: idProveedor,
+        numero_documento: busqueda ? { contains: busqueda, mode: 'insensitive' } : undefined,
+        estado_documento: estado ? { equals: estado, mode: 'insensitive' } : undefined,
+      },
+      include: { ...incluirDocumentos, proveedor: true },
+      orderBy: [{ fecha_emision: 'desc' }, { id_documento_compra_proveedor: 'desc' }],
+    });
+    return documentos.map(documento => this.presentarDocumentoProveedor(documento));
+  }
+
+  async obtenerDocumentoProveedor(id: number) {
+    const documento = await prisma.documento_compra_proveedor.findUnique({ where: { id_documento_compra_proveedor: id }, include: { ...incluirDocumentos, proveedor: true } });
+    if (!documento) throw new ErrorAplicacion(404, 'Documento de proveedor no encontrado');
+    return this.presentarDocumentoProveedor(documento);
   }
 }

@@ -20,6 +20,7 @@ import UmbralPorVencer from './views/Configuracion/UmbralPorVencer';
 import CatalogoProveedores from './views/CatalogoProveedores/CatalogoProveedores';
 import VerFichaProveedor from './views/VerFichaProveedor/VerFichaProveedor';
 import OrdenesCompraServicios from './views/OrdenesCompraServicios/OrdenesCompraServicios';
+import DocumentosProveedor from './views/DocumentosProveedor/DocumentosProveedor';
 
 const App: React.FC = () => {
   return (
@@ -37,6 +38,7 @@ const App: React.FC = () => {
           <Route path="proveedores" element={<Protegido permiso="CU80"><CatalogoProveedores /></Protegido>} />
           <Route path="proveedores/:id" element={<Protegido permiso="CU84"><VerFichaProveedor /></Protegido>} />
           <Route path="ordenes-compra-servicios" element={<Protegido permiso="CU88"><OrdenesCompraServicios /></Protegido>} />
+          <Route path="documentos-proveedor" element={<Protegido permiso="CU95"><DocumentosProveedor /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />
