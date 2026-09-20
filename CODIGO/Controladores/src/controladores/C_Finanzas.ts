@@ -20,7 +20,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'prepararAjusteOrdenCompraServicio' | 'confirmarAjusteOrdenCompraServicio' | 'anularOrdenCompraServicio' | 'cerrarOrdenCompraServicio' | 'reabrirOrdenCompraServicio'
   | 'listarDocumentosProveedor' | 'obtenerDocumentoProveedor' | 'catalogosDocumentosProveedor'
   | 'registrarDocumentoPreliminar' | 'registrarDocumentoDefinitivo' | 'asociarDocumentoOrdenes' | 'resolverDiferenciaDocumento' | 'resolverExcedenteDocumento'
-  | 'determinarVencimientoDocumento' | 'clasificarDocumento' | 'prepararImputacionDocumento' | 'confirmarImputacionDocumento' | 'registrarTipoCambioManual' | 'generarObligacionDocumento';
+  | 'determinarVencimientoDocumento' | 'clasificarDocumento' | 'prepararImputacionDocumento' | 'confirmarImputacionDocumento' | 'registrarTipoCambioManual' | 'generarObligacionDocumento'
+  | 'listarCuentasPorPagar' | 'consultarUmbralProveedores' | 'configurarUmbralProveedores';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -60,6 +61,11 @@ export class C_Finanzas {
       if(solicitud.consulta?.ordenar || solicitud.consulta?.direccion) adicionales.push('CU86');
     }
     if(operacion==='abrirFichaProveedor' && (solicitud.consulta?.tipoAntecedente || solicitud.consulta?.estadoAntecedente || solicitud.consulta?.direccion)) adicionales.push('CU85');
+    if(operacion==='listarCuentasPorPagar') {
+      if(solicitud.consulta?.estadoTemporal && String(solicitud.consulta.estadoTemporal).toLowerCase()!=='todos') adicionales.push('CU107');
+      if(solicitud.consulta?.estadoPago && String(solicitud.consulta.estadoPago).toLowerCase()!=='todos') adicionales.push('CU108');
+      if(solicitud.consulta?.proveedor || solicitud.consulta?.busqueda || solicitud.consulta?.ordenar || solicitud.consulta?.direccion) adicionales.push('CU109');
+    }
     const actor = (this.autorizacion ? await this.autorizacion.autorizar(operacion, solicitud.contexto) : await this.m4.autorizar(operacion, solicitud.contexto,adicionales)) as ActorAutenticado;
     // Sólo inyección explícita en pruebas. La ejecución normal siempre usa M4.
     // TODO: dejar documentado el adaptador de pruebas cuando cerremos la integración
@@ -109,6 +115,9 @@ export class C_Finanzas {
       case 'confirmarImputacionDocumento': return this.m5.confirmarImputacionDocumento(identificador(parametros.id), identificador(parametros.propuestaId), actor.id);
       case 'registrarTipoCambioManual': return this.m5.registrarTipoCambioManual(identificador(parametros.id), cuerpo, actor.id);
       case 'generarObligacionDocumento': return this.m5.generarObligacionDocumento(identificador(parametros.id), actor.id);
+      case 'listarCuentasPorPagar': return this.m5.listarCuentasPorPagar(solicitud.consulta || {});
+      case 'consultarUmbralProveedores': return this.m5.consultarUmbralM5();
+      case 'configurarUmbralProveedores': return this.m5.configurarUmbralM5(cuerpo, actor.id);
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();

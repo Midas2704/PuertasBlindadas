@@ -23,7 +23,7 @@ export function sumarDiasHabilesChile(fecha: string, dias: number, feriados = ne
 }
 
 const TIPOS_PROVEEDOR = ['Insumos/Materiales', 'Servicios', 'Ambos'] as const;
-const DIAS_POR_VENCER_M5 = 5; // TEMPORAL_M5_DB_PATCH: configuración propia de M5 aún no existe.
+const UMBRAL_INICIAL_M5 = 5;
 const camposIdentidad = ['idPais', 'id_pais', 'pais', 'idTipoIdentificador', 'id_tipo_identificador', 'tipoIdentificador', 'identificador', 'identificadorTributario', 'identificador_tributario', 'rut'];
 
 const incluirDocumentos = {
@@ -61,7 +61,7 @@ export interface ResumenFinancieroProveedor {
 }
 
 /** Única fuente para la etiqueta y el filtro financiero de CU80/CU83. */
-export function calcularResumenFinancieroProveedor(documentos: DocumentoProveedor[], hoy = fechaNegocio()): ResumenFinancieroProveedor {
+export function calcularResumenFinancieroProveedor(documentos: DocumentoProveedor[], hoy = fechaNegocio(), umbral = UMBRAL_INICIAL_M5): ResumenFinancieroProveedor {
   const saldos = new Map<string, number>();
   const obligaciones = documentos.map(documento => {
     const retirado = documento.estado_documento.toLowerCase() === 'anulado';
@@ -74,7 +74,7 @@ export function calcularResumenFinancieroProveedor(documentos: DocumentoProveedo
     if (saldoPendiente > 0) {
       if (documento.fecha_vencimiento) {
         const dias = diasHabilesEntre(hoy, fechaRegistro(documento.fecha_vencimiento));
-        condicionTemporal = dias < 0 ? 'Vencida' : dias <= DIAS_POR_VENCER_M5 ? 'Por vencer' : 'Por pagar';
+        condicionTemporal = dias < 0 ? 'Vencida' : dias <= umbral ? 'Por vencer' : 'Por pagar';
       } else condicionTemporal = 'Por pagar';
       const moneda = documento.moneda.codigo_moneda;
       saldos.set(moneda, (saldos.get(moneda) || 0) + saldoPendiente);
@@ -167,6 +167,22 @@ export function esDiaHabilChile(fecha: Date) {
   return diferencia !== -2 && diferencia !== -1;
 }
 
+export function calcularEstadoPagoObligacion(saldoInicial: Prisma.Decimal | number, saldoActual: Prisma.Decimal | number) {
+  const inicial = Number(saldoInicial); const actual = Number(saldoActual);
+  if (actual <= 0) return 'Pagada' as const;
+  if (actual < inicial) return 'Parcial' as const;
+  return 'Pendiente' as const;
+}
+
+export function calcularCondicionTemporalObligacion(obligacion: { saldo_actual: Prisma.Decimal | number; fecha_vencimiento: Date }, umbral: number, hoy = fechaNegocio()) {
+  if (Number(obligacion.saldo_actual) <= 0) return null;
+  const vencimiento = fechaRegistro(obligacion.fecha_vencimiento);
+  if (vencimiento < hoy) return 'Vencida' as const;
+  const cursor = new Date(`${hoy}T00:00:00Z`); const limite = new Date(`${vencimiento}T00:00:00Z`); let dias = 0;
+  while (cursor < limite) { if (esDiaHabilChile(cursor)) dias++; cursor.setUTCDate(cursor.getUTCDate() + 1); }
+  return dias <= umbral ? 'Por vencer' as const : 'Por pagar' as const;
+}
+
 export function calcularFechaVencimientoProveedor(fechaBase: Date, dias: number, tipoComputo: TipoComputoPago) {
   const condicion = condicionPago(dias, tipoComputo);
   const fecha = new Date(Date.UTC(fechaBase.getUTCFullYear(), fechaBase.getUTCMonth(), fechaBase.getUTCDate()));
@@ -207,6 +223,66 @@ export function evaluarCierreOcs(montoAutorizado: Prisma.Decimal | number, monto
 
 export class M5Controller {
   constructor(private readonly bancoCentral: BancoCentral = new C_BancoCentral()) {}
+  private async umbralM5(tx: Transaccion | typeof prisma = prisma) {
+    return (await tx.config_umbral_por_vencer_m5.findFirst({ orderBy: [{ fecha_hora: 'desc' }, { id_config_umbral_m5: 'desc' }] }))?.dias_habiles ?? UMBRAL_INICIAL_M5;
+  }
+
+  private async resumenObligacionesM5(idsProveedores: number[]) {
+    const [obligaciones, monedas, umbral] = await Promise.all([
+      prisma.obligacion_proveedor_m5.findMany({ where: { id_proveedor: { in: idsProveedores } } }), prisma.moneda.findMany(), this.umbralM5(),
+    ]);
+    const codigos = new Map(monedas.map(moneda => [moneda.id_moneda, moneda.codigo_moneda]));
+    const resultado = new Map<number, ResumenFinancieroProveedor>();
+    for (const id of idsProveedores) {
+      const propias = obligaciones.filter(item => item.id_proveedor === id).map(item => {
+        const estadoPago = calcularEstadoPagoObligacion(item.saldo_inicial, item.saldo_actual); const condicionTemporal = calcularCondicionTemporalObligacion(item, umbral);
+        return { id: item.id_obligacion_m5, numero: `M5-${item.id_documento_m5}`, tipo: 'Obligación M5', moneda: codigos.get(item.id_moneda) || 'No disponible', fechaEmision: item.fecha_emision, fechaVencimiento: item.fecha_vencimiento, estadoPago, condicionTemporal, montoTotal: Number(item.monto_original), saldoPendiente: Number(item.saldo_actual) };
+      });
+      if (!propias.length) continue;
+      const saldos = new Map<string, number>(); let totalClp = 0;
+      for (const item of propias.filter(item => item.saldoPendiente > 0)) saldos.set(item.moneda, (saldos.get(item.moneda) || 0) + item.saldoPendiente);
+      for (const obligacion of obligaciones.filter(item => item.id_proveedor === id && item.saldo_actual.gt(0))) { const codigo = codigos.get(obligacion.id_moneda); if (codigo === 'CLP') totalClp += Number(obligacion.saldo_actual); else if (obligacion.tipo_cambio) totalClp += Number(obligacion.saldo_actual.mul(obligacion.tipo_cambio)); }
+      const situacionFinanciera: SituacionProveedor = propias.some(item => item.condicionTemporal === 'Vencida') ? 'Vencida' : propias.some(item => item.condicionTemporal === 'Por vencer') ? 'Por vencer' : propias.some(item => item.condicionTemporal === 'Por pagar') ? 'Por pagar' : 'Sin deuda';
+      resultado.set(id, { saldoPendienteTotal: totalClp, situacionFinanciera, saldosPorMoneda: [...saldos].map(([moneda,saldoPendiente]) => ({ moneda,saldoPendiente })), obligaciones: propias });
+    }
+    return resultado;
+  }
+
+  async listarCuentasPorPagar(consulta: Record<string, unknown>) {
+    const estadoTemporal = texto(valorEntrada(consulta, 'estadoTemporal', 'estado_temporal') || 'todos', 20).toLowerCase();
+    const estadoPago = texto(valorEntrada(consulta, 'estadoPago', 'estado_pago') || 'todos', 20).toLowerCase();
+    const idProveedor = consulta.proveedor === undefined ? undefined : identificador(consulta.proveedor);
+    const busqueda = texto(consulta.busqueda, 120).toLocaleLowerCase('es-CL');
+    const ordenar = texto(consulta.ordenar || 'fechaVencimiento', 30); const direccion = direccionOrden(consulta.direccion || 'asc');
+    const temporales: Record<string,string|null> = { todos:null, por_pagar:'Por pagar', 'por pagar':'Por pagar', por_vencer:'Por vencer', 'por vencer':'Por vencer', vencida:'Vencida' };
+    const pagos: Record<string,string|null> = { todos:null, pendiente:'Pendiente', parcial:'Parcial', pagada:'Pagada' };
+    if (!(estadoTemporal in temporales)) throw new ErrorAplicacion(400, 'Estado temporal inválido');
+    if (!(estadoPago in pagos)) throw new ErrorAplicacion(400, 'Estado de pago inválido');
+    if (!['proveedor','fechaEmision','fechaVencimiento','saldoPendiente','montoOriginal'].includes(ordenar)) throw new ErrorAplicacion(400, 'Ordenamiento inválido');
+    const obligaciones = await prisma.obligacion_proveedor_m5.findMany({ where: { id_proveedor: idProveedor } });
+    const [proveedores, documentos, monedas, tipos, umbral] = await Promise.all([
+      prisma.proveedor.findMany({ where: { id_proveedor: { in: obligaciones.map(o => o.id_proveedor) } } }), prisma.documento_proveedor_m5.findMany({ where: { id_documento_m5: { in: obligaciones.map(o => o.id_documento_m5) } } }), prisma.moneda.findMany(), prisma.tipo_documento.findMany(), this.umbralM5(),
+    ]);
+    const lista = obligaciones.map(obligacion => {
+      const proveedor = proveedores.find(p => p.id_proveedor === obligacion.id_proveedor)!; const documento = documentos.find(d => d.id_documento_m5 === obligacion.id_documento_m5)!; const moneda = monedas.find(m => m.id_moneda === obligacion.id_moneda)!; const tipo = tipos.find(t => t.id_tipo_documento === documento.id_tipo_documento);
+      return { id: obligacion.id_obligacion_m5, proveedor: { id: proveedor.id_proveedor, razonSocial: proveedor.nombre_razon_social, identificadorFiscal: proveedor.identificador_tributario }, documento: { id: documento.id_documento_m5, folio: documento.folio, tipo: tipo?.nombre_tipo_documento || 'No disponible' }, moneda: moneda.codigo_moneda, montoOriginal: Number(obligacion.monto_original), saldoActual: Number(obligacion.saldo_actual), fechaEmision: obligacion.fecha_emision, fechaVencimiento: obligacion.fecha_vencimiento, condicionTemporal: calcularCondicionTemporalObligacion(obligacion, umbral), estadoPago: calcularEstadoPagoObligacion(obligacion.saldo_inicial, obligacion.saldo_actual), tipoCambio: obligacion.tipo_cambio ? Number(obligacion.tipo_cambio) : null, requiereAtencion: Number(obligacion.saldo_actual) > 0 && ['Por vencer','Vencida'].includes(calcularCondicionTemporalObligacion(obligacion, umbral) || '') };
+    }).filter(item => (!temporales[estadoTemporal] || item.condicionTemporal === temporales[estadoTemporal]) && (!pagos[estadoPago] || item.estadoPago === pagos[estadoPago]) && (!busqueda || item.proveedor.razonSocial.toLocaleLowerCase('es-CL').includes(busqueda) || item.proveedor.identificadorFiscal.toLocaleLowerCase('es-CL').includes(busqueda) || item.documento.folio.toLocaleLowerCase('es-CL').includes(busqueda)));
+    const factor = direccion === 'asc' ? 1 : -1;
+    return lista.sort((a,b) => { let c=0; if(ordenar==='proveedor')c=a.proveedor.razonSocial.localeCompare(b.proveedor.razonSocial,'es-CL',{sensitivity:'base'}); if(ordenar==='fechaEmision')c=a.fechaEmision.getTime()-b.fechaEmision.getTime(); if(ordenar==='fechaVencimiento')c=a.fechaVencimiento.getTime()-b.fechaVencimiento.getTime(); if(ordenar==='saldoPendiente')c=a.saldoActual-b.saldoActual; if(ordenar==='montoOriginal')c=a.montoOriginal-b.montoOriginal; return c===0?a.id-b.id:c*factor; });
+  }
+
+  async consultarUmbralM5() {
+    const vigente = await prisma.config_umbral_por_vencer_m5.findFirst({ orderBy: [{ fecha_hora: 'desc' }, { id_config_umbral_m5: 'desc' }] });
+    return { diasHabiles: vigente?.dias_habiles ?? UMBRAL_INICIAL_M5, fechaHora: vigente?.fecha_hora || null, usuario: vigente?.usuario_id_usuario.toString() || null };
+  }
+
+  async configurarUmbralM5(entrada: Entrada, usuario: bigint) {
+    const dias = Number(valorEntrada(entrada, 'diasHabiles', 'dias_habiles'));
+    if (!Number.isInteger(dias) || dias < 0) throw new ErrorAplicacion(400, 'El umbral debe ser un entero mayor o igual que cero');
+    const anterior = await this.consultarUmbralM5();
+    const registro = await prisma.config_umbral_por_vencer_m5.create({ data: { dias_habiles: dias, usuario_id_usuario: usuario } });
+    return { valorAnterior: anterior.diasHabiles, valorNuevo: registro.dias_habiles, usuario: usuario.toString(), fechaHora: registro.fecha_hora };
+  }
   private async identidad(tx: Transaccion, entrada: Entrada, actual?: { id_pais: number | null; id_tipo_identificador: number; identificador_tributario: string }) {
     const idPais = valorEntrada(entrada, 'idPais', 'id_pais', 'pais');
     const idTipo = valorEntrada(entrada, 'idTipoIdentificador', 'id_tipo_identificador', 'tipoIdentificador');
@@ -369,9 +445,11 @@ export class M5Controller {
       include: { pais: true, tipo_identificador: true, documento_compra_proveedor: { include: incluirDocumentos } },
       orderBy: [{ nombre_razon_social: 'asc' }, { id_proveedor: 'asc' }],
     });
+    const resumenesM5 = await this.resumenObligacionesM5(proveedores.map(proveedor => proveedor.id_proveedor));
     const identificadorBuscado = busqueda.replace(/[.\s-]/g, '');
     const resultado = proveedores.map(proveedor => {
-      const resumen = calcularResumenFinancieroProveedor(proveedor.documento_compra_proveedor);
+      // TEMPORAL_M5_DB_PATCH: si ya existe obligación M5, Legacy queda sólo como antecedente y no se suma dos veces.
+      const resumen = resumenesM5.get(proveedor.id_proveedor) || calcularResumenFinancieroProveedor(proveedor.documento_compra_proveedor);
       return {
         idProveedor: proveedor.id_proveedor,
         identificadorFiscal: proveedor.identificador_tributario,
@@ -411,7 +489,7 @@ export class M5Controller {
       proveedor_contacto_telefono: true,
     } });
     if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
-    const resumenFinanciero = calcularResumenFinancieroProveedor(proveedor.documento_compra_proveedor);
+    const resumenFinanciero = (await this.resumenObligacionesM5([id])).get(id) || calcularResumenFinancieroProveedor(proveedor.documento_compra_proveedor);
     const factor = direccion === 'asc' ? 1 : -1;
     const ordenarFecha = <T>(items: T[], fecha: (item: T) => Date) => items.sort((a, b) => factor * (fecha(a).getTime() - fecha(b).getTime()));
     const historialCondicion = proveedor.historial_proveedor_m5.find(item => item.campo === 'condicion_pago');
@@ -902,8 +980,7 @@ export class M5Controller {
       if (!await tx.propuesta_imputacion_m5.findFirst({ where: { id_documento_m5: id, estado: 'confirmado' } })) throw new ErrorAplicacion(409, 'La imputación no está confirmada');
       const moneda = await tx.moneda.findUniqueOrThrow({ where: { id_moneda: documento.id_moneda } });
       if (moneda.codigo_moneda !== 'CLP' && !documento.tipo_cambio) throw new ErrorAplicacion(409, 'Se requiere referencia cambiaria confirmada');
-      const hoy = fechaNegocio(); const vencimiento = fechaRegistro(documento.fecha_vencimiento); const dias = diasHabilesEntre(hoy, vencimiento);
-      const condicion = vencimiento < hoy ? 'Vencida' : dias <= DIAS_POR_VENCER_M5 ? 'Por vencer' : 'Por pagar';
+      const condicion = calcularCondicionTemporalObligacion({ saldo_actual: documento.monto_total, fecha_vencimiento: documento.fecha_vencimiento }, await this.umbralM5(tx))!;
       const obligacion = await tx.obligacion_proveedor_m5.create({ data: { id_documento_m5: id, id_proveedor: documento.id_proveedor, monto_original: documento.monto_total, id_moneda: documento.id_moneda, saldo_inicial: documento.monto_total, saldo_actual: documento.monto_total, fecha_emision: documento.fecha_emision, fecha_vencimiento: documento.fecha_vencimiento, estado_pago: 'Pendiente', condicion_temporal: condicion, condicion_pago_dias_snapshot: documento.condicion_pago_dias_snapshot, condicion_pago_tipo_snapshot: documento.condicion_pago_tipo_snapshot, tipo_cambio: documento.tipo_cambio, tipo_cambio_origen: documento.tipo_cambio_origen, generado_por: usuario } });
       for (const asociacion of asociaciones.filter(a => a.tipo_orden === 'OCS')) {
         const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: asociacion.id_ocs_m5! }, include: { efectos_financieros: true } });

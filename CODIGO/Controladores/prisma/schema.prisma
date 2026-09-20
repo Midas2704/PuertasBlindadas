@@ -1053,6 +1053,17 @@ model feriado_chile_m5 {
   @@schema("finanzas")
 }
 
+/// TEMPORAL_M5_DB_PATCH: historial append-only del umbral operativo CU110.
+model config_umbral_por_vencer_m5 {
+  id_config_umbral_m5 Int      @id @default(autoincrement())
+  dias_habiles        Int
+  usuario_id_usuario  BigInt
+  fecha_hora          DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([fecha_hora, id_config_umbral_m5], map: "idx_config_umbral_m5_vigente")
+  @@schema("finanzas")
+}
+
 /// TEMPORAL_M5_DB_PATCH: trazabilidad mínima de creación y modificación directa de OCS.
 model historial_orden_compra_servicio_m5 {
   id_historial_ocs_m5 Int                      @id @default(autoincrement())

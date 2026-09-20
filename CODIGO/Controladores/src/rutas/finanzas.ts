@@ -60,6 +60,9 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/documentos-proveedor/:id/imputacion/:propuestaId/confirmar', derivar('confirmarImputacionDocumento'));
   rutas.post('/documentos-proveedor/:id/tipo-cambio-manual', derivar('registrarTipoCambioManual'));
   rutas.post('/documentos-proveedor/:id/generar-obligacion', derivar('generarObligacionDocumento'));
+  rutas.get('/cuentas-por-pagar', derivar('listarCuentasPorPagar'));
+  rutas.get('/configuracion/umbral-por-vencer-proveedores', derivar('consultarUmbralProveedores'));
+  rutas.put('/configuracion/umbral-por-vencer-proveedores', derivar('configurarUmbralProveedores'));
   rutas.get('/dashboard/stats', derivar('dashboard'));
   rutas.get('/billing/inventory', derivar('inventario'));
   rutas.get('/billing/products', derivar('productos'));
