@@ -3,6 +3,7 @@ import { M4Controller, ActorAutenticado } from './M4Controller';
 import { M1Controller } from './M1Controller';
 import { M2Controller } from './M2Controller';
 import { M3Controller } from './M3Controller';
+import { M5Controller } from './M5Controller';
 import { Autorizacion, ContextoAutorizacion } from '../validaciones/autorizacion';
 import { identificador, texto, validarFiltros } from '../validaciones/solicitudes';
 
@@ -13,7 +14,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
   | 'iniciarSesion' | 'solicitarRecuperacion' | 'recuperarClave' | 'validarRecuperacion' | 'miSesion' | 'cambiarClave' | 'cerrarSesion'
   | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
-  | 'asignarPermisos' | 'retirarPermisos' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa';
+  | 'asignarPermisos' | 'retirarPermisos' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
+  | 'crearProveedor' | 'actualizarProveedor' | 'corregirIdentidadProveedor' | 'desactivarProveedor' | 'reactivarProveedor' | 'listarProveedores' | 'abrirFichaProveedor' | 'catalogosProveedores';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -30,6 +32,7 @@ export class C_Finanzas {
     private readonly m2 = new M2Controller(),
     private readonly m3 = new M3Controller(),
     private readonly m4 = new M4Controller(),
+    private readonly m5 = new M5Controller(),
   ) {}
   async ejecutar(operacion: Operacion, solicitud: SolicitudFinanzas) {
     // CU68/CU70 no exigen sesión previa. Cada comando protegido representa una confirmación de CU.
@@ -38,12 +41,17 @@ export class C_Finanzas {
     if (operacion === 'solicitarRecuperacion') return this.m4.solicitarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'validarRecuperacion') return this.m4.validarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'recuperarClave') return this.m4.recuperarClave(solicitud.cuerpo || {});
-    if (operacion === 'salud') return {status:'ok', arquitectura:'C_Finanzas → M1/M2/M3/M4 → Prisma → PostgreSQL'};
+    if (operacion === 'salud') return {status:'ok', arquitectura:'C_Finanzas → M1/M2/M3/M4/M5 → Prisma → PostgreSQL'};
     const adicionales:string[]=[];
     if(operacion==='listarClientes') {
       if(solicitud.consulta?.busqueda || solicitud.consulta?.search) adicionales.push('CU06');
       if(solicitud.consulta?.estado && solicitud.consulta.estado!=='activos') adicionales.push('CU07');
       if(solicitud.consulta?.deuda==='true' || solicitud.consulta?.morosos==='true') adicionales.push('CU08');
+    }
+    if(operacion==='listarProveedores') {
+      if(solicitud.consulta?.busqueda) adicionales.push('CU81');
+      if(solicitud.consulta?.estado && String(solicitud.consulta.estado).toLowerCase()!=='todos') adicionales.push('CU82');
+      if(solicitud.consulta?.situacion && String(solicitud.consulta.situacion).toLowerCase()!=='todos') adicionales.push('CU83');
     }
     const actor = (this.autorizacion ? await this.autorizacion.autorizar(operacion, solicitud.contexto) : await this.m4.autorizar(operacion, solicitud.contexto,adicionales)) as ActorAutenticado;
     // Sólo inyección explícita en pruebas. La ejecución normal siempre usa M4.
@@ -60,6 +68,14 @@ export class C_Finanzas {
       case 'actualizarCliente': return this.m1.actualizarCliente(identificador(parametros.id), cuerpo);
       case 'desactivarCliente': return this.m1.cambiarEstadoCliente(identificador(parametros.id), 'inactivo', cuerpo.confirmado === true);
       case 'reactivarCliente': return this.m1.cambiarEstadoCliente(identificador(parametros.id), 'activo', cuerpo.confirmado === true);
+      case 'crearProveedor': return this.m5.crearProveedor(cuerpo);
+      case 'actualizarProveedor': return this.m5.actualizarProveedor(identificador(parametros.id), cuerpo, actor.id);
+      case 'corregirIdentidadProveedor': return this.m5.corregirIdentidadProveedor(identificador(parametros.id), cuerpo, actor.id);
+      case 'desactivarProveedor': return this.m5.cambiarEstadoProveedor(identificador(parametros.id), 'inactivo', cuerpo.confirmado === true, actor.id);
+      case 'reactivarProveedor': return this.m5.cambiarEstadoProveedor(identificador(parametros.id), 'activo', cuerpo.confirmado === true, actor.id);
+      case 'listarProveedores': return this.m5.listarProveedores(solicitud.consulta || {});
+      case 'abrirFichaProveedor': return this.m5.abrirFichaProveedor(identificador(parametros.id));
+      case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();

@@ -75,7 +75,8 @@ export class M4Controller {
   const personales=['miSesion','cambiarClave','cerrarSesion'];
   if(cambiarClave && !personales.includes(operacion)) return error(403,'Debes cambiar tu contraseña antes de continuar');
   const permisos=permisosEfectivos(cuenta);
-  if (Number(operacionesPermiso[operacion]?.slice(2)) >= 59 && cuenta.perfil?.codigo_m4 !== 'gerencia') return error(403,'La operación requiere configuración de Gerencia');
+  const numeroCU = Number(operacionesPermiso[operacion]?.slice(2));
+  if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia') return error(403,'La operación requiere configuración de Gerencia');
   if (operacionesQueRequierenAdministrador.has(operacion) && !cuenta.usuario_es_administrador) return error(403,'La operación requiere rol Administrador');
   if(!personales.includes(operacion) && (!operacionesPermiso[operacion] || !permisos.includes(operacionesPermiso[operacion]!))) return error(403,'No tienes permiso para esta operación');
   if(adicionales.some(p=>!permisos.includes(p))) return error(403,'No tienes permiso para los filtros o condiciones solicitados');
@@ -135,7 +136,7 @@ export class M4Controller {
  }
  private async validarPermisos(tx:Transaccion,codigos:string[],administrador=false) {
   const seleccion=await tx.permiso.findMany({where:{codigo_m4:{in:codigos},activo_m4:true},include:{dependencias:{include:{requerido:true}}}});
-  if(seleccion.length!==new Set(codigos).size || seleccion.some(p=>(p.requiere_administrador || Number(p.codigo_m4?.slice(2))>=59)&&!administrador)) error(400,'Permiso no asignable');
+  if(seleccion.length!==new Set(codigos).size || seleccion.some(p=>{const numero=Number(p.codigo_m4?.slice(2));return (p.requiere_administrador || numero>=59&&numero<=74)&&!administrador;})) error(400,'Permiso no asignable');
   if(seleccion.some(p=>p.dependencias.some(d=>!codigos.includes(d.requerido.codigo_m4!)))) error(409,'No se puede mantener un permiso sin sus dependencias');
   return seleccion;
  }

@@ -17,6 +17,8 @@ import NotaDeVentaDirecta from './views/NotaDeVentaDirecta/NotaDeVentaDirecta';
 import BandejaAprobacionGerencia from './views/BandejaAprobacion/BandejaAprobacionGerencia';
 import PagosCliente from './views/Pagos/PagosCliente';
 import UmbralPorVencer from './views/Configuracion/UmbralPorVencer';
+import CatalogoProveedores from './views/CatalogoProveedores/CatalogoProveedores';
+import VerFichaProveedor from './views/VerFichaProveedor/VerFichaProveedor';
 
 const App: React.FC = () => {
   return (
@@ -31,6 +33,8 @@ const App: React.FC = () => {
           <Route index element={<Protegido permiso="CU05"><DashboardPrincipal /></Protegido>} />
           <Route path="clientes" element={<Protegido permiso="CU05"><CatalogoClientes /></Protegido>} />
           <Route path="clientes/:rut" element={<Protegido permiso="CU09"><VerFicha /></Protegido>} />
+          <Route path="proveedores" element={<Protegido permiso="CU80"><CatalogoProveedores /></Protegido>} />
+          <Route path="proveedores/:id" element={<Protegido permiso="CU84"><VerFichaProveedor /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

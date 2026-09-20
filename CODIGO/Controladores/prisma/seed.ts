@@ -94,4 +94,52 @@ async function sembrar() {
   }, { timeout: 60000 });
   console.log('Seed I2 completado: datos ficticios relacionados, sin borrar ni actualizar información previa.');
 }
-sembrar().then(sembrarM4).catch(error => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());
+
+/** Escenarios visuales repetibles de M5 para catálogo, filtros y fichas CU75-CU84. */
+async function sembrarM5() {
+  await prisma.$transaction(async tx => {
+    const [pais, tipoIdentificador, moneda, medioPago, usuario] = await Promise.all([
+      tx.pais.upsert({ where: { nombre_pais: 'Chile' }, update: { estado_pais: 'activo', codigo_iso_pais: 'CL' }, create: { nombre_pais: 'Chile', codigo_iso_pais: 'CL' } }),
+      tx.tipo_identificador.upsert({ where: { nombre_tipo_identificador: 'RUT' }, update: { estado_tipo_identificador: 'activo' }, create: { nombre_tipo_identificador: 'RUT', descripcion_tipo_identificador: 'Rol Único Tributario chileno' } }),
+      tx.moneda.findUniqueOrThrow({ where: { codigo_moneda: 'CLP' } }),
+      tx.medio_pago.findUniqueOrThrow({ where: { nombre_medio_pago: 'Transferencia' } }),
+      tx.usuario.findFirstOrThrow({ where: { administrador_original: true } }),
+    ]);
+    const tipoDocumento = await tx.tipo_documento.upsert({
+      where: { nombre_tipo_documento: 'Factura proveedor demo M5' },
+      update: { aplica_compra: true, requiere_vencimiento: true, estado_tipo_documento: 'activo' },
+      create: { nombre_tipo_documento: 'Factura proveedor demo M5', descripcion_tipo_documento: 'Documento ficticio para validar CU80-CU84', aplica_compra: true, requiere_vencimiento: true },
+    });
+    const fechaHabil = (desplazamiento: number) => {
+      const fecha = new Date(); let restantes = Math.abs(desplazamiento); const paso = desplazamiento < 0 ? -1 : 1;
+      while (restantes > 0) { fecha.setUTCDate(fecha.getUTCDate() + paso); if (![0, 6].includes(fecha.getUTCDay())) restantes--; }
+      return fecha;
+    };
+    const escenarios = [
+      { clave: 'SIN-DEUDA', rut: '76.543.210-3', nombre: 'Demo M5 Acero Austral', estado: 'activo', tipo: 'Insumos/Materiales', contacto: 'Camila Soto', correo: 'camila.demo@example.invalid', telefono: '+56 9 5555 0101', condicion: null, total: 0, vence: null },
+      { clave: 'INACTIVO', rut: '76.543.211-1', nombre: 'Demo M5 Servicios Históricos', estado: 'inactivo', tipo: 'Servicios', contacto: 'Tomás Vera', correo: 'tomas.demo@example.invalid', telefono: '+56 9 5555 0102', condicion: null, total: 0, vence: null },
+      { clave: 'POR-PAGAR', rut: '76.543.212-K', nombre: 'Demo M5 Materiales Andinos', estado: 'activo', tipo: 'Ambos', contacto: 'Elena Ruiz', correo: 'elena.demo@example.invalid', telefono: '+56 9 5555 0103', condicion: '30 días', total: 120000, vence: null },
+      { clave: 'POR-VENCER', rut: '76.543.213-8', nombre: 'Demo M5 Logística Central', estado: 'activo', tipo: 'Servicios', contacto: 'Marco Díaz', correo: 'marco.demo@example.invalid', telefono: '+56 9 5555 0104', condicion: '15 días', total: 240000, vence: fechaHabil(3) },
+      { clave: 'VENCIDA', rut: '76.543.214-6', nombre: 'Demo M5 Suministros del Sur', estado: 'activo', tipo: 'Insumos/Materiales', contacto: 'Sofía Lagos', correo: 'sofia.demo@example.invalid', telefono: '+56 9 5555 0105', condicion: 'Contado', total: 360000, vence: fechaHabil(-2) },
+    ] as const;
+    for (const escenario of escenarios) {
+      const existente = await tx.proveedor.findFirst({ where: { id_pais: pais.id_pais, id_tipo_identificador: tipoIdentificador.id_tipo_identificador, identificador_tributario: escenario.rut } });
+      const datos = { id_pais: pais.id_pais, id_tipo_identificador: tipoIdentificador.id_tipo_identificador, identificador_tributario: escenario.rut, nombre_razon_social: escenario.nombre, tipo_proveedor_m5: escenario.tipo, contacto_proveedor: escenario.contacto, correo_proveedor: escenario.correo, telefono_proveedor: escenario.telefono, direccion_proveedor: 'Dirección ficticia para demostración M5', condicion_pago_m5: escenario.condicion, estado_proveedor: escenario.estado };
+      const proveedor = existente ? await tx.proveedor.update({ where: { id_proveedor: existente.id_proveedor }, data: datos }) : await tx.proveedor.create({ data: datos });
+      if (!await tx.historial_proveedor_m5.findFirst({ where: { id_proveedor: proveedor.id_proveedor, motivo: 'Datos ficticios M5' } })) await tx.historial_proveedor_m5.create({ data: { id_proveedor: proveedor.id_proveedor, campo: escenario.estado === 'inactivo' ? 'estado' : 'razon_social', valor_anterior: escenario.estado === 'inactivo' ? 'activo' : null, valor_nuevo: escenario.estado === 'inactivo' ? 'inactivo' : escenario.nombre, motivo: 'Datos ficticios M5', usuario_id_usuario: usuario.usuario_id_usuario } });
+      if (escenario.total > 0) {
+        const numero = `DEMO-M5-${escenario.clave}`;
+        const anterior = await tx.documento_compra_proveedor.findFirst({ where: { id_proveedor: proveedor.id_proveedor, id_tipo_documento: tipoDocumento.id_tipo_documento, numero_documento: numero } });
+        const documento = anterior ? await tx.documento_compra_proveedor.update({ where: { id_documento_compra_proveedor: anterior.id_documento_compra_proveedor }, data: { fecha_emision: fechaHabil(-10), fecha_vencimiento: escenario.vence, monto_neto: escenario.total, monto_total: escenario.total, estado_documento: 'pendiente_pago' } }) : await tx.documento_compra_proveedor.create({ data: { id_proveedor: proveedor.id_proveedor, id_tipo_documento: tipoDocumento.id_tipo_documento, id_moneda: moneda.id_moneda, numero_documento: numero, fecha_emision: fechaHabil(-10), fecha_vencimiento: escenario.vence, monto_neto: escenario.total, monto_total: escenario.total, estado_documento: 'pendiente_pago', observacion: 'Documento ficticio M5' } });
+        if (escenario.clave === 'POR-PAGAR') {
+          let pago = await tx.pago_proveedor.findFirst({ where: { id_proveedor: proveedor.id_proveedor, observacion: 'DEMO_M5_PAGO_PARCIAL' } });
+          if (!pago) pago = await tx.pago_proveedor.create({ data: { id_proveedor: proveedor.id_proveedor, id_moneda: moneda.id_moneda, id_medio_pago: medioPago.id_medio_pago, fecha_pago: fechaHabil(-3), monto_pago: 20000, estado_pago: 'verificado', observacion: 'DEMO_M5_PAGO_PARCIAL' } });
+          if (!await tx.asignacion_pago_proveedor.findFirst({ where: { id_pago_proveedor: pago.id_pago_proveedor, id_documento_compra_proveedor: documento.id_documento_compra_proveedor } })) await tx.asignacion_pago_proveedor.create({ data: { id_pago_proveedor: pago.id_pago_proveedor, id_documento_compra_proveedor: documento.id_documento_compra_proveedor, monto_asignado: 20000, observacion: 'Asignación ficticia M5' } });
+        }
+      }
+    }
+  }, { timeout: 60000 });
+  console.log('Seed M5 completado: proveedores ficticios para catálogo, filtros y fichas.');
+}
+
+sembrar().then(sembrarM4).then(sembrarM5).catch(error => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());

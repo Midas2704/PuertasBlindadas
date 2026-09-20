@@ -842,6 +842,8 @@ model proveedor {
   id_moneda_preferente        Int?
   identificador_tributario    String                        @db.VarChar(50)
   nombre_razon_social         String                        @db.VarChar(150)
+  tipo_proveedor_m5           String                        @default("Ambos") @db.VarChar(30)
+  condicion_pago_m5           String?                       @db.VarChar(150)
   nacionalidad_origen         String?                       @db.VarChar(80)
   contacto_proveedor          String?                       @db.VarChar(150)
   correo_proveedor            String?                       @db.VarChar(150)
@@ -862,9 +864,27 @@ model proveedor {
   material_proveedor          material_proveedor[]
   proveedor_contacto_correo   proveedor_contacto_correo[]
   proveedor_contacto_telefono proveedor_contacto_telefono[]
+  historial_proveedor_m5      historial_proveedor_m5[]
 
-  @@unique([id_tipo_identificador, identificador_tributario], map: "uq_proveedor_identificador")
-  @@index([id_tipo_identificador, identificador_tributario], map: "idx_proveedor_identificador")
+  @@unique([id_pais, id_tipo_identificador, identificador_tributario], map: "uq_proveedor_identidad_m5")
+  @@index([id_pais, id_tipo_identificador, identificador_tributario], map: "idx_proveedor_identidad_m5")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: historial operativo de CU76-CU79, pendiente de reconciliar con el patch definitivo.
+model historial_proveedor_m5 {
+  id_historial_proveedor_m5 Int       @id @default(autoincrement())
+  id_proveedor              Int
+  campo                      String    @db.VarChar(80)
+  valor_anterior             String?
+  valor_nuevo                String?
+  motivo                     String?
+  usuario_id_usuario         BigInt
+  fecha_hora                 DateTime  @default(now()) @db.Timestamptz(6)
+  proveedor                  proveedor @relation(fields: [id_proveedor], references: [id_proveedor], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_proveedor_m5_proveedor")
+  usuario                    usuario   @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_proveedor_m5_usuario")
+
+  @@index([id_proveedor, fecha_hora], map: "idx_historial_proveedor_m5_proveedor_fecha")
   @@schema("finanzas")
 }
 
@@ -2039,6 +2059,7 @@ model usuario {
   empleado                                         empleado?                @relation(fields: [empleado_rut_empleado], references: [rut_empleado], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_empleado_rut_empleado")
   perfil                                           perfil?                  @relation(fields: [perfil_id_perfil], references: [perfil_id_perfil], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_perfil_id_perfil")
   usuario_contrasena                               usuario_contrasena[]
+  historial_proveedor_m5                           historial_proveedor_m5[]
 
   @@schema("terreno")
 }

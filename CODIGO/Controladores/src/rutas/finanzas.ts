@@ -28,6 +28,14 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post(['/clientes/:id/desactivar', '/clients/:id/desactivar'], derivar('desactivarCliente'));
   rutas.post(['/clientes/:id/reactivar', '/clients/:id/reactivar'], derivar('reactivarCliente'));
   rutas.get(['/clientes/:referencia/ficha', '/clients/:referencia/ficha'], derivar('abrirFicha'));
+  rutas.get('/proveedores/catalogos', derivar('catalogosProveedores'));
+  rutas.get('/proveedores', derivar('listarProveedores'));
+  rutas.post('/proveedores', derivar('crearProveedor'));
+  rutas.put('/proveedores/:id', derivar('actualizarProveedor'));
+  rutas.post('/proveedores/:id/corregir-identidad', derivar('corregirIdentidadProveedor'));
+  rutas.post('/proveedores/:id/desactivar', derivar('desactivarProveedor'));
+  rutas.post('/proveedores/:id/reactivar', derivar('reactivarProveedor'));
+  rutas.get('/proveedores/:id/ficha', derivar('abrirFichaProveedor'));
   rutas.get('/dashboard/stats', derivar('dashboard'));
   rutas.get('/billing/inventory', derivar('inventario'));
   rutas.get('/billing/products', derivar('productos'));
