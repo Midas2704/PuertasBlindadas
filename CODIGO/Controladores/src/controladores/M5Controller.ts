@@ -995,6 +995,202 @@ export class M5Controller {
     });
   }
 
+  private async operacionPagoM5(id: number, tx: Transaccion | typeof prisma = prisma) {
+    const operacion = await tx.operacion_pago_proveedor_m5.findUnique({ where: { id_operacion_pago_m5: id } });
+    if (!operacion) throw new ErrorAplicacion(404, 'Operación de pago no encontrada');
+    return operacion;
+  }
+
+  private async presentarOperacionPago(id: number, tx: Transaccion | typeof prisma = prisma) {
+    const operacion = await this.operacionPagoM5(id, tx);
+    const movimientos = await tx.movimiento_pago_proveedor_m5.findMany({ where: { id_operacion_pago_m5: id }, orderBy: { id_movimiento_pago_m5: 'asc' } });
+    const [proveedor, obligaciones, medios, monedas, asociaciones] = await Promise.all([
+      tx.proveedor.findUniqueOrThrow({ where: { id_proveedor: operacion.id_proveedor } }),
+      tx.obligacion_proveedor_m5.findMany({ where: { id_obligacion_m5: { in: movimientos.map(m => m.id_obligacion_m5) } } }),
+      tx.medio_pago.findMany({ where: { id_medio_pago: { in: movimientos.map(m => m.id_medio_pago) } } }),
+      tx.moneda.findMany({ where: { id_moneda: { in: movimientos.map(m => m.id_moneda) } } }),
+      tx.asociacion_respaldo_pago_m5.findMany({ where: { OR: [{ id_operacion_pago_m5: id }, { id_movimiento_pago_m5: { in: movimientos.map(m => m.id_movimiento_pago_m5) } }] } }),
+    ]);
+    const total = movimientos.reduce((suma, movimiento) => suma.plus(movimiento.monto_aplicado), new Prisma.Decimal(0));
+    return {
+      id: operacion.id_operacion_pago_m5, estado: operacion.estado, fechaEfectivaPago: operacion.fecha_efectiva_pago,
+      proveedor: { id: proveedor.id_proveedor, razonSocial: proveedor.nombre_razon_social, identificadorFiscal: proveedor.identificador_tributario, estado: proveedor.estado_proveedor },
+      total: Number(total), totalConfirmado: operacion.total_confirmado === null ? null : Number(operacion.total_confirmado),
+      tieneRespaldo: asociaciones.some(a => a.id_operacion_pago_m5 === id),
+      movimientos: movimientos.map(movimiento => {
+        const obligacion = obligaciones.find(o => o.id_obligacion_m5 === movimiento.id_obligacion_m5)!;
+        const propuesto = movimientos.filter(m => m.id_obligacion_m5 === movimiento.id_obligacion_m5).reduce((suma, m) => suma.plus(m.monto_aplicado), new Prisma.Decimal(0));
+        return { id: movimiento.id_movimiento_pago_m5, idObligacion: movimiento.id_obligacion_m5, idMedioPago: movimiento.id_medio_pago, medioPago: medios.find(m => m.id_medio_pago === movimiento.id_medio_pago)?.nombre_medio_pago, moneda: monedas.find(m => m.id_moneda === movimiento.id_moneda)?.codigo_moneda, montoAplicado: Number(movimiento.monto_aplicado), saldoActual: Number(obligacion.saldo_actual), conflictoSaldo: propuesto.gt(obligacion.saldo_actual), tasaReferencia: movimiento.tasa_referencia === null ? null : Number(movimiento.tasa_referencia), fuenteTasa: movimiento.fuente_tasa, tasaBancariaEfectiva: movimiento.tasa_bancaria_efectiva === null ? null : Number(movimiento.tasa_bancaria_efectiva), equivalenteClp: movimiento.equivalente_clp === null ? null : Number(movimiento.equivalente_clp), tasaManual: movimiento.tasa_manual, estado: movimiento.estado, tieneRespaldo: asociaciones.some(a => a.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5) };
+      }),
+      creadoPor: operacion.creado_por.toString(), fechaCreacion: operacion.fecha_creacion, preparadoPor: operacion.preparado_por?.toString() || null, fechaPreparacion: operacion.fecha_preparacion, confirmadoPor: operacion.confirmado_por?.toString() || null, fechaConfirmacion: operacion.fecha_confirmacion,
+    };
+  }
+
+  async buscarProveedoresParaPago(consulta: Record<string, unknown>) {
+    const busqueda = texto(consulta.busqueda, 120);
+    const proveedores = await prisma.proveedor.findMany({
+      where: { estado_proveedor: 'activo', OR: busqueda ? [{ nombre_razon_social: { contains: busqueda, mode: 'insensitive' } }, { identificador_tributario: { contains: busqueda, mode: 'insensitive' } }] : undefined },
+      orderBy: [{ nombre_razon_social: 'asc' }, { id_proveedor: 'asc' }],
+    });
+    const obligaciones = await prisma.obligacion_proveedor_m5.findMany({ where: { id_proveedor: { in: proveedores.map(p => p.id_proveedor) }, saldo_actual: { gt: 0 } }, orderBy: [{ fecha_vencimiento: 'asc' }, { id_obligacion_m5: 'asc' }] });
+    const monedas = await prisma.moneda.findMany({ where: { id_moneda: { in: obligaciones.map(o => o.id_moneda) } } });
+    return proveedores.map(proveedor => ({ id: proveedor.id_proveedor, razonSocial: proveedor.nombre_razon_social, identificadorFiscal: proveedor.identificador_tributario, obligaciones: obligaciones.filter(o => o.id_proveedor === proveedor.id_proveedor).map(o => ({ id: o.id_obligacion_m5, moneda: monedas.find(m => m.id_moneda === o.id_moneda)?.codigo_moneda, saldoActual: Number(o.saldo_actual), montoOriginal: Number(o.monto_original), fechaVencimiento: o.fecha_vencimiento })) })).filter(proveedor => proveedor.obligaciones.length > 0);
+  }
+
+  async catalogosPagosProveedores() {
+    const [medios, monedas] = await Promise.all([prisma.medio_pago.findMany({ where: { estado_medio_pago: 'activo' }, orderBy: { nombre_medio_pago: 'asc' } }), prisma.moneda.findMany({ where: { estado_moneda: 'activo' }, orderBy: { codigo_moneda: 'asc' } })]);
+    return { medios: medios.map(m => ({ id: m.id_medio_pago, nombre: m.nombre_medio_pago })), monedas: monedas.map(m => ({ id: m.id_moneda, codigo: m.codigo_moneda, simbolo: m.simbolo_moneda })) };
+  }
+
+  async crearOperacionPago(entrada: Entrada, usuario: bigint) {
+    const idProveedor = identificador(valorEntrada(entrada, 'idProveedor', 'id_proveedor'));
+    const proveedor = await prisma.proveedor.findUnique({ where: { id_proveedor: idProveedor } });
+    if (!proveedor || proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'El proveedor no está habilitado para iniciar pagos');
+    if (!await prisma.obligacion_proveedor_m5.findFirst({ where: { id_proveedor: idProveedor, saldo_actual: { gt: 0 } } })) throw new ErrorAplicacion(409, 'El proveedor no tiene obligaciones pendientes');
+    const fecha = valorEntrada(entrada, 'fechaEfectivaPago', 'fecha_pago');
+    return this.presentarOperacionPago((await prisma.operacion_pago_proveedor_m5.create({ data: { id_proveedor: idProveedor, creado_por: usuario, fecha_efectiva_pago: fecha ? fechaEntrada(fecha, 'Fecha efectiva de pago') : null } })).id_operacion_pago_m5);
+  }
+
+  async listarBorradoresPago() {
+    const operaciones = await prisma.operacion_pago_proveedor_m5.findMany({ where: { estado: { in: ['borrador','preparada'] } }, orderBy: [{ fecha_creacion: 'desc' }, { id_operacion_pago_m5: 'desc' }] });
+    return Promise.all(operaciones.map(operacion => this.presentarOperacionPago(operacion.id_operacion_pago_m5)));
+  }
+
+  async obtenerOperacionPago(id: number) { return this.presentarOperacionPago(id); }
+
+  private async datosMovimientoPago(idOperacion: number, entrada: Entrada, excluir?: number) {
+    const operacion = await this.operacionPagoM5(idOperacion);
+    if (operacion.estado !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se editan operaciones en borrador');
+    const idObligacion = identificador(valorEntrada(entrada, 'idObligacion', 'id_obligacion_m5'));
+    const idMedio = identificador(valorEntrada(entrada, 'idMedioPago', 'id_medio_pago'));
+    const monto = montoPositivo(valorEntrada(entrada, 'montoAplicado', 'monto'));
+    const [obligacion, medio, moneda, movimientos] = await Promise.all([
+      prisma.obligacion_proveedor_m5.findUnique({ where: { id_obligacion_m5: idObligacion } }), prisma.medio_pago.findUnique({ where: { id_medio_pago: idMedio } }),
+      prisma.obligacion_proveedor_m5.findUnique({ where: { id_obligacion_m5: idObligacion } }).then(o => o ? prisma.moneda.findUnique({ where: { id_moneda: o.id_moneda } }) : null),
+      prisma.movimiento_pago_proveedor_m5.findMany({ where: { id_operacion_pago_m5: idOperacion, id_obligacion_m5: idObligacion, id_movimiento_pago_m5: excluir ? { not: excluir } : undefined } }),
+    ]);
+    if (!obligacion || obligacion.id_proveedor !== operacion.id_proveedor || obligacion.saldo_actual.lte(0)) throw new ErrorAplicacion(409, 'La obligación no es elegible para este proveedor');
+    if (!medio || medio.estado_medio_pago !== 'activo') throw new ErrorAplicacion(409, 'Selecciona un medio de pago activo');
+    if (movimientos.reduce((suma, actual) => suma.plus(actual.monto_aplicado), monto).gt(obligacion.saldo_actual)) throw new ErrorAplicacion(409, 'La suma de movimientos supera el saldo actual de la obligación');
+    const tasaBancariaEntrada = valorEntrada(entrada, 'tasaBancariaEfectiva', 'tasa_bancaria_efectiva');
+    const tasaBancaria = tasaBancariaEntrada === undefined || tasaBancariaEntrada === null || tasaBancariaEntrada === '' ? null : montoPositivo(tasaBancariaEntrada);
+    let tasaReferencia: Prisma.Decimal | null = null; let fuenteTasa: string | null = null;
+    if (moneda?.codigo_moneda !== 'CLP' && operacion.fecha_efectiva_pago) {
+      try { tasaReferencia = new Prisma.Decimal(await this.bancoCentral.obtenerTipoCambio(moneda!.codigo_moneda, fechaRegistro(operacion.fecha_efectiva_pago))); fuenteTasa = 'C_BancoCentral'; } catch (error) { if (!(error instanceof ErrorAplicacion)) throw error; }
+    }
+    const tasaClp = tasaBancaria || tasaReferencia;
+    return { id_operacion_pago_m5: idOperacion, id_obligacion_m5: idObligacion, id_medio_pago: idMedio, id_moneda: obligacion.id_moneda, monto_aplicado: monto, tasa_referencia: tasaReferencia, fuente_tasa: fuenteTasa, fecha_tasa: tasaReferencia ? operacion.fecha_efectiva_pago : null, tasa_bancaria_efectiva: tasaBancaria, equivalente_clp: moneda?.codigo_moneda === 'CLP' ? monto : tasaClp ? monto.mul(tasaClp).toDecimalPlaces(2) : null };
+  }
+
+  async agregarMovimientoPago(idOperacion: number, entrada: Entrada) {
+    const datos = await this.datosMovimientoPago(idOperacion, entrada);
+    const movimiento = await prisma.movimiento_pago_proveedor_m5.create({ data: datos });
+    return this.presentarOperacionPago(movimiento.id_operacion_pago_m5);
+  }
+
+  async actualizarMovimientoPago(idOperacion: number, idMovimiento: number, entrada: Entrada) {
+    const actual = await prisma.movimiento_pago_proveedor_m5.findFirst({ where: { id_movimiento_pago_m5: idMovimiento, id_operacion_pago_m5: idOperacion } });
+    if (!actual) throw new ErrorAplicacion(404, 'Movimiento no encontrado');
+    const datos = await this.datosMovimientoPago(idOperacion, entrada, idMovimiento);
+    await prisma.movimiento_pago_proveedor_m5.update({ where: { id_movimiento_pago_m5: idMovimiento }, data: { ...datos, tasa_manual: false, tasa_manual_justificacion: null, tasa_manual_usuario: null, tasa_manual_fecha: null } });
+    return this.presentarOperacionPago(idOperacion);
+  }
+
+  async adjuntarRespaldoPago(idOperacion: number, entrada: Entrada, usuario: bigint) {
+    const operacion = await this.operacionPagoM5(idOperacion);
+    if (operacion.estado !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se adjuntan respaldos a un borrador');
+    const nombre = texto(valorEntrada(entrada, 'nombreArchivo', 'nombre'), 255); const contenido = texto(entrada.contenido, 4500000);
+    if (!nombre || !contenido) throw new ErrorAplicacion(400, 'Nombre y contenido del respaldo son obligatorios');
+    const ids = Array.isArray(entrada.movimientos) ? entrada.movimientos.map(identificador) : [];
+    const movimientos = await prisma.movimiento_pago_proveedor_m5.findMany({ where: { id_movimiento_pago_m5: { in: ids }, id_operacion_pago_m5: idOperacion } });
+    if (movimientos.length !== new Set(ids).size) throw new ErrorAplicacion(400, 'Uno de los movimientos no pertenece a la operación');
+    const asociarOperacion = entrada.operacion !== false;
+    if (!asociarOperacion && !ids.length) throw new ErrorAplicacion(400, 'Selecciona la operación o al menos un movimiento');
+    await prisma.$transaction(async tx => {
+      const respaldo = await tx.respaldo_pago_proveedor_m5.create({ data: { nombre_archivo: nombre, contenido, creado_por: usuario } });
+      await tx.asociacion_respaldo_pago_m5.createMany({ data: [...(asociarOperacion ? [{ id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, id_operacion_pago_m5: idOperacion }] : []), ...ids.map(id => ({ id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, id_movimiento_pago_m5: id }))] });
+    });
+    return this.presentarOperacionPago(idOperacion);
+  }
+
+  async registrarTipoCambioManualPago(idOperacion: number, idMovimiento: number, entrada: Entrada, usuario: bigint, perfil: string) {
+    if (!['gerencia','contador'].includes(perfil)) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden ingresar una tasa manual');
+    const operacion = await this.operacionPagoM5(idOperacion); if (operacion.estado !== 'borrador') throw new ErrorAplicacion(409, 'La operación ya no admite cambios');
+    const movimiento = await prisma.movimiento_pago_proveedor_m5.findFirst({ where: { id_movimiento_pago_m5: idMovimiento, id_operacion_pago_m5: idOperacion } });
+    if (!movimiento) throw new ErrorAplicacion(404, 'Movimiento no encontrado');
+    const moneda = await prisma.moneda.findUniqueOrThrow({ where: { id_moneda: movimiento.id_moneda } }); if (moneda.codigo_moneda === 'CLP') throw new ErrorAplicacion(400, 'CLP no requiere tipo de cambio');
+    const tasa = montoPositivo(valorEntrada(entrada, 'tasaReferencia', 'tasa')); const justificacion = motivoObligatorio(entrada.justificacion);
+    const bancariaEntrada = valorEntrada(entrada, 'tasaBancariaEfectiva', 'tasa_bancaria_efectiva'); const bancaria = bancariaEntrada === undefined || bancariaEntrada === null || bancariaEntrada === '' ? null : montoPositivo(bancariaEntrada);
+    await prisma.movimiento_pago_proveedor_m5.update({ where: { id_movimiento_pago_m5: idMovimiento }, data: { tasa_referencia: tasa, fuente_tasa: 'manual', fecha_tasa: operacion.fecha_efectiva_pago, tasa_manual: true, tasa_manual_justificacion: justificacion, tasa_manual_usuario: usuario, tasa_manual_fecha: new Date(), tasa_bancaria_efectiva: bancaria, equivalente_clp: movimiento.monto_aplicado.mul(bancaria || tasa).toDecimalPlaces(2) } });
+    return this.presentarOperacionPago(idOperacion);
+  }
+
+  private async validarOperacionPago(tx: Transaccion, idOperacion: number) {
+    const operacion = await this.operacionPagoM5(idOperacion, tx);
+    if (!['borrador','preparada'].includes(operacion.estado)) throw new ErrorAplicacion(409, 'La operación ya no está disponible');
+    if (!operacion.fecha_efectiva_pago) throw new ErrorAplicacion(409, 'Falta la fecha efectiva de pago');
+    const proveedor = await tx.proveedor.findUnique({ where: { id_proveedor: operacion.id_proveedor } }); if (!proveedor || proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'El proveedor ya no está habilitado');
+    const movimientos = await tx.movimiento_pago_proveedor_m5.findMany({ where: { id_operacion_pago_m5: idOperacion } }); if (!movimientos.length) throw new ErrorAplicacion(409, 'La operación requiere al menos un movimiento');
+    const [obligaciones, medios, monedas, respaldos] = await Promise.all([tx.obligacion_proveedor_m5.findMany({ where: { id_obligacion_m5: { in: movimientos.map(m => m.id_obligacion_m5) } } }), tx.medio_pago.findMany({ where: { id_medio_pago: { in: movimientos.map(m => m.id_medio_pago) } } }), tx.moneda.findMany({ where: { id_moneda: { in: movimientos.map(m => m.id_moneda) } } }), tx.asociacion_respaldo_pago_m5.findMany({ where: { OR: [{ id_operacion_pago_m5: idOperacion }, { id_movimiento_pago_m5: { in: movimientos.map(m => m.id_movimiento_pago_m5) } }] } })]);
+    if (!respaldos.some(r => r.id_operacion_pago_m5 === idOperacion)) throw new ErrorAplicacion(409, 'La operación requiere respaldo');
+    for (const movimiento of movimientos) {
+      const obligacion = obligaciones.find(o => o.id_obligacion_m5 === movimiento.id_obligacion_m5); const medio = medios.find(m => m.id_medio_pago === movimiento.id_medio_pago); const moneda = monedas.find(m => m.id_moneda === movimiento.id_moneda);
+      if (!obligacion || obligacion.id_proveedor !== operacion.id_proveedor || obligacion.saldo_actual.lte(0)) throw new ErrorAplicacion(409, 'Una obligación ya no está disponible');
+      if (!medio || medio.estado_medio_pago !== 'activo') throw new ErrorAplicacion(409, 'Un medio de pago ya no está activo');
+      if (!respaldos.some(r => r.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5)) throw new ErrorAplicacion(409, 'Todos los movimientos requieren respaldo');
+      if (moneda?.codigo_moneda !== 'CLP' && (!movimiento.tasa_referencia || !movimiento.equivalente_clp)) throw new ErrorAplicacion(409, 'Falta resolver la tasa de un movimiento en moneda extranjera');
+    }
+    const porObligacion = new Map<number, Prisma.Decimal>(); for (const movimiento of movimientos) porObligacion.set(movimiento.id_obligacion_m5, (porObligacion.get(movimiento.id_obligacion_m5) || new Prisma.Decimal(0)).plus(movimiento.monto_aplicado));
+    for (const [id, monto] of porObligacion) if (monto.gt(obligaciones.find(o => o.id_obligacion_m5 === id)!.saldo_actual)) throw new ErrorAplicacion(409, 'La operación supera el saldo actual de una obligación');
+    return { operacion, movimientos, obligaciones, porObligacion, total: movimientos.reduce((suma, m) => suma.plus(m.monto_aplicado), new Prisma.Decimal(0)) };
+  }
+
+  async prepararOperacionPago(id: number, usuario: bigint) {
+    await prisma.$transaction(async tx => { await this.validarOperacionPago(tx, id); await tx.operacion_pago_proveedor_m5.update({ where: { id_operacion_pago_m5: id }, data: { estado: 'preparada', preparado_por: usuario, fecha_preparacion: new Date() } }); });
+    return this.presentarOperacionPago(id);
+  }
+
+  async guardarBorradorPago(id: number, entrada: Entrada) {
+    const operacion = await this.operacionPagoM5(id); if (operacion.estado !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se guarda una operación en borrador');
+    const fecha = valorEntrada(entrada, 'fechaEfectivaPago', 'fecha_pago');
+    if (fecha !== undefined) {
+      const nuevaFecha = fecha ? fechaEntrada(fecha, 'Fecha efectiva de pago') : null;
+      await prisma.operacion_pago_proveedor_m5.update({ where: { id_operacion_pago_m5: id }, data: { fecha_efectiva_pago: nuevaFecha } });
+      if (nuevaFecha && fechaRegistro(nuevaFecha) !== (operacion.fecha_efectiva_pago ? fechaRegistro(operacion.fecha_efectiva_pago) : null)) {
+        const movimientos = await prisma.movimiento_pago_proveedor_m5.findMany({ where: { id_operacion_pago_m5: id } }); const monedas = await prisma.moneda.findMany({ where: { id_moneda: { in: movimientos.map(m => m.id_moneda) } } });
+        for (const movimiento of movimientos.filter(m => monedas.find(moneda => moneda.id_moneda === m.id_moneda)?.codigo_moneda !== 'CLP')) {
+          try { const tasa = new Prisma.Decimal(await this.bancoCentral.obtenerTipoCambio(monedas.find(moneda => moneda.id_moneda === movimiento.id_moneda)!.codigo_moneda, fechaRegistro(nuevaFecha))); await prisma.movimiento_pago_proveedor_m5.update({ where: { id_movimiento_pago_m5: movimiento.id_movimiento_pago_m5 }, data: { tasa_referencia: tasa, fuente_tasa: 'C_BancoCentral', fecha_tasa: nuevaFecha, tasa_manual: false, tasa_manual_justificacion: null, tasa_manual_usuario: null, tasa_manual_fecha: null, tasa_bancaria_efectiva: null, equivalente_clp: movimiento.monto_aplicado.mul(tasa).toDecimalPlaces(2) } }); }
+          catch (error) { if (!(error instanceof ErrorAplicacion)) throw error; await prisma.movimiento_pago_proveedor_m5.update({ where: { id_movimiento_pago_m5: movimiento.id_movimiento_pago_m5 }, data: { tasa_referencia: null, fuente_tasa: null, fecha_tasa: null, tasa_manual: false, tasa_manual_justificacion: null, tasa_manual_usuario: null, tasa_manual_fecha: null, tasa_bancaria_efectiva: null, equivalente_clp: null } }); }
+        }
+      }
+    }
+    return this.presentarOperacionPago(id);
+  }
+
+  async retomarOperacionPago(id: number) { const operacion = await this.operacionPagoM5(id); if (operacion.estado !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se retoman operaciones en borrador'); return this.presentarOperacionPago(id); }
+
+  async descartarOperacionPago(id: number, usuario: bigint) {
+    const operacion = await this.operacionPagoM5(id); if (operacion.estado !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se descartan operaciones en borrador');
+    await prisma.operacion_pago_proveedor_m5.update({ where: { id_operacion_pago_m5: id }, data: { estado: 'descartada', descartado_por: usuario, fecha_descarte: new Date() } }); return this.presentarOperacionPago(id);
+  }
+
+  async confirmarOperacionPago(id: number, usuario: bigint) {
+    try {
+      await prisma.$transaction(async tx => {
+        const validacion = await this.validarOperacionPago(tx, id); if (validacion.operacion.estado !== 'preparada') throw new ErrorAplicacion(409, 'La operación debe estar preparada antes de confirmar');
+        for (const [idObligacion, monto] of validacion.porObligacion) {
+          const resultado = await tx.obligacion_proveedor_m5.updateMany({ where: { id_obligacion_m5: idObligacion, saldo_actual: { gte: monto } }, data: { saldo_actual: { decrement: monto } } });
+          if (resultado.count !== 1) throw new ErrorAplicacion(409, 'El saldo cambió y la operación completa debe revisarse');
+          const obligacion = await tx.obligacion_proveedor_m5.findUniqueOrThrow({ where: { id_obligacion_m5: idObligacion } }); const estado = calcularEstadoPagoObligacion(obligacion.saldo_inicial, obligacion.saldo_actual); const condicion = calcularCondicionTemporalObligacion(obligacion, await this.umbralM5(tx));
+          await tx.obligacion_proveedor_m5.update({ where: { id_obligacion_m5: idObligacion }, data: { estado_pago: estado, ...(condicion ? { condicion_temporal: condicion } : {}) } });
+        }
+        await tx.movimiento_pago_proveedor_m5.updateMany({ where: { id_operacion_pago_m5: id }, data: { estado: 'Vigente' } });
+        await tx.operacion_pago_proveedor_m5.update({ where: { id_operacion_pago_m5: id }, data: { estado: 'confirmada', confirmado_por: usuario, fecha_confirmacion: new Date(), total_confirmado: validacion.total } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'Conflicto concurrente: vuelve a revisar los saldos'); throw error; }
+    return this.presentarOperacionPago(id);
+  }
+
   async catalogosDocumentosProveedor() {
     const [proveedores, tipos, monedas, categorias, ordenes, proyectos, ots] = await Promise.all([
       prisma.proveedor.findMany({ where: { estado_proveedor: 'activo' }, orderBy: { nombre_razon_social: 'asc' } }), prisma.tipo_documento.findMany({ orderBy: { nombre_tipo_documento: 'asc' } }), prisma.moneda.findMany({ where: { estado_moneda: 'activo' } }), prisma.categoria_egreso_m5.findMany({ where: { activo: true }, orderBy: { nombre: 'asc' } }), prisma.orden_compra_servicio_m5.findMany({ where: { estado_ocs: 'abierta', id_moneda: { not: null } } }), prisma.proyecto.findMany({ where: { proyecto_estado_operacional: 'activo' } }), prisma.orden_trabajo.findMany(),

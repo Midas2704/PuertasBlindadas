@@ -1045,6 +1045,72 @@ model obligacion_proveedor_m5 {
   @@schema("finanzas")
 }
 
+/// TEMPORAL_M5_DB_PATCH: operación agrupadora de pagos a proveedor para CU111-CU120.
+model operacion_pago_proveedor_m5 {
+  id_operacion_pago_m5 Int       @id @default(autoincrement())
+  id_proveedor         Int
+  estado               String    @default("borrador") @db.VarChar(20)
+  fecha_efectiva_pago  DateTime? @db.Date
+  creado_por           BigInt
+  fecha_creacion       DateTime  @default(now()) @db.Timestamptz(6)
+  preparado_por        BigInt?
+  fecha_preparacion    DateTime? @db.Timestamptz(6)
+  confirmado_por       BigInt?
+  fecha_confirmacion   DateTime? @db.Timestamptz(6)
+  descartado_por       BigInt?
+  fecha_descarte       DateTime? @db.Timestamptz(6)
+  total_confirmado     Decimal?  @db.Decimal(14, 2)
+
+  @@index([id_proveedor, estado, fecha_creacion], map: "idx_operacion_pago_m5_proveedor_estado")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: cada movimiento aplica un medio a una obligación M5.
+model movimiento_pago_proveedor_m5 {
+  id_movimiento_pago_m5 Int       @id @default(autoincrement())
+  id_operacion_pago_m5  Int
+  id_obligacion_m5      Int
+  id_medio_pago         Int
+  id_moneda             Int
+  monto_aplicado        Decimal   @db.Decimal(14, 2)
+  tasa_referencia       Decimal?  @db.Decimal(14, 4)
+  fuente_tasa           String?   @db.VarChar(80)
+  fecha_tasa            DateTime? @db.Date
+  tasa_manual           Boolean   @default(false)
+  tasa_manual_justificacion String?
+  tasa_manual_usuario   BigInt?
+  tasa_manual_fecha     DateTime? @db.Timestamptz(6)
+  tasa_bancaria_efectiva Decimal? @db.Decimal(14, 4)
+  equivalente_clp       Decimal?  @db.Decimal(14, 2)
+  estado                String    @default("borrador") @db.VarChar(20)
+  fecha_creacion        DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([id_operacion_pago_m5, id_movimiento_pago_m5], map: "idx_movimiento_pago_m5_operacion")
+  @@index([id_obligacion_m5], map: "idx_movimiento_pago_m5_obligacion")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: archivo único reutilizable como evidencia de operación y movimientos.
+model respaldo_pago_proveedor_m5 {
+  id_respaldo_pago_m5 Int      @id @default(autoincrement())
+  nombre_archivo      String   @db.VarChar(255)
+  contenido           String
+  creado_por          BigInt
+  fecha_creacion      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@schema("finanzas")
+}
+
+model asociacion_respaldo_pago_m5 {
+  id_asociacion_respaldo_m5 Int  @id @default(autoincrement())
+  id_respaldo_pago_m5       Int
+  id_operacion_pago_m5      Int?
+  id_movimiento_pago_m5     Int?
+
+  @@index([id_respaldo_pago_m5], map: "idx_asociacion_respaldo_m5_respaldo")
+  @@schema("finanzas")
+}
+
 /// TEMPORAL_M5_DB_PATCH: calendario laboral chileno consumido por CU101.
 model feriado_chile_m5 {
   fecha       DateTime @id @db.Date

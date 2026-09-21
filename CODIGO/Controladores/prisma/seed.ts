@@ -158,8 +158,30 @@ async function sembrarM5() {
     for (const demo of [{ clase: 'preliminar', folio: 'DEMO-M5-PRELIMINAR', monto: 125000 }, { clase: 'definitivo', folio: 'DEMO-M5-DEFINITIVO-PREPARACION', monto: 250000 }] as const) {
       if (!await tx.documento_proveedor_m5.findFirst({ where: { id_proveedor: proveedorDemo.id_proveedor, id_tipo_documento: tipoDocumento.id_tipo_documento, folio_normalizado: demo.folio } })) await tx.documento_proveedor_m5.create({ data: { id_proveedor: proveedorDemo.id_proveedor, clase: demo.clase, id_tipo_documento: tipoDocumento.id_tipo_documento, folio: demo.folio, folio_normalizado: demo.folio, fecha_emision: fechaHabil(-5), id_moneda: moneda.id_moneda, monto_total: demo.monto, descripcion: 'Escenario ficticio P4 en preparación', creado_por: usuario.usuario_id_usuario } });
     }
+    const proveedorPago = await tx.proveedor.findFirstOrThrow({ where: { identificador_tributario: '76.543.213-8', estado_proveedor: 'activo' } });
+    const usd = await tx.moneda.findUniqueOrThrow({ where: { codigo_moneda: 'USD' } });
+    const medios = await tx.medio_pago.findMany({ where: { estado_medio_pago: 'activo' }, orderBy: { id_medio_pago: 'asc' }, take: 2 });
+    const asegurarObligacion = async (folio: string, monto: number, idMoneda: number) => {
+      let documento = await tx.documento_proveedor_m5.findFirst({ where: { id_proveedor: proveedorPago.id_proveedor, folio_normalizado: folio } });
+      if (!documento) documento = await tx.documento_proveedor_m5.create({ data: { id_proveedor: proveedorPago.id_proveedor, clase: 'definitivo', id_tipo_documento: tipoDocumento.id_tipo_documento, folio, folio_normalizado: folio, fecha_emision: fechaHabil(-4), fecha_vencimiento: fechaHabil(15), id_moneda: idMoneda, monto_total: monto, estado: 'confirmado', respaldo: 'demostracion://documento-p6', descripcion: 'Escenario ficticio P6', creado_por: usuario.usuario_id_usuario, confirmado_por: usuario.usuario_id_usuario, fecha_confirmacion: new Date() } });
+      let obligacion = await tx.obligacion_proveedor_m5.findUnique({ where: { id_documento_m5: documento.id_documento_m5 } });
+      if (!obligacion) obligacion = await tx.obligacion_proveedor_m5.create({ data: { id_documento_m5: documento.id_documento_m5, id_proveedor: proveedorPago.id_proveedor, monto_original: monto, id_moneda: idMoneda, saldo_inicial: monto, saldo_actual: monto, fecha_emision: documento.fecha_emision, fecha_vencimiento: documento.fecha_vencimiento!, estado_pago: 'Pendiente', condicion_temporal: 'Por pagar', generado_por: usuario.usuario_id_usuario } });
+      return obligacion;
+    };
+    const [obligacionClp1, obligacionClp2, obligacionUsd] = await Promise.all([asegurarObligacion('DEMO-M5-P6-CLP-1', 180000, moneda.id_moneda), asegurarObligacion('DEMO-M5-P6-CLP-2', 90000, moneda.id_moneda), asegurarObligacion('DEMO-M5-P6-USD', 500, usd.id_moneda)]);
+    const asegurarOperacion = async (estado: 'borrador' | 'preparada', especificaciones: Array<{ obligacion: typeof obligacionClp1; monto: number; medio: number }>, conRespaldo: boolean) => {
+      const marcador = especificaciones[0]; const movimientoExistente = await tx.movimiento_pago_proveedor_m5.findFirst({ where: { id_obligacion_m5: marcador.obligacion.id_obligacion_m5, monto_aplicado: marcador.monto, estado: 'borrador' } });
+      let operacion = movimientoExistente ? await tx.operacion_pago_proveedor_m5.findFirst({ where: { id_operacion_pago_m5: movimientoExistente.id_operacion_pago_m5, estado } }) : null;
+      if (operacion) return;
+      operacion = await tx.operacion_pago_proveedor_m5.create({ data: { id_proveedor: proveedorPago.id_proveedor, estado, fecha_efectiva_pago: new Date('2026-09-20T00:00:00Z'), creado_por: usuario.usuario_id_usuario, preparado_por: estado === 'preparada' ? usuario.usuario_id_usuario : null, fecha_preparacion: estado === 'preparada' ? new Date() : null } });
+      const creados = []; for (const especificacion of especificaciones) creados.push(await tx.movimiento_pago_proveedor_m5.create({ data: { id_operacion_pago_m5: operacion.id_operacion_pago_m5, id_obligacion_m5: especificacion.obligacion.id_obligacion_m5, id_medio_pago: especificacion.medio, id_moneda: especificacion.obligacion.id_moneda, monto_aplicado: especificacion.monto, equivalente_clp: especificacion.obligacion.id_moneda === moneda.id_moneda ? especificacion.monto : null } }));
+      if (conRespaldo) { const respaldo = await tx.respaldo_pago_proveedor_m5.create({ data: { nombre_archivo: 'respaldo-demo-p6.pdf', contenido: 'demostracion://respaldo-p6', creado_por: usuario.usuario_id_usuario } }); await tx.asociacion_respaldo_pago_m5.createMany({ data: [{ id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, id_operacion_pago_m5: operacion.id_operacion_pago_m5 }, ...creados.map(movimiento => ({ id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, id_movimiento_pago_m5: movimiento.id_movimiento_pago_m5 }))] }); }
+    };
+    await asegurarOperacion('borrador', [{ obligacion: obligacionClp1, monto: 25000, medio: medioPago.id_medio_pago }], false);
+    await asegurarOperacion('preparada', [{ obligacion: obligacionClp1, monto: 60000, medio: medioPago.id_medio_pago }, { obligacion: obligacionClp2, monto: 40000, medio: (medios[1] || medioPago).id_medio_pago }], true);
+    await asegurarOperacion('borrador', [{ obligacion: obligacionUsd, monto: 100, medio: medioPago.id_medio_pago }], false);
   }, { timeout: 60000 });
-  console.log('Seed M5 completado: proveedores, documentos, OCS y umbral para CU75-CU110.');
+  console.log('Seed M5 completado: proveedores, documentos, OCS, obligaciones y borradores para CU75-CU120.');
 }
 
 sembrar().then(sembrarM4).then(sembrarM5).catch(error => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());

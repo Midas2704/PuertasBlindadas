@@ -21,7 +21,10 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarDocumentosProveedor' | 'obtenerDocumentoProveedor' | 'catalogosDocumentosProveedor'
   | 'registrarDocumentoPreliminar' | 'registrarDocumentoDefinitivo' | 'asociarDocumentoOrdenes' | 'resolverDiferenciaDocumento' | 'resolverExcedenteDocumento'
   | 'determinarVencimientoDocumento' | 'clasificarDocumento' | 'prepararImputacionDocumento' | 'confirmarImputacionDocumento' | 'registrarTipoCambioManual' | 'generarObligacionDocumento'
-  | 'listarCuentasPorPagar' | 'consultarUmbralProveedores' | 'configurarUmbralProveedores';
+  | 'listarCuentasPorPagar' | 'consultarUmbralProveedores' | 'configurarUmbralProveedores'
+  | 'buscarProveedoresPago' | 'catalogosPagosProveedores' | 'crearOperacionPago' | 'listarBorradoresPago' | 'obtenerOperacionPago'
+  | 'agregarMovimientoPago' | 'actualizarMovimientoPago' | 'adjuntarRespaldoPago' | 'registrarTipoCambioManualPago'
+  | 'prepararOperacionPago' | 'guardarBorradorPago' | 'retomarOperacionPago' | 'descartarOperacionPago' | 'confirmarOperacionPago';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -73,6 +76,8 @@ export class C_Finanzas {
     if (actor && ((operacion==='guardarCotizacion' && Number(solicitud.cuerpo?.descuento_valor)>0 && !actor.permisos.includes('CU31')) || (operacion==='crearVentaDirecta' && Number((solicitud.cuerpo?.descuento as {valor?:number})?.valor)>0 && !actor.permisos.includes('CU33')))) throw new ErrorAplicacion(403,'No tienes permiso para aplicar descuentos');
     if (operacion === 'confirmarAjusteOrdenCompraServicio' && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede confirmar un ajuste de OCS');
     if (operacion === 'confirmarImputacionDocumento' && !['gerencia','contador'].includes(actor.configuracion) && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar la imputación');
+    if (operacion === 'registrarTipoCambioManualPago' && !['gerencia','contador'].includes(actor.configuracion)) throw new ErrorAplicacion(403, 'Secretaría no puede ingresar una tasa manual');
+    if (operacion === 'confirmarOperacionPago' && !['gerencia','contador'].includes(actor.configuracion)) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar pagos a proveedores');
     const productosConCostoAjustado = Array.isArray(solicitud.cuerpo?.productos) && (solicitud.cuerpo.productos as Array<{ materiales?: Array<Record<string, unknown>> }>).some(producto => Array.isArray(producto.materiales) && producto.materiales.some(material => material.costo_ajustado !== undefined));
     if (operacion === 'editarCotizacion' && (solicitud.cuerpo?.precio_sugerido !== undefined || productosConCostoAjustado || Array.isArray(solicitud.cuerpo?.materiales) && (solicitud.cuerpo?.materiales as Array<Record<string, unknown>>).some(m => m.costo_ajustado !== undefined || m.precio !== undefined)) && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede ajustar costos o precio sugerido');
     const parametros = solicitud.parametros || {};
@@ -118,6 +123,20 @@ export class C_Finanzas {
       case 'listarCuentasPorPagar': return this.m5.listarCuentasPorPagar(solicitud.consulta || {});
       case 'consultarUmbralProveedores': return this.m5.consultarUmbralM5();
       case 'configurarUmbralProveedores': return this.m5.configurarUmbralM5(cuerpo, actor.id);
+      case 'buscarProveedoresPago': return this.m5.buscarProveedoresParaPago(solicitud.consulta || {});
+      case 'catalogosPagosProveedores': return this.m5.catalogosPagosProveedores();
+      case 'crearOperacionPago': return this.m5.crearOperacionPago(cuerpo, actor.id);
+      case 'listarBorradoresPago': return this.m5.listarBorradoresPago();
+      case 'obtenerOperacionPago': return this.m5.obtenerOperacionPago(identificador(parametros.id));
+      case 'agregarMovimientoPago': return this.m5.agregarMovimientoPago(identificador(parametros.id), cuerpo);
+      case 'actualizarMovimientoPago': return this.m5.actualizarMovimientoPago(identificador(parametros.id), identificador(parametros.movimientoId), cuerpo);
+      case 'adjuntarRespaldoPago': return this.m5.adjuntarRespaldoPago(identificador(parametros.id), cuerpo, actor.id);
+      case 'registrarTipoCambioManualPago': return this.m5.registrarTipoCambioManualPago(identificador(parametros.id), identificador(parametros.movimientoId), cuerpo, actor.id, actor.configuracion);
+      case 'prepararOperacionPago': return this.m5.prepararOperacionPago(identificador(parametros.id), actor.id);
+      case 'guardarBorradorPago': return this.m5.guardarBorradorPago(identificador(parametros.id), cuerpo);
+      case 'retomarOperacionPago': return this.m5.retomarOperacionPago(identificador(parametros.id));
+      case 'descartarOperacionPago': return this.m5.descartarOperacionPago(identificador(parametros.id), actor.id);
+      case 'confirmarOperacionPago': return this.m5.confirmarOperacionPago(identificador(parametros.id), actor.id);
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();
