@@ -1033,7 +1033,7 @@ model obligacion_proveedor_m5 {
   fecha_emision            DateTime @db.Date
   fecha_vencimiento        DateTime @db.Date
   estado_pago              String   @default("Pendiente") @db.VarChar(20)
-  condicion_temporal       String   @db.VarChar(20)
+  condicion_temporal       String?  @db.VarChar(20)
   condicion_pago_dias_snapshot Int?
   condicion_pago_tipo_snapshot String? @db.VarChar(20)
   tipo_cambio              Decimal? @db.Decimal(14, 4)
@@ -1108,6 +1108,48 @@ model asociacion_respaldo_pago_m5 {
   id_movimiento_pago_m5     Int?
 
   @@index([id_respaldo_pago_m5], map: "idx_asociacion_respaldo_m5_respaldo")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: CU124 registra que el efecto vigente de un movimiento nunca ocurrió.
+model anulacion_movimiento_pago_m5 {
+  id_anulacion_movimiento_m5 Int      @id @default(autoincrement())
+  id_movimiento_pago_m5      Int      @unique
+  monto_anulado              Decimal  @db.Decimal(14, 2)
+  motivo                     String
+  id_respaldo_pago_m5        Int
+  usuario_id_usuario         BigInt
+  fecha_hora                 DateTime @default(now()) @db.Timestamptz(6)
+  grupo_operacion            String?  @db.VarChar(36)
+
+  @@index([grupo_operacion], map: "idx_anulacion_pago_m5_grupo")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: CU125 conserva cada devolución posterior al pago.
+model reversion_movimiento_pago_m5 {
+  id_reversion_movimiento_m5 Int      @id @default(autoincrement())
+  id_movimiento_pago_m5      Int
+  monto_revertido            Decimal  @db.Decimal(14, 2)
+  motivo                     String
+  id_respaldo_pago_m5        Int
+  usuario_id_usuario         BigInt
+  fecha_hora                 DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_movimiento_pago_m5, fecha_hora], map: "idx_reversion_pago_m5_movimiento")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: CU126 mantiene historial bancario sin alterar saldos.
+model conciliacion_movimiento_pago_m5 {
+  id_conciliacion_movimiento_m5 Int      @id @default(autoincrement())
+  id_movimiento_pago_m5         Int
+  resultado                     String   @db.VarChar(20)
+  observacion                   String?
+  usuario_id_usuario            BigInt
+  fecha_hora                    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_movimiento_pago_m5, fecha_hora, id_conciliacion_movimiento_m5], map: "idx_conciliacion_pago_m5_movimiento")
   @@schema("finanzas")
 }
 

@@ -5,6 +5,7 @@ import { diasHabilesEntre, fechaNegocio, fechaRegistro } from '../utilidades/fin
 import { validarYNormalizarRut } from '../utilidades/rut';
 import { identificador, texto } from '../validaciones/solicitudes';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
+import { randomUUID } from 'node:crypto';
 
 type Entrada = Record<string, unknown>;
 type Transaccion = Prisma.TransactionClient;
@@ -181,6 +182,43 @@ export function calcularCondicionTemporalObligacion(obligacion: { saldo_actual: 
   const cursor = new Date(`${hoy}T00:00:00Z`); const limite = new Date(`${vencimiento}T00:00:00Z`); let dias = 0;
   while (cursor < limite) { if (esDiaHabilChile(cursor)) dias++; cursor.setUTCDate(cursor.getUTCDate() + 1); }
   return dias <= umbral ? 'Por vencer' as const : 'Por pagar' as const;
+}
+
+export interface EfectoPagoObligacion {
+  montoOriginal: Prisma.Decimal | number;
+  montoAnulado?: Prisma.Decimal | number;
+  montoRevertido?: Prisma.Decimal | number;
+}
+
+export function calcularEfectoNetoMovimiento(efecto: EfectoPagoObligacion) {
+  const original = new Prisma.Decimal(efecto.montoOriginal).toDecimalPlaces(2);
+  const anulado = new Prisma.Decimal(efecto.montoAnulado || 0).toDecimalPlaces(2);
+  const revertido = new Prisma.Decimal(efecto.montoRevertido || 0).toDecimalPlaces(2);
+  if (original.lte(0) || anulado.lt(0) || revertido.lt(0) || anulado.plus(revertido).gt(original)) throw new ErrorAplicacion(409, 'Los efectos postpago superan el monto original');
+  return original.minus(anulado).minus(revertido).toDecimalPlaces(2);
+}
+
+/** Única fórmula de CU121: saldo inicial menos efectos netos confirmados. */
+export function calcularSaldoObligacion(montoInicial: Prisma.Decimal | number, efectos: EfectoPagoObligacion[]) {
+  const inicial = new Prisma.Decimal(montoInicial).toDecimalPlaces(2);
+  const pagadoVigente = efectos.reduce((suma, efecto) => suma.plus(calcularEfectoNetoMovimiento(efecto)), new Prisma.Decimal(0));
+  if (pagadoVigente.gt(inicial)) throw new ErrorAplicacion(409, 'Los pagos vigentes superan el monto inicial de la obligación');
+  return inicial.minus(pagadoVigente).toDecimalPlaces(2);
+}
+
+export function derivarEstadoMovimientoPago(efecto: EfectoPagoObligacion) {
+  const original = new Prisma.Decimal(efecto.montoOriginal); const anulado = new Prisma.Decimal(efecto.montoAnulado || 0); const revertido = new Prisma.Decimal(efecto.montoRevertido || 0);
+  if (anulado.gt(0)) return 'Anulado' as const;
+  if (revertido.gte(original)) return 'Revertido totalmente' as const;
+  if (revertido.gt(0)) return 'Revertido parcialmente' as const;
+  return 'Vigente' as const;
+}
+
+export function derivarEstadoOperacionPago(estados: string[]) {
+  if (estados.length && estados.every(estado => estado === 'Anulado')) return 'Anulada' as const;
+  if (estados.length && estados.every(estado => estado === 'Revertido totalmente')) return 'Revertida totalmente' as const;
+  if (estados.some(estado => estado !== 'Vigente')) return 'Afectada parcialmente' as const;
+  return 'Confirmada' as const;
 }
 
 export function calcularFechaVencimientoProveedor(fechaBase: Date, dias: number, tipoComputo: TipoComputoPago) {
@@ -410,7 +448,11 @@ export class M5Controller {
     // TEMPORAL_M5_DB_PATCH_PENDIENTE: factura_compra no tiene estado, vencimiento ni vínculo de pago confiable.
     // TEMPORAL_M5_DB_PATCH_PENDIENTE: pagos sueltos, lotes, materiales y alertas representan hechos o tareas internas,
     // no una relación externa abierta demostrable. Tampoco existe aún una OC consultable ni saldo a favor de proveedor.
-    return pendientes.map(item => ({ tipo: 'documento_comercial', id: item.id, referencia: item.numero, saldoPendiente: item.saldoPendiente }));
+    const obligacionesM5 = await tx.obligacion_proveedor_m5.findMany({ where: { id_proveedor: id, saldo_actual: { gt: 0 } } });
+    return [
+      ...pendientes.map(item => ({ tipo: 'documento_comercial', id: item.id, referencia: item.numero, saldoPendiente: item.saldoPendiente })),
+      ...obligacionesM5.map(item => ({ tipo: 'obligacion_m5', id: item.id_obligacion_m5, referencia: `M5-${item.id_documento_m5}`, saldoPendiente: Number(item.saldo_actual) })),
+    ];
   }
 
   async cambiarEstadoProveedor(id: number, estado: 'activo' | 'inactivo', confirmado: boolean, usuario: bigint) {
@@ -1001,28 +1043,85 @@ export class M5Controller {
     return operacion;
   }
 
+  private async efectosMovimientosPago(tx: Transaccion | typeof prisma, ids: number[]) {
+    const [anulaciones, reversas, conciliaciones] = await Promise.all([
+      tx.anulacion_movimiento_pago_m5.findMany({ where: { id_movimiento_pago_m5: { in: ids } } }),
+      tx.reversion_movimiento_pago_m5.findMany({ where: { id_movimiento_pago_m5: { in: ids } }, orderBy: [{ fecha_hora: 'asc' }, { id_reversion_movimiento_m5: 'asc' }] }),
+      tx.conciliacion_movimiento_pago_m5.findMany({ where: { id_movimiento_pago_m5: { in: ids } }, orderBy: [{ fecha_hora: 'desc' }, { id_conciliacion_movimiento_m5: 'desc' }] }),
+    ]);
+    return { anulaciones, reversas, conciliaciones };
+  }
+
+  private async recalcularObligacionM5(tx: Transaccion, idObligacion: number) {
+    const obligacion = await tx.obligacion_proveedor_m5.findUniqueOrThrow({ where: { id_obligacion_m5: idObligacion } });
+    const movimientos = await tx.movimiento_pago_proveedor_m5.findMany({ where: { id_obligacion_m5: idObligacion, estado: 'Vigente' } });
+    const operaciones = await tx.operacion_pago_proveedor_m5.findMany({ where: { id_operacion_pago_m5: { in: movimientos.map(m => m.id_operacion_pago_m5) }, estado: 'confirmada' }, select: { id_operacion_pago_m5: true } });
+    const confirmadas = new Set(operaciones.map(item => item.id_operacion_pago_m5));
+    const vigentes = movimientos.filter(item => confirmadas.has(item.id_operacion_pago_m5));
+    const efectos = await this.efectosMovimientosPago(tx, vigentes.map(item => item.id_movimiento_pago_m5));
+    const saldo = calcularSaldoObligacion(obligacion.saldo_inicial, vigentes.map(movimiento => ({
+      montoOriginal: movimiento.monto_aplicado,
+      montoAnulado: efectos.anulaciones.find(item => item.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5)?.monto_anulado || 0,
+      montoRevertido: efectos.reversas.filter(item => item.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5).reduce((suma, item) => suma.plus(item.monto_revertido), new Prisma.Decimal(0)),
+    })));
+    const estado = calcularEstadoPagoObligacion(obligacion.saldo_inicial, saldo);
+    const condicion = calcularCondicionTemporalObligacion({ saldo_actual: saldo, fecha_vencimiento: obligacion.fecha_vencimiento }, await this.umbralM5(tx));
+    return tx.obligacion_proveedor_m5.update({ where: { id_obligacion_m5: idObligacion }, data: { saldo_actual: saldo, estado_pago: estado, condicion_temporal: condicion } });
+  }
+
+  private nombreUsuario(usuario: { usuario_id_usuario: bigint; usuario_nombre_completo_primer_nombre_usuario: string | null; usuario_nombre_completo_primer_apellido_usuario: string | null; usuario_username: string | null } | undefined) {
+    if (!usuario) return null;
+    return [usuario.usuario_nombre_completo_primer_nombre_usuario, usuario.usuario_nombre_completo_primer_apellido_usuario].filter(Boolean).join(' ') || usuario.usuario_username || usuario.usuario_id_usuario.toString();
+  }
+
   private async presentarOperacionPago(id: number, tx: Transaccion | typeof prisma = prisma) {
     const operacion = await this.operacionPagoM5(id, tx);
     const movimientos = await tx.movimiento_pago_proveedor_m5.findMany({ where: { id_operacion_pago_m5: id }, orderBy: { id_movimiento_pago_m5: 'asc' } });
-    const [proveedor, obligaciones, medios, monedas, asociaciones] = await Promise.all([
+    const idsMovimientos = movimientos.map(m => m.id_movimiento_pago_m5);
+    const [proveedor, obligaciones, medios, monedas, asociaciones, efectos, usuarios] = await Promise.all([
       tx.proveedor.findUniqueOrThrow({ where: { id_proveedor: operacion.id_proveedor } }),
       tx.obligacion_proveedor_m5.findMany({ where: { id_obligacion_m5: { in: movimientos.map(m => m.id_obligacion_m5) } } }),
       tx.medio_pago.findMany({ where: { id_medio_pago: { in: movimientos.map(m => m.id_medio_pago) } } }),
       tx.moneda.findMany({ where: { id_moneda: { in: movimientos.map(m => m.id_moneda) } } }),
-      tx.asociacion_respaldo_pago_m5.findMany({ where: { OR: [{ id_operacion_pago_m5: id }, { id_movimiento_pago_m5: { in: movimientos.map(m => m.id_movimiento_pago_m5) } }] } }),
+      tx.asociacion_respaldo_pago_m5.findMany({ where: { OR: [{ id_operacion_pago_m5: id }, { id_movimiento_pago_m5: { in: idsMovimientos } }] } }),
+      this.efectosMovimientosPago(tx, idsMovimientos),
+      tx.usuario.findMany({ where: { usuario_id_usuario: { in: [operacion.creado_por, operacion.preparado_por, operacion.confirmado_por].filter((valor): valor is bigint => valor !== null) } } }),
     ]);
+    const idsRespaldos = [...new Set([...asociaciones.map(a => a.id_respaldo_pago_m5), ...efectos.anulaciones.map(a => a.id_respaldo_pago_m5), ...efectos.reversas.map(r => r.id_respaldo_pago_m5)])];
+    const respaldos = await tx.respaldo_pago_proveedor_m5.findMany({ where: { id_respaldo_pago_m5: { in: idsRespaldos } } });
     const total = movimientos.reduce((suma, movimiento) => suma.plus(movimiento.monto_aplicado), new Prisma.Decimal(0));
+    const presentados = movimientos.map(movimiento => {
+      const obligacion = obligaciones.find(o => o.id_obligacion_m5 === movimiento.id_obligacion_m5)!;
+      const propuesto = movimientos.filter(m => m.id_obligacion_m5 === movimiento.id_obligacion_m5).reduce((suma, m) => suma.plus(m.monto_aplicado), new Prisma.Decimal(0));
+      const anulacion = efectos.anulaciones.find(item => item.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5);
+      const reversas = efectos.reversas.filter(item => item.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5);
+      const montoRevertido = reversas.reduce((suma, item) => suma.plus(item.monto_revertido), new Prisma.Decimal(0));
+      const efecto = { montoOriginal: movimiento.monto_aplicado, montoAnulado: anulacion?.monto_anulado || 0, montoRevertido };
+      const conciliacion = efectos.conciliaciones.find(item => item.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5);
+      return {
+        id: movimiento.id_movimiento_pago_m5, idObligacion: movimiento.id_obligacion_m5, idMedioPago: movimiento.id_medio_pago,
+        medioPago: medios.find(m => m.id_medio_pago === movimiento.id_medio_pago)?.nombre_medio_pago,
+        moneda: monedas.find(m => m.id_moneda === movimiento.id_moneda)?.codigo_moneda, montoAplicado: Number(movimiento.monto_aplicado), saldoActual: Number(obligacion.saldo_actual), conflictoSaldo: operacion.estado !== 'confirmada' && propuesto.gt(obligacion.saldo_actual),
+        tasaReferencia: movimiento.tasa_referencia === null ? null : Number(movimiento.tasa_referencia), fuenteTasa: movimiento.fuente_tasa, tasaBancariaEfectiva: movimiento.tasa_bancaria_efectiva === null ? null : Number(movimiento.tasa_bancaria_efectiva), equivalenteClp: movimiento.equivalente_clp === null ? null : Number(movimiento.equivalente_clp), tasaManual: movimiento.tasa_manual,
+        estado: operacion.estado === 'confirmada' ? derivarEstadoMovimientoPago(efecto) : movimiento.estado,
+        tieneRespaldo: asociaciones.some(a => a.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5),
+        montoAnulado: Number(anulacion?.monto_anulado || 0), montoRevertido: Number(montoRevertido), montoNetoVigente: Number(calcularEfectoNetoMovimiento(efecto)),
+        conciliacion: conciliacion ? { estado: conciliacion.resultado, observacion: conciliacion.observacion, usuario: conciliacion.usuario_id_usuario.toString(), fecha: conciliacion.fecha_hora } : { estado: 'pendiente', observacion: null, usuario: null, fecha: null },
+        respaldos: asociaciones.filter(a => a.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5).map(a => respaldos.find(r => r.id_respaldo_pago_m5 === a.id_respaldo_pago_m5)).filter(Boolean).map(r => ({ id: r!.id_respaldo_pago_m5, nombre: r!.nombre_archivo })),
+        anulacion: anulacion ? { monto: Number(anulacion.monto_anulado), motivo: anulacion.motivo, usuario: anulacion.usuario_id_usuario.toString(), fecha: anulacion.fecha_hora, respaldo: respaldos.find(r => r.id_respaldo_pago_m5 === anulacion.id_respaldo_pago_m5)?.nombre_archivo } : null,
+        reversas: reversas.map(reversa => ({ id: reversa.id_reversion_movimiento_m5, monto: Number(reversa.monto_revertido), motivo: reversa.motivo, usuario: reversa.usuario_id_usuario.toString(), fecha: reversa.fecha_hora, respaldo: respaldos.find(r => r.id_respaldo_pago_m5 === reversa.id_respaldo_pago_m5)?.nombre_archivo })),
+      };
+    });
     return {
-      id: operacion.id_operacion_pago_m5, estado: operacion.estado, fechaEfectivaPago: operacion.fecha_efectiva_pago,
+      id: operacion.id_operacion_pago_m5, estado: operacion.estado, estadoAgregado: operacion.estado === 'confirmada' ? derivarEstadoOperacionPago(presentados.map(item => item.estado)) : operacion.estado, fechaEfectivaPago: operacion.fecha_efectiva_pago,
       proveedor: { id: proveedor.id_proveedor, razonSocial: proveedor.nombre_razon_social, identificadorFiscal: proveedor.identificador_tributario, estado: proveedor.estado_proveedor },
       total: Number(total), totalConfirmado: operacion.total_confirmado === null ? null : Number(operacion.total_confirmado),
       tieneRespaldo: asociaciones.some(a => a.id_operacion_pago_m5 === id),
-      movimientos: movimientos.map(movimiento => {
-        const obligacion = obligaciones.find(o => o.id_obligacion_m5 === movimiento.id_obligacion_m5)!;
-        const propuesto = movimientos.filter(m => m.id_obligacion_m5 === movimiento.id_obligacion_m5).reduce((suma, m) => suma.plus(m.monto_aplicado), new Prisma.Decimal(0));
-        return { id: movimiento.id_movimiento_pago_m5, idObligacion: movimiento.id_obligacion_m5, idMedioPago: movimiento.id_medio_pago, medioPago: medios.find(m => m.id_medio_pago === movimiento.id_medio_pago)?.nombre_medio_pago, moneda: monedas.find(m => m.id_moneda === movimiento.id_moneda)?.codigo_moneda, montoAplicado: Number(movimiento.monto_aplicado), saldoActual: Number(obligacion.saldo_actual), conflictoSaldo: propuesto.gt(obligacion.saldo_actual), tasaReferencia: movimiento.tasa_referencia === null ? null : Number(movimiento.tasa_referencia), fuenteTasa: movimiento.fuente_tasa, tasaBancariaEfectiva: movimiento.tasa_bancaria_efectiva === null ? null : Number(movimiento.tasa_bancaria_efectiva), equivalenteClp: movimiento.equivalente_clp === null ? null : Number(movimiento.equivalente_clp), tasaManual: movimiento.tasa_manual, estado: movimiento.estado, tieneRespaldo: asociaciones.some(a => a.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5) };
-      }),
-      creadoPor: operacion.creado_por.toString(), fechaCreacion: operacion.fecha_creacion, preparadoPor: operacion.preparado_por?.toString() || null, fechaPreparacion: operacion.fecha_preparacion, confirmadoPor: operacion.confirmado_por?.toString() || null, fechaConfirmacion: operacion.fecha_confirmacion,
+      respaldos: asociaciones.filter(a => a.id_operacion_pago_m5 === id).map(a => respaldos.find(r => r.id_respaldo_pago_m5 === a.id_respaldo_pago_m5)).filter(Boolean).map(r => ({ id: r!.id_respaldo_pago_m5, nombre: r!.nombre_archivo })),
+      movimientos: presentados,
+      creadoPor: this.nombreUsuario(usuarios.find(u => u.usuario_id_usuario === operacion.creado_por)) || operacion.creado_por.toString(), fechaCreacion: operacion.fecha_creacion,
+      preparadoPor: this.nombreUsuario(usuarios.find(u => u.usuario_id_usuario === operacion.preparado_por)), fechaPreparacion: operacion.fecha_preparacion,
+      confirmadoPor: this.nombreUsuario(usuarios.find(u => u.usuario_id_usuario === operacion.confirmado_por)), fechaConfirmacion: operacion.fecha_confirmacion,
     };
   }
 
@@ -1057,6 +1156,17 @@ export class M5Controller {
   }
 
   async obtenerOperacionPago(id: number) { return this.presentarOperacionPago(id); }
+
+  async listarPagosConfirmados() {
+    const operaciones = await prisma.operacion_pago_proveedor_m5.findMany({ where: { estado: 'confirmada' }, orderBy: [{ fecha_confirmacion: 'desc' }, { id_operacion_pago_m5: 'desc' }] });
+    return Promise.all(operaciones.map(operacion => this.presentarOperacionPago(operacion.id_operacion_pago_m5)));
+  }
+
+  async consultarDetallePagoProveedor(id: number) {
+    const operacion = await this.operacionPagoM5(id);
+    if (operacion.estado !== 'confirmada') throw new ErrorAplicacion(409, 'El detalle postpago sólo está disponible para operaciones confirmadas');
+    return this.presentarOperacionPago(id);
+  }
 
   private async datosMovimientoPago(idOperacion: number, entrada: Entrada, excluir?: number) {
     const operacion = await this.operacionPagoM5(idOperacion);
@@ -1111,6 +1221,28 @@ export class M5Controller {
       await tx.asociacion_respaldo_pago_m5.createMany({ data: [...(asociarOperacion ? [{ id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, id_operacion_pago_m5: idOperacion }] : []), ...ids.map(id => ({ id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, id_movimiento_pago_m5: id }))] });
     });
     return this.presentarOperacionPago(idOperacion);
+  }
+
+  private async crearRespaldoPostPago(tx: Transaccion, entrada: Entrada, usuario: bigint) {
+    const nombre = texto(valorEntrada(entrada, 'nombreArchivo', 'nombre'), 255); const contenido = texto(entrada.contenido, 4500000);
+    if (!nombre || !contenido) throw new ErrorAplicacion(400, 'El respaldo es obligatorio');
+    return tx.respaldo_pago_proveedor_m5.create({ data: { nombre_archivo: nombre, contenido, creado_por: usuario } });
+  }
+
+  private async movimientoPostPago(tx: Transaccion, idOperacion: number, idMovimiento: number) {
+    const operacion = await this.operacionPagoM5(idOperacion, tx);
+    if (operacion.estado !== 'confirmada') throw new ErrorAplicacion(409, 'La operación debe estar confirmada');
+    const movimiento = await tx.movimiento_pago_proveedor_m5.findFirst({ where: { id_movimiento_pago_m5: idMovimiento, id_operacion_pago_m5: idOperacion, estado: 'Vigente' } });
+    if (!movimiento) throw new ErrorAplicacion(404, 'Movimiento confirmado no encontrado');
+    return movimiento;
+  }
+
+  private async efectoMovimientoPostPago(tx: Transaccion, movimiento: { id_movimiento_pago_m5: number; monto_aplicado: Prisma.Decimal }) {
+    const efectos = await this.efectosMovimientosPago(tx, [movimiento.id_movimiento_pago_m5]);
+    const anulacion = efectos.anulaciones[0];
+    const revertido = efectos.reversas.reduce((suma, item) => suma.plus(item.monto_revertido), new Prisma.Decimal(0));
+    const efecto = { montoOriginal: movimiento.monto_aplicado, montoAnulado: anulacion?.monto_anulado || 0, montoRevertido: revertido };
+    return { ...efectos, anulacion, revertido, neto: calcularEfectoNetoMovimiento(efecto) };
   }
 
   async registrarTipoCambioManualPago(idOperacion: number, idMovimiento: number, entrada: Entrada, usuario: bigint, perfil: string) {
@@ -1178,17 +1310,69 @@ export class M5Controller {
     try {
       await prisma.$transaction(async tx => {
         const validacion = await this.validarOperacionPago(tx, id); if (validacion.operacion.estado !== 'preparada') throw new ErrorAplicacion(409, 'La operación debe estar preparada antes de confirmar');
-        for (const [idObligacion, monto] of validacion.porObligacion) {
-          const resultado = await tx.obligacion_proveedor_m5.updateMany({ where: { id_obligacion_m5: idObligacion, saldo_actual: { gte: monto } }, data: { saldo_actual: { decrement: monto } } });
-          if (resultado.count !== 1) throw new ErrorAplicacion(409, 'El saldo cambió y la operación completa debe revisarse');
-          const obligacion = await tx.obligacion_proveedor_m5.findUniqueOrThrow({ where: { id_obligacion_m5: idObligacion } }); const estado = calcularEstadoPagoObligacion(obligacion.saldo_inicial, obligacion.saldo_actual); const condicion = calcularCondicionTemporalObligacion(obligacion, await this.umbralM5(tx));
-          await tx.obligacion_proveedor_m5.update({ where: { id_obligacion_m5: idObligacion }, data: { estado_pago: estado, ...(condicion ? { condicion_temporal: condicion } : {}) } });
-        }
         await tx.movimiento_pago_proveedor_m5.updateMany({ where: { id_operacion_pago_m5: id }, data: { estado: 'Vigente' } });
         await tx.operacion_pago_proveedor_m5.update({ where: { id_operacion_pago_m5: id }, data: { estado: 'confirmada', confirmado_por: usuario, fecha_confirmacion: new Date(), total_confirmado: validacion.total } });
+        for (const idObligacion of validacion.porObligacion.keys()) await this.recalcularObligacionM5(tx, idObligacion);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'Conflicto concurrente: vuelve a revisar los saldos'); throw error; }
     return this.presentarOperacionPago(id);
+  }
+
+  async anularMovimientoPago(idOperacion: number, idMovimiento: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo);
+    try {
+      await prisma.$transaction(async tx => {
+        const movimiento = await this.movimientoPostPago(tx, idOperacion, idMovimiento); const efecto = await this.efectoMovimientoPostPago(tx, movimiento);
+        if (efecto.anulacion || efecto.neto.lte(0)) throw new ErrorAplicacion(409, 'El movimiento no conserva efecto vigente anulable');
+        const respaldo = await this.crearRespaldoPostPago(tx, entrada, usuario);
+        await tx.anulacion_movimiento_pago_m5.create({ data: { id_movimiento_pago_m5: idMovimiento, monto_anulado: efecto.neto, motivo, id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, usuario_id_usuario: usuario } });
+        await this.recalcularObligacionM5(tx, movimiento.id_obligacion_m5);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002','P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'El movimiento cambió concurrentemente; vuelve a revisar el pago'); throw error; }
+    return this.presentarOperacionPago(idOperacion);
+  }
+
+  async anularOperacionPago(idOperacion: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo); const grupo = randomUUID();
+    try {
+      await prisma.$transaction(async tx => {
+        const operacion = await this.operacionPagoM5(idOperacion, tx); if (operacion.estado !== 'confirmada') throw new ErrorAplicacion(409, 'La operación debe estar confirmada');
+        const movimientos = await tx.movimiento_pago_proveedor_m5.findMany({ where: { id_operacion_pago_m5: idOperacion, estado: 'Vigente' } });
+        if (!movimientos.length) throw new ErrorAplicacion(409, 'La operación no contiene movimientos anulables');
+        const calculados = await Promise.all(movimientos.map(async movimiento => ({ movimiento, efecto: await this.efectoMovimientoPostPago(tx, movimiento) })));
+        if (calculados.some(item => item.efecto.anulacion || item.efecto.neto.lte(0))) throw new ErrorAplicacion(409, 'No es posible anular la operación completa porque uno de sus movimientos ya no conserva efecto anulable');
+        const respaldo = await this.crearRespaldoPostPago(tx, entrada, usuario);
+        await tx.anulacion_movimiento_pago_m5.createMany({ data: calculados.map(({ movimiento, efecto }) => ({ id_movimiento_pago_m5: movimiento.id_movimiento_pago_m5, monto_anulado: efecto.neto, motivo, id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, usuario_id_usuario: usuario, grupo_operacion: grupo })) });
+        for (const idObligacion of new Set(movimientos.map(item => item.id_obligacion_m5))) await this.recalcularObligacionM5(tx, idObligacion);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002','P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'La operación cambió concurrentemente y no fue anulada'); throw error; }
+    return this.presentarOperacionPago(idOperacion);
+  }
+
+  async revertirMovimientoPago(idOperacion: number, idMovimiento: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo); const monto = montoPositivo(valorEntrada(entrada, 'monto', 'montoRevertido'));
+    try {
+      await prisma.$transaction(async tx => {
+        const movimiento = await this.movimientoPostPago(tx, idOperacion, idMovimiento); const efecto = await this.efectoMovimientoPostPago(tx, movimiento);
+        if (monto.gt(efecto.neto)) throw new ErrorAplicacion(409, 'La reversa supera el efecto neto vigente del movimiento');
+        const respaldo = await this.crearRespaldoPostPago(tx, entrada, usuario);
+        await tx.reversion_movimiento_pago_m5.create({ data: { id_movimiento_pago_m5: idMovimiento, monto_revertido: monto, motivo, id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, usuario_id_usuario: usuario } });
+        await this.recalcularObligacionM5(tx, movimiento.id_obligacion_m5);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'Conflicto concurrente: la reversa no fue registrada'); throw error; }
+    return this.presentarOperacionPago(idOperacion);
+  }
+
+  async conciliarMovimientoPago(idOperacion: number, idMovimiento: number, entrada: Entrada, usuario: bigint) {
+    const resultado = texto(entrada.resultado, 20).toLowerCase();
+    if (!['conciliado','con_discrepancia'].includes(resultado)) throw new ErrorAplicacion(400, 'Resultado de conciliación inválido');
+    const observacion = texto(entrada.observacion, 1000) || null;
+    if (resultado === 'con_discrepancia' && !observacion) throw new ErrorAplicacion(400, 'La discrepancia requiere una observación');
+    await prisma.$transaction(async tx => {
+      await this.movimientoPostPago(tx, idOperacion, idMovimiento);
+      await tx.conciliacion_movimiento_pago_m5.create({ data: { id_movimiento_pago_m5: idMovimiento, resultado, observacion, usuario_id_usuario: usuario } });
+    });
+    return this.presentarOperacionPago(idOperacion);
   }
 
   async catalogosDocumentosProveedor() {

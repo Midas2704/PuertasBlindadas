@@ -193,17 +193,18 @@ test('Legacy Bloqueado permanece consultable y fuera de los filtros y transicion
 
 test('CU83 usa una sola prioridad Vencida > Por vencer > Por pagar > Sin deuda', () => {
   const decimal = valor => new Prisma.Decimal(valor);
-  const fecha = dias => { const valor = new Date(); valor.setUTCDate(valor.getUTCDate() + dias); return valor; };
+  const hoy = '2026-09-20';
+  const fecha = dias => { const valor = new Date(`${hoy}T00:00:00Z`); valor.setUTCDate(valor.getUTCDate() + dias); return valor; };
   const base = (id, vencimiento, total = 100, estado = 'registrado', asignaciones = []) => ({ id_documento_compra_proveedor: id, numero_documento: `D-${id}`, fecha_emision: fecha(-10), fecha_vencimiento: vencimiento, monto_total: decimal(total), monto_convertido: null, estado_documento: estado, moneda: { codigo_moneda: 'CLP' }, tipo_documento: { nombre_tipo_documento: 'Factura' }, asignacion_pago_proveedor: asignaciones });
-  assert.equal(calcularResumenFinancieroProveedor([]).situacionFinanciera, 'Sin deuda');
-  assert.equal(calcularResumenFinancieroProveedor([base(1, fecha(20))]).situacionFinanciera, 'Por pagar');
-  assert.equal(calcularResumenFinancieroProveedor([base(1, fecha(20)), base(2, fecha(1))]).situacionFinanciera, 'Por vencer');
-  assert.equal(calcularResumenFinancieroProveedor([base(1, fecha(20)), base(2, fecha(1)), base(3, fecha(-2))]).situacionFinanciera, 'Vencida');
-  assert.equal(calcularResumenFinancieroProveedor([base(4, fecha(-2), 100, 'pagado')]).situacionFinanciera, 'Sin deuda');
-  assert.equal(calcularResumenFinancieroProveedor([base(5, null)]).situacionFinanciera, 'Por pagar');
-  const parcial = calcularResumenFinancieroProveedor([base(6, fecha(20), 100, 'registrado', [{ monto_asignado: decimal(40), pago_proveedor: { estado_pago: 'verificado' } }])]);
+  assert.equal(calcularResumenFinancieroProveedor([], hoy).situacionFinanciera, 'Sin deuda');
+  assert.equal(calcularResumenFinancieroProveedor([base(1, fecha(20))], hoy).situacionFinanciera, 'Por pagar');
+  assert.equal(calcularResumenFinancieroProveedor([base(1, fecha(20)), base(2, fecha(1))], hoy).situacionFinanciera, 'Por vencer');
+  assert.equal(calcularResumenFinancieroProveedor([base(1, fecha(20)), base(2, fecha(1)), base(3, fecha(-2))], hoy).situacionFinanciera, 'Vencida');
+  assert.equal(calcularResumenFinancieroProveedor([base(4, fecha(-2), 100, 'pagado')], hoy).situacionFinanciera, 'Sin deuda');
+  assert.equal(calcularResumenFinancieroProveedor([base(5, null)], hoy).situacionFinanciera, 'Por pagar');
+  const parcial = calcularResumenFinancieroProveedor([base(6, fecha(20), 100, 'registrado', [{ monto_asignado: decimal(40), pago_proveedor: { estado_pago: 'verificado' } }])], hoy);
   assert.equal(parcial.obligaciones[0].saldoPendiente, 60); assert.equal(parcial.obligaciones[0].estadoPago, 'Parcial');
-  const anulado = calcularResumenFinancieroProveedor([base(7, fecha(20), 100, 'registrado', [{ monto_asignado: decimal(100), pago_proveedor: { estado_pago: 'anulado' } }])]);
+  const anulado = calcularResumenFinancieroProveedor([base(7, fecha(20), 100, 'registrado', [{ monto_asignado: decimal(100), pago_proveedor: { estado_pago: 'anulado' } }])], hoy);
   assert.equal(anulado.obligaciones[0].saldoPendiente, 100);
 });
 

@@ -66,7 +66,13 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/pagos-proveedores/proveedores', derivar('buscarProveedoresPago'));
   rutas.get('/pagos-proveedores/catalogos', derivar('catalogosPagosProveedores'));
   rutas.get('/pagos-proveedores/borradores', derivar('listarBorradoresPago'));
+  rutas.get('/pagos-proveedores/confirmados', derivar('listarPagosConfirmados'));
   rutas.post('/pagos-proveedores', derivar('crearOperacionPago'));
+  rutas.get('/pagos-proveedores/:id/detalle', derivar('consultarDetallePagoProveedor'));
+  rutas.post('/pagos-proveedores/:id/anular', derivar('anularOperacionPago'));
+  rutas.post('/pagos-proveedores/:id/movimientos/:movimientoId/anular', derivar('anularMovimientoPago'));
+  rutas.post('/pagos-proveedores/:id/movimientos/:movimientoId/reversas', derivar('revertirMovimientoPago'));
+  rutas.post('/pagos-proveedores/:id/movimientos/:movimientoId/conciliar', derivar('conciliarMovimientoPago'));
   rutas.get('/pagos-proveedores/:id', derivar('obtenerOperacionPago'));
   rutas.post('/pagos-proveedores/:id/movimientos', derivar('agregarMovimientoPago'));
   rutas.put('/pagos-proveedores/:id/movimientos/:movimientoId', derivar('actualizarMovimientoPago'));
