@@ -195,6 +195,11 @@ export interface EfectoAjusteObligacion {
   monto: Prisma.Decimal | number;
 }
 
+export interface EfectoCompensacionObligacion {
+  montoAplicado: Prisma.Decimal | number;
+  montoRevertido?: Prisma.Decimal | number;
+}
+
 export function calcularEfectoNetoMovimiento(efecto: EfectoPagoObligacion) {
   const original = new Prisma.Decimal(efecto.montoOriginal).toDecimalPlaces(2);
   const anulado = new Prisma.Decimal(efecto.montoAnulado || 0).toDecimalPlaces(2);
@@ -204,13 +209,14 @@ export function calcularEfectoNetoMovimiento(efecto: EfectoPagoObligacion) {
 }
 
 /** Única fórmula de CU121: saldo inicial menos efectos netos confirmados. */
-export function calcularSaldoObligacion(montoInicial: Prisma.Decimal | number, efectos: EfectoPagoObligacion[], ajustes: EfectoAjusteObligacion[] = []) {
+export function calcularSaldoObligacion(montoInicial: Prisma.Decimal | number, efectos: EfectoPagoObligacion[], ajustes: EfectoAjusteObligacion[] = [], compensaciones: EfectoCompensacionObligacion[] = []) {
   const inicial = new Prisma.Decimal(montoInicial).toDecimalPlaces(2);
   const deudaAjustada = ajustes.reduce((saldo, ajuste) => ajuste.tipo === 'ND' ? saldo.plus(ajuste.monto) : saldo.minus(ajuste.monto), inicial);
   const pagadoVigente = efectos.reduce((suma, efecto) => suma.plus(calcularEfectoNetoMovimiento(efecto)), new Prisma.Decimal(0));
+  const compensadoVigente = compensaciones.reduce((suma, efecto) => { const aplicado = new Prisma.Decimal(efecto.montoAplicado); const revertido = new Prisma.Decimal(efecto.montoRevertido || 0); if (revertido.lt(0) || revertido.gt(aplicado)) throw new ErrorAplicacion(409, 'Las reversas superan la compensación original'); return suma.plus(aplicado.minus(revertido)); }, new Prisma.Decimal(0));
   if (deudaAjustada.lt(0)) throw new ErrorAplicacion(409, 'Los ajustes reducen la deuda por debajo de cero');
-  if (pagadoVigente.gt(deudaAjustada)) throw new ErrorAplicacion(409, 'Los pagos vigentes superan la deuda ajustada de la obligación');
-  return deudaAjustada.minus(pagadoVigente).toDecimalPlaces(2);
+  if (pagadoVigente.plus(compensadoVigente).gt(deudaAjustada)) throw new ErrorAplicacion(409, 'Los efectos vigentes superan la deuda ajustada de la obligación');
+  return deudaAjustada.minus(pagadoVigente).minus(compensadoVigente).toDecimalPlaces(2);
 }
 
 export function derivarEstadoMovimientoPago(efecto: EfectoPagoObligacion) {
@@ -814,6 +820,8 @@ export class M5Controller {
       prisma.ajuste_obligacion_proveedor_m5.findUnique({ where: { id_documento_ajuste_m5: documento.id_documento_m5 } }),
     ]);
     const clasificaciones = await prisma.clasificacion_asociacion_m5.findMany({ where: { id_asociacion_m5: { in: asociaciones.map(item => item.id_asociacion_m5) } } });
+    const reclasificaciones = await prisma.reclasificacion_egreso_m5.findMany({ where: { id_documento_m5: documento.id_documento_m5 }, orderBy: { fecha_solicitud: 'desc' } });
+    const detallesReclasificacion = await prisma.detalle_reclasificacion_egreso_m5.findMany({ where: { id_reclasificacion_m5: { in: reclasificaciones.map(item => item.id_reclasificacion_m5) } } });
     const categorias = await prisma.categoria_egreso_m5.findMany({ where: { id_categoria_egreso_m5: { in: clasificaciones.map(item => item.id_categoria_egreso_m5) } } });
     const listo = documento.clase === 'definitivo' && asociaciones.length > 0 && !!documento.fecha_vencimiento
       && asociaciones.every(a => a.estado_excedente !== 'pendiente' && a.estado_excedente !== 'rechazado')
@@ -825,7 +833,8 @@ export class M5Controller {
       numero: documento.folio, fechaEmision: documento.fecha_emision, fechaVencimiento: documento.fecha_vencimiento, moneda: moneda?.codigo_moneda || 'No disponible', montoTotal: Number(documento.monto_total),
       estadoDocumental: documento.estado, saldoPendiente: obligacion ? Number(obligacion.saldo_actual) : 0, clasificacionM5: documento.clase, asociacionOrdenCompra: asociaciones.length ? asociaciones.map(a => a.tipo_orden === 'OCS' ? `OCS-${a.id_ocs_m5}` : a.tipo_orden).join(', ') : 'Sin asociación',
       descripcion: documento.descripcion, asociaciones: asociaciones.map(a => ({ id: a.id_asociacion_m5, tipoOrden: a.tipo_orden, idOcs: a.id_ocs_m5, montoAsignado: Number(a.monto_asignado), estadoDiferencia: a.estado_diferencia, estadoExcedente: a.estado_excedente, montoExcedente: Number(a.monto_excedente), esFinal: a.es_documento_final })),
-      clasificaciones: clasificaciones.map(c => ({ id: c.id_clasificacion_m5, idAsociacion: c.id_asociacion_m5, idCategoria: c.id_categoria_egreso_m5, categoria: categorias.find(k => k.id_categoria_egreso_m5 === c.id_categoria_egreso_m5)?.nombre || 'No disponible', monto: Number(c.monto) })),
+      clasificaciones: clasificaciones.map(c => ({ id: c.id_clasificacion_m5, idAsociacion: c.id_asociacion_m5, idCategoria: c.id_categoria_egreso_m5, categoria: c.nombre_categoria_snapshot || categorias.find(k => k.id_categoria_egreso_m5 === c.id_categoria_egreso_m5)?.nombre || 'No disponible', monto: Number(c.monto) })),
+      reclasificaciones: reclasificaciones.map(r => ({ id: r.id_reclasificacion_m5, estado: r.estado, montoTotal: Number(r.monto_total), umbralSnapshotClp: Number(r.umbral_snapshot_clp), motivo: r.motivo, fecha: r.fecha_solicitud, detalles: detallesReclasificacion.filter(d => d.id_reclasificacion_m5 === r.id_reclasificacion_m5).map(d => ({ idClasificacion: d.id_clasificacion_origen_m5, idCategoriaOrigen: d.id_categoria_origen_m5, idCategoriaDestino: d.id_categoria_destino_m5, monto: Number(d.monto) })) })),
       propuestaImputacion: propuesta ? { id: propuesta.id_propuesta_imputacion_m5, estado: propuesta.estado, preparadoPor: propuesta.preparado_por.toString() } : null,
       progreso: { asociaciones: asociaciones.length > 0, vencimiento: !!documento.fecha_vencimiento, clasificacion: clasificaciones.length > 0, imputacion: propuesta?.estado || 'pendiente', moneda: moneda?.codigo_moneda === 'CLP' || !!documento.tipo_cambio, listoObligacion: listo }, obligacion,
       ajuste: ajuste ? { id: ajuste.id_ajuste_obligacion_m5, tipo: ajuste.tipo_ajuste, estado: ajuste.estado, idObligacion: ajuste.id_obligacion_m5, monto: Number(ajuste.monto), montoAplicado: Number(ajuste.monto_aplicado_obligacion), montoSaldoFavor: Number(ajuste.monto_saldo_favor), fecha: ajuste.fecha_creacion, motivoAnulacion: ajuste.motivo_anulacion } : null,
@@ -985,7 +994,7 @@ export class M5Controller {
       if (new Set(datos.map(d => d.idCategoria)).size !== categorias.length) throw new ErrorAplicacion(404, 'Categoría de egreso activa no encontrada');
       for (const asociacion of asociaciones) if (!datos.filter(d => d.idAsociacion === asociacion.id_asociacion_m5).reduce((s, d) => s.plus(d.monto), new Prisma.Decimal(0)).equals(asociacion.monto_asignado)) throw new ErrorAplicacion(400, 'La clasificación debe cuadrar exactamente con cada asociación');
       await tx.clasificacion_asociacion_m5.deleteMany({ where: { id_asociacion_m5: { in: [...ids] } } });
-      await tx.clasificacion_asociacion_m5.createMany({ data: datos.map(d => ({ id_asociacion_m5: d.idAsociacion, id_categoria_egreso_m5: d.idCategoria, monto: d.monto })) });
+      await tx.clasificacion_asociacion_m5.createMany({ data: datos.map(d => ({ id_asociacion_m5: d.idAsociacion, id_categoria_egreso_m5: d.idCategoria, nombre_categoria_snapshot: categorias.find(c => c.id_categoria_egreso_m5 === d.idCategoria)!.nombre, monto: d.monto })) });
       return { mensaje: 'Clasificación guardada', cantidad: datos.length };
     });
   }
@@ -1085,11 +1094,13 @@ export class M5Controller {
     const vigentes = movimientos.filter(item => confirmadas.has(item.id_operacion_pago_m5));
     const efectos = await this.efectosMovimientosPago(tx, vigentes.map(item => item.id_movimiento_pago_m5));
     const ajustes = await tx.ajuste_obligacion_proveedor_m5.findMany({ where: { id_obligacion_m5: idObligacion, estado: 'confirmado' } });
+    const compensaciones = await tx.detalle_compensacion_saldo_favor_m5.findMany({ where: { id_obligacion_m5: idObligacion } });
+    const reversasCompensacion = await tx.reversion_compensacion_m5.findMany({ where: { id_detalle_compensacion_m5: { in: compensaciones.map(item => item.id_detalle_compensacion_m5) } } });
     const saldo = calcularSaldoObligacion(obligacion.saldo_inicial, vigentes.map(movimiento => ({
       montoOriginal: movimiento.monto_aplicado,
       montoAnulado: efectos.anulaciones.find(item => item.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5)?.monto_anulado || 0,
       montoRevertido: efectos.reversas.filter(item => item.id_movimiento_pago_m5 === movimiento.id_movimiento_pago_m5).reduce((suma, item) => suma.plus(item.monto_revertido), new Prisma.Decimal(0)),
-    })), ajustes.map(ajuste => ({ tipo: ajuste.tipo_ajuste as 'NC' | 'ND', monto: ajuste.monto_aplicado_obligacion })));
+    })), ajustes.map(ajuste => ({ tipo: ajuste.tipo_ajuste as 'NC' | 'ND', monto: ajuste.monto_aplicado_obligacion })), compensaciones.map(item => ({ montoAplicado: item.monto_aplicado, montoRevertido: reversasCompensacion.filter(reversa => reversa.id_detalle_compensacion_m5 === item.id_detalle_compensacion_m5).reduce((suma, reversa) => suma.plus(reversa.monto_revertido), new Prisma.Decimal(0)) })));
     const estado = calcularEstadoPagoObligacion(obligacion.saldo_inicial, saldo);
     const condicion = calcularCondicionTemporalObligacion({ saldo_actual: saldo, fecha_vencimiento: obligacion.fecha_vencimiento }, await this.umbralM5(tx));
     return tx.obligacion_proveedor_m5.update({ where: { id_obligacion_m5: idObligacion }, data: { saldo_actual: saldo, estado_pago: estado, condicion_temporal: condicion } });
@@ -1517,10 +1528,106 @@ export class M5Controller {
     const ajustes = await prisma.ajuste_obligacion_proveedor_m5.findMany({ where: { id_ajuste_obligacion_m5: { in: saldos.map(item => item.id_ajuste_origen_m5) } } });
     const documentos = await prisma.documento_proveedor_m5.findMany({ where: { id_documento_m5: { in: ajustes.map(item => item.id_documento_ajuste_m5) } } });
     const monedas = await prisma.moneda.findMany({ where: { id_moneda: { in: saldos.map(item => item.id_moneda) } } });
-    const detalle = saldos.map(saldo => { const ajuste = ajustes.find(item => item.id_ajuste_obligacion_m5 === saldo.id_ajuste_origen_m5)!; const documento = documentos.find(item => item.id_documento_m5 === ajuste.id_documento_ajuste_m5)!; return { id: saldo.id_saldo_favor_m5, moneda: monedas.find(item => item.id_moneda === saldo.id_moneda)?.codigo_moneda || 'No disponible', origen: 'Nota de Crédito', idNotaCredito: ajuste.id_ajuste_obligacion_m5, folio: documento.folio, montoOriginalCredito: Number(ajuste.monto), montoGenerado: Number(saldo.monto_generado), montoDisponible: Number(saldo.monto_disponible), fecha: saldo.fecha_creacion, estado: saldo.estado }; });
+    const detalle = saldos.map(saldo => { const ajuste = ajustes.find(item => item.id_ajuste_obligacion_m5 === saldo.id_ajuste_origen_m5)!; const documento = documentos.find(item => item.id_documento_m5 === ajuste.id_documento_ajuste_m5)!; return { id: saldo.id_saldo_favor_m5, moneda: monedas.find(item => item.id_moneda === saldo.id_moneda)?.codigo_moneda || 'No disponible', origen: 'Nota de Crédito', idNotaCredito: ajuste.id_ajuste_obligacion_m5, folio: documento.folio, montoOriginalCredito: Number(ajuste.monto), montoGenerado: Number(saldo.monto_generado), montoUtilizadoNeto: Number(saldo.monto_generado.minus(saldo.monto_disponible)), montoDisponible: Number(saldo.monto_disponible), fecha: saldo.fecha_creacion, estado: saldo.estado }; });
     const totales = new Map<string, number>(); for (const item of detalle.filter(item => item.estado === 'disponible')) totales.set(item.moneda, (totales.get(item.moneda) || 0) + item.montoDisponible);
     return { proveedor: { id: proveedor.id_proveedor, razonSocial: proveedor.nombre_razon_social, estado: proveedor.estado_proveedor }, totalesPorMoneda: [...totales].map(([moneda, montoDisponible]) => ({ moneda, montoDisponible })), saldos: detalle };
   }
+
+  async proponerCompensacion(idProveedor: number, entrada: Entrada) {
+    const idSaldo = identificador(valorEntrada(entrada, 'idSaldoFavor', 'id_saldo_favor'));
+    const [proveedor, saldo] = await Promise.all([prisma.proveedor.findUnique({ where: { id_proveedor: idProveedor } }), prisma.saldo_favor_proveedor_m5.findUnique({ where: { id_saldo_favor_m5: idSaldo } })]);
+    if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
+    if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'El proveedor debe estar Activo para compensar');
+    if (!saldo || saldo.id_proveedor !== idProveedor || saldo.estado !== 'disponible' || saldo.monto_disponible.lte(0)) throw new ErrorAplicacion(404, 'Saldo a favor disponible no encontrado');
+    const obligaciones = await prisma.obligacion_proveedor_m5.findMany({ where: { id_proveedor: idProveedor, id_moneda: saldo.id_moneda, saldo_actual: { gt: 0 } }, orderBy: [{ fecha_vencimiento: 'asc' }, { id_obligacion_m5: 'asc' }] });
+    const prioridad = (estado: string | null) => estado === 'Vencida' ? 0 : estado === 'Por vencer' ? 1 : 2;
+    obligaciones.sort((a, b) => prioridad(a.condicion_temporal) - prioridad(b.condicion_temporal) || a.fecha_vencimiento.getTime() - b.fecha_vencimiento.getTime() || a.id_obligacion_m5 - b.id_obligacion_m5);
+    let disponible = saldo.monto_disponible;
+    const distribuciones = obligaciones.flatMap(obligacion => { if (disponible.lte(0)) return []; const monto = Prisma.Decimal.min(disponible, obligacion.saldo_actual); disponible = disponible.minus(monto); return [{ idObligacion: obligacion.id_obligacion_m5, monto: Number(monto), saldoObligacion: Number(obligacion.saldo_actual), condicionTemporal: obligacion.condicion_temporal, fechaVencimiento: obligacion.fecha_vencimiento }]; });
+    return { idSaldoFavor: idSaldo, montoDisponible: Number(saldo.monto_disponible), distribuciones, reglaMoneda: 'TEMPORAL_M5_REGLA_MONEDA_COMPENSACION' };
+  }
+
+  private async presentarCompensacion(id: number) {
+    const compensacion = await prisma.compensacion_saldo_favor_m5.findUnique({ where: { id_compensacion_m5: id } });
+    if (!compensacion) throw new ErrorAplicacion(404, 'Compensación no encontrada');
+    const detalles = await prisma.detalle_compensacion_saldo_favor_m5.findMany({ where: { id_compensacion_m5: id } });
+    const reversas = await prisma.reversion_compensacion_m5.findMany({ where: { id_detalle_compensacion_m5: { in: detalles.map(item => item.id_detalle_compensacion_m5) } }, orderBy: { fecha_hora: 'asc' } });
+    return { id, estado: compensacion.estado, idSaldoFavor: compensacion.id_saldo_favor_m5, idProveedor: compensacion.id_proveedor, total: Number(compensacion.monto_total), fecha: compensacion.fecha_creacion, distribuciones: detalles.map(item => ({ id: item.id_detalle_compensacion_m5, idObligacion: item.id_obligacion_m5, monto: Number(item.monto_aplicado), montoRevertido: Number(reversas.filter(r => r.id_detalle_compensacion_m5 === item.id_detalle_compensacion_m5).reduce((s, r) => s.plus(r.monto_revertido), new Prisma.Decimal(0))), reversas: reversas.filter(r => r.id_detalle_compensacion_m5 === item.id_detalle_compensacion_m5).map(r => ({ id: r.id_reversion_compensacion_m5, monto: Number(r.monto_revertido), motivo: r.motivo, fecha: r.fecha_hora })) })) };
+  }
+
+  async listarCompensaciones(idProveedor: number) { const proveedor = await prisma.proveedor.findUnique({ where: { id_proveedor: idProveedor } }); if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado'); const registros = await prisma.compensacion_saldo_favor_m5.findMany({ where: { id_proveedor: idProveedor }, orderBy: { fecha_creacion: 'desc' }, select: { id_compensacion_m5: true } }); return Promise.all(registros.map(item => this.presentarCompensacion(item.id_compensacion_m5))); }
+
+  async confirmarCompensacion(idProveedor: number, entrada: Entrada, usuario: bigint) {
+    const idSaldo = identificador(valorEntrada(entrada, 'idSaldoFavor', 'id_saldo_favor'));
+    const distribuciones = Array.isArray(entrada.distribuciones) ? entrada.distribuciones as Entrada[] : [];
+    const datos = distribuciones.map(item => ({ idObligacion: identificador(valorEntrada(item, 'idObligacion', 'id_obligacion')), monto: montoPositivo(item.monto) }));
+    if (!datos.length || new Set(datos.map(item => item.idObligacion)).size !== datos.length) throw new ErrorAplicacion(400, 'La distribución de compensación es obligatoria y no admite obligaciones repetidas');
+    try {
+      const id = await prisma.$transaction(async tx => {
+        const [proveedor, saldo, obligaciones] = await Promise.all([tx.proveedor.findUnique({ where: { id_proveedor: idProveedor } }), tx.saldo_favor_proveedor_m5.findUnique({ where: { id_saldo_favor_m5: idSaldo } }), tx.obligacion_proveedor_m5.findMany({ where: { id_obligacion_m5: { in: datos.map(item => item.idObligacion) } } })]);
+        if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
+        if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'El proveedor debe estar Activo para compensar');
+        if (!saldo || saldo.id_proveedor !== idProveedor || saldo.estado !== 'disponible') throw new ErrorAplicacion(404, 'Saldo a favor disponible no encontrado');
+        if (obligaciones.length !== datos.length) throw new ErrorAplicacion(404, 'Obligación no encontrada');
+        const total = datos.reduce((s, item) => s.plus(item.monto), new Prisma.Decimal(0));
+        if (total.gt(saldo.monto_disponible)) throw new ErrorAplicacion(409, 'La compensación supera el saldo a favor disponible');
+        for (const item of datos) { const obligacion = obligaciones.find(o => o.id_obligacion_m5 === item.idObligacion)!; if (obligacion.id_proveedor !== idProveedor) throw new ErrorAplicacion(400, 'Todas las obligaciones deben pertenecer al mismo proveedor'); if (obligacion.id_moneda !== saldo.id_moneda) throw new ErrorAplicacion(400, 'TEMPORAL_M5_REGLA_MONEDA_COMPENSACION: crédito y obligación deben usar la misma moneda'); if (item.monto.gt(obligacion.saldo_actual)) throw new ErrorAplicacion(409, 'La compensación supera el saldo de una obligación'); }
+        const creada = await tx.compensacion_saldo_favor_m5.create({ data: { id_saldo_favor_m5: idSaldo, id_proveedor: idProveedor, id_moneda: saldo.id_moneda, monto_total: total, creado_por: usuario } });
+        await tx.detalle_compensacion_saldo_favor_m5.createMany({ data: datos.map(item => ({ id_compensacion_m5: creada.id_compensacion_m5, id_obligacion_m5: item.idObligacion, monto_aplicado: item.monto })) });
+        const restante = saldo.monto_disponible.minus(total); await tx.saldo_favor_proveedor_m5.update({ where: { id_saldo_favor_m5: idSaldo }, data: { monto_disponible: restante, estado: restante.isZero() ? 'agotado' : 'disponible' } });
+        for (const item of datos) await this.recalcularObligacionM5(tx, item.idObligacion);
+        return creada.id_compensacion_m5;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.presentarCompensacion(id);
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'Conflicto concurrente: vuelve a revisar el saldo disponible'); throw error; }
+  }
+
+  async revertirCompensacion(id: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo); const distribuciones = Array.isArray(entrada.distribuciones) ? entrada.distribuciones as Entrada[] : [];
+    const datos = distribuciones.map(item => ({ idDetalle: identificador(valorEntrada(item, 'idDetalle', 'id_detalle')), monto: montoPositivo(item.monto) }));
+    if (!datos.length || new Set(datos.map(item => item.idDetalle)).size !== datos.length) throw new ErrorAplicacion(400, 'Indica las distribuciones que serán revertidas');
+    try { await prisma.$transaction(async tx => {
+      const compensacion = await tx.compensacion_saldo_favor_m5.findUnique({ where: { id_compensacion_m5: id } }); if (!compensacion) throw new ErrorAplicacion(404, 'Compensación no encontrada');
+      const detalles = await tx.detalle_compensacion_saldo_favor_m5.findMany({ where: { id_compensacion_m5: id, id_detalle_compensacion_m5: { in: datos.map(item => item.idDetalle) } } }); if (detalles.length !== datos.length) throw new ErrorAplicacion(404, 'Distribución de compensación no encontrada');
+      const previas = await tx.reversion_compensacion_m5.findMany({ where: { id_detalle_compensacion_m5: { in: datos.map(item => item.idDetalle) } } });
+      for (const item of datos) { const detalle = detalles.find(d => d.id_detalle_compensacion_m5 === item.idDetalle)!; const revertido = previas.filter(r => r.id_detalle_compensacion_m5 === item.idDetalle).reduce((s, r) => s.plus(r.monto_revertido), new Prisma.Decimal(0)); if (item.monto.plus(revertido).gt(detalle.monto_aplicado)) throw new ErrorAplicacion(409, 'La reversa supera lo compensado en una distribución'); }
+      const respaldo = await this.crearRespaldoPostPago(tx, entrada, usuario); const total = datos.reduce((s, item) => s.plus(item.monto), new Prisma.Decimal(0));
+      await tx.reversion_compensacion_m5.createMany({ data: datos.map(item => ({ id_detalle_compensacion_m5: item.idDetalle, monto_revertido: item.monto, motivo, id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, usuario_id_usuario: usuario })) });
+      const saldo = await tx.saldo_favor_proveedor_m5.findUniqueOrThrow({ where: { id_saldo_favor_m5: compensacion.id_saldo_favor_m5 } }); await tx.saldo_favor_proveedor_m5.update({ where: { id_saldo_favor_m5: saldo.id_saldo_favor_m5 }, data: { monto_disponible: saldo.monto_disponible.plus(total), estado: 'disponible' } });
+      const todas = await tx.detalle_compensacion_saldo_favor_m5.findMany({ where: { id_compensacion_m5: id } }); const todasReversas = await tx.reversion_compensacion_m5.findMany({ where: { id_detalle_compensacion_m5: { in: todas.map(item => item.id_detalle_compensacion_m5) } } }); const neto = todas.reduce((s, d) => s.plus(d.monto_aplicado), new Prisma.Decimal(0)).minus(todasReversas.reduce((s, r) => s.plus(r.monto_revertido), new Prisma.Decimal(0)));
+      await tx.compensacion_saldo_favor_m5.update({ where: { id_compensacion_m5: id }, data: { estado: neto.isZero() ? 'revertida_total' : 'revertida_parcial' } }); for (const detalle of detalles) await this.recalcularObligacionM5(tx, detalle.id_obligacion_m5);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'Conflicto concurrente al revertir la compensación'); throw error; }
+    return this.presentarCompensacion(id);
+  }
+
+  async listarCategoriasEgreso() {
+    const categorias = await prisma.categoria_egreso_m5.findMany({ orderBy: [{ activo: 'desc' }, { nombre: 'asc' }] }); const historial = await prisma.historial_categoria_egreso_m5.findMany({ where: { id_categoria_egreso_m5: { in: categorias.map(item => item.id_categoria_egreso_m5) } }, orderBy: { fecha_hora: 'desc' } });
+    return categorias.map(item => ({ id: item.id_categoria_egreso_m5, nombre: item.nombre, activo: item.activo, fechaCreacion: item.fecha_creacion, historial: historial.filter(h => h.id_categoria_egreso_m5 === item.id_categoria_egreso_m5) }));
+  }
+
+  async crearCategoriaEgreso(entrada: Entrada, usuario: bigint) {
+    const nombre = texto(entrada.nombre, 100).trim(); if (!nombre) throw new ErrorAplicacion(400, 'El nombre es obligatorio'); const normalizado = nombre.toLocaleUpperCase('es-CL');
+    try { return await prisma.categoria_egreso_m5.create({ data: { nombre, nombre_normalizado: normalizado, activo: entrada.activo !== false, creado_por: usuario } }); } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe una categoría con ese nombre'); throw error; }
+  }
+
+  async actualizarCategoriaEgreso(id: number, entrada: Entrada, usuario: bigint) {
+    return prisma.$transaction(async tx => { const actual = await tx.categoria_egreso_m5.findUnique({ where: { id_categoria_egreso_m5: id } }); if (!actual) throw new ErrorAplicacion(404, 'Categoría no encontrada'); const nombre = entrada.nombre === undefined ? actual.nombre : texto(entrada.nombre, 100).trim(); if (!nombre) throw new ErrorAplicacion(400, 'El nombre es obligatorio'); const activo = entrada.activo === undefined ? actual.activo : entrada.activo === true; const motivo = contacto(entrada.motivo, 500); if (nombre === actual.nombre && activo === actual.activo) return actual; try { const actualizada = await tx.categoria_egreso_m5.update({ where: { id_categoria_egreso_m5: id }, data: { nombre, nombre_normalizado: nombre.toLocaleUpperCase('es-CL'), activo } }); await tx.historial_categoria_egreso_m5.create({ data: { id_categoria_egreso_m5: id, nombre_anterior: actual.nombre, nombre_nuevo: nombre, activo_anterior: actual.activo, activo_nuevo: activo, motivo, usuario_id_usuario: usuario } }); return actualizada; } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe una categoría con ese nombre'); throw error; } });
+  }
+
+  async consultarUmbralReclasificacion() { const actual = await prisma.config_umbral_reclasificacion_m5.findUniqueOrThrow({ where: { id_configuracion: 1 } }); const historial = await prisma.historial_umbral_reclasificacion_m5.findMany({ orderBy: { fecha_hora: 'desc' } }); return { montoClp: Number(actual.monto_clp), fecha: actual.fecha_actualizacion, historial: historial.map(item => ({ anterior: Number(item.monto_anterior_clp), nuevo: Number(item.monto_nuevo_clp), usuario: item.usuario_id_usuario.toString(), fecha: item.fecha_hora })) }; }
+  async configurarUmbralReclasificacion(entrada: Entrada, usuario: bigint) { const valor = Number(valorEntrada(entrada, 'montoClp', 'monto')); if (!Number.isFinite(valor) || valor < 0) throw new ErrorAplicacion(400, 'El umbral debe ser un monto mayor o igual que cero'); const nuevo = new Prisma.Decimal(valor).toDecimalPlaces(2); await prisma.$transaction(async tx => { const actual = await tx.config_umbral_reclasificacion_m5.findUniqueOrThrow({ where: { id_configuracion: 1 } }); await tx.historial_umbral_reclasificacion_m5.create({ data: { monto_anterior_clp: actual.monto_clp, monto_nuevo_clp: nuevo, usuario_id_usuario: usuario } }); await tx.config_umbral_reclasificacion_m5.update({ where: { id_configuracion: 1 }, data: { monto_clp: nuevo, actualizado_por: usuario, fecha_actualizacion: new Date() } }); }); return this.consultarUmbralReclasificacion(); }
+
+  private async disponibilidadClasificacion(tx: Transaccion, idClasificacion: number) { const original = await tx.clasificacion_asociacion_m5.findUnique({ where: { id_clasificacion_m5: idClasificacion } }); if (!original) throw new ErrorAplicacion(404, 'Clasificación de origen no encontrada'); const salidas = await tx.detalle_reclasificacion_egreso_m5.findMany({ where: { id_clasificacion_origen_m5: idClasificacion } }); const aprobadas = await tx.reclasificacion_egreso_m5.findMany({ where: { id_reclasificacion_m5: { in: salidas.map(item => item.id_reclasificacion_m5) }, estado: 'aprobada' }, select: { id_reclasificacion_m5: true } }); const ids = new Set(aprobadas.map(item => item.id_reclasificacion_m5)); return { original, disponible: original.monto.minus(salidas.filter(item => ids.has(item.id_reclasificacion_m5)).reduce((s, item) => s.plus(item.monto), new Prisma.Decimal(0))) }; }
+
+  async solicitarReclasificacion(idDocumento: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo); const movimientos = Array.isArray(entrada.movimientos) ? entrada.movimientos as Entrada[] : []; const datos = movimientos.map(item => ({ idClasificacion: identificador(valorEntrada(item, 'idClasificacion', 'id_clasificacion')), idDestino: identificador(valorEntrada(item, 'idCategoriaDestino', 'id_categoria_destino')), monto: montoPositivo(item.monto) })); if (!datos.length) throw new ErrorAplicacion(400, 'La corrección completa debe enviarse en una sola solicitud');
+    return prisma.$transaction(async tx => { const documento = await tx.documento_proveedor_m5.findUnique({ where: { id_documento_m5: idDocumento } }); if (!documento || documento.estado !== 'confirmado') throw new ErrorAplicacion(409, 'El documento debe estar confirmado'); const asociaciones = await tx.asociacion_documento_oc_m5.findMany({ where: { id_documento_m5: idDocumento } }); const idsAsociacion = new Set(asociaciones.map(item => item.id_asociacion_m5)); const destinos = await tx.categoria_egreso_m5.findMany({ where: { id_categoria_egreso_m5: { in: datos.map(item => item.idDestino) }, activo: true } }); if (new Set(datos.map(item => item.idDestino)).size !== destinos.length) throw new ErrorAplicacion(404, 'Categoría destino activa no encontrada'); for (const item of datos) { const origen = await this.disponibilidadClasificacion(tx, item.idClasificacion); if (!idsAsociacion.has(origen.original.id_asociacion_m5)) throw new ErrorAplicacion(400, 'La clasificación no pertenece al documento'); if (origen.original.id_categoria_egreso_m5 === item.idDestino) throw new ErrorAplicacion(400, 'La categoría destino debe ser distinta'); if (item.monto.gt(origen.disponible)) throw new ErrorAplicacion(409, 'El monto supera la clasificación vigente'); }
+      const total = datos.reduce((s, item) => s.plus(item.monto), new Prisma.Decimal(0)); const obligacion = await tx.obligacion_proveedor_m5.findUnique({ where: { id_documento_m5: idDocumento } }); const moneda = await tx.moneda.findUniqueOrThrow({ where: { id_moneda: documento.id_moneda } }); let referenciaSolicitud = total; if (moneda.codigo_moneda !== 'CLP') { if (!obligacion?.tipo_cambio) throw new ErrorAplicacion(409, 'TEMPORAL_M5_REGLA_UMBRAL_MONEDA: no existe equivalente CLP confirmado'); referenciaSolicitud = total.mul(obligacion.tipo_cambio).toDecimalPlaces(2); } const anteriores = await tx.reclasificacion_egreso_m5.findMany({ where: { id_documento_m5: idDocumento, estado: { in: ['pendiente','aprobada'] } } }); const referencia = anteriores.reduce((s, item) => s.plus(item.monto_referencia_clp), referenciaSolicitud); const config = await tx.config_umbral_reclasificacion_m5.findUniqueOrThrow({ where: { id_configuracion: 1 } }); const estado = referencia.lte(config.monto_clp) ? 'aprobada' : 'pendiente'; const creada = await tx.reclasificacion_egreso_m5.create({ data: { id_documento_m5: idDocumento, monto_total: total, monto_referencia_clp: referencia, umbral_snapshot_clp: config.monto_clp, motivo, estado, solicitado_por: usuario, resuelto_por: estado === 'aprobada' ? usuario : null, fecha_resolucion: estado === 'aprobada' ? new Date() : null } }); for (const item of datos) { const origen = await tx.clasificacion_asociacion_m5.findUniqueOrThrow({ where: { id_clasificacion_m5: item.idClasificacion } }); await tx.detalle_reclasificacion_egreso_m5.create({ data: { id_reclasificacion_m5: creada.id_reclasificacion_m5, id_clasificacion_origen_m5: item.idClasificacion, id_asociacion_m5: origen.id_asociacion_m5, id_categoria_origen_m5: origen.id_categoria_egreso_m5, id_categoria_destino_m5: item.idDestino, monto: item.monto } }); } return { id: creada.id_reclasificacion_m5, estado, montoTotal: Number(total), montoReferenciaClp: Number(referencia), umbralSnapshotClp: Number(config.monto_clp) }; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async resolverReclasificacion(id: number, aprobar: boolean, entrada: Entrada, usuario: bigint, perfil: string) { const motivoRechazo = aprobar ? null : motivoObligatorio(entrada.motivo); return prisma.$transaction(async tx => { const solicitud = await tx.reclasificacion_egreso_m5.findUnique({ where: { id_reclasificacion_m5: id } }); if (!solicitud) throw new ErrorAplicacion(404, 'Solicitud de reclasificación no encontrada'); if (solicitud.estado !== 'pendiente') throw new ErrorAplicacion(409, 'La solicitud ya fue resuelta'); if (aprobar && perfil === 'contador' && solicitud.solicitado_por === usuario) throw new ErrorAplicacion(403, 'Contador no puede aprobar su propia reclasificación'); if (aprobar) { const detalles = await tx.detalle_reclasificacion_egreso_m5.findMany({ where: { id_reclasificacion_m5: id } }); const destinos = await tx.categoria_egreso_m5.findMany({ where: { id_categoria_egreso_m5: { in: detalles.map(item => item.id_categoria_destino_m5) }, activo: true } }); if (new Set(detalles.map(item => item.id_categoria_destino_m5)).size !== destinos.length) throw new ErrorAplicacion(409, 'Una categoría destino ya no está activa'); for (const detalle of detalles) { const origen = await this.disponibilidadClasificacion(tx, detalle.id_clasificacion_origen_m5); if (detalle.monto.gt(origen.disponible)) throw new ErrorAplicacion(409, 'La clasificación original cambió y ya no tiene monto suficiente'); } } const actualizada = await tx.reclasificacion_egreso_m5.update({ where: { id_reclasificacion_m5: id }, data: { estado: aprobar ? 'aprobada' : 'rechazada', resuelto_por: usuario, fecha_resolucion: new Date(), motivo_rechazo: motivoRechazo } }); return { id, estado: actualizada.estado }; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
+
+  async listarReclasificaciones() { const solicitudes = await prisma.reclasificacion_egreso_m5.findMany({ orderBy: [{ fecha_solicitud: 'desc' }, { id_reclasificacion_m5: 'desc' }] }); const detalles = await prisma.detalle_reclasificacion_egreso_m5.findMany({ where: { id_reclasificacion_m5: { in: solicitudes.map(item => item.id_reclasificacion_m5) } } }); return solicitudes.map(item => ({ id: item.id_reclasificacion_m5, idDocumento: item.id_documento_m5, estado: item.estado, montoTotal: Number(item.monto_total), montoReferenciaClp: Number(item.monto_referencia_clp), umbralSnapshotClp: Number(item.umbral_snapshot_clp), motivo: item.motivo, solicitadoPor: item.solicitado_por.toString(), fecha: item.fecha_solicitud, detalles: detalles.filter(d => d.id_reclasificacion_m5 === item.id_reclasificacion_m5).map(d => ({ idClasificacion: d.id_clasificacion_origen_m5, idCategoriaDestino: d.id_categoria_destino_m5, monto: Number(d.monto) })) })); }
 
   async catalogosDocumentosProveedor() {
     const [proveedores, tipos, monedas, categorias, ordenes, proyectos, ots] = await Promise.all([

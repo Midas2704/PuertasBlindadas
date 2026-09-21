@@ -37,6 +37,9 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/proveedores/:id/reactivar', derivar('reactivarProveedor'));
   rutas.put('/proveedores/:id/condicion-pago', derivar('actualizarCondicionPagoProveedor'));
   rutas.get('/proveedores/:id/saldos-favor', derivar('consultarSaldosFavorProveedor'));
+  rutas.post('/proveedores/:id/compensaciones/propuesta', derivar('proponerCompensacion'));
+  rutas.post('/proveedores/:id/compensaciones', derivar('confirmarCompensacion'));
+  rutas.get('/proveedores/:id/compensaciones', derivar('listarCompensaciones'));
   rutas.get('/proveedores/:id/ficha', derivar('abrirFichaProveedor'));
   rutas.get('/ordenes-compra-servicios', derivar('listarOrdenesCompraServicios'));
   rutas.get('/ordenes-compra-servicios/:id', derivar('obtenerOrdenCompraServicio'));
@@ -54,6 +57,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/documentos-proveedor/notas-credito', derivar('registrarNotaCredito'));
   rutas.post('/documentos-proveedor/notas-debito', derivar('registrarNotaDebito'));
   rutas.post('/documentos-proveedor/ajustes/:id/anular', derivar('anularAjusteObligacion'));
+  rutas.post('/documentos-proveedor/:id/reclasificaciones', derivar('solicitarReclasificacion'));
   rutas.get('/documentos-proveedor/:id', derivar('obtenerDocumentoProveedor'));
   rutas.post('/documentos-proveedor/:id/asociaciones', derivar('asociarDocumentoOrdenes'));
   rutas.put('/documentos-proveedor/:id/diferencias/:asociacionId', derivar('resolverDiferenciaDocumento'));
@@ -82,6 +86,17 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.put('/pagos-proveedores/:id/movimientos/:movimientoId', derivar('actualizarMovimientoPago'));
   rutas.post('/pagos-proveedores/:id/respaldos', derivar('adjuntarRespaldoPago'));
   rutas.post('/pagos-proveedores/:id/respaldos/:respaldoId/reemplazar', derivar('reemplazarRespaldoPago'));
+  rutas.post('/compensaciones/:id/reversas', derivar('revertirCompensacion'));
+  rutas.get('/categorias-egreso', derivar('listarCategoriasEgreso'));
+  rutas.post('/categorias-egreso', derivar('crearCategoriaEgreso'));
+  rutas.put('/categorias-egreso/:id', derivar('actualizarCategoriaEgreso'));
+  rutas.post('/categorias-egreso/:id/activar', derivar('activarCategoriaEgreso'));
+  rutas.post('/categorias-egreso/:id/desactivar', derivar('desactivarCategoriaEgreso'));
+  rutas.post('/reclasificaciones/:id/aprobar', derivar('aprobarReclasificacion'));
+  rutas.post('/reclasificaciones/:id/rechazar', derivar('rechazarReclasificacion'));
+  rutas.get('/reclasificaciones', derivar('listarReclasificaciones'));
+  rutas.get('/configuracion/umbral-reclasificacion', derivar('consultarUmbralReclasificacion'));
+  rutas.put('/configuracion/umbral-reclasificacion', derivar('configurarUmbralReclasificacion'));
   rutas.post('/pagos-proveedores/:id/movimientos/:movimientoId/tipo-cambio-manual', derivar('registrarTipoCambioManualPago'));
   rutas.post('/pagos-proveedores/:id/preparar', derivar('prepararOperacionPago'));
   rutas.post('/pagos-proveedores/:id/guardar-borrador', derivar('guardarBorradorPago'));

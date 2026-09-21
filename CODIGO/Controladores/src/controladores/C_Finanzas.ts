@@ -26,7 +26,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'agregarMovimientoPago' | 'actualizarMovimientoPago' | 'adjuntarRespaldoPago' | 'registrarTipoCambioManualPago'
   | 'prepararOperacionPago' | 'guardarBorradorPago' | 'retomarOperacionPago' | 'descartarOperacionPago' | 'confirmarOperacionPago'
   | 'listarPagosConfirmados' | 'consultarDetallePagoProveedor' | 'anularMovimientoPago' | 'anularOperacionPago' | 'revertirMovimientoPago' | 'conciliarMovimientoPago'
-  | 'reemplazarRespaldoPago' | 'registrarNotaCredito' | 'registrarNotaDebito' | 'anularAjusteObligacion' | 'consultarSaldosFavorProveedor';
+  | 'reemplazarRespaldoPago' | 'registrarNotaCredito' | 'registrarNotaDebito' | 'anularAjusteObligacion' | 'consultarSaldosFavorProveedor'
+  | 'proponerCompensacion' | 'confirmarCompensacion' | 'listarCompensaciones' | 'revertirCompensacion' | 'listarCategoriasEgreso' | 'crearCategoriaEgreso' | 'actualizarCategoriaEgreso' | 'activarCategoriaEgreso' | 'desactivarCategoriaEgreso'
+  | 'solicitarReclasificacion' | 'listarReclasificaciones' | 'aprobarReclasificacion' | 'rechazarReclasificacion' | 'consultarUmbralReclasificacion' | 'configurarUmbralReclasificacion';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -151,6 +153,21 @@ export class C_Finanzas {
       case 'registrarNotaDebito': return this.m5.registrarNotaDebito(cuerpo, actor.id);
       case 'anularAjusteObligacion': return this.m5.anularAjusteObligacion(identificador(parametros.id), cuerpo, actor.id);
       case 'consultarSaldosFavorProveedor': return this.m5.consultarSaldosFavorProveedor(identificador(parametros.id));
+      case 'proponerCompensacion': return this.m5.proponerCompensacion(identificador(parametros.id), cuerpo);
+      case 'confirmarCompensacion': return this.m5.confirmarCompensacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'listarCompensaciones': return this.m5.listarCompensaciones(identificador(parametros.id));
+      case 'revertirCompensacion': return this.m5.revertirCompensacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'listarCategoriasEgreso': return this.m5.listarCategoriasEgreso();
+      case 'crearCategoriaEgreso': return this.m5.crearCategoriaEgreso(cuerpo, actor.id);
+      case 'actualizarCategoriaEgreso': return this.m5.actualizarCategoriaEgreso(identificador(parametros.id), cuerpo, actor.id);
+      case 'activarCategoriaEgreso': return this.m5.actualizarCategoriaEgreso(identificador(parametros.id), { ...cuerpo, activo: true }, actor.id);
+      case 'desactivarCategoriaEgreso': return this.m5.actualizarCategoriaEgreso(identificador(parametros.id), { ...cuerpo, activo: false }, actor.id);
+      case 'solicitarReclasificacion': return this.m5.solicitarReclasificacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'listarReclasificaciones': return this.m5.listarReclasificaciones();
+      case 'aprobarReclasificacion': return this.m5.resolverReclasificacion(identificador(parametros.id), true, cuerpo, actor.id, actor.configuracion);
+      case 'rechazarReclasificacion': return this.m5.resolverReclasificacion(identificador(parametros.id), false, cuerpo, actor.id, actor.configuracion);
+      case 'consultarUmbralReclasificacion': return this.m5.consultarUmbralReclasificacion();
+      case 'configurarUmbralReclasificacion': return this.m5.configurarUmbralReclasificacion(cuerpo, actor.id);
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();
