@@ -28,7 +28,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarPagosConfirmados' | 'consultarDetallePagoProveedor' | 'anularMovimientoPago' | 'anularOperacionPago' | 'revertirMovimientoPago' | 'conciliarMovimientoPago'
   | 'reemplazarRespaldoPago' | 'registrarNotaCredito' | 'registrarNotaDebito' | 'anularAjusteObligacion' | 'consultarSaldosFavorProveedor'
   | 'proponerCompensacion' | 'confirmarCompensacion' | 'listarCompensaciones' | 'revertirCompensacion' | 'listarCategoriasEgreso' | 'crearCategoriaEgreso' | 'actualizarCategoriaEgreso' | 'activarCategoriaEgreso' | 'desactivarCategoriaEgreso'
-  | 'solicitarReclasificacion' | 'listarReclasificaciones' | 'aprobarReclasificacion' | 'rechazarReclasificacion' | 'consultarUmbralReclasificacion' | 'configurarUmbralReclasificacion';
+  | 'solicitarReclasificacion' | 'listarReclasificaciones' | 'aprobarReclasificacion' | 'rechazarReclasificacion' | 'consultarUmbralReclasificacion' | 'configurarUmbralReclasificacion'
+  | 'corregirOrdenTrabajoImputacion' | 'solicitarReasignacionCosto' | 'listarReasignacionesCosto' | 'aprobarReasignacionCosto' | 'rechazarReasignacionCosto'
+  | 'registrarComisionBancaria' | 'listarEnviosImportaciones' | 'obtenerEnvioImportacion' | 'crearEnvioImportacion' | 'asociarOrdenEnvio' | 'registrarCostoEnvio' | 'actualizarCostoEnvio';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -83,6 +85,7 @@ export class C_Finanzas {
     if (operacion === 'registrarTipoCambioManualPago' && !['gerencia','contador'].includes(actor.configuracion)) throw new ErrorAplicacion(403, 'Secretaría no puede ingresar una tasa manual');
     if (operacion === 'confirmarOperacionPago' && !['gerencia','contador'].includes(actor.configuracion)) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar pagos a proveedores');
     if (['anularMovimientoPago','anularOperacionPago','revertirMovimientoPago','conciliarMovimientoPago','reemplazarRespaldoPago','anularAjusteObligacion'].includes(operacion) && !['gerencia','contador'].includes(actor.configuracion) && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden ejecutar esta operación');
+    if (['aprobarReasignacionCosto','rechazarReasignacionCosto'].includes(operacion) && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede resolver reasignaciones de costo');
     const productosConCostoAjustado = Array.isArray(solicitud.cuerpo?.productos) && (solicitud.cuerpo.productos as Array<{ materiales?: Array<Record<string, unknown>> }>).some(producto => Array.isArray(producto.materiales) && producto.materiales.some(material => material.costo_ajustado !== undefined));
     if (operacion === 'editarCotizacion' && (solicitud.cuerpo?.precio_sugerido !== undefined || productosConCostoAjustado || Array.isArray(solicitud.cuerpo?.materiales) && (solicitud.cuerpo?.materiales as Array<Record<string, unknown>>).some(m => m.costo_ajustado !== undefined || m.precio !== undefined)) && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede ajustar costos o precio sugerido');
     const parametros = solicitud.parametros || {};
@@ -168,6 +171,18 @@ export class C_Finanzas {
       case 'rechazarReclasificacion': return this.m5.resolverReclasificacion(identificador(parametros.id), false, cuerpo, actor.id, actor.configuracion);
       case 'consultarUmbralReclasificacion': return this.m5.consultarUmbralReclasificacion();
       case 'configurarUmbralReclasificacion': return this.m5.configurarUmbralReclasificacion(cuerpo, actor.id);
+      case 'corregirOrdenTrabajoImputacion': return this.m5.corregirOrdenTrabajoImputacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'solicitarReasignacionCosto': return this.m5.solicitarReasignacionCosto(identificador(parametros.id), cuerpo, actor.id);
+      case 'listarReasignacionesCosto': return this.m5.listarReasignacionesCosto();
+      case 'aprobarReasignacionCosto': return this.m5.resolverReasignacionCosto(identificador(parametros.id), true, cuerpo, actor.id);
+      case 'rechazarReasignacionCosto': return this.m5.resolverReasignacionCosto(identificador(parametros.id), false, cuerpo, actor.id);
+      case 'registrarComisionBancaria': return this.m5.registrarComisionBancaria(identificador(parametros.id), cuerpo, actor.id);
+      case 'listarEnviosImportaciones': return this.m5.listarEnviosImportaciones();
+      case 'obtenerEnvioImportacion': return this.m5.obtenerEnvioImportacion(identificador(parametros.id));
+      case 'crearEnvioImportacion': return this.m5.crearEnvioImportacion(cuerpo, actor.id);
+      case 'asociarOrdenEnvio': return this.m5.asociarOrdenEnvio(identificador(parametros.id), cuerpo, actor.id);
+      case 'registrarCostoEnvio': return this.m5.registrarCostoEnvio(identificador(parametros.id), cuerpo, actor.id);
+      case 'actualizarCostoEnvio': return this.m5.actualizarCostoEnvio(identificador(parametros.id), identificador(parametros.costoId), cuerpo, actor.id);
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();

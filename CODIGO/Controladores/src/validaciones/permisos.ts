@@ -19,6 +19,7 @@ export const operacionesPermiso: Record<string, string> = {
  listarPagosConfirmados:'CU123', consultarDetallePagoProveedor:'CU123', anularMovimientoPago:'CU124', anularOperacionPago:'CU124', revertirMovimientoPago:'CU125', conciliarMovimientoPago:'CU126',
  reemplazarRespaldoPago:'CU127', registrarNotaCredito:'CU128', registrarNotaDebito:'CU129', anularAjusteObligacion:'CU130', consultarSaldosFavorProveedor:'CU131',
  proponerCompensacion:'CU132', confirmarCompensacion:'CU132', listarCompensaciones:'CU133', revertirCompensacion:'CU133', listarCategoriasEgreso:'CU134', crearCategoriaEgreso:'CU134', actualizarCategoriaEgreso:'CU134', activarCategoriaEgreso:'CU134', desactivarCategoriaEgreso:'CU134', solicitarReclasificacion:'CU135', listarReclasificaciones:'CU136', aprobarReclasificacion:'CU136', rechazarReclasificacion:'CU136', consultarUmbralReclasificacion:'CU137', configurarUmbralReclasificacion:'CU137',
+ corregirOrdenTrabajoImputacion:'CU138', solicitarReasignacionCosto:'CU139', listarReasignacionesCosto:'CU140', aprobarReasignacionCosto:'CU140', rechazarReasignacionCosto:'CU140', registrarComisionBancaria:'CU141', listarEnviosImportaciones:'CU142', obtenerEnvioImportacion:'CU142', crearEnvioImportacion:'CU143', asociarOrdenEnvio:'CU144', registrarCostoEnvio:'CU145', actualizarCostoEnvio:'CU145',
 };
 
 /** Operaciones sobre cuentas y seguridad ajenas: Gerencia por sí sola no basta. */
@@ -32,9 +33,9 @@ export const operacionesQueRequierenAdministrador = new Set(
 );
 export const permisosM4 = Array.from({length:16}, (_, indice) => `CU${indice + 59}`).filter(codigo => !['CU68','CU69','CU70'].includes(codigo));
 export const codigosImplementados = [...new Set([...Object.values(operacionesPermiso), 'CU31','CU33'])];
-/** El perfil Administrador representa acceso integral a la matriz CU01–CU137. */
+/** El perfil Administrador representa acceso integral a la matriz CU01–CU145. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
-export const codigosTodosLosCU = Array.from({ length: 137 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
+export const codigosTodosLosCU = Array.from({ length: 145 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
  return numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
@@ -49,6 +50,7 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU121:['CU120'],CU122:['CU121'],CU123:['CU118'],CU124:['CU123'],CU125:['CU123'],CU126:['CU123'],
  CU127:['CU123'],CU128:['CU106'],CU129:['CU106'],CU130:['CU95'],CU131:['CU106'],
  CU132:['CU131'],CU133:['CU132'],CU134:['CU102'],CU135:['CU102'],CU136:['CU135'],CU137:['CU134'],
+ CU138:['CU103'],CU139:['CU103'],CU140:['CU139'],CU141:['CU123'],CU142:['CU95'],CU143:['CU142'],CU144:['CU142','CU88'],CU145:['CU142'],
 };
 type PerfilFuncional = 'gerencia' | 'secretaria' | 'contador';
 const G: readonly PerfilFuncional[] = ['gerencia'];
@@ -75,6 +77,7 @@ export const matrizPermisosPorCU: Record<string, readonly PerfilFuncional[]> = {
  CU121:[],CU122:[],CU123:GSC,CU124:GC,CU125:GC,CU126:GC,
  CU127:GC,CU128:GSC,CU129:GSC,CU130:GC,CU131:GSC,
  CU132:GC,CU133:GC,CU134:GC,CU135:GC,CU136:GC,CU137:G,
+ CU138:GSC,CU139:GSC,CU140:G,CU141:GC,CU142:GSC,CU143:GSC,CU144:GSC,CU145:GSC,
 };
 
 const operacionesPersonales = new Set(['CU68','CU69','CU70']);

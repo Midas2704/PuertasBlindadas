@@ -1296,6 +1296,132 @@ model detalle_reclasificacion_egreso_m5 {
   @@schema("finanzas")
 }
 
+/// TEMPORAL_M5_DB_PATCH: correcciones de OT sobre imputaciones confirmadas, sin cambiar Proyecto ni monto.
+model historial_ot_imputacion_m5 {
+  id_historial_ot_m5       Int      @id @default(autoincrement())
+  id_detalle_imputacion_m5 Int
+  id_proyecto              BigInt
+  id_ot_anterior           BigInt?
+  id_ot_nueva              BigInt
+  monto_contexto           Decimal  @db.Decimal(14, 2)
+  motivo                   String
+  usuario_id_usuario       BigInt
+  fecha_hora               DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_detalle_imputacion_m5, fecha_hora], map: "idx_historial_ot_imputacion_m5_detalle")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: solicitud inmutable; la imputación original sigue vigente hasta CU140.
+model solicitud_reasignacion_costo_m5 {
+  id_solicitud_reasignacion_m5 Int      @id @default(autoincrement())
+  id_detalle_origen_m5         Int
+  monto_total                  Decimal  @db.Decimal(14, 2)
+  motivo                       String
+  estado                       String   @default("pendiente") @db.VarChar(20)
+  excepcional_proyecto_cerrado Boolean  @default(false)
+  justificacion_excepcion      String?
+  solicitado_por               BigInt
+  fecha_solicitud              DateTime @default(now()) @db.Timestamptz(6)
+  resuelto_por                 BigInt?
+  fecha_resolucion             DateTime? @db.Timestamptz(6)
+  motivo_rechazo               String?
+
+  @@index([id_detalle_origen_m5, estado], map: "idx_reasignacion_costo_m5_origen_estado")
+  @@schema("finanzas")
+}
+
+model detalle_reasignacion_costo_m5 {
+  id_detalle_reasignacion_m5   Int     @id @default(autoincrement())
+  id_solicitud_reasignacion_m5 Int
+  destino                      String  @db.VarChar(20)
+  id_proyecto                  BigInt?
+  id_orden_trabajo             BigInt?
+  monto                        Decimal @db.Decimal(14, 2)
+
+  @@index([id_solicitud_reasignacion_m5], map: "idx_detalle_reasignacion_m5_solicitud")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: gasto bancario separado, sin efecto sobre deuda o pago al proveedor.
+model comision_bancaria_m5 {
+  id_comision_bancaria_m5 Int      @id @default(autoincrement())
+  id_operacion_pago_m5    Int
+  id_movimiento_pago_m5   Int?
+  id_moneda               Int
+  monto                    Decimal  @db.Decimal(14, 2)
+  equivalente_clp          Decimal? @db.Decimal(14, 2)
+  fecha_comision           DateTime @db.Date
+  descripcion              String
+  id_respaldo_pago_m5      Int
+  registrado_por           BigInt
+  fecha_registro           DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_operacion_pago_m5, fecha_registro], map: "idx_comision_bancaria_m5_operacion")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: unidad financiera de agrupación, no representa OC, deuda ni inventario.
+model envio_importacion_m5 {
+  id_envio_importacion_m5 Int      @id @default(autoincrement())
+  referencia              String   @db.VarChar(120)
+  referencia_normalizada  String   @unique(map: "uq_envio_importacion_m5_referencia") @db.VarChar(120)
+  fecha                    DateTime @db.Date
+  descripcion              String?
+  estado                   String   @default("abierto") @db.VarChar(30)
+  creado_por               BigInt
+  fecha_creacion           DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([estado, fecha], map: "idx_envio_importacion_m5_estado_fecha")
+  @@schema("finanzas")
+}
+
+model envio_orden_compra_m5 {
+  id_envio_orden_m5       Int      @id @default(autoincrement())
+  id_envio_importacion_m5 Int
+  tipo_orden              String   @db.VarChar(10)
+  id_ocs_m5               Int?
+  id_orden_externa        String?  @db.VarChar(100)
+  asociado_por            BigInt
+  fecha_asociacion        DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([id_envio_importacion_m5, id_ocs_m5], map: "uq_envio_orden_m5_ocs")
+  @@unique([id_envio_importacion_m5, tipo_orden, id_orden_externa], map: "uq_envio_orden_m5_externa")
+  @@index([id_envio_importacion_m5], map: "idx_envio_orden_m5_envio")
+  @@schema("finanzas")
+}
+
+model costo_envio_importacion_m5 {
+  id_costo_envio_m5       Int      @id @default(autoincrement())
+  id_envio_importacion_m5 Int
+  tipo_costo              String   @db.VarChar(40)
+  fuente                   String   @db.VarChar(20)
+  id_obligacion_m5        Int?     @unique(map: "uq_costo_envio_m5_obligacion")
+  id_comision_bancaria_m5 Int?     @unique(map: "uq_costo_envio_m5_comision")
+  id_moneda               Int
+  monto                    Decimal  @db.Decimal(14, 2)
+  equivalente_clp          Decimal? @db.Decimal(14, 2)
+  descripcion              String?
+  id_respaldo_pago_m5      Int?
+  registrado_por          BigInt
+  fecha_registro           DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_envio_importacion_m5, id_moneda], map: "idx_costo_envio_m5_envio_moneda")
+  @@schema("finanzas")
+}
+
+model historial_envio_importacion_m5 {
+  id_historial_envio_m5   Int      @id @default(autoincrement())
+  id_envio_importacion_m5 Int
+  evento                  String   @db.VarChar(40)
+  detalle                 String
+  usuario_id_usuario      BigInt
+  fecha_hora              DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_envio_importacion_m5, fecha_hora], map: "idx_historial_envio_m5_envio")
+  @@schema("finanzas")
+}
+
 /// TEMPORAL_M5_DB_PATCH: calendario laboral chileno consumido por CU101.
 model feriado_chile_m5 {
   fecha       DateTime @id @db.Date

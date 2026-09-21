@@ -97,6 +97,18 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/reclasificaciones', derivar('listarReclasificaciones'));
   rutas.get('/configuracion/umbral-reclasificacion', derivar('consultarUmbralReclasificacion'));
   rutas.put('/configuracion/umbral-reclasificacion', derivar('configurarUmbralReclasificacion'));
+  rutas.put('/imputaciones/:id/orden-trabajo', derivar('corregirOrdenTrabajoImputacion'));
+  rutas.post('/imputaciones/:id/reasignaciones', derivar('solicitarReasignacionCosto'));
+  rutas.get('/reasignaciones-costo', derivar('listarReasignacionesCosto'));
+  rutas.post('/reasignaciones-costo/:id/aprobar', derivar('aprobarReasignacionCosto'));
+  rutas.post('/reasignaciones-costo/:id/rechazar', derivar('rechazarReasignacionCosto'));
+  rutas.post('/pagos-proveedores/:id/comisiones', derivar('registrarComisionBancaria'));
+  rutas.get('/envios-importaciones', derivar('listarEnviosImportaciones'));
+  rutas.post('/envios-importaciones', derivar('crearEnvioImportacion'));
+  rutas.get('/envios-importaciones/:id', derivar('obtenerEnvioImportacion'));
+  rutas.post('/envios-importaciones/:id/ordenes-compra', derivar('asociarOrdenEnvio'));
+  rutas.post('/envios-importaciones/:id/costos', derivar('registrarCostoEnvio'));
+  rutas.put('/envios-importaciones/:id/costos/:costoId', derivar('actualizarCostoEnvio'));
   rutas.post('/pagos-proveedores/:id/movimientos/:movimientoId/tipo-cambio-manual', derivar('registrarTipoCambioManualPago'));
   rutas.post('/pagos-proveedores/:id/preparar', derivar('prepararOperacionPago'));
   rutas.post('/pagos-proveedores/:id/guardar-borrador', derivar('guardarBorradorPago'));

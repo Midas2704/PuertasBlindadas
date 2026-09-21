@@ -24,6 +24,7 @@ import DocumentosProveedor from './views/DocumentosProveedor/DocumentosProveedor
 import CuentasPorPagar from './views/CuentasPorPagar/CuentasPorPagar';
 import PagosProveedores from './views/PagosProveedores/PagosProveedores';
 import CategoriasEgreso from './views/CategoriasEgreso/CategoriasEgreso';
+import EnviosImportaciones from './views/EnviosImportaciones/EnviosImportaciones';
 
 const App: React.FC = () => {
   return (
@@ -45,6 +46,7 @@ const App: React.FC = () => {
           <Route path="cuentas-por-pagar" element={<Protegido permiso="CU106"><CuentasPorPagar /></Protegido>} />
           <Route path="pagos-proveedores" element={<Protegido permiso="CU111"><PagosProveedores /></Protegido>} />
           <Route path="categorias-egreso" element={<Protegido permiso="CU134"><CategoriasEgreso /></Protegido>} />
+          <Route path="envios-importaciones" element={<Protegido permiso="CU142"><EnviosImportaciones /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

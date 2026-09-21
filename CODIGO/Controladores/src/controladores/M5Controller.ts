@@ -12,6 +12,17 @@ type Transaccion = Prisma.TransactionClient;
 export type SituacionProveedor = 'Vencida' | 'Por vencer' | 'Por pagar' | 'Sin deuda';
 export type TipoComputoPago = 'DIAS_CORRIDOS' | 'DIAS_HABILES';
 
+export function calcularCostoFinancieroEnvio(costos: Array<{ moneda: string; monto: number; equivalenteClp: number | null }>) {
+  const porMoneda = new Map<string, number>();
+  for (const costo of costos) porMoneda.set(costo.moneda, (porMoneda.get(costo.moneda) || 0) + costo.monto);
+  const consolidable = costos.every(costo => costo.equivalenteClp !== null);
+  return {
+    totalesPorMoneda: [...porMoneda].map(([moneda, monto]) => ({ moneda, monto })),
+    totalClp: consolidable ? costos.reduce((suma, costo) => suma + (costo.equivalenteClp || 0), 0) : null,
+    conversionPendiente: !consolidable,
+  };
+}
+
 export function sumarDiasHabilesChile(fecha: string, dias: number, feriados = new Set<string>()) {
   const cursor = new Date(`${fecha}T00:00:00Z`);
   let restantes = dias;
@@ -823,6 +834,12 @@ export class M5Controller {
     const reclasificaciones = await prisma.reclasificacion_egreso_m5.findMany({ where: { id_documento_m5: documento.id_documento_m5 }, orderBy: { fecha_solicitud: 'desc' } });
     const detallesReclasificacion = await prisma.detalle_reclasificacion_egreso_m5.findMany({ where: { id_reclasificacion_m5: { in: reclasificaciones.map(item => item.id_reclasificacion_m5) } } });
     const categorias = await prisma.categoria_egreso_m5.findMany({ where: { id_categoria_egreso_m5: { in: clasificaciones.map(item => item.id_categoria_egreso_m5) } } });
+    const imputaciones = propuesta?.estado === 'confirmado' ? await prisma.detalle_imputacion_m5.findMany({ where: { id_propuesta_imputacion_m5: propuesta.id_propuesta_imputacion_m5 } }) : [];
+    const [historialOt, solicitudesReasignacion] = await Promise.all([
+      prisma.historial_ot_imputacion_m5.findMany({ where: { id_detalle_imputacion_m5: { in: imputaciones.map(item => item.id_detalle_imputacion_m5) } }, orderBy: { fecha_hora: 'desc' } }),
+      prisma.solicitud_reasignacion_costo_m5.findMany({ where: { id_detalle_origen_m5: { in: imputaciones.map(item => item.id_detalle_imputacion_m5) } }, orderBy: { fecha_solicitud: 'desc' } }),
+    ]);
+    const detallesReasignacion = await prisma.detalle_reasignacion_costo_m5.findMany({ where: { id_solicitud_reasignacion_m5: { in: solicitudesReasignacion.map(item => item.id_solicitud_reasignacion_m5) } } });
     const listo = documento.clase === 'definitivo' && asociaciones.length > 0 && !!documento.fecha_vencimiento
       && asociaciones.every(a => a.estado_excedente !== 'pendiente' && a.estado_excedente !== 'rechazado')
       && asociaciones.every(a => clasificaciones.filter(c => c.id_asociacion_m5 === a.id_asociacion_m5).reduce((s, c) => s.plus(c.monto), new Prisma.Decimal(0)).equals(a.monto_asignado))
@@ -836,6 +853,7 @@ export class M5Controller {
       clasificaciones: clasificaciones.map(c => ({ id: c.id_clasificacion_m5, idAsociacion: c.id_asociacion_m5, idCategoria: c.id_categoria_egreso_m5, categoria: c.nombre_categoria_snapshot || categorias.find(k => k.id_categoria_egreso_m5 === c.id_categoria_egreso_m5)?.nombre || 'No disponible', monto: Number(c.monto) })),
       reclasificaciones: reclasificaciones.map(r => ({ id: r.id_reclasificacion_m5, estado: r.estado, montoTotal: Number(r.monto_total), umbralSnapshotClp: Number(r.umbral_snapshot_clp), motivo: r.motivo, fecha: r.fecha_solicitud, detalles: detallesReclasificacion.filter(d => d.id_reclasificacion_m5 === r.id_reclasificacion_m5).map(d => ({ idClasificacion: d.id_clasificacion_origen_m5, idCategoriaOrigen: d.id_categoria_origen_m5, idCategoriaDestino: d.id_categoria_destino_m5, monto: Number(d.monto) })) })),
       propuestaImputacion: propuesta ? { id: propuesta.id_propuesta_imputacion_m5, estado: propuesta.estado, preparadoPor: propuesta.preparado_por.toString() } : null,
+      imputaciones: imputaciones.map(item => { const aprobadas = solicitudesReasignacion.filter(s => s.id_detalle_origen_m5 === item.id_detalle_imputacion_m5 && s.estado === 'aprobada'); const reasignado = aprobadas.reduce((suma, solicitud) => suma.plus(solicitud.monto_total), new Prisma.Decimal(0)); return { id: item.id_detalle_imputacion_m5, idClasificacion: item.id_clasificacion_m5, destino: item.destino, idProyecto: item.id_proyecto?.toString() || null, idOrdenTrabajo: item.id_orden_trabajo?.toString() || null, montoOriginal: Number(item.monto), montoVigente: Number(item.monto.minus(reasignado)), historialOt: historialOt.filter(h => h.id_detalle_imputacion_m5 === item.id_detalle_imputacion_m5).map(h => ({ anterior: h.id_ot_anterior?.toString() || null, nueva: h.id_ot_nueva.toString(), motivo: h.motivo, fecha: h.fecha_hora })), reasignaciones: solicitudesReasignacion.filter(s => s.id_detalle_origen_m5 === item.id_detalle_imputacion_m5).map(s => ({ id: s.id_solicitud_reasignacion_m5, estado: s.estado, monto: Number(s.monto_total), motivo: s.motivo, excepcional: s.excepcional_proyecto_cerrado, detalles: detallesReasignacion.filter(d => d.id_solicitud_reasignacion_m5 === s.id_solicitud_reasignacion_m5).map(d => ({ destino: d.destino, idProyecto: d.id_proyecto?.toString() || null, idOrdenTrabajo: d.id_orden_trabajo?.toString() || null, monto: Number(d.monto) })) })) }; }),
       progreso: { asociaciones: asociaciones.length > 0, vencimiento: !!documento.fecha_vencimiento, clasificacion: clasificaciones.length > 0, imputacion: propuesta?.estado || 'pendiente', moneda: moneda?.codigo_moneda === 'CLP' || !!documento.tipo_cambio, listoObligacion: listo }, obligacion,
       ajuste: ajuste ? { id: ajuste.id_ajuste_obligacion_m5, tipo: ajuste.tipo_ajuste, estado: ajuste.estado, idObligacion: ajuste.id_obligacion_m5, monto: Number(ajuste.monto), montoAplicado: Number(ajuste.monto_aplicado_obligacion), montoSaldoFavor: Number(ajuste.monto_saldo_favor), fecha: ajuste.fecha_creacion, motivoAnulacion: ajuste.motivo_anulacion } : null,
     };
@@ -1125,7 +1143,9 @@ export class M5Controller {
       tx.usuario.findMany({ where: { usuario_id_usuario: { in: [operacion.creado_por, operacion.preparado_por, operacion.confirmado_por].filter((valor): valor is bigint => valor !== null) } } }),
       tx.historial_respaldo_pago_m5.findMany({ where: { id_operacion_pago_m5: id }, orderBy: [{ fecha_hora: 'desc' }, { id_historial_respaldo_m5: 'desc' }] }),
     ]);
-    const idsRespaldos = [...new Set([...asociaciones.map(a => a.id_respaldo_pago_m5), ...efectos.anulaciones.map(a => a.id_respaldo_pago_m5), ...efectos.reversas.map(r => r.id_respaldo_pago_m5), ...historialRespaldos.flatMap(item => [item.id_respaldo_anterior, item.id_respaldo_nuevo])])];
+    const comisiones = await tx.comision_bancaria_m5.findMany({ where: { id_operacion_pago_m5: id }, orderBy: { fecha_registro: 'asc' } });
+    const monedasComision = await tx.moneda.findMany({ where: { id_moneda: { in: comisiones.map(item => item.id_moneda) } } });
+    const idsRespaldos = [...new Set([...asociaciones.map(a => a.id_respaldo_pago_m5), ...efectos.anulaciones.map(a => a.id_respaldo_pago_m5), ...efectos.reversas.map(r => r.id_respaldo_pago_m5), ...historialRespaldos.flatMap(item => [item.id_respaldo_anterior, item.id_respaldo_nuevo]), ...comisiones.map(item => item.id_respaldo_pago_m5)])];
     const respaldos = await tx.respaldo_pago_proveedor_m5.findMany({ where: { id_respaldo_pago_m5: { in: idsRespaldos } } });
     const total = movimientos.reduce((suma, movimiento) => suma.plus(movimiento.monto_aplicado), new Prisma.Decimal(0));
     const presentados = movimientos.map(movimiento => {
@@ -1158,6 +1178,7 @@ export class M5Controller {
       respaldos: asociaciones.filter(a => a.id_operacion_pago_m5 === id).map(a => respaldos.find(r => r.id_respaldo_pago_m5 === a.id_respaldo_pago_m5)).filter(Boolean).map(r => ({ id: r!.id_respaldo_pago_m5, nombre: r!.nombre_archivo })),
       historialRespaldos: historialRespaldos.map(item => ({ id: item.id_historial_respaldo_m5, idMovimiento: item.id_movimiento_pago_m5, anterior: { id: item.id_respaldo_anterior, nombre: respaldos.find(r => r.id_respaldo_pago_m5 === item.id_respaldo_anterior)?.nombre_archivo }, nuevo: { id: item.id_respaldo_nuevo, nombre: respaldos.find(r => r.id_respaldo_pago_m5 === item.id_respaldo_nuevo)?.nombre_archivo }, motivo: item.motivo, usuario: item.usuario_id_usuario.toString(), fecha: item.fecha_hora })),
       movimientos: presentados,
+      comisiones: comisiones.map(item => ({ id: item.id_comision_bancaria_m5, idMovimiento: item.id_movimiento_pago_m5, monto: Number(item.monto), moneda: monedasComision.find(moneda => moneda.id_moneda === item.id_moneda)?.codigo_moneda || 'No disponible', equivalenteClp: item.equivalente_clp === null ? null : Number(item.equivalente_clp), fecha: item.fecha_comision, descripcion: item.descripcion, respaldo: respaldos.find(r => r.id_respaldo_pago_m5 === item.id_respaldo_pago_m5)?.nombre_archivo })),
       creadoPor: this.nombreUsuario(usuarios.find(u => u.usuario_id_usuario === operacion.creado_por)) || operacion.creado_por.toString(), fechaCreacion: operacion.fecha_creacion,
       preparadoPor: this.nombreUsuario(usuarios.find(u => u.usuario_id_usuario === operacion.preparado_por)), fechaPreparacion: operacion.fecha_preparacion,
       confirmadoPor: this.nombreUsuario(usuarios.find(u => u.usuario_id_usuario === operacion.confirmado_por)), fechaConfirmacion: operacion.fecha_confirmacion,
@@ -1628,6 +1649,170 @@ export class M5Controller {
   async resolverReclasificacion(id: number, aprobar: boolean, entrada: Entrada, usuario: bigint, perfil: string) { const motivoRechazo = aprobar ? null : motivoObligatorio(entrada.motivo); return prisma.$transaction(async tx => { const solicitud = await tx.reclasificacion_egreso_m5.findUnique({ where: { id_reclasificacion_m5: id } }); if (!solicitud) throw new ErrorAplicacion(404, 'Solicitud de reclasificación no encontrada'); if (solicitud.estado !== 'pendiente') throw new ErrorAplicacion(409, 'La solicitud ya fue resuelta'); if (aprobar && perfil === 'contador' && solicitud.solicitado_por === usuario) throw new ErrorAplicacion(403, 'Contador no puede aprobar su propia reclasificación'); if (aprobar) { const detalles = await tx.detalle_reclasificacion_egreso_m5.findMany({ where: { id_reclasificacion_m5: id } }); const destinos = await tx.categoria_egreso_m5.findMany({ where: { id_categoria_egreso_m5: { in: detalles.map(item => item.id_categoria_destino_m5) }, activo: true } }); if (new Set(detalles.map(item => item.id_categoria_destino_m5)).size !== destinos.length) throw new ErrorAplicacion(409, 'Una categoría destino ya no está activa'); for (const detalle of detalles) { const origen = await this.disponibilidadClasificacion(tx, detalle.id_clasificacion_origen_m5); if (detalle.monto.gt(origen.disponible)) throw new ErrorAplicacion(409, 'La clasificación original cambió y ya no tiene monto suficiente'); } } const actualizada = await tx.reclasificacion_egreso_m5.update({ where: { id_reclasificacion_m5: id }, data: { estado: aprobar ? 'aprobada' : 'rechazada', resuelto_por: usuario, fecha_resolucion: new Date(), motivo_rechazo: motivoRechazo } }); return { id, estado: actualizada.estado }; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); }
 
   async listarReclasificaciones() { const solicitudes = await prisma.reclasificacion_egreso_m5.findMany({ orderBy: [{ fecha_solicitud: 'desc' }, { id_reclasificacion_m5: 'desc' }] }); const detalles = await prisma.detalle_reclasificacion_egreso_m5.findMany({ where: { id_reclasificacion_m5: { in: solicitudes.map(item => item.id_reclasificacion_m5) } } }); return solicitudes.map(item => ({ id: item.id_reclasificacion_m5, idDocumento: item.id_documento_m5, estado: item.estado, montoTotal: Number(item.monto_total), montoReferenciaClp: Number(item.monto_referencia_clp), umbralSnapshotClp: Number(item.umbral_snapshot_clp), motivo: item.motivo, solicitadoPor: item.solicitado_por.toString(), fecha: item.fecha_solicitud, detalles: detalles.filter(d => d.id_reclasificacion_m5 === item.id_reclasificacion_m5).map(d => ({ idClasificacion: d.id_clasificacion_origen_m5, idCategoriaDestino: d.id_categoria_destino_m5, monto: Number(d.monto) })) })); }
+
+  async corregirOrdenTrabajoImputacion(idDetalle: number, entrada: Entrada, usuario: bigint) {
+    const idOt = BigInt(String(valorEntrada(entrada, 'idOrdenTrabajo', 'id_orden_trabajo')));
+    const motivo = motivoObligatorio(entrada.motivo);
+    return prisma.$transaction(async tx => {
+      const detalle = await tx.detalle_imputacion_m5.findUnique({ where: { id_detalle_imputacion_m5: idDetalle } });
+      if (!detalle) throw new ErrorAplicacion(404, 'Imputación no encontrada');
+      const propuesta = await tx.propuesta_imputacion_m5.findUnique({ where: { id_propuesta_imputacion_m5: detalle.id_propuesta_imputacion_m5 } });
+      if (!propuesta || propuesta.estado !== 'confirmado') throw new ErrorAplicacion(409, 'La imputación debe estar confirmada');
+      if (detalle.destino !== 'proyecto' || !detalle.id_proyecto) throw new ErrorAplicacion(400, 'La corrección de OT requiere una imputación a Proyecto');
+      const ot = await tx.orden_trabajo.findUnique({ where: { orden_trabajo_id_orden: idOt } });
+      if (!ot) throw new ErrorAplicacion(404, 'Orden de Trabajo no encontrada');
+      if (ot.proyecto_id_proyecto !== detalle.id_proyecto) throw new ErrorAplicacion(400, 'La Orden de Trabajo no pertenece al Proyecto de la imputación');
+      await tx.historial_ot_imputacion_m5.create({ data: { id_detalle_imputacion_m5: idDetalle, id_proyecto: detalle.id_proyecto, id_ot_anterior: detalle.id_orden_trabajo, id_ot_nueva: idOt, monto_contexto: detalle.monto, motivo, usuario_id_usuario: usuario } });
+      await tx.detalle_imputacion_m5.update({ where: { id_detalle_imputacion_m5: idDetalle }, data: { id_orden_trabajo: idOt } });
+      return { idDetalle, idProyecto: detalle.id_proyecto.toString(), idOtAnterior: detalle.id_orden_trabajo?.toString() || null, idOtNueva: idOt.toString(), monto: Number(detalle.monto), motivo };
+    });
+  }
+
+  private async validarDestinoReasignacion(tx: Transaccion, item: { destino: string; idProyecto: bigint | null; idOt: bigint | null }) {
+    if (!['general', 'proyecto'].includes(item.destino)) throw new ErrorAplicacion(400, 'Destino de reasignación inválido');
+    if (item.destino === 'general') {
+      if (item.idProyecto || item.idOt) throw new ErrorAplicacion(400, 'Gasto general no admite Proyecto ni Orden de Trabajo');
+      return false;
+    }
+    if (!item.idProyecto) throw new ErrorAplicacion(400, 'El Proyecto destino es obligatorio');
+    const proyecto = await tx.proyecto.findUnique({ where: { proyecto_proyecto_id: item.idProyecto } });
+    if (!proyecto) throw new ErrorAplicacion(404, 'Proyecto destino no encontrado');
+    let excepcional = !['activo', 'abierto'].includes((proyecto.proyecto_estado_operacional || '').toLowerCase());
+    if (item.idOt) {
+      const ot = await tx.orden_trabajo.findUnique({ where: { orden_trabajo_id_orden: item.idOt } });
+      if (!ot) throw new ErrorAplicacion(404, 'Orden de Trabajo destino no encontrada');
+      if (ot.proyecto_id_proyecto !== item.idProyecto) throw new ErrorAplicacion(400, 'La Orden de Trabajo no pertenece al Proyecto destino');
+      excepcional ||= ['cerrada', 'cerrado', 'finalizada', 'finalizado', 'terminada', 'terminado', 'inactiva', 'inactivo'].includes((ot.orden_trabajo_estado || '').toLowerCase());
+    }
+    return excepcional;
+  }
+
+  private async disponibilidadImputacion(tx: Transaccion, idDetalle: number) {
+    const detalle = await tx.detalle_imputacion_m5.findUnique({ where: { id_detalle_imputacion_m5: idDetalle } });
+    if (!detalle) throw new ErrorAplicacion(404, 'Imputación de origen no encontrada');
+    const propuesta = await tx.propuesta_imputacion_m5.findUnique({ where: { id_propuesta_imputacion_m5: detalle.id_propuesta_imputacion_m5 } });
+    if (!propuesta || propuesta.estado !== 'confirmado') throw new ErrorAplicacion(409, 'La imputación de origen ya no está confirmada');
+    const aprobadas = await tx.solicitud_reasignacion_costo_m5.findMany({ where: { id_detalle_origen_m5: idDetalle, estado: 'aprobada' } });
+    const utilizado = aprobadas.reduce((suma, item) => suma.plus(item.monto_total), new Prisma.Decimal(0));
+    return { detalle, propuesta, disponible: detalle.monto.minus(utilizado) };
+  }
+
+  async solicitarReasignacionCosto(idDetalle: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo);
+    const distribuciones = Array.isArray(entrada.distribuciones) ? entrada.distribuciones as Entrada[] : [];
+    const datos = distribuciones.map(item => ({ destino: texto(item.destino, 20).toLowerCase(), idProyecto: item.idProyecto ? BigInt(String(item.idProyecto)) : null, idOt: item.idOrdenTrabajo ? BigInt(String(item.idOrdenTrabajo)) : null, monto: montoPositivo(item.monto) }));
+    if (!datos.length) throw new ErrorAplicacion(400, 'La distribución propuesta es obligatoria');
+    const total = datos.reduce((suma, item) => suma.plus(item.monto), new Prisma.Decimal(0));
+    if (entrada.monto !== undefined && !total.equals(montoPositivo(entrada.monto))) throw new ErrorAplicacion(400, 'La distribución no cuadra con el monto que se pretende reasignar');
+    const justificacion = contacto(valorEntrada(entrada, 'justificacionExcepcion', 'justificacion'), 1000);
+    try {
+      const id = await prisma.$transaction(async tx => {
+        const origen = await this.disponibilidadImputacion(tx, idDetalle);
+        if (total.gt(origen.disponible)) throw new ErrorAplicacion(409, 'El monto supera la imputación vigente disponible');
+        let excepcional: boolean = false;
+        for (const item of datos) if (await this.validarDestinoReasignacion(tx, item)) excepcional = true;
+        if (excepcional && !justificacion) throw new ErrorAplicacion(400, 'El Proyecto u OT cerrado requiere justificación excepcional');
+        const datosSolicitud: Prisma.solicitud_reasignacion_costo_m5UncheckedCreateInput = { id_detalle_origen_m5: idDetalle, monto_total: total, motivo, excepcional_proyecto_cerrado: excepcional, justificacion_excepcion: justificacion, solicitado_por: usuario };
+        const solicitud = await tx.solicitud_reasignacion_costo_m5.create({ data: datosSolicitud });
+        await tx.detalle_reasignacion_costo_m5.createMany({ data: datos.map(item => ({ id_solicitud_reasignacion_m5: solicitud.id_solicitud_reasignacion_m5, destino: item.destino, id_proyecto: item.idProyecto, id_orden_trabajo: item.idOt, monto: item.monto })) });
+        return solicitud.id_solicitud_reasignacion_m5;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return (await this.listarReasignacionesCosto()).find(item => item.id === id)!;
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'La imputación cambió concurrentemente'); throw error; }
+  }
+
+  async resolverReasignacionCosto(id: number, aprobar: boolean, entrada: Entrada, usuario: bigint) {
+    const motivoRechazo = aprobar ? null : motivoObligatorio(entrada.motivo);
+    try {
+      await prisma.$transaction(async tx => {
+        const solicitud = await tx.solicitud_reasignacion_costo_m5.findUnique({ where: { id_solicitud_reasignacion_m5: id } });
+        if (!solicitud) throw new ErrorAplicacion(404, 'Solicitud de reasignación no encontrada');
+        if (solicitud.estado !== 'pendiente') throw new ErrorAplicacion(409, 'La solicitud ya fue resuelta');
+        if (aprobar) {
+          const origen = await this.disponibilidadImputacion(tx, solicitud.id_detalle_origen_m5);
+          if (solicitud.monto_total.gt(origen.disponible)) throw new ErrorAplicacion(409, 'La imputación original cambió y no tiene monto suficiente');
+          const detalles = await tx.detalle_reasignacion_costo_m5.findMany({ where: { id_solicitud_reasignacion_m5: id } });
+          for (const item of detalles) {
+            const excepcional = await this.validarDestinoReasignacion(tx, { destino: item.destino, idProyecto: item.id_proyecto, idOt: item.id_orden_trabajo });
+            if (excepcional && !solicitud.justificacion_excepcion) throw new ErrorAplicacion(409, 'El destino cerró y requiere una nueva solicitud excepcional');
+          }
+        }
+        await tx.solicitud_reasignacion_costo_m5.update({ where: { id_solicitud_reasignacion_m5: id }, data: { estado: aprobar ? 'aprobada' : 'rechazada', resuelto_por: usuario, fecha_resolucion: new Date(), motivo_rechazo: motivoRechazo } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'La imputación cambió concurrentemente'); throw error; }
+    return (await this.listarReasignacionesCosto()).find(item => item.id === id)!;
+  }
+
+  async listarReasignacionesCosto() {
+    const solicitudes = await prisma.solicitud_reasignacion_costo_m5.findMany({ orderBy: [{ fecha_solicitud: 'desc' }, { id_solicitud_reasignacion_m5: 'desc' }] });
+    const detalles = await prisma.detalle_reasignacion_costo_m5.findMany({ where: { id_solicitud_reasignacion_m5: { in: solicitudes.map(item => item.id_solicitud_reasignacion_m5) } } });
+    return solicitudes.map(item => ({ id: item.id_solicitud_reasignacion_m5, idDetalleOrigen: item.id_detalle_origen_m5, montoTotal: Number(item.monto_total), motivo: item.motivo, estado: item.estado, excepcional: item.excepcional_proyecto_cerrado, justificacionExcepcion: item.justificacion_excepcion, solicitadoPor: item.solicitado_por.toString(), fechaSolicitud: item.fecha_solicitud, resueltoPor: item.resuelto_por?.toString() || null, fechaResolucion: item.fecha_resolucion, motivoRechazo: item.motivo_rechazo, distribuciones: detalles.filter(d => d.id_solicitud_reasignacion_m5 === item.id_solicitud_reasignacion_m5).map(d => ({ destino: d.destino, idProyecto: d.id_proyecto?.toString() || null, idOrdenTrabajo: d.id_orden_trabajo?.toString() || null, monto: Number(d.monto) })) }));
+  }
+
+  async registrarComisionBancaria(idOperacion: number, entrada: Entrada, usuario: bigint) {
+    const monto = montoPositivo(entrada.monto); const idMoneda = identificador(valorEntrada(entrada, 'idMoneda', 'id_moneda'));
+    const idMovimiento = valorEntrada(entrada, 'idMovimiento', 'id_movimiento') === undefined ? null : identificador(valorEntrada(entrada, 'idMovimiento', 'id_movimiento'));
+    const descripcion = motivoObligatorio(valorEntrada(entrada, 'descripcion', 'tipo'));
+    const fecha = fechaEntrada(valorEntrada(entrada, 'fecha', 'fechaComision'), 'Fecha de comisión');
+    return prisma.$transaction(async tx => {
+      const operacion = await this.operacionPagoM5(idOperacion, tx);
+      if (operacion.estado !== 'confirmada') throw new ErrorAplicacion(409, 'La operación de pago debe estar confirmada');
+      const movimientos = await tx.movimiento_pago_proveedor_m5.findMany({ where: { id_operacion_pago_m5: idOperacion } });
+      const monedasMovimiento = await tx.moneda.findMany({ where: { id_moneda: { in: movimientos.map(item => item.id_moneda) } } });
+      if (!movimientos.some(item => monedasMovimiento.find(moneda => moneda.id_moneda === item.id_moneda)?.codigo_moneda !== 'CLP')) throw new ErrorAplicacion(409, 'La comisión bancaria sólo aplica a un pago internacional');
+      const movimiento = idMovimiento ? movimientos.find(item => item.id_movimiento_pago_m5 === idMovimiento) : null;
+      if (idMovimiento && !movimiento) throw new ErrorAplicacion(404, 'Movimiento internacional relacionado no encontrado');
+      const moneda = await tx.moneda.findUnique({ where: { id_moneda: idMoneda } });
+      if (!moneda || moneda.estado_moneda !== 'activo') throw new ErrorAplicacion(404, 'Moneda activa no encontrada');
+      let equivalente: Prisma.Decimal | null = moneda.codigo_moneda === 'CLP' ? monto : null;
+      if (movimiento && movimiento.id_moneda === idMoneda) { const tasa = movimiento.tasa_bancaria_efectiva || movimiento.tasa_referencia; if (tasa) equivalente = monto.mul(tasa).toDecimalPlaces(2); }
+      const respaldo = await this.crearRespaldoPostPago(tx, entrada, usuario);
+      const comision = await tx.comision_bancaria_m5.create({ data: { id_operacion_pago_m5: idOperacion, id_movimiento_pago_m5: idMovimiento, id_moneda: idMoneda, monto, equivalente_clp: equivalente, fecha_comision: fecha, descripcion, id_respaldo_pago_m5: respaldo.id_respaldo_pago_m5, registrado_por: usuario } });
+      return { id: comision.id_comision_bancaria_m5, idOperacion, idMovimiento, monto: Number(monto), moneda: moneda.codigo_moneda, equivalenteClp: equivalente ? Number(equivalente) : null, fecha, descripcion, efectoDeudaProveedor: 0 };
+    });
+  }
+
+  private async presentarEnvio(id: number) {
+    const envio = await prisma.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: id } });
+    if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado');
+    const [ordenes, costos, historial] = await Promise.all([prisma.envio_orden_compra_m5.findMany({ where: { id_envio_importacion_m5: id }, orderBy: { id_envio_orden_m5: 'asc' } }), prisma.costo_envio_importacion_m5.findMany({ where: { id_envio_importacion_m5: id }, orderBy: { id_costo_envio_m5: 'asc' } }), prisma.historial_envio_importacion_m5.findMany({ where: { id_envio_importacion_m5: id }, orderBy: [{ fecha_hora: 'desc' }, { id_historial_envio_m5: 'desc' }] })]);
+    const monedas = await prisma.moneda.findMany({ where: { id_moneda: { in: costos.map(item => item.id_moneda) } } });
+    const presentados = costos.map(item => ({ id: item.id_costo_envio_m5, tipo: item.tipo_costo, fuente: item.fuente, idObligacion: item.id_obligacion_m5, idComision: item.id_comision_bancaria_m5, monto: Number(item.monto), moneda: monedas.find(m => m.id_moneda === item.id_moneda)?.codigo_moneda || 'No disponible', equivalenteClp: item.equivalente_clp === null ? null : Number(item.equivalente_clp), descripcion: item.descripcion, fecha: item.fecha_registro }));
+    return { id: envio.id_envio_importacion_m5, referencia: envio.referencia, fecha: envio.fecha, descripcion: envio.descripcion, estado: envio.estado, fechaCreacion: envio.fecha_creacion, ordenes: ordenes.map(item => ({ id: item.id_envio_orden_m5, tipo: item.tipo_orden, idOcs: item.id_ocs_m5, idExterno: item.id_orden_externa, fecha: item.fecha_asociacion })), costos: presentados, costoFinanciero: calcularCostoFinancieroEnvio(presentados), historial: historial.map(item => ({ id: item.id_historial_envio_m5, evento: item.evento, detalle: item.detalle, usuario: item.usuario_id_usuario.toString(), fecha: item.fecha_hora })) };
+  }
+
+  async listarEnviosImportaciones() { const envios = await prisma.envio_importacion_m5.findMany({ orderBy: [{ fecha: 'desc' }, { id_envio_importacion_m5: 'desc' }] }); return Promise.all(envios.map(item => this.presentarEnvio(item.id_envio_importacion_m5))); }
+  obtenerEnvioImportacion(id: number) { return this.presentarEnvio(id); }
+
+  async crearEnvioImportacion(entrada: Entrada, usuario: bigint) {
+    const referencia = texto(entrada.referencia, 120).trim(); if (!referencia) throw new ErrorAplicacion(400, 'La referencia es obligatoria');
+    const fecha = fechaEntrada(entrada.fecha, 'Fecha del envío'); const descripcion = contacto(entrada.descripcion, 1000);
+    try { const id = await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.create({ data: { referencia, referencia_normalizada: referencia.toLocaleUpperCase('es-CL'), fecha, descripcion, estado: 'abierto', creado_por: usuario } }); await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: envio.id_envio_importacion_m5, evento: 'creacion', detalle: JSON.stringify({ referencia, estado: 'abierto' }), usuario_id_usuario: usuario } }); return envio.id_envio_importacion_m5; }); return this.presentarEnvio(id); } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe un envío con esa referencia'); throw error; }
+  }
+
+  async asociarOrdenEnvio(idEnvio: number, entrada: Entrada, usuario: bigint) {
+    const tipo = texto(valorEntrada(entrada, 'tipoOrden', 'tipo'), 10).toUpperCase();
+    if (tipo === 'OCI') throw new ErrorAplicacion(409, 'TEMPORAL_M5_DB_PATCH_PENDIENTE_INTEGRACION_OCI: la fuente oficial OCI no está disponible');
+    if (tipo !== 'OCS') throw new ErrorAplicacion(400, 'Tipo de Orden de Compra inválido');
+    const idOcs = identificador(valorEntrada(entrada, 'idOcs', 'id_ocs'));
+    try { await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } }); if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado'); if (envio.estado !== 'abierto') throw new ErrorAplicacion(409, 'El envío no está editable'); const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: idOcs } }); if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada'); await tx.envio_orden_compra_m5.create({ data: { id_envio_importacion_m5: idEnvio, tipo_orden: 'OCS', id_ocs_m5: idOcs, asociado_por: usuario } }); await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, evento: 'asociacion_oc', detalle: JSON.stringify({ tipo: 'OCS', id: idOcs }), usuario_id_usuario: usuario } }); }); return this.presentarEnvio(idEnvio); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'La Orden de Compra ya está asociada al envío'); throw error; }
+  }
+
+  async registrarCostoEnvio(idEnvio: number, entrada: Entrada, usuario: bigint) {
+    const fuente = texto(entrada.fuente || 'directo', 20).toLowerCase(); const tipo = texto(valorEntrada(entrada, 'tipoCosto', 'tipo'), 40).trim(); if (!tipo) throw new ErrorAplicacion(400, 'El tipo de costo es obligatorio');
+    try { const idCosto = await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } }); if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado'); if (envio.estado !== 'abierto') throw new ErrorAplicacion(409, 'El envío no está editable'); let idMoneda: number; let monto: Prisma.Decimal; let equivalente: Prisma.Decimal | null; let idObligacion: number | null = null; let idComision: number | null = null; let idRespaldo: number | null = null;
+      if (fuente === 'obligacion') { idObligacion = identificador(valorEntrada(entrada, 'idObligacion', 'id_obligacion')); const obligacion = await tx.obligacion_proveedor_m5.findUnique({ where: { id_obligacion_m5: idObligacion } }); if (!obligacion) throw new ErrorAplicacion(404, 'Obligación referenciada no encontrada'); idMoneda = obligacion.id_moneda; monto = obligacion.monto_original; const moneda = await tx.moneda.findUniqueOrThrow({ where: { id_moneda: idMoneda } }); equivalente = moneda.codigo_moneda === 'CLP' ? monto : obligacion.tipo_cambio ? monto.mul(obligacion.tipo_cambio).toDecimalPlaces(2) : null; }
+      else if (fuente === 'comision') { idComision = identificador(valorEntrada(entrada, 'idComision', 'id_comision')); const comision = await tx.comision_bancaria_m5.findUnique({ where: { id_comision_bancaria_m5: idComision } }); if (!comision) throw new ErrorAplicacion(404, 'Comisión bancaria referenciada no encontrada'); idMoneda = comision.id_moneda; monto = comision.monto; equivalente = comision.equivalente_clp; }
+      else if (fuente === 'directo') { idMoneda = identificador(valorEntrada(entrada, 'idMoneda', 'id_moneda')); monto = montoPositivo(entrada.monto); const moneda = await tx.moneda.findUnique({ where: { id_moneda: idMoneda } }); if (!moneda || moneda.estado_moneda !== 'activo') throw new ErrorAplicacion(404, 'Moneda activa no encontrada'); equivalente = moneda.codigo_moneda === 'CLP' ? monto : null; idRespaldo = (await this.crearRespaldoPostPago(tx, entrada, usuario)).id_respaldo_pago_m5; }
+      else throw new ErrorAplicacion(400, 'Fuente de costo inválida');
+      const costo = await tx.costo_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, tipo_costo: tipo, fuente, id_obligacion_m5: idObligacion, id_comision_bancaria_m5: idComision, id_moneda: idMoneda, monto, equivalente_clp: equivalente, descripcion: contacto(entrada.descripcion, 1000), id_respaldo_pago_m5: idRespaldo, registrado_por: usuario } }); await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, evento: 'alta_costo', detalle: JSON.stringify({ idCosto: costo.id_costo_envio_m5, fuente, tipo }), usuario_id_usuario: usuario } }); return costo.id_costo_envio_m5;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return (await this.presentarEnvio(idEnvio)).costos.find(item => item.id === idCosto)!; } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'La fuente financiera ya fue vinculada a un envío'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'Conflicto concurrente al registrar el costo'); throw error; }
+  }
+
+  async actualizarCostoEnvio(idEnvio: number, idCosto: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo);
+    await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } }); if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado'); if (envio.estado !== 'abierto') throw new ErrorAplicacion(409, 'El envío no está editable'); const costo = await tx.costo_envio_importacion_m5.findFirst({ where: { id_costo_envio_m5: idCosto, id_envio_importacion_m5: idEnvio } }); if (!costo) throw new ErrorAplicacion(404, 'Costo de envío no encontrado'); if (costo.fuente !== 'directo') throw new ErrorAplicacion(409, 'Un costo referenciado se corrige en su fuente financiera'); const idMoneda = entrada.idMoneda === undefined ? costo.id_moneda : identificador(entrada.idMoneda); const monto = entrada.monto === undefined ? costo.monto : montoPositivo(entrada.monto); const moneda = await tx.moneda.findUnique({ where: { id_moneda: idMoneda } }); if (!moneda || moneda.estado_moneda !== 'activo') throw new ErrorAplicacion(404, 'Moneda activa no encontrada'); let idRespaldo = costo.id_respaldo_pago_m5; if (entrada.nombreArchivo || entrada.contenido) idRespaldo = (await this.crearRespaldoPostPago(tx, entrada, usuario)).id_respaldo_pago_m5; const anterior = { tipo: costo.tipo_costo, monto: Number(costo.monto), idMoneda: costo.id_moneda, descripcion: costo.descripcion }; const nuevo = { tipo: texto(entrada.tipoCosto || costo.tipo_costo, 40), monto: Number(monto), idMoneda, descripcion: contacto(entrada.descripcion, 1000) ?? costo.descripcion }; await tx.costo_envio_importacion_m5.update({ where: { id_costo_envio_m5: idCosto }, data: { tipo_costo: nuevo.tipo, monto, id_moneda: idMoneda, equivalente_clp: moneda.codigo_moneda === 'CLP' ? monto : null, descripcion: nuevo.descripcion, id_respaldo_pago_m5: idRespaldo } }); await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, evento: 'correccion_costo', detalle: JSON.stringify({ idCosto, anterior, nuevo, motivo }), usuario_id_usuario: usuario } }); }); return this.presentarEnvio(idEnvio);
+  }
 
   async catalogosDocumentosProveedor() {
     const [proveedores, tipos, monedas, categorias, ordenes, proyectos, ots] = await Promise.all([
