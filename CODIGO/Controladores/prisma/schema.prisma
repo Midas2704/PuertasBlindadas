@@ -1153,6 +1153,62 @@ model conciliacion_movimiento_pago_m5 {
   @@schema("finanzas")
 }
 
+/// TEMPORAL_M5_DB_PATCH: ledger inmutable de notas de crédito y débito CU128-CU130.
+model ajuste_obligacion_proveedor_m5 {
+  id_ajuste_obligacion_m5  Int      @id @default(autoincrement())
+  id_documento_ajuste_m5   Int      @unique
+  id_obligacion_m5         Int
+  id_proveedor             Int
+  id_tipo_documento        Int
+  folio_normalizado        String   @db.VarChar(80)
+  id_moneda                Int
+  tipo_ajuste              String   @db.VarChar(2)
+  monto                    Decimal  @db.Decimal(14, 2)
+  monto_aplicado_obligacion Decimal @default(0) @db.Decimal(14, 2)
+  monto_saldo_favor        Decimal  @default(0) @db.Decimal(14, 2)
+  estado                   String   @db.VarChar(30)
+  creado_por               BigInt
+  fecha_creacion           DateTime @default(now()) @db.Timestamptz(6)
+  anulado_por              BigInt?
+  fecha_anulacion          DateTime? @db.Timestamptz(6)
+  motivo_anulacion         String?
+  id_respaldo_anulacion    Int?
+
+  @@unique([id_proveedor, id_tipo_documento, folio_normalizado], map: "uq_ajuste_documental_m5_identidad")
+  @@index([id_obligacion_m5, estado], map: "idx_ajuste_obligacion_m5_obligacion")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: crédito separado de deuda; CU132 conectará compensaciones.
+model saldo_favor_proveedor_m5 {
+  id_saldo_favor_m5    Int      @id @default(autoincrement())
+  id_proveedor         Int
+  id_ajuste_origen_m5  Int      @unique
+  id_moneda            Int
+  monto_generado       Decimal  @db.Decimal(14, 2)
+  monto_disponible     Decimal  @db.Decimal(14, 2)
+  estado               String   @default("disponible") @db.VarChar(20)
+  fecha_creacion       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_proveedor, id_moneda, estado], map: "idx_saldo_favor_m5_proveedor_moneda")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: cadena de custodia de evidencia histórica CU127.
+model historial_respaldo_pago_m5 {
+  id_historial_respaldo_m5 Int      @id @default(autoincrement())
+  id_operacion_pago_m5     Int
+  id_movimiento_pago_m5    Int?
+  id_respaldo_anterior     Int
+  id_respaldo_nuevo        Int
+  motivo                   String
+  usuario_id_usuario       BigInt
+  fecha_hora               DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_operacion_pago_m5, fecha_hora], map: "idx_historial_respaldo_m5_operacion")
+  @@schema("finanzas")
+}
+
 /// TEMPORAL_M5_DB_PATCH: calendario laboral chileno consumido por CU101.
 model feriado_chile_m5 {
   fecha       DateTime @id @db.Date

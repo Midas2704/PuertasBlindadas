@@ -36,6 +36,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/proveedores/:id/desactivar', derivar('desactivarProveedor'));
   rutas.post('/proveedores/:id/reactivar', derivar('reactivarProveedor'));
   rutas.put('/proveedores/:id/condicion-pago', derivar('actualizarCondicionPagoProveedor'));
+  rutas.get('/proveedores/:id/saldos-favor', derivar('consultarSaldosFavorProveedor'));
   rutas.get('/proveedores/:id/ficha', derivar('abrirFichaProveedor'));
   rutas.get('/ordenes-compra-servicios', derivar('listarOrdenesCompraServicios'));
   rutas.get('/ordenes-compra-servicios/:id', derivar('obtenerOrdenCompraServicio'));
@@ -50,6 +51,9 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/documentos-proveedor-catalogos', derivar('catalogosDocumentosProveedor'));
   rutas.post('/documentos-proveedor/preliminares', derivar('registrarDocumentoPreliminar'));
   rutas.post('/documentos-proveedor/definitivos', derivar('registrarDocumentoDefinitivo'));
+  rutas.post('/documentos-proveedor/notas-credito', derivar('registrarNotaCredito'));
+  rutas.post('/documentos-proveedor/notas-debito', derivar('registrarNotaDebito'));
+  rutas.post('/documentos-proveedor/ajustes/:id/anular', derivar('anularAjusteObligacion'));
   rutas.get('/documentos-proveedor/:id', derivar('obtenerDocumentoProveedor'));
   rutas.post('/documentos-proveedor/:id/asociaciones', derivar('asociarDocumentoOrdenes'));
   rutas.put('/documentos-proveedor/:id/diferencias/:asociacionId', derivar('resolverDiferenciaDocumento'));
@@ -77,6 +81,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/pagos-proveedores/:id/movimientos', derivar('agregarMovimientoPago'));
   rutas.put('/pagos-proveedores/:id/movimientos/:movimientoId', derivar('actualizarMovimientoPago'));
   rutas.post('/pagos-proveedores/:id/respaldos', derivar('adjuntarRespaldoPago'));
+  rutas.post('/pagos-proveedores/:id/respaldos/:respaldoId/reemplazar', derivar('reemplazarRespaldoPago'));
   rutas.post('/pagos-proveedores/:id/movimientos/:movimientoId/tipo-cambio-manual', derivar('registrarTipoCambioManualPago'));
   rutas.post('/pagos-proveedores/:id/preparar', derivar('prepararOperacionPago'));
   rutas.post('/pagos-proveedores/:id/guardar-borrador', derivar('guardarBorradorPago'));

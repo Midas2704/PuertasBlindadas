@@ -17,6 +17,7 @@ export const operacionesPermiso: Record<string, string> = {
  listarCuentasPorPagar:'CU106', consultarUmbralProveedores:'CU106', configurarUmbralProveedores:'CU110',
  buscarProveedoresPago:'CU111', agregarMovimientoPago:'CU112', actualizarMovimientoPago:'CU113', catalogosPagosProveedores:'CU113', adjuntarRespaldoPago:'CU114', registrarTipoCambioManualPago:'CU115', prepararOperacionPago:'CU116', crearOperacionPago:'CU117', guardarBorradorPago:'CU117', listarBorradoresPago:'CU118', obtenerOperacionPago:'CU118', retomarOperacionPago:'CU118', descartarOperacionPago:'CU119', confirmarOperacionPago:'CU120',
  listarPagosConfirmados:'CU123', consultarDetallePagoProveedor:'CU123', anularMovimientoPago:'CU124', anularOperacionPago:'CU124', revertirMovimientoPago:'CU125', conciliarMovimientoPago:'CU126',
+ reemplazarRespaldoPago:'CU127', registrarNotaCredito:'CU128', registrarNotaDebito:'CU129', anularAjusteObligacion:'CU130', consultarSaldosFavorProveedor:'CU131',
 };
 
 /** Operaciones sobre cuentas y seguridad ajenas: Gerencia por sí sola no basta. */
@@ -30,9 +31,9 @@ export const operacionesQueRequierenAdministrador = new Set(
 );
 export const permisosM4 = Array.from({length:16}, (_, indice) => `CU${indice + 59}`).filter(codigo => !['CU68','CU69','CU70'].includes(codigo));
 export const codigosImplementados = [...new Set([...Object.values(operacionesPermiso), 'CU31','CU33'])];
-/** El perfil Administrador representa acceso integral a la matriz CU01–CU126. */
+/** El perfil Administrador representa acceso integral a la matriz CU01–CU131. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
-export const codigosTodosLosCU = Array.from({ length: 126 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
+export const codigosTodosLosCU = Array.from({ length: 131 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
  return numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
@@ -45,6 +46,7 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU107:['CU106'],CU108:['CU106'],CU109:['CU106'],CU110:['CU106'],
  CU111:['CU106'],CU112:['CU111'],CU113:['CU112'],CU114:['CU112'],CU115:['CU112'],CU116:['CU112','CU113','CU114'],CU117:['CU111'],CU118:['CU117'],CU119:['CU117'],CU120:['CU116'],
  CU121:['CU120'],CU122:['CU121'],CU123:['CU118'],CU124:['CU123'],CU125:['CU123'],CU126:['CU123'],
+ CU127:['CU123'],CU128:['CU106'],CU129:['CU106'],CU130:['CU95'],CU131:['CU106'],
 };
 type PerfilFuncional = 'gerencia' | 'secretaria' | 'contador';
 const G: readonly PerfilFuncional[] = ['gerencia'];
@@ -69,6 +71,7 @@ export const matrizPermisosPorCU: Record<string, readonly PerfilFuncional[]> = {
  CU106:GSC,CU107:GSC,CU108:GSC,CU109:GSC,CU110:G,
  CU111:GSC,CU112:GSC,CU113:GSC,CU114:GSC,CU115:GC,CU116:GSC,CU117:GSC,CU118:GSC,CU119:GSC,CU120:GC,
  CU121:[],CU122:[],CU123:GSC,CU124:GC,CU125:GC,CU126:GC,
+ CU127:GC,CU128:GSC,CU129:GSC,CU130:GC,CU131:GSC,
 };
 
 const operacionesPersonales = new Set(['CU68','CU69','CU70']);

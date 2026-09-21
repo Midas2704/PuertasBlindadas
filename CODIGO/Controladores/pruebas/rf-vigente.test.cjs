@@ -12,20 +12,20 @@ const { hashClave, comprobarClave, futuro, huella, politica } = require('../dist
 const { codigosTodosLosCU, codigosGerencia, codigosSecretaria, codigosContador, matrizPermisosPorCU } = require('../dist/validaciones/permisos');
 const { sembrarM4 } = require('../prisma/seed-m4.ts');
 
-test('la matriz de perfiles coincide con los actores de los 126 CU',()=>{
+test('la matriz de perfiles coincide con los actores de los 131 CU',()=>{
   const tramo=(desde,hasta)=>Array.from({length:hasta-desde+1},(_,i)=>`CU${String(desde+i).padStart(2,'0')}`);
   const actores={
-    gerencia:[...tramo(1,120),...tramo(123,126)],
-    secretaria:[...tramo(5,12),...tramo(14,22),...tramo(24,30),'CU32',...tramo(34,36),...tramo(39,40),...tramo(42,50),...tramo(55,56),...tramo(68,70),'CU76',...tramo(80,86),'CU88','CU89','CU90','CU91','CU92','CU93','CU95','CU96','CU97','CU98','CU99','CU101','CU102','CU103','CU105',...tramo(106,109),...tramo(111,114),...tramo(116,119),'CU123'],
-    contador:[...tramo(5,11),...tramo(37,38),...tramo(42,58),...tramo(68,70),...tramo(80,88).filter(codigo=>!['CU89','CU90'].includes(codigo)),'CU93','CU95',...tramo(97,109),...tramo(111,120),...tramo(123,126)],
+    gerencia:[...tramo(1,120),...tramo(123,131)],
+    secretaria:[...tramo(5,12),...tramo(14,22),...tramo(24,30),'CU32',...tramo(34,36),...tramo(39,40),...tramo(42,50),...tramo(55,56),...tramo(68,70),'CU76',...tramo(80,86),'CU88','CU89','CU90','CU91','CU92','CU93','CU95','CU96','CU97','CU98','CU99','CU101','CU102','CU103','CU105',...tramo(106,109),...tramo(111,114),...tramo(116,119),'CU123','CU128','CU129','CU131'],
+    contador:[...tramo(5,11),...tramo(37,38),...tramo(42,58),...tramo(68,70),...tramo(80,88).filter(codigo=>!['CU89','CU90'].includes(codigo)),'CU93','CU95',...tramo(97,109),...tramo(111,120),...tramo(123,131)],
   };
   const esperados=Object.fromEntries(Object.entries(actores).map(([perfil,codigos])=>[perfil,codigos.filter(codigo=>!['CU68','CU69','CU70'].includes(codigo))]));
-  assert.deepEqual(codigosTodosLosCU,tramo(1,126));
+  assert.deepEqual(codigosTodosLosCU,tramo(1,131));
   assert.deepEqual(codigosGerencia,esperados.gerencia);
   assert.deepEqual(codigosSecretaria,esperados.secretaria);
   assert.deepEqual(codigosContador,esperados.contador);
-  assert.deepEqual(Object.keys(matrizPermisosPorCU),tramo(1,126));
-  for(const codigo of tramo(1,126)) assert.deepEqual(matrizPermisosPorCU[codigo],[...Object.keys(actores).filter(perfil=>actores[perfil].includes(codigo))]);
+  assert.deepEqual(Object.keys(matrizPermisosPorCU),tramo(1,131));
+  for(const codigo of tramo(1,131)) assert.deepEqual(matrizPermisosPorCU[codigo],[...Object.keys(actores).filter(perfil=>actores[perfil].includes(codigo))]);
 });
 
 test('RF vigente: perfiles M4, seed y política de acceso', async t => {

@@ -25,7 +25,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'buscarProveedoresPago' | 'catalogosPagosProveedores' | 'crearOperacionPago' | 'listarBorradoresPago' | 'obtenerOperacionPago'
   | 'agregarMovimientoPago' | 'actualizarMovimientoPago' | 'adjuntarRespaldoPago' | 'registrarTipoCambioManualPago'
   | 'prepararOperacionPago' | 'guardarBorradorPago' | 'retomarOperacionPago' | 'descartarOperacionPago' | 'confirmarOperacionPago'
-  | 'listarPagosConfirmados' | 'consultarDetallePagoProveedor' | 'anularMovimientoPago' | 'anularOperacionPago' | 'revertirMovimientoPago' | 'conciliarMovimientoPago';
+  | 'listarPagosConfirmados' | 'consultarDetallePagoProveedor' | 'anularMovimientoPago' | 'anularOperacionPago' | 'revertirMovimientoPago' | 'conciliarMovimientoPago'
+  | 'reemplazarRespaldoPago' | 'registrarNotaCredito' | 'registrarNotaDebito' | 'anularAjusteObligacion' | 'consultarSaldosFavorProveedor';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -79,7 +80,7 @@ export class C_Finanzas {
     if (operacion === 'confirmarImputacionDocumento' && !['gerencia','contador'].includes(actor.configuracion) && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar la imputación');
     if (operacion === 'registrarTipoCambioManualPago' && !['gerencia','contador'].includes(actor.configuracion)) throw new ErrorAplicacion(403, 'Secretaría no puede ingresar una tasa manual');
     if (operacion === 'confirmarOperacionPago' && !['gerencia','contador'].includes(actor.configuracion)) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar pagos a proveedores');
-    if (['anularMovimientoPago','anularOperacionPago','revertirMovimientoPago','conciliarMovimientoPago'].includes(operacion) && !['gerencia','contador'].includes(actor.configuracion) && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden ejecutar acciones postpago');
+    if (['anularMovimientoPago','anularOperacionPago','revertirMovimientoPago','conciliarMovimientoPago','reemplazarRespaldoPago','anularAjusteObligacion'].includes(operacion) && !['gerencia','contador'].includes(actor.configuracion) && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden ejecutar esta operación');
     const productosConCostoAjustado = Array.isArray(solicitud.cuerpo?.productos) && (solicitud.cuerpo.productos as Array<{ materiales?: Array<Record<string, unknown>> }>).some(producto => Array.isArray(producto.materiales) && producto.materiales.some(material => material.costo_ajustado !== undefined));
     if (operacion === 'editarCotizacion' && (solicitud.cuerpo?.precio_sugerido !== undefined || productosConCostoAjustado || Array.isArray(solicitud.cuerpo?.materiales) && (solicitud.cuerpo?.materiales as Array<Record<string, unknown>>).some(m => m.costo_ajustado !== undefined || m.precio !== undefined)) && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede ajustar costos o precio sugerido');
     const parametros = solicitud.parametros || {};
@@ -145,6 +146,11 @@ export class C_Finanzas {
       case 'anularOperacionPago': return this.m5.anularOperacionPago(identificador(parametros.id), cuerpo, actor.id);
       case 'revertirMovimientoPago': return this.m5.revertirMovimientoPago(identificador(parametros.id), identificador(parametros.movimientoId), cuerpo, actor.id);
       case 'conciliarMovimientoPago': return this.m5.conciliarMovimientoPago(identificador(parametros.id), identificador(parametros.movimientoId), cuerpo, actor.id);
+      case 'reemplazarRespaldoPago': return this.m5.reemplazarRespaldoPago(identificador(parametros.id), identificador(parametros.respaldoId), cuerpo, actor.id);
+      case 'registrarNotaCredito': return this.m5.registrarNotaCredito(cuerpo, actor.id);
+      case 'registrarNotaDebito': return this.m5.registrarNotaDebito(cuerpo, actor.id);
+      case 'anularAjusteObligacion': return this.m5.anularAjusteObligacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'consultarSaldosFavorProveedor': return this.m5.consultarSaldosFavorProveedor(identificador(parametros.id));
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();
