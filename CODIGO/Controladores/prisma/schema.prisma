@@ -1422,6 +1422,78 @@ model historial_envio_importacion_m5 {
   @@schema("finanzas")
 }
 
+/// TEMPORAL_M5_DB_PATCH: fondo mensual independiente; no arrastra saldos entre periodos.
+model fondo_caja_chica_m5 {
+  id_fondo_caja_chica_m5 Int      @id @default(autoincrement())
+  anio                    Int
+  mes                     Int
+  monto                   Decimal  @db.Decimal(14, 2)
+  actualizado_por         BigInt
+  fecha_actualizacion     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([anio, mes], map: "uq_fondo_caja_chica_m5_periodo")
+  @@schema("finanzas")
+}
+
+model historial_fondo_caja_chica_m5 {
+  id_historial_fondo_m5 Int      @id @default(autoincrement())
+  id_fondo_caja_chica_m5 Int
+  monto_anterior         Decimal  @db.Decimal(14, 2)
+  monto_nuevo            Decimal  @db.Decimal(14, 2)
+  usuario_id_usuario     BigInt
+  fecha_hora             DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_fondo_caja_chica_m5, fecha_hora], map: "idx_historial_fondo_caja_m5")
+  @@schema("finanzas")
+}
+
+/// TEMPORAL_M5_DB_PATCH: circuito de egreso independiente de proveedor, OCS y CxP.
+model gasto_caja_chica_m5 {
+  id_gasto_caja_chica_m5 Int       @id @default(autoincrement())
+  anio                    Int
+  mes                     Int
+  monto                   Decimal   @db.Decimal(14, 2)
+  descripcion             String
+  fecha_gasto             DateTime  @db.Date
+  comercio_emisor         String?   @db.VarChar(200)
+  estado                  String    @default("pendiente") @db.VarChar(20)
+  registrado_por          BigInt
+  fecha_registro          DateTime  @default(now()) @db.Timestamptz(6)
+  resuelto_por            BigInt?
+  fecha_resolucion        DateTime? @db.Timestamptz(6)
+  condicion_aprobacion    String?   @db.VarChar(20)
+  motivo_rechazo          String?
+
+  @@index([anio, mes, estado], map: "idx_gasto_caja_chica_m5_periodo_estado")
+  @@schema("finanzas")
+}
+
+model respaldo_gasto_caja_chica_m5 {
+  id_respaldo_gasto_m5 Int      @id @default(autoincrement())
+  id_gasto_caja_chica_m5 Int
+  nombre_archivo          String   @db.VarChar(255)
+  contenido               String
+  tipo_respaldo           String?  @db.VarChar(40)
+  comercio_emisor         String?  @db.VarChar(200)
+  adjuntado_por           BigInt
+  fecha_hora              DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_gasto_caja_chica_m5, fecha_hora], map: "idx_respaldo_gasto_caja_m5")
+  @@schema("finanzas")
+}
+
+model historial_gasto_caja_chica_m5 {
+  id_historial_gasto_m5 Int      @id @default(autoincrement())
+  id_gasto_caja_chica_m5 Int
+  evento                 String   @db.VarChar(30)
+  detalle                String
+  usuario_id_usuario     BigInt
+  fecha_hora             DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([id_gasto_caja_chica_m5, fecha_hora], map: "idx_historial_gasto_caja_m5")
+  @@schema("finanzas")
+}
+
 /// TEMPORAL_M5_DB_PATCH: calendario laboral chileno consumido por CU101.
 model feriado_chile_m5 {
   fecha       DateTime @id @db.Date

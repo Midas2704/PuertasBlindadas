@@ -1,11 +1,11 @@
 import { usarSesion, operar } from '../../seguridad/Sesion';
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { Anchor, ClipboardList, FileSearch, LayoutDashboard, Users, FileSignature, Receipt, ShieldCheck, CheckSquare, Truck, Landmark, WalletCards, Tags } from 'lucide-react';
+import { Anchor, Banknote, ClipboardList, FileSearch, LayoutDashboard, Users, FileSignature, Receipt, ShieldCheck, CheckSquare, Truck, Landmark, WalletCards, Tags } from 'lucide-react';
 
 const DashboardWrapper: React.FC = () => {
   const {sesion,actualizar}=usarSesion();
-  const permisosRuta:Record<string,string>={'/':'CU05','/clientes':'CU05','/proveedores':'CU80','/ordenes-compra-servicios':'CU88','/documentos-proveedor':'CU95','/cuentas-por-pagar':'CU106','/pagos-proveedores':'CU111','/categorias-egreso':'CU134','/envios-importaciones':'CU142','/cotizacion/nueva':'CU19','/venta/directa':'CU27','/aprobaciones':'CU20','/pagos':'CU42','/usuarios':'CU67','/sesiones':'CU73','/configuracion/umbral':'CU41'};
+  const permisosRuta:Record<string,string>={'/':'CU05','/clientes':'CU05','/proveedores':'CU80','/ordenes-compra-servicios':'CU88','/documentos-proveedor':'CU95','/cuentas-por-pagar':'CU106','/pagos-proveedores':'CU111','/categorias-egreso':'CU134','/envios-importaciones':'CU142','/caja-chica':'CU149','/cotizacion/nueva':'CU19','/venta/directa':'CU27','/aprobaciones':'CU20','/pagos':'CU42','/usuarios':'CU67','/sesiones':'CU73','/configuracion/umbral':'CU41'};
   const location = useLocation();
 
   const menuItems = [
@@ -18,6 +18,7 @@ const DashboardWrapper: React.FC = () => {
     { path: '/pagos-proveedores', label: 'Pagos a Proveedores', icon: <WalletCards className="w-5 h-5" /> },
     { path: '/categorias-egreso', label: 'Categorías de Egreso', icon: <Tags className="w-5 h-5" /> },
     { path: '/envios-importaciones', label: 'Envíos e Importaciones', icon: <Anchor className="w-5 h-5" /> },
+    { path: '/caja-chica', label: 'Caja Chica', icon: <Banknote className="w-5 h-5" /> },
     { path: '/cotizacion/nueva', label: 'Armar Cotización', icon: <FileSignature className="w-5 h-5" /> },
     { path: '/venta/directa', label: 'Nueva Venta Directa', icon: <Receipt className="w-5 h-5" /> },
     { path: '/pagos', label: 'Pagos y Recaudación', icon: <Receipt className="w-5 h-5" /> },

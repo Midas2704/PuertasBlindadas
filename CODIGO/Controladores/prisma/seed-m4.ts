@@ -12,7 +12,7 @@ export async function sembrarM4() {
    const permiso=await tx.permiso.upsert({where:{codigo_m4:codigo},update:{permiso_modulo:moduloPermiso(codigo)},create:{codigo_m4:codigo,...datos}});
    permisos.set(codigo,permiso.permiso_id_permiso);
   }
-  await tx.permiso_dependencia.deleteMany({where:{id_permiso:{in:Array.from({length:25},(_,indice)=>`CU${121+indice}`).map(codigo=>permisos.get(codigo)!)}}});
+  await tx.permiso_dependencia.deleteMany({where:{id_permiso:{in:Array.from({length:34},(_,indice)=>`CU${121+indice}`).map(codigo=>permisos.get(codigo)!)}}});
   for(const [codigo,necesarios] of Object.entries(dependenciasPermiso)) for(const requerido of necesarios) await tx.permiso_dependencia.upsert({where:{id_permiso_id_requerido:{id_permiso:permisos.get(codigo)!,id_requerido:permisos.get(requerido)!}},update:{},create:{id_permiso:permisos.get(codigo)!,id_requerido:permisos.get(requerido)!}});
   const perfiles=new Map<string,bigint>();
   for(const [codigo,nombre,codigos] of [['gerencia','Gerencia',codigosGerencia],['secretaria','Secretaría',codigosSecretaria],['contador','Contador',codigosContador]] as const) {

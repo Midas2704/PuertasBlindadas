@@ -23,6 +23,13 @@ export function calcularCostoFinancieroEnvio(costos: Array<{ moneda: string; mon
   };
 }
 
+export function calcularFondoCajaChica(fondo: Prisma.Decimal | number, gastos: Array<{ monto: Prisma.Decimal | number; estado: string }>) {
+  const montoFondo = new Prisma.Decimal(fondo).toDecimalPlaces(2);
+  const pendientes = gastos.filter(gasto => gasto.estado === 'pendiente').reduce((suma, gasto) => suma.plus(gasto.monto), new Prisma.Decimal(0));
+  const aprobados = gastos.filter(gasto => gasto.estado === 'aprobado').reduce((suma, gasto) => suma.plus(gasto.monto), new Prisma.Decimal(0));
+  return { fondo: Number(montoFondo), reservado: Number(pendientes), aprobado: Number(aprobados), disponibleProyectado: Number(montoFondo.minus(pendientes).minus(aprobados)) };
+}
+
 export function sumarDiasHabilesChile(fecha: string, dias: number, feriados = new Set<string>()) {
   const cursor = new Date(`${fecha}T00:00:00Z`);
   let restantes = dias;
@@ -149,6 +156,17 @@ const montoPositivo = (valor: unknown) => {
   const monto = Number(valor);
   if (!Number.isFinite(monto) || monto <= 0) throw new ErrorAplicacion(400, 'El monto autorizado debe ser numérico y mayor que cero');
   return new Prisma.Decimal(monto).toDecimalPlaces(2);
+};
+const montoNoNegativo = (valor: unknown) => {
+  const monto = Number(valor);
+  if (!Number.isFinite(monto) || monto < 0) throw new ErrorAplicacion(400, 'El monto debe ser numérico y mayor o igual que cero');
+  return new Prisma.Decimal(monto).toDecimalPlaces(2);
+};
+const periodoCaja = (valor: unknown) => {
+  const periodo = texto(valor, 7);
+  const coincidencia = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(periodo);
+  if (!coincidencia) throw new ErrorAplicacion(400, 'El período debe usar formato YYYY-MM');
+  return { periodo, anio: Number(coincidencia[1]), mes: Number(coincidencia[2]) };
 };
 const condicionPago = (diasEntrada: unknown, tipoEntrada: unknown) => {
   const dias = Number(diasEntrada);
@@ -1795,12 +1813,12 @@ export class M5Controller {
     if (tipo === 'OCI') throw new ErrorAplicacion(409, 'TEMPORAL_M5_DB_PATCH_PENDIENTE_INTEGRACION_OCI: la fuente oficial OCI no está disponible');
     if (tipo !== 'OCS') throw new ErrorAplicacion(400, 'Tipo de Orden de Compra inválido');
     const idOcs = identificador(valorEntrada(entrada, 'idOcs', 'id_ocs'));
-    try { await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } }); if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado'); if (envio.estado !== 'abierto') throw new ErrorAplicacion(409, 'El envío no está editable'); const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: idOcs } }); if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada'); await tx.envio_orden_compra_m5.create({ data: { id_envio_importacion_m5: idEnvio, tipo_orden: 'OCS', id_ocs_m5: idOcs, asociado_por: usuario } }); await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, evento: 'asociacion_oc', detalle: JSON.stringify({ tipo: 'OCS', id: idOcs }), usuario_id_usuario: usuario } }); }); return this.presentarEnvio(idEnvio); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'La Orden de Compra ya está asociada al envío'); throw error; }
+    try { await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } }); if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado'); if (!['abierto','en_revision'].includes(envio.estado)) throw new ErrorAplicacion(409, 'El envío no está editable'); const orden = await tx.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: idOcs } }); if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada'); await tx.envio_orden_compra_m5.create({ data: { id_envio_importacion_m5: idEnvio, tipo_orden: 'OCS', id_ocs_m5: idOcs, asociado_por: usuario } }); await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, evento: 'asociacion_oc', detalle: JSON.stringify({ tipo: 'OCS', id: idOcs }), usuario_id_usuario: usuario } }); }); return this.presentarEnvio(idEnvio); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'La Orden de Compra ya está asociada al envío'); throw error; }
   }
 
   async registrarCostoEnvio(idEnvio: number, entrada: Entrada, usuario: bigint) {
     const fuente = texto(entrada.fuente || 'directo', 20).toLowerCase(); const tipo = texto(valorEntrada(entrada, 'tipoCosto', 'tipo'), 40).trim(); if (!tipo) throw new ErrorAplicacion(400, 'El tipo de costo es obligatorio');
-    try { const idCosto = await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } }); if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado'); if (envio.estado !== 'abierto') throw new ErrorAplicacion(409, 'El envío no está editable'); let idMoneda: number; let monto: Prisma.Decimal; let equivalente: Prisma.Decimal | null; let idObligacion: number | null = null; let idComision: number | null = null; let idRespaldo: number | null = null;
+    try { const idCosto = await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } }); if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado'); if (!['abierto','en_revision'].includes(envio.estado)) throw new ErrorAplicacion(409, 'El envío no está editable'); let idMoneda: number; let monto: Prisma.Decimal; let equivalente: Prisma.Decimal | null; let idObligacion: number | null = null; let idComision: number | null = null; let idRespaldo: number | null = null;
       if (fuente === 'obligacion') { idObligacion = identificador(valorEntrada(entrada, 'idObligacion', 'id_obligacion')); const obligacion = await tx.obligacion_proveedor_m5.findUnique({ where: { id_obligacion_m5: idObligacion } }); if (!obligacion) throw new ErrorAplicacion(404, 'Obligación referenciada no encontrada'); idMoneda = obligacion.id_moneda; monto = obligacion.monto_original; const moneda = await tx.moneda.findUniqueOrThrow({ where: { id_moneda: idMoneda } }); equivalente = moneda.codigo_moneda === 'CLP' ? monto : obligacion.tipo_cambio ? monto.mul(obligacion.tipo_cambio).toDecimalPlaces(2) : null; }
       else if (fuente === 'comision') { idComision = identificador(valorEntrada(entrada, 'idComision', 'id_comision')); const comision = await tx.comision_bancaria_m5.findUnique({ where: { id_comision_bancaria_m5: idComision } }); if (!comision) throw new ErrorAplicacion(404, 'Comisión bancaria referenciada no encontrada'); idMoneda = comision.id_moneda; monto = comision.monto; equivalente = comision.equivalente_clp; }
       else if (fuente === 'directo') { idMoneda = identificador(valorEntrada(entrada, 'idMoneda', 'id_moneda')); monto = montoPositivo(entrada.monto); const moneda = await tx.moneda.findUnique({ where: { id_moneda: idMoneda } }); if (!moneda || moneda.estado_moneda !== 'activo') throw new ErrorAplicacion(404, 'Moneda activa no encontrada'); equivalente = moneda.codigo_moneda === 'CLP' ? monto : null; idRespaldo = (await this.crearRespaldoPostPago(tx, entrada, usuario)).id_respaldo_pago_m5; }
@@ -1811,7 +1829,101 @@ export class M5Controller {
 
   async actualizarCostoEnvio(idEnvio: number, idCosto: number, entrada: Entrada, usuario: bigint) {
     const motivo = motivoObligatorio(entrada.motivo);
-    await prisma.$transaction(async tx => { const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } }); if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado'); if (envio.estado !== 'abierto') throw new ErrorAplicacion(409, 'El envío no está editable'); const costo = await tx.costo_envio_importacion_m5.findFirst({ where: { id_costo_envio_m5: idCosto, id_envio_importacion_m5: idEnvio } }); if (!costo) throw new ErrorAplicacion(404, 'Costo de envío no encontrado'); if (costo.fuente !== 'directo') throw new ErrorAplicacion(409, 'Un costo referenciado se corrige en su fuente financiera'); const idMoneda = entrada.idMoneda === undefined ? costo.id_moneda : identificador(entrada.idMoneda); const monto = entrada.monto === undefined ? costo.monto : montoPositivo(entrada.monto); const moneda = await tx.moneda.findUnique({ where: { id_moneda: idMoneda } }); if (!moneda || moneda.estado_moneda !== 'activo') throw new ErrorAplicacion(404, 'Moneda activa no encontrada'); let idRespaldo = costo.id_respaldo_pago_m5; if (entrada.nombreArchivo || entrada.contenido) idRespaldo = (await this.crearRespaldoPostPago(tx, entrada, usuario)).id_respaldo_pago_m5; const anterior = { tipo: costo.tipo_costo, monto: Number(costo.monto), idMoneda: costo.id_moneda, descripcion: costo.descripcion }; const nuevo = { tipo: texto(entrada.tipoCosto || costo.tipo_costo, 40), monto: Number(monto), idMoneda, descripcion: contacto(entrada.descripcion, 1000) ?? costo.descripcion }; await tx.costo_envio_importacion_m5.update({ where: { id_costo_envio_m5: idCosto }, data: { tipo_costo: nuevo.tipo, monto, id_moneda: idMoneda, equivalente_clp: moneda.codigo_moneda === 'CLP' ? monto : null, descripcion: nuevo.descripcion, id_respaldo_pago_m5: idRespaldo } }); await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, evento: 'correccion_costo', detalle: JSON.stringify({ idCosto, anterior, nuevo, motivo }), usuario_id_usuario: usuario } }); }); return this.presentarEnvio(idEnvio);
+    await prisma.$transaction(async tx => {
+      const envio = await tx.envio_importacion_m5.findUnique({ where: { id_envio_importacion_m5: idEnvio } });
+      if (!envio) throw new ErrorAplicacion(404, 'Envío o importación no encontrado');
+      if (!['abierto','en_revision'].includes(envio.estado)) throw new ErrorAplicacion(409, 'El envío no está editable');
+      const costo = await tx.costo_envio_importacion_m5.findFirst({ where: { id_costo_envio_m5: idCosto, id_envio_importacion_m5: idEnvio } });
+      if (!costo) throw new ErrorAplicacion(404, 'Costo de envío no encontrado');
+      if (costo.fuente !== 'directo') throw new ErrorAplicacion(409, 'Un costo referenciado se corrige en su fuente financiera');
+      const idMoneda = entrada.idMoneda === undefined ? costo.id_moneda : identificador(entrada.idMoneda);
+      const monto = entrada.monto === undefined ? costo.monto : montoPositivo(entrada.monto);
+      const moneda = await tx.moneda.findUnique({ where: { id_moneda: idMoneda } });
+      if (!moneda || moneda.estado_moneda !== 'activo') throw new ErrorAplicacion(404, 'Moneda activa no encontrada');
+      let idRespaldo = costo.id_respaldo_pago_m5;
+      if (entrada.nombreArchivo || entrada.contenido) idRespaldo = (await this.crearRespaldoPostPago(tx, entrada, usuario)).id_respaldo_pago_m5;
+      const anterior = { tipo: costo.tipo_costo, monto: Number(costo.monto), idMoneda: costo.id_moneda, descripcion: costo.descripcion };
+      const nuevo = { tipo: texto(entrada.tipoCosto || costo.tipo_costo, 40), monto: Number(monto), idMoneda, descripcion: contacto(entrada.descripcion, 1000) ?? costo.descripcion };
+      await tx.costo_envio_importacion_m5.update({ where: { id_costo_envio_m5: idCosto }, data: { tipo_costo: nuevo.tipo, monto, id_moneda: idMoneda, equivalente_clp: moneda.codigo_moneda === 'CLP' ? monto : null, descripcion: nuevo.descripcion, id_respaldo_pago_m5: idRespaldo } });
+      await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, evento: 'correccion_costo', detalle: JSON.stringify({ idCosto, anterior, nuevo, motivo }), usuario_id_usuario: usuario } });
+    });
+    return this.presentarEnvio(idEnvio);
+  }
+
+  private async cambiarEstadoEnvio(idEnvio: number, estadoAnterior: string, estadoNuevo: string, evento: string, usuario: bigint, detalle: Entrada = {}) {
+    try {
+      await prisma.$transaction(async tx => {
+        const actualizado = await tx.envio_importacion_m5.updateMany({ where: { id_envio_importacion_m5: idEnvio, estado: estadoAnterior }, data: { estado: estadoNuevo } });
+        if (actualizado.count !== 1) {
+          const existe = await tx.envio_importacion_m5.count({ where: { id_envio_importacion_m5: idEnvio } });
+          throw new ErrorAplicacion(existe ? 409 : 404, existe ? 'El estado del envío no permite esta transición' : 'Envío o importación no encontrado');
+        }
+        await tx.historial_envio_importacion_m5.create({ data: { id_envio_importacion_m5: idEnvio, evento, detalle: JSON.stringify({ estadoAnterior, estadoNuevo, ...detalle }), usuario_id_usuario: usuario } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.presentarEnvio(idEnvio);
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'El envío cambió concurrentemente'); throw error; }
+  }
+
+  pasarEnvioRevision(idEnvio: number, usuario: bigint) { return this.cambiarEstadoEnvio(idEnvio, 'abierto', 'en_revision', 'paso_revision', usuario); }
+
+  async cerrarFinancieramenteEnvio(idEnvio: number, usuario: bigint) {
+    const envio = await this.presentarEnvio(idEnvio);
+    if (envio.estado !== 'en_revision') throw new ErrorAplicacion(409, 'El envío debe estar En revisión para cerrarse');
+    if (!envio.costos.length) throw new ErrorAplicacion(409, 'El envío no tiene costos consolidados');
+    if (envio.costoFinanciero.conversionPendiente) throw new ErrorAplicacion(409, 'Existen costos sin equivalente confiable para el cierre');
+    const idsOcs = envio.ordenes.filter(item => item.tipo === 'OCS' && item.idOcs).map(item => item.idOcs!);
+    if (idsOcs.length) {
+      const asociaciones = await prisma.asociacion_documento_oc_m5.findMany({ where: { id_ocs_m5: { in: idsOcs } } });
+      if (asociaciones.some(item => item.estado_diferencia === 'sin_evaluar' || item.estado_excedente === 'pendiente')) throw new ErrorAplicacion(409, 'Existen diferencias o excedentes pendientes vinculados al envío');
+      const idsDocumentos = [...new Set(asociaciones.map(item => item.id_documento_m5))];
+      if (idsDocumentos.length) {
+        const [documentos, propuestas] = await Promise.all([prisma.documento_proveedor_m5.findMany({ where: { id_documento_m5: { in: idsDocumentos } } }), prisma.propuesta_imputacion_m5.findMany({ where: { id_documento_m5: { in: idsDocumentos }, estado: 'pendiente' } })]);
+        if (documentos.some(item => item.clase === 'preliminar' || item.estado !== 'confirmado') || propuestas.length) throw new ErrorAplicacion(409, 'Existen documentos o validaciones relevantes todavía en preparación');
+      }
+    }
+    return this.cambiarEstadoEnvio(idEnvio, 'en_revision', 'cerrado_financieramente', 'cierre_financiero', usuario, { costoFinanciero: envio.costoFinanciero });
+  }
+
+  async reabrirEnvio(idEnvio: number, entrada: Entrada, usuario: bigint) { return this.cambiarEstadoEnvio(idEnvio, 'cerrado_financieramente', 'en_revision', 'reapertura', usuario, { motivo: motivoObligatorio(entrada.motivo) }); }
+
+  private async presentarCajaChica(periodoEntrada: unknown) {
+    const { periodo, anio, mes } = periodoCaja(periodoEntrada);
+    const [fondo, gastos, historialFondo] = await Promise.all([
+      prisma.fondo_caja_chica_m5.findUnique({ where: { anio_mes: { anio, mes } } }),
+      prisma.gasto_caja_chica_m5.findMany({ where: { anio, mes }, orderBy: [{ fecha_registro: 'desc' }, { id_gasto_caja_chica_m5: 'desc' }] }),
+      prisma.historial_fondo_caja_chica_m5.findMany({ where: { id_fondo_caja_chica_m5: { in: (await prisma.fondo_caja_chica_m5.findMany({ where: { anio, mes }, select: { id_fondo_caja_chica_m5: true } })).map(item => item.id_fondo_caja_chica_m5) } }, orderBy: { fecha_hora: 'desc' } }),
+    ]);
+    const ids = gastos.map(item => item.id_gasto_caja_chica_m5);
+    const [respaldos, historial] = await Promise.all([prisma.respaldo_gasto_caja_chica_m5.findMany({ where: { id_gasto_caja_chica_m5: { in: ids } }, orderBy: { fecha_hora: 'desc' } }), prisma.historial_gasto_caja_chica_m5.findMany({ where: { id_gasto_caja_chica_m5: { in: ids } }, orderBy: { fecha_hora: 'desc' } })]);
+    const resumen = calcularFondoCajaChica(fondo?.monto || 0, gastos);
+    return { periodo, ...resumen, fondoConfigurado: !!fondo, historialFondo: historialFondo.map(item => ({ id: item.id_historial_fondo_m5, anterior: Number(item.monto_anterior), nuevo: Number(item.monto_nuevo), usuario: item.usuario_id_usuario.toString(), fecha: item.fecha_hora })), gastos: gastos.map(item => ({ id: item.id_gasto_caja_chica_m5, monto: Number(item.monto), descripcion: item.descripcion, fechaGasto: item.fecha_gasto, fechaRegistro: item.fecha_registro, periodo: `${item.anio}-${String(item.mes).padStart(2, '0')}`, comercioEmisor: item.comercio_emisor, estado: item.estado, registradoPor: item.registrado_por.toString(), resueltoPor: item.resuelto_por?.toString() || null, fechaResolucion: item.fecha_resolucion, condicionAprobacion: item.condicion_aprobacion, motivoRechazo: item.motivo_rechazo, respaldos: respaldos.filter(r => r.id_gasto_caja_chica_m5 === item.id_gasto_caja_chica_m5).map(r => ({ id: r.id_respaldo_gasto_m5, nombreArchivo: r.nombre_archivo, tipo: r.tipo_respaldo, comercioEmisor: r.comercio_emisor, actor: r.adjuntado_por.toString(), fecha: r.fecha_hora })), historial: historial.filter(h => h.id_gasto_caja_chica_m5 === item.id_gasto_caja_chica_m5).map(h => ({ id: h.id_historial_gasto_m5, evento: h.evento, detalle: h.detalle, usuario: h.usuario_id_usuario.toString(), fecha: h.fecha_hora })) })) };
+  }
+
+  consultarCajaChica(consulta: Entrada) { return this.presentarCajaChica(consulta.periodo || fechaNegocio().slice(0, 7)); }
+  async obtenerGastoCajaChica(id: number) { const gasto = await prisma.gasto_caja_chica_m5.findUnique({ where: { id_gasto_caja_chica_m5: id } }); if (!gasto) throw new ErrorAplicacion(404, 'Gasto de Caja Chica no encontrado'); const caja = await this.presentarCajaChica(`${gasto.anio}-${String(gasto.mes).padStart(2, '0')}`); return caja.gastos.find(item => item.id === id)!; }
+
+  async configurarFondoCajaChica(periodoEntrada: unknown, entrada: Entrada, usuario: bigint) {
+    const { periodo, anio, mes } = periodoCaja(periodoEntrada); const monto = montoNoNegativo(entrada.monto);
+    try { await prisma.$transaction(async tx => { const anterior = await tx.fondo_caja_chica_m5.findUnique({ where: { anio_mes: { anio, mes } } }); const fondo = anterior ? await tx.fondo_caja_chica_m5.update({ where: { anio_mes: { anio, mes } }, data: { monto, actualizado_por: usuario, fecha_actualizacion: new Date() } }) : await tx.fondo_caja_chica_m5.create({ data: { anio, mes, monto, actualizado_por: usuario } }); await tx.historial_fondo_caja_chica_m5.create({ data: { id_fondo_caja_chica_m5: fondo.id_fondo_caja_chica_m5, monto_anterior: anterior?.monto || 0, monto_nuevo: monto, usuario_id_usuario: usuario } }); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.presentarCajaChica(periodo); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002','P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'El fondo mensual cambió concurrentemente'); throw error; }
+  }
+
+  async registrarGastoCajaChica(entrada: Entrada, usuario: bigint) {
+    const monto = montoPositivo(entrada.monto); const descripcion = motivoObligatorio(entrada.descripcion); const fechaGasto = fechaEntrada(entrada.fecha || fechaNegocio(), 'Fecha del gasto'); const { periodo, anio, mes } = periodoCaja(fechaNegocio().slice(0, 7));
+    const id = await prisma.$transaction(async tx => { if (!await tx.fondo_caja_chica_m5.findUnique({ where: { anio_mes: { anio, mes } } })) throw new ErrorAplicacion(409, 'El fondo del mes debe configurarse antes de registrar gastos'); const gasto = await tx.gasto_caja_chica_m5.create({ data: { anio, mes, monto, descripcion, fecha_gasto: fechaGasto, comercio_emisor: contacto(valorEntrada(entrada, 'comercioEmisor', 'comercio'), 200), estado: 'pendiente', registrado_por: usuario } }); await tx.historial_gasto_caja_chica_m5.create({ data: { id_gasto_caja_chica_m5: gasto.id_gasto_caja_chica_m5, evento: 'registro', detalle: JSON.stringify({ monto: Number(monto), periodo, origen: 'Caja Chica' }), usuario_id_usuario: usuario } }); return gasto.id_gasto_caja_chica_m5; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.obtenerGastoCajaChica(id);
+  }
+
+  async adjuntarRespaldoCajaChica(id: number, entrada: Entrada, usuario: bigint) {
+    const nombre = texto(valorEntrada(entrada, 'nombreArchivo', 'nombre'), 255).trim(); const contenido = texto(entrada.contenido, 10_000_000); if (!nombre || !contenido) throw new ErrorAplicacion(400, 'Archivo y contenido del respaldo son obligatorios');
+    await prisma.$transaction(async tx => { const gasto = await tx.gasto_caja_chica_m5.findUnique({ where: { id_gasto_caja_chica_m5: id } }); if (!gasto) throw new ErrorAplicacion(404, 'Gasto de Caja Chica no encontrado'); if (gasto.estado !== 'pendiente') throw new ErrorAplicacion(409, 'El gasto ya fue resuelto'); const respaldo = await tx.respaldo_gasto_caja_chica_m5.create({ data: { id_gasto_caja_chica_m5: id, nombre_archivo: nombre, contenido, tipo_respaldo: contacto(valorEntrada(entrada, 'tipoRespaldo', 'tipo'), 40), comercio_emisor: contacto(valorEntrada(entrada, 'comercioEmisor', 'comercio'), 200), adjuntado_por: usuario } }); await tx.historial_gasto_caja_chica_m5.create({ data: { id_gasto_caja_chica_m5: id, evento: 'respaldo', detalle: JSON.stringify({ idRespaldo: respaldo.id_respaldo_gasto_m5, nombre, circuito: 'Caja Chica' }), usuario_id_usuario: usuario } }); }); return this.obtenerGastoCajaChica(id);
+  }
+
+  async aprobarGastoCajaChica(id: number, usuario: bigint, perfil: string) {
+    try { let periodo = ''; await prisma.$transaction(async tx => { const gasto = await tx.gasto_caja_chica_m5.findUnique({ where: { id_gasto_caja_chica_m5: id } }); if (!gasto) throw new ErrorAplicacion(404, 'Gasto de Caja Chica no encontrado'); if (gasto.estado !== 'pendiente') throw new ErrorAplicacion(409, 'El gasto ya fue resuelto'); if (!await tx.respaldo_gasto_caja_chica_m5.count({ where: { id_gasto_caja_chica_m5: id } })) throw new ErrorAplicacion(409, 'El gasto requiere respaldo antes de aprobarse'); const fondo = await tx.fondo_caja_chica_m5.findUnique({ where: { anio_mes: { anio: gasto.anio, mes: gasto.mes } } }); if (!fondo) throw new ErrorAplicacion(409, 'El fondo histórico del gasto no existe'); const gastos = await tx.gasto_caja_chica_m5.findMany({ where: { anio: gasto.anio, mes: gasto.mes } }); const exceso = calcularFondoCajaChica(fondo.monto, gastos).disponibleProyectado < 0; if (exceso && perfil === 'contador' && gasto.registrado_por === usuario) throw new ErrorAplicacion(403, 'Contador no puede autoaprobar su propio gasto cuando implica exceso'); const actualizado = await tx.gasto_caja_chica_m5.updateMany({ where: { id_gasto_caja_chica_m5: id, estado: 'pendiente' }, data: { estado: 'aprobado', resuelto_por: usuario, fecha_resolucion: new Date(), condicion_aprobacion: exceso ? 'exceso' : 'normal' } }); if (actualizado.count !== 1) throw new ErrorAplicacion(409, 'El gasto cambió concurrentemente'); await tx.historial_gasto_caja_chica_m5.create({ data: { id_gasto_caja_chica_m5: id, evento: 'aprobacion', detalle: JSON.stringify({ condicion: exceso ? 'exceso' : 'normal', reservaDuplicada: false }), usuario_id_usuario: usuario } }); periodo = `${gasto.anio}-${String(gasto.mes).padStart(2, '0')}`; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.presentarCajaChica(periodo); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'El gasto cambió concurrentemente'); throw error; }
+  }
+
+  async rechazarGastoCajaChica(id: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo);
+    try { let periodo = ''; await prisma.$transaction(async tx => { const gasto = await tx.gasto_caja_chica_m5.findUnique({ where: { id_gasto_caja_chica_m5: id } }); if (!gasto) throw new ErrorAplicacion(404, 'Gasto de Caja Chica no encontrado'); if (gasto.estado !== 'pendiente') throw new ErrorAplicacion(409, 'El gasto ya fue resuelto'); const actualizado = await tx.gasto_caja_chica_m5.updateMany({ where: { id_gasto_caja_chica_m5: id, estado: 'pendiente' }, data: { estado: 'rechazado', resuelto_por: usuario, fecha_resolucion: new Date(), motivo_rechazo: motivo } }); if (actualizado.count !== 1) throw new ErrorAplicacion(409, 'El gasto cambió concurrentemente'); await tx.historial_gasto_caja_chica_m5.create({ data: { id_gasto_caja_chica_m5: id, evento: 'rechazo', detalle: JSON.stringify({ motivo, reservaLiberadaEn: `${gasto.anio}-${String(gasto.mes).padStart(2, '0')}` }), usuario_id_usuario: usuario } }); periodo = `${gasto.anio}-${String(gasto.mes).padStart(2, '0')}`; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.presentarCajaChica(periodo); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'El gasto cambió concurrentemente'); throw error; }
   }
 
   async catalogosDocumentosProveedor() {

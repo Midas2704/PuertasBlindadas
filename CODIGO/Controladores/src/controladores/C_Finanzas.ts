@@ -30,7 +30,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'proponerCompensacion' | 'confirmarCompensacion' | 'listarCompensaciones' | 'revertirCompensacion' | 'listarCategoriasEgreso' | 'crearCategoriaEgreso' | 'actualizarCategoriaEgreso' | 'activarCategoriaEgreso' | 'desactivarCategoriaEgreso'
   | 'solicitarReclasificacion' | 'listarReclasificaciones' | 'aprobarReclasificacion' | 'rechazarReclasificacion' | 'consultarUmbralReclasificacion' | 'configurarUmbralReclasificacion'
   | 'corregirOrdenTrabajoImputacion' | 'solicitarReasignacionCosto' | 'listarReasignacionesCosto' | 'aprobarReasignacionCosto' | 'rechazarReasignacionCosto'
-  | 'registrarComisionBancaria' | 'listarEnviosImportaciones' | 'obtenerEnvioImportacion' | 'crearEnvioImportacion' | 'asociarOrdenEnvio' | 'registrarCostoEnvio' | 'actualizarCostoEnvio';
+  | 'registrarComisionBancaria' | 'listarEnviosImportaciones' | 'obtenerEnvioImportacion' | 'crearEnvioImportacion' | 'asociarOrdenEnvio' | 'registrarCostoEnvio' | 'actualizarCostoEnvio'
+  | 'pasarEnvioRevision' | 'cerrarFinancieramenteEnvio' | 'reabrirEnvio' | 'consultarCajaChica' | 'obtenerGastoCajaChica' | 'configurarFondoCajaChica' | 'registrarGastoCajaChica' | 'adjuntarRespaldoCajaChica' | 'aprobarGastoCajaChica' | 'rechazarGastoCajaChica';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -86,6 +87,7 @@ export class C_Finanzas {
     if (operacion === 'confirmarOperacionPago' && !['gerencia','contador'].includes(actor.configuracion)) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar pagos a proveedores');
     if (['anularMovimientoPago','anularOperacionPago','revertirMovimientoPago','conciliarMovimientoPago','reemplazarRespaldoPago','anularAjusteObligacion'].includes(operacion) && !['gerencia','contador'].includes(actor.configuracion) && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden ejecutar esta operación');
     if (['aprobarReasignacionCosto','rechazarReasignacionCosto'].includes(operacion) && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede resolver reasignaciones de costo');
+    if (['reabrirEnvio','aprobarGastoCajaChica','rechazarGastoCajaChica'].includes(operacion) && !['gerencia','contador'].includes(actor.configuracion) && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden ejecutar esta operación');
     const productosConCostoAjustado = Array.isArray(solicitud.cuerpo?.productos) && (solicitud.cuerpo.productos as Array<{ materiales?: Array<Record<string, unknown>> }>).some(producto => Array.isArray(producto.materiales) && producto.materiales.some(material => material.costo_ajustado !== undefined));
     if (operacion === 'editarCotizacion' && (solicitud.cuerpo?.precio_sugerido !== undefined || productosConCostoAjustado || Array.isArray(solicitud.cuerpo?.materiales) && (solicitud.cuerpo?.materiales as Array<Record<string, unknown>>).some(m => m.costo_ajustado !== undefined || m.precio !== undefined)) && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede ajustar costos o precio sugerido');
     const parametros = solicitud.parametros || {};
@@ -183,6 +185,16 @@ export class C_Finanzas {
       case 'asociarOrdenEnvio': return this.m5.asociarOrdenEnvio(identificador(parametros.id), cuerpo, actor.id);
       case 'registrarCostoEnvio': return this.m5.registrarCostoEnvio(identificador(parametros.id), cuerpo, actor.id);
       case 'actualizarCostoEnvio': return this.m5.actualizarCostoEnvio(identificador(parametros.id), identificador(parametros.costoId), cuerpo, actor.id);
+      case 'pasarEnvioRevision': return this.m5.pasarEnvioRevision(identificador(parametros.id), actor.id);
+      case 'cerrarFinancieramenteEnvio': return this.m5.cerrarFinancieramenteEnvio(identificador(parametros.id), actor.id);
+      case 'reabrirEnvio': return this.m5.reabrirEnvio(identificador(parametros.id), cuerpo, actor.id);
+      case 'consultarCajaChica': return this.m5.consultarCajaChica(solicitud.consulta || {});
+      case 'obtenerGastoCajaChica': return this.m5.obtenerGastoCajaChica(identificador(parametros.gastoId));
+      case 'configurarFondoCajaChica': return this.m5.configurarFondoCajaChica(parametros.periodo, cuerpo, actor.id);
+      case 'registrarGastoCajaChica': return this.m5.registrarGastoCajaChica(cuerpo, actor.id);
+      case 'adjuntarRespaldoCajaChica': return this.m5.adjuntarRespaldoCajaChica(identificador(parametros.gastoId), cuerpo, actor.id);
+      case 'aprobarGastoCajaChica': return this.m5.aprobarGastoCajaChica(identificador(parametros.gastoId), actor.id, actor.configuracion);
+      case 'rechazarGastoCajaChica': return this.m5.rechazarGastoCajaChica(identificador(parametros.gastoId), cuerpo, actor.id);
       case 'cerrarSesion': return this.m4.cerrarSesion(actor);
       case 'cambiarClave': return this.m4.cambiarClave(actor,cuerpo);
       case 'usuarios': return this.m4.usuarios();

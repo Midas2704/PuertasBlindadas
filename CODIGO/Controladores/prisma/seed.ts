@@ -180,8 +180,21 @@ async function sembrarM5() {
     await asegurarOperacion('borrador', [{ obligacion: obligacionClp1, monto: 25000, medio: medioPago.id_medio_pago }], false);
     await asegurarOperacion('preparada', [{ obligacion: obligacionClp1, monto: 60000, medio: medioPago.id_medio_pago }, { obligacion: obligacionClp2, monto: 40000, medio: (medios[1] || medioPago).id_medio_pago }], true);
     await asegurarOperacion('borrador', [{ obligacion: obligacionUsd, monto: 100, medio: medioPago.id_medio_pago }], false);
+    await tx.fondo_caja_chica_m5.upsert({ where: { anio_mes: { anio: 2026, mes: 9 } }, update: {}, create: { anio: 2026, mes: 9, monto: 500000, actualizado_por: usuario.usuario_id_usuario } });
+    const asegurarGastoCaja = async (descripcion: string, monto: number, estado: 'pendiente' | 'aprobado' | 'rechazado', conRespaldo: boolean) => {
+      let gasto = await tx.gasto_caja_chica_m5.findFirst({ where: { anio: 2026, mes: 9, descripcion } });
+      if (!gasto) {
+        gasto = await tx.gasto_caja_chica_m5.create({ data: { anio: 2026, mes: 9, monto, descripcion, fecha_gasto: new Date('2026-09-15T00:00:00Z'), comercio_emisor: 'Comercio demostración', estado, registrado_por: usuario.usuario_id_usuario, fecha_registro: new Date('2026-09-15T12:00:00Z'), resuelto_por: estado === 'pendiente' ? null : usuario.usuario_id_usuario, fecha_resolucion: estado === 'pendiente' ? null : new Date('2026-09-16T12:00:00Z'), condicion_aprobacion: estado === 'aprobado' ? 'normal' : null, motivo_rechazo: estado === 'rechazado' ? 'Respaldo observado en demostración' : null } });
+        await tx.historial_gasto_caja_chica_m5.create({ data: { id_gasto_caja_chica_m5: gasto.id_gasto_caja_chica_m5, evento: 'registro', detalle: JSON.stringify({ origen: 'Caja Chica', demo: true }), usuario_id_usuario: usuario.usuario_id_usuario } });
+      }
+      if (conRespaldo && !await tx.respaldo_gasto_caja_chica_m5.count({ where: { id_gasto_caja_chica_m5: gasto.id_gasto_caja_chica_m5 } })) await tx.respaldo_gasto_caja_chica_m5.create({ data: { id_gasto_caja_chica_m5: gasto.id_gasto_caja_chica_m5, nombre_archivo: `factura-${gasto.id_gasto_caja_chica_m5}.pdf`, contenido: 'demostracion://caja-chica', tipo_respaldo: 'factura', comercio_emisor: gasto.comercio_emisor, adjuntado_por: usuario.usuario_id_usuario } });
+    };
+    await asegurarGastoCaja('Demo P11 pendiente con respaldo', 450000, 'pendiente', true);
+    await asegurarGastoCaja('Demo P11 pendiente sin respaldo', 25000, 'pendiente', false);
+    await asegurarGastoCaja('Demo P11 aprobado', 100000, 'aprobado', true);
+    await asegurarGastoCaja('Demo P11 rechazado', 40000, 'rechazado', true);
   }, { timeout: 60000 });
-  console.log('Seed M5 completado: proveedores, documentos, OCS, obligaciones y borradores para CU75-CU120.');
+  console.log('Seed M5 completado: proveedores, egresos, importaciones y Caja Chica para CU75-CU154.');
 }
 
 sembrar().then(sembrarM4).then(sembrarM5).catch(error => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());

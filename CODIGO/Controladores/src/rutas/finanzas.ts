@@ -109,6 +109,16 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/envios-importaciones/:id/ordenes-compra', derivar('asociarOrdenEnvio'));
   rutas.post('/envios-importaciones/:id/costos', derivar('registrarCostoEnvio'));
   rutas.put('/envios-importaciones/:id/costos/:costoId', derivar('actualizarCostoEnvio'));
+  rutas.post('/envios-importaciones/:id/pasar-revision', derivar('pasarEnvioRevision'));
+  rutas.post('/envios-importaciones/:id/cerrar-financieramente', derivar('cerrarFinancieramenteEnvio'));
+  rutas.post('/envios-importaciones/:id/reabrir', derivar('reabrirEnvio'));
+  rutas.get('/caja-chica', derivar('consultarCajaChica'));
+  rutas.get('/caja-chica/:gastoId', derivar('obtenerGastoCajaChica'));
+  rutas.put('/caja-chica/fondo/:periodo', derivar('configurarFondoCajaChica'));
+  rutas.post('/caja-chica/gastos', derivar('registrarGastoCajaChica'));
+  rutas.post('/caja-chica/gastos/:gastoId/respaldo', derivar('adjuntarRespaldoCajaChica'));
+  rutas.post('/caja-chica/gastos/:gastoId/aprobar', derivar('aprobarGastoCajaChica'));
+  rutas.post('/caja-chica/gastos/:gastoId/rechazar', derivar('rechazarGastoCajaChica'));
   rutas.post('/pagos-proveedores/:id/movimientos/:movimientoId/tipo-cambio-manual', derivar('registrarTipoCambioManualPago'));
   rutas.post('/pagos-proveedores/:id/preparar', derivar('prepararOperacionPago'));
   rutas.post('/pagos-proveedores/:id/guardar-borrador', derivar('guardarBorradorPago'));
