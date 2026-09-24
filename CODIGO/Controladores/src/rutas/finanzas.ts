@@ -28,6 +28,17 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post(['/clientes/:id/desactivar', '/clients/:id/desactivar'], derivar('desactivarCliente'));
   rutas.post(['/clientes/:id/reactivar', '/clients/:id/reactivar'], derivar('reactivarCliente'));
   rutas.get(['/clientes/:referencia/ficha', '/clients/:referencia/ficha'], derivar('abrirFicha'));
+  rutas.get('/empleados', derivar('listarEmpleados'));
+  rutas.post('/empleados', derivar('crearEmpleado'));
+  rutas.get('/empleados/catalogos/laborales', derivar('catalogosLaborales'));
+  rutas.get('/empleados/catalogos/remuneracionales', derivar('catalogosRemuneracionales'));
+  rutas.patch('/empleados/:id/datos-base', derivar('actualizarDatosBaseEmpleado'));
+  rutas.get('/empleados/:id/relaciones-laborales', derivar('listarRelacionesLaborales'));
+  rutas.post('/empleados/:id/relaciones-laborales', derivar('crearRelacionLaboral'));
+  rutas.patch('/empleados/:id/relaciones-laborales/:relacionId', derivar('actualizarRelacionLaboral'));
+  rutas.get('/empleados/:id/perfil-remuneracional', derivar('obtenerPerfilRemuneracional'));
+  rutas.patch('/empleados/:id/perfil-remuneracional', derivar('actualizarPerfilRemuneracional'));
+  rutas.get('/empleados/:id', derivar('obtenerEmpleado'));
   rutas.get('/proveedores/catalogos', derivar('catalogosProveedores'));
   rutas.get('/proveedores', derivar('listarProveedores'));
   rutas.post('/proveedores', derivar('crearProveedor'));

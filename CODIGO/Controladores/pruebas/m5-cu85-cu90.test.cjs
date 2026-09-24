@@ -194,7 +194,7 @@ test('permisos CU85-CU90 respetan actores, operaciones y módulo M5', () => {
   assert.deepEqual(actores('CU87'), ['contador', 'gerencia']);
   for (const codigo of ['CU89', 'CU90']) assert.deepEqual(actores(codigo), ['gerencia', 'secretaria']);
   for (let numero = 85; numero <= 90; numero++) assert.equal(moduloPermiso(`CU${numero}`), 'M5');
-  assert.equal(codigosTodosLosCU.length, 154);
+  assert.equal(codigosTodosLosCU.length, 158);
   assert.equal(operacionesPermiso.actualizarCondicionPagoProveedor, 'CU87');
   assert.equal(operacionesPermiso.listarOrdenesCompraServicios, 'CU88');
   assert.equal(operacionesPermiso.crearOrdenCompraServicio, 'CU89');

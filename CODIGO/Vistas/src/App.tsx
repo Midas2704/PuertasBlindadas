@@ -26,6 +26,8 @@ import PagosProveedores from './views/PagosProveedores/PagosProveedores';
 import CategoriasEgreso from './views/CategoriasEgreso/CategoriasEgreso';
 import EnviosImportaciones from './views/EnviosImportaciones/EnviosImportaciones';
 import CajaChica from './views/CajaChica/CajaChica';
+import CatalogoEmpleados from './views/CatalogoEmpleados/CatalogoEmpleados';
+import FichaEmpleado from './views/FichaEmpleado/FichaEmpleado';
 
 const App: React.FC = () => {
   return (
@@ -49,6 +51,8 @@ const App: React.FC = () => {
           <Route path="categorias-egreso" element={<Protegido permiso="CU134"><CategoriasEgreso /></Protegido>} />
           <Route path="envios-importaciones" element={<Protegido permiso="CU142"><EnviosImportaciones /></Protegido>} />
           <Route path="caja-chica" element={<Protegido permiso="CU149"><CajaChica /></Protegido>} />
+          <Route path="empleados" element={<Protegido permiso="CU155"><CatalogoEmpleados /></Protegido>} />
+          <Route path="empleados/:id" element={<Protegido permiso="CU155"><FichaEmpleado /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

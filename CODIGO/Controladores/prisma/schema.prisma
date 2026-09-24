@@ -390,27 +390,36 @@ model documento_tributario {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model empleado {
   cuenta_m4 usuario? @relation("empleado_m4")
+  id_empleado              Int                        @unique @default(autoincrement())
   rut_empleado             String                     @id @db.VarChar(15)
-  id_cargo                 Int
-  id_tipo_vinculo_laboral  Int
+  id_cargo                 Int?
+  id_tipo_vinculo_laboral  Int?
   id_prevision_salud       Int?
   id_afp                   Int?
   nombres                  String                     @db.VarChar(120)
   apellido_paterno         String                     @db.VarChar(80)
   apellido_materno         String?                    @db.VarChar(80)
   fecha_nacimiento         DateTime?                  @db.Date
-  fecha_ingreso            DateTime                   @db.Date
-  sueldo_base              Decimal                    @db.Decimal(14, 2)
+  fecha_ingreso            DateTime?                  @db.Date
+  sueldo_base              Decimal?                   @db.Decimal(14, 2)
+  fecha_aplicacion_sueldo_base DateTime?              @db.Date
   seguro_cesantia          Boolean                    @default(true)
   estado_laboral           String                     @default("activo") @db.VarChar(30)
+  correo_particular        String?                    @db.VarChar(254)
+  telefono_particular      String?                    @db.VarChar(30)
+  direccion_particular     String?
+  tipo_correo              String?                    @db.VarChar(30)
+  consentimiento_electronico Boolean?
+  canal_documental         String?                    @db.VarChar(30)
   afp                      afp?                       @relation(fields: [id_afp], references: [id_afp], onDelete: Restrict, onUpdate: NoAction, map: "fk_empleado_afp")
-  cargo                    cargo                      @relation(fields: [id_cargo], references: [id_cargo], onUpdate: NoAction, map: "fk_empleado_cargo")
+  cargo                    cargo?                     @relation(fields: [id_cargo], references: [id_cargo], onDelete: Restrict, onUpdate: NoAction, map: "fk_empleado_cargo")
   prevision_salud          prevision_salud?           @relation(fields: [id_prevision_salud], references: [id_prevision_salud], onDelete: Restrict, onUpdate: NoAction, map: "fk_empleado_prevision_salud")
-  tipo_vinculo_laboral     tipo_vinculo_laboral       @relation(fields: [id_tipo_vinculo_laboral], references: [id_tipo_vinculo_laboral], onUpdate: NoAction, map: "fk_empleado_tipo_vinculo")
+  tipo_vinculo_laboral     tipo_vinculo_laboral?      @relation(fields: [id_tipo_vinculo_laboral], references: [id_tipo_vinculo_laboral], onDelete: Restrict, onUpdate: NoAction, map: "fk_empleado_tipo_vinculo")
   liquidacion_remuneracion liquidacion_remuneracion[]
   tarea_remunerable        tarea_remunerable[]
   prestamo_herramientas    prestamo_herramientas[]
   usuario                  usuario[]
+  relaciones_laborales     relacion_laboral_empleado[]
 
   @@index([id_cargo], map: "idx_empleado_cargo")
   @@schema("finanzas")
@@ -1679,7 +1688,23 @@ model tipo_vinculo_laboral {
   descripcion_tipo_vinculo_laboral String?
   estado_tipo_vinculo_laboral      String     @default("activo") @db.VarChar(20)
   empleado                         empleado[]
+  relaciones_laborales             relacion_laboral_empleado[]
 
+  @@schema("finanzas")
+}
+
+model relacion_laboral_empleado {
+  id_relacion_laboral_empleado Int                   @id @default(autoincrement())
+  id_empleado                  Int
+  fecha_inicio                 DateTime              @db.Date
+  fecha_termino                DateTime?             @db.Date
+  estado                       String                @default("vigente") @db.VarChar(20)
+  id_tipo_vinculo_laboral      Int?
+  jornada                      String?               @db.VarChar(80)
+  empleado                     empleado              @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction, map: "fk_relacion_laboral_empleado")
+  tipo_vinculo_laboral         tipo_vinculo_laboral? @relation(fields: [id_tipo_vinculo_laboral], references: [id_tipo_vinculo_laboral], onDelete: Restrict, onUpdate: NoAction, map: "fk_relacion_laboral_tipo_vinculo")
+
+  @@index([id_empleado, fecha_inicio], map: "idx_relacion_laboral_empleado_fecha")
   @@schema("finanzas")
 }
 

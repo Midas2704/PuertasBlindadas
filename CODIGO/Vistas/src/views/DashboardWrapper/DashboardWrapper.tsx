@@ -4,6 +4,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import {
   Anchor,
   Banknote,
+  BriefcaseBusiness,
   ChevronDown,
   ClipboardList,
   FileSearch,
@@ -75,6 +76,14 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/pagos-proveedores', label: 'Pagos a Proveedores', icon: WalletCards, permission: 'CU111' },
       { path: '/envios-importaciones', label: 'Envíos e Importaciones', icon: Anchor, permission: 'CU142' },
       { path: '/caja-chica', label: 'Caja Chica', icon: Banknote, permission: 'CU149' },
+    ],
+  },
+  {
+    id: 'remuneraciones',
+    label: 'Remuneraciones',
+    icon: BriefcaseBusiness,
+    items: [
+      { path: '/empleados', label: 'Empleados', icon: BriefcaseBusiness, permission: 'CU155' },
     ],
   },
   {

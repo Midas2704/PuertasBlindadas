@@ -4,6 +4,7 @@ import { M1Controller } from './M1Controller';
 import { M2Controller } from './M2Controller';
 import { M3Controller } from './M3Controller';
 import { M5Controller } from './M5Controller';
+import { M6Controller } from './M6Controller';
 import { Autorizacion, ContextoAutorizacion } from '../validaciones/autorizacion';
 import { identificador, texto, validarFiltros } from '../validaciones/solicitudes';
 
@@ -31,7 +32,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'solicitarReclasificacion' | 'listarReclasificaciones' | 'aprobarReclasificacion' | 'rechazarReclasificacion' | 'consultarUmbralReclasificacion' | 'configurarUmbralReclasificacion'
   | 'corregirOrdenTrabajoImputacion' | 'solicitarReasignacionCosto' | 'listarReasignacionesCosto' | 'aprobarReasignacionCosto' | 'rechazarReasignacionCosto'
   | 'registrarComisionBancaria' | 'listarEnviosImportaciones' | 'obtenerEnvioImportacion' | 'crearEnvioImportacion' | 'asociarOrdenEnvio' | 'registrarCostoEnvio' | 'actualizarCostoEnvio'
-  | 'pasarEnvioRevision' | 'cerrarFinancieramenteEnvio' | 'reabrirEnvio' | 'consultarCajaChica' | 'obtenerGastoCajaChica' | 'configurarFondoCajaChica' | 'registrarGastoCajaChica' | 'adjuntarRespaldoCajaChica' | 'aprobarGastoCajaChica' | 'rechazarGastoCajaChica';
+  | 'pasarEnvioRevision' | 'cerrarFinancieramenteEnvio' | 'reabrirEnvio' | 'consultarCajaChica' | 'obtenerGastoCajaChica' | 'configurarFondoCajaChica' | 'registrarGastoCajaChica' | 'adjuntarRespaldoCajaChica' | 'aprobarGastoCajaChica' | 'rechazarGastoCajaChica'
+  | 'listarEmpleados' | 'obtenerEmpleado' | 'crearEmpleado' | 'actualizarDatosBaseEmpleado' | 'catalogosLaborales' | 'listarRelacionesLaborales' | 'crearRelacionLaboral' | 'actualizarRelacionLaboral'
+  | 'catalogosRemuneracionales' | 'obtenerPerfilRemuneracional' | 'actualizarPerfilRemuneracional';
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -49,6 +52,7 @@ export class C_Finanzas {
     private readonly m3 = new M3Controller(),
     private readonly m4 = new M4Controller(),
     private readonly m5 = new M5Controller(),
+    private readonly m6 = new M6Controller(),
   ) {}
   async ejecutar(operacion: Operacion, solicitud: SolicitudFinanzas) {
     // CU68/CU70 no exigen sesión previa. Cada comando protegido representa una confirmación de CU.
@@ -57,7 +61,7 @@ export class C_Finanzas {
     if (operacion === 'solicitarRecuperacion') return this.m4.solicitarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'validarRecuperacion') return this.m4.validarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'recuperarClave') return this.m4.recuperarClave(solicitud.cuerpo || {});
-    if (operacion === 'salud') return {status:'ok', arquitectura:'C_Finanzas → M1/M2/M3/M4/M5 → Prisma → PostgreSQL'};
+    if (operacion === 'salud') return {status:'ok', arquitectura:'C_Finanzas → M1/M2/M3/M4/M5/M6 → Prisma → PostgreSQL'};
     const adicionales:string[]=[];
     if(operacion==='listarClientes') {
       if(solicitud.consulta?.busqueda || solicitud.consulta?.search) adicionales.push('CU06');
@@ -105,6 +109,17 @@ export class C_Finanzas {
       case 'reactivarProveedor': return this.m5.cambiarEstadoProveedor(identificador(parametros.id), 'activo', cuerpo.confirmado === true, actor.id);
       case 'listarProveedores': return this.m5.listarProveedores(solicitud.consulta || {});
       case 'abrirFichaProveedor': return this.m5.abrirFichaProveedor(identificador(parametros.id), solicitud.consulta || {});
+      case 'listarEmpleados': return this.m6.listarEmpleados(solicitud.consulta || {});
+      case 'obtenerEmpleado': return this.m6.obtenerEmpleado(identificador(parametros.id));
+      case 'crearEmpleado': return this.m6.crearEmpleado(cuerpo);
+      case 'actualizarDatosBaseEmpleado': return this.m6.actualizarDatosBaseEmpleado(identificador(parametros.id), cuerpo);
+      case 'catalogosLaborales': return this.m6.catalogosLaborales();
+      case 'listarRelacionesLaborales': return this.m6.listarRelacionesLaborales(identificador(parametros.id));
+      case 'crearRelacionLaboral': return this.m6.crearRelacionLaboral(identificador(parametros.id), cuerpo);
+      case 'actualizarRelacionLaboral': return this.m6.actualizarRelacionLaboral(identificador(parametros.id), identificador(parametros.relacionId), cuerpo);
+      case 'catalogosRemuneracionales': return this.m6.catalogosRemuneracionales();
+      case 'obtenerPerfilRemuneracional': return this.m6.obtenerPerfilRemuneracional(identificador(parametros.id));
+      case 'actualizarPerfilRemuneracional': return this.m6.actualizarPerfilRemuneracional(identificador(parametros.id), cuerpo);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();
