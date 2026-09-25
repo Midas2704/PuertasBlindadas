@@ -20,12 +20,12 @@ test('la matriz de perfiles conserva M1-M5 y deja M6 sin perfiles inventados',()
     contador:[...tramo(5,11),...tramo(37,38),...tramo(42,58),...tramo(68,70),...tramo(80,88).filter(codigo=>!['CU89','CU90'].includes(codigo)),'CU93','CU95',...tramo(97,109),...tramo(111,120),...tramo(123,136),'CU138','CU139',...tramo(141,149),...tramo(151,154)],
   };
   const esperados=Object.fromEntries(Object.entries(actores).map(([perfil,codigos])=>[perfil,codigos.filter(codigo=>!['CU68','CU69','CU70'].includes(codigo))]));
-  assert.deepEqual(codigosTodosLosCU,tramo(1,158));
+  assert.deepEqual(codigosTodosLosCU,tramo(1,166));
   assert.deepEqual(codigosGerencia,esperados.gerencia);
   assert.deepEqual(codigosSecretaria,esperados.secretaria);
   assert.deepEqual(codigosContador,esperados.contador);
-  assert.deepEqual(Object.keys(matrizPermisosPorCU),tramo(1,158));
-  for(const codigo of tramo(1,158)) assert.deepEqual(matrizPermisosPorCU[codigo],[...Object.keys(actores).filter(perfil=>actores[perfil].includes(codigo))]);
+  assert.deepEqual(Object.keys(matrizPermisosPorCU),tramo(1,166));
+  for(const codigo of tramo(1,166)) assert.deepEqual(matrizPermisosPorCU[codigo],[...Object.keys(actores).filter(perfil=>actores[perfil].includes(codigo))]);
 });
 
 test('RF vigente: perfiles M4, seed y política de acceso', async t => {

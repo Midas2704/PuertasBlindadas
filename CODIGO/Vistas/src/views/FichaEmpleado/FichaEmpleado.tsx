@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, BriefcaseBusiness, CalendarDays, CircleDollarSign, Plus, Save } from 'lucide-react';
+import { ArrowLeft, BriefcaseBusiness, CalendarDays, CircleDollarSign, FileCheck2, Layers3, Plus, Save, Sparkles } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
@@ -28,6 +28,7 @@ type RelacionLaboral = {
 
 type TipoVinculo = { id: number; nombre: string };
 type Catalogo = { id: number; nombre: string };
+type Asignacion = { id: number; esquema?: string; concepto?: string; vigenciaDesde: string; vigenciaHasta: string | null; activa: boolean };
 type PerfilRemuneracional = {
   idCargo: number | null;
   sueldoBaseActual: number | null;
@@ -56,6 +57,9 @@ export default function FichaEmpleado() {
   const { sesion } = usarSesion();
   const puedeCU157 = Boolean(sesion?.permisos.includes('CU157'));
   const puedeCU158 = Boolean(sesion?.permisos.includes('CU158'));
+  const puedeCU159 = Boolean(sesion?.permisos.includes('CU159'));
+  const puedeCU160 = Boolean(sesion?.permisos.includes('CU160'));
+  const puedeCU161 = Boolean(sesion?.permisos.includes('CU161'));
   const [empleado, setEmpleado] = useState<Empleado | null>(null);
   const [relaciones, setRelaciones] = useState<RelacionLaboral[]>([]);
   const [tiposVinculo, setTiposVinculo] = useState<TipoVinculo[]>([]);
@@ -65,6 +69,13 @@ export default function FichaEmpleado() {
   const [datosBase, setDatosBase] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', fechaNacimiento: '', estado: 'activo' });
   const [nuevaRelacion, setNuevaRelacion] = useState({ fechaInicio: '', idTipoVinculo: '', jornada: '' });
   const [perfil, setPerfil] = useState({ idCargo: '', sueldoBaseActual: '', fechaAplicacionSueldoBase: '', idAfp: '', idInstitucionSalud: '', seguroCesantia: true, correoParticular: '', telefonoParticular: '', direccionParticular: '', tipoCorreo: '', consentimientoElectronico: false, canalDocumental: '' });
+  const [esquemas, setEsquemas] = useState<Catalogo[]>([]);
+  const [asignacionesEsquema, setAsignacionesEsquema] = useState<Asignacion[]>([]);
+  const [haberes, setHaberes] = useState<Catalogo[]>([]);
+  const [asignacionesHaber, setAsignacionesHaber] = useState<Asignacion[]>([]);
+  const [nuevaAsignacionEsquema, setNuevaAsignacionEsquema] = useState({ idEsquema: '', vigenciaDesde: '', vigenciaHasta: '' });
+  const [nuevaAsignacionHaber, setNuevaAsignacionHaber] = useState({ idConcepto: '', vigenciaDesde: '', vigenciaHasta: '', valorAplicable: '' });
+  const [documental, setDocumental] = useState({ consentimientoElectronico: false, canalDocumental: '', canalesDisponibles: [] as string[] });
   const [version, setVersion] = useState(0);
   const [error, setError] = useState('');
   const [mensaje, setMensaje] = useState('');
@@ -120,6 +131,16 @@ export default function FichaEmpleado() {
     return () => cancelacion.abort();
   }, [id, puedeCU158, version]);
 
+  useEffect(() => {
+    const cancelacion = new AbortController();
+    const tareas: Promise<void>[] = [];
+    if (puedeCU159) tareas.push(Promise.all([respuestaJson(`/empleados/${id}/esquemas`, { signal: cancelacion.signal }), respuestaJson('/empleados/catalogos/esquemas', { signal: cancelacion.signal })]).then(([asignaciones, catalogo]) => { setAsignacionesEsquema(asignaciones); setEsquemas(catalogo); }));
+    if (puedeCU160) tareas.push(Promise.all([respuestaJson(`/empleados/${id}/haberes`, { signal: cancelacion.signal }), respuestaJson('/empleados/catalogos/haberes', { signal: cancelacion.signal })]).then(([asignaciones, catalogo]) => { setAsignacionesHaber(asignaciones); setHaberes(catalogo); }));
+    if (puedeCU161) tareas.push(respuestaJson(`/empleados/${id}/configuracion-documental`, { signal: cancelacion.signal }).then((actual) => setDocumental({ consentimientoElectronico: actual.consentimientoElectronico === true, canalDocumental: actual.canalDocumental || '', canalesDisponibles: actual.canalesDisponibles })));
+    Promise.all(tareas).catch((causa) => { if (!cancelacion.signal.aborted) setError(causa.message); });
+    return () => cancelacion.abort();
+  }, [id, puedeCU159, puedeCU160, puedeCU161, version]);
+
   const guardarDatosBase = async () => {
     setGuardando(true); setError(''); setMensaje('');
     try {
@@ -156,6 +177,21 @@ export default function FichaEmpleado() {
       setMensaje('Perfil remuneracional actualizado.'); setVersion((valor) => valor + 1);
     } catch (causa) { setError((causa as Error).message); }
     finally { setGuardando(false); }
+  };
+
+  const asignar = async (tipo: 'esquemas' | 'haberes') => {
+    setGuardando(true); setError(''); setMensaje('');
+    try {
+      const formulario = tipo === 'esquemas' ? nuevaAsignacionEsquema : nuevaAsignacionHaber;
+      await respuestaJson(`/empleados/${id}/${tipo}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formulario) });
+      setMensaje(tipo === 'esquemas' ? 'Esquema asignado.' : 'HABER asignado.'); setVersion((valor) => valor + 1);
+    } catch (causa) { setError((causa as Error).message); } finally { setGuardando(false); }
+  };
+
+  const guardarDocumental = async () => {
+    setGuardando(true); setError(''); setMensaje('');
+    try { await respuestaJson(`/empleados/${id}/configuracion-documental`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(documental) }); setMensaje('Configuración documental actualizada.'); setVersion((valor) => valor + 1); }
+    catch (causa) { setError((causa as Error).message); } finally { setGuardando(false); }
   };
 
   return <div className="min-h-full bg-slate-50 p-5 lg:p-8"><div className="mx-auto max-w-6xl">
@@ -195,6 +231,18 @@ export default function FichaEmpleado() {
           <label className="flex items-center gap-3 rounded-md border px-3 py-2.5 text-sm font-medium md:col-span-2 lg:col-span-3"><input type="checkbox" checked={perfil.consentimientoElectronico} onChange={(evento) => setPerfil({ ...perfil, consentimientoElectronico: evento.target.checked })} className="h-4 w-4 accent-primary-600" />Consentimiento electrónico vigente (estado actual)</label>
         </div>
       </section>}
+
+      {puedeCU159 && <section className="mt-6 border-y border-gray-200 bg-white px-5 py-5"><div className="mb-4 flex items-center gap-2"><Layers3 className="h-5 w-5 text-primary-600"/><h2 className="font-bold">Esquemas remuneracionales</h2></div>
+        {!esquemas.length ? <p className="py-6 text-sm text-gray-500">No existen esquemas remuneracionales disponibles.</p> : <div className="mb-5 grid gap-3 md:grid-cols-4"><select value={nuevaAsignacionEsquema.idEsquema} onChange={e=>setNuevaAsignacionEsquema({...nuevaAsignacionEsquema,idEsquema:e.target.value})} className="rounded-md border p-2.5"><option value="">Seleccionar esquema</option>{esquemas.map(x=><option key={x.id} value={x.id}>{x.nombre}</option>)}</select><input type="date" value={nuevaAsignacionEsquema.vigenciaDesde} onChange={e=>setNuevaAsignacionEsquema({...nuevaAsignacionEsquema,vigenciaDesde:e.target.value})} className="rounded-md border p-2.5"/><input type="date" value={nuevaAsignacionEsquema.vigenciaHasta} onChange={e=>setNuevaAsignacionEsquema({...nuevaAsignacionEsquema,vigenciaHasta:e.target.value})} className="rounded-md border p-2.5"/><button disabled={guardando} onClick={()=>void asignar('esquemas')} className="rounded-md bg-gray-900 px-4 text-sm font-semibold text-white">Asignar esquema</button></div>}
+        <div className="space-y-2">{asignacionesEsquema.map(x=><div key={x.id} className="flex justify-between border-b py-2 text-sm"><span>{x.esquema}</span><span>{x.vigenciaDesde.slice(0,10)} → {x.vigenciaHasta?.slice(0,10)||'vigente'}</span></div>)}</div>
+      </section>}
+
+      {puedeCU160 && <section className="mt-6 border-y border-gray-200 bg-white px-5 py-5"><div className="mb-4 flex items-center gap-2"><Sparkles className="h-5 w-5 text-primary-600"/><h2 className="font-bold">Haberes individuales</h2></div>
+        {!haberes.length ? <p className="py-6 text-sm text-gray-500">No existen conceptos HABER disponibles.</p> : <div className="mb-5 grid gap-3 md:grid-cols-5"><select value={nuevaAsignacionHaber.idConcepto} onChange={e=>setNuevaAsignacionHaber({...nuevaAsignacionHaber,idConcepto:e.target.value})} className="rounded-md border p-2.5"><option value="">Seleccionar HABER</option>{haberes.map(x=><option key={x.id} value={x.id}>{x.nombre}</option>)}</select><input type="date" value={nuevaAsignacionHaber.vigenciaDesde} onChange={e=>setNuevaAsignacionHaber({...nuevaAsignacionHaber,vigenciaDesde:e.target.value})} className="rounded-md border p-2.5"/><input type="date" value={nuevaAsignacionHaber.vigenciaHasta} onChange={e=>setNuevaAsignacionHaber({...nuevaAsignacionHaber,vigenciaHasta:e.target.value})} className="rounded-md border p-2.5"/><input type="number" min="0" placeholder="Valor opcional" value={nuevaAsignacionHaber.valorAplicable} onChange={e=>setNuevaAsignacionHaber({...nuevaAsignacionHaber,valorAplicable:e.target.value})} className="rounded-md border p-2.5"/><button disabled={guardando} onClick={()=>void asignar('haberes')} className="rounded-md bg-gray-900 px-4 text-sm font-semibold text-white">Asignar HABER</button></div>}
+        <div className="space-y-2">{asignacionesHaber.map(x=><div key={x.id} className="flex justify-between border-b py-2 text-sm"><span>{x.concepto}</span><span>{x.vigenciaDesde.slice(0,10)} → {x.vigenciaHasta?.slice(0,10)||'vigente'}</span></div>)}</div>
+      </section>}
+
+      {puedeCU161 && <section className="mt-6 border-y border-gray-200 bg-white px-5 py-5"><div className="mb-4 flex items-center gap-2"><FileCheck2 className="h-5 w-5 text-primary-600"/><h2 className="font-bold">Consentimiento y canal documental</h2></div><div className="grid gap-4 md:grid-cols-3"><label className="flex items-center gap-3 rounded-md border px-3 py-2.5 text-sm font-medium"><input type="checkbox" checked={documental.consentimientoElectronico} onChange={e=>setDocumental({...documental,consentimientoElectronico:e.target.checked,canalDocumental:e.target.checked?documental.canalDocumental:''})}/>Consentimiento electrónico vigente</label><select disabled={!documental.consentimientoElectronico} value={documental.canalDocumental} onChange={e=>setDocumental({...documental,canalDocumental:e.target.value})} className="rounded-md border p-2.5 disabled:bg-gray-100"><option value="">Sin canal configurado</option>{documental.canalesDisponibles.map(c=><option key={c} value={c}>{c.replaceAll('_',' ')}</option>)}</select><button disabled={guardando} onClick={()=>void guardarDocumental()} className="flex items-center justify-center gap-2 rounded-md bg-primary-600 px-4 text-sm font-semibold text-white"><Save className="h-4 w-4"/>Guardar configuración</button></div></section>}
     </>}
   </div></div>;
 }

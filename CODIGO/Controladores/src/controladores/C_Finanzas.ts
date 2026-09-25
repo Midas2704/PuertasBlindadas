@@ -34,7 +34,14 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'registrarComisionBancaria' | 'listarEnviosImportaciones' | 'obtenerEnvioImportacion' | 'crearEnvioImportacion' | 'asociarOrdenEnvio' | 'registrarCostoEnvio' | 'actualizarCostoEnvio'
   | 'pasarEnvioRevision' | 'cerrarFinancieramenteEnvio' | 'reabrirEnvio' | 'consultarCajaChica' | 'obtenerGastoCajaChica' | 'configurarFondoCajaChica' | 'registrarGastoCajaChica' | 'adjuntarRespaldoCajaChica' | 'aprobarGastoCajaChica' | 'rechazarGastoCajaChica'
   | 'listarEmpleados' | 'obtenerEmpleado' | 'crearEmpleado' | 'actualizarDatosBaseEmpleado' | 'catalogosLaborales' | 'listarRelacionesLaborales' | 'crearRelacionLaboral' | 'actualizarRelacionLaboral'
-  | 'catalogosRemuneracionales' | 'obtenerPerfilRemuneracional' | 'actualizarPerfilRemuneracional';
+  | 'catalogosRemuneracionales' | 'obtenerPerfilRemuneracional' | 'actualizarPerfilRemuneracional'
+  | 'catalogosAsignacionEsquemas' | 'listarAsignacionesEsquemaEmpleado' | 'asignarEsquemaEmpleado' | 'finalizarAsignacionEsquemaEmpleado'
+  | 'catalogoHaberes' | 'listarAsignacionesHaberEmpleado' | 'asignarHaberEmpleado' | 'finalizarAsignacionHaberEmpleado'
+  | 'obtenerConfiguracionDocumental' | 'actualizarConfiguracionDocumental'
+  | 'listarEsquemas' | 'catalogoCargosEsquemas' | 'crearEsquema' | 'actualizarEsquema' | 'asignarEsquemaCargo'
+  | 'listarTarifasEsquema' | 'crearTarifaEsquema' | 'revisarTarifaEsquema'
+  | 'listarHaberes' | 'crearHaber' | 'actualizarHaber' | 'crearConfiguracionHaber' | 'resolverConfiguracionHaber';
+
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
@@ -120,6 +127,29 @@ export class C_Finanzas {
       case 'catalogosRemuneracionales': return this.m6.catalogosRemuneracionales();
       case 'obtenerPerfilRemuneracional': return this.m6.obtenerPerfilRemuneracional(identificador(parametros.id));
       case 'actualizarPerfilRemuneracional': return this.m6.actualizarPerfilRemuneracional(identificador(parametros.id), cuerpo);
+      case 'catalogosAsignacionEsquemas': return this.m6.catalogosAsignacionEsquemas();
+      case 'listarAsignacionesEsquemaEmpleado': return this.m6.listarAsignacionesEsquemaEmpleado(identificador(parametros.id));
+      case 'asignarEsquemaEmpleado': return this.m6.asignarEsquemaEmpleado(identificador(parametros.id), cuerpo);
+      case 'finalizarAsignacionEsquemaEmpleado': return this.m6.finalizarAsignacionEsquemaEmpleado(identificador(parametros.id), identificador(parametros.asignacionId), cuerpo);
+      case 'catalogoHaberes': return this.m6.catalogoHaberes();
+      case 'listarAsignacionesHaberEmpleado': return this.m6.listarAsignacionesHaberEmpleado(identificador(parametros.id));
+      case 'asignarHaberEmpleado': return this.m6.asignarHaberEmpleado(identificador(parametros.id), cuerpo);
+      case 'finalizarAsignacionHaberEmpleado': return this.m6.finalizarAsignacionHaberEmpleado(identificador(parametros.id), identificador(parametros.asignacionId), cuerpo);
+      case 'obtenerConfiguracionDocumental': return this.m6.obtenerConfiguracionDocumental(identificador(parametros.id));
+      case 'actualizarConfiguracionDocumental': return this.m6.actualizarConfiguracionDocumental(identificador(parametros.id), cuerpo);
+      case 'listarEsquemas': return this.m6.listarEsquemas();
+      case 'catalogoCargosEsquemas': return this.m6.catalogoCargosEsquemas();
+      case 'crearEsquema': return this.m6.crearEsquema(cuerpo);
+      case 'actualizarEsquema': return this.m6.actualizarEsquema(identificador(parametros.id), cuerpo);
+      case 'asignarEsquemaCargo': return this.m6.asignarEsquemaCargo(identificador(parametros.id), cuerpo);
+      case 'listarTarifasEsquema': return this.m6.listarTarifasEsquema(identificador(parametros.id), solicitud.consulta?.fecha);
+      case 'crearTarifaEsquema': return this.m6.crearTarifaEsquema(identificador(parametros.id), cuerpo);
+      case 'revisarTarifaEsquema': return this.m6.revisarTarifaEsquema(identificador(parametros.id), identificador(parametros.tarifaId));
+      case 'listarHaberes': return this.m6.listarHaberes();
+      case 'crearHaber': return this.m6.crearHaber(cuerpo);
+      case 'actualizarHaber': return this.m6.actualizarHaber(identificador(parametros.id), cuerpo);
+      case 'crearConfiguracionHaber': return this.m6.crearConfiguracionHaber(identificador(parametros.id), cuerpo);
+      case 'resolverConfiguracionHaber': return this.m6.resolverConfiguracionHaber(identificador(parametros.id), solicitud.consulta?.fecha);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

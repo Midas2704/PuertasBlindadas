@@ -3,7 +3,7 @@ import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { comprobarClave, hashClave, validarClave, secreto, huella, futuro, politica } from '../utilidades/seguridad';
 import { CorreoRecuperacion, CorreoDesarrollo } from '../utilidades/correo';
-import { codigosTodosLosCU, operacionesPermiso, operacionesQueRequierenAdministrador } from '../validaciones/permisos';
+import { codigosTodosLosCU, operacionesPermiso, operacionesQueRequierenAdministrador, permiteOperacion } from '../validaciones/permisos';
 import { texto } from '../validaciones/solicitudes';
 
 type Transaccion = Prisma.TransactionClient;
@@ -78,7 +78,7 @@ export class M4Controller {
   const numeroCU = Number(operacionesPermiso[operacion]?.slice(2));
   if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia') return error(403,'La operación requiere configuración de Gerencia');
   if (operacionesQueRequierenAdministrador.has(operacion) && !cuenta.usuario_es_administrador) return error(403,'La operación requiere rol Administrador');
-  if(!personales.includes(operacion) && (!operacionesPermiso[operacion] || !permisos.includes(operacionesPermiso[operacion]!))) return error(403,'No tienes permiso para esta operación');
+  if(!personales.includes(operacion) && !permiteOperacion(operacion, permisos)) return error(403,'No tienes permiso para esta operación');
   if(adicionales.some(p=>!permisos.includes(p))) return error(403,'No tienes permiso para los filtros o condiciones solicitados');
   const vencePorInactividad = new Date(Math.min(finAbsoluto.getTime(), ahora.getTime() + politica.inactividadMinutos * 60000));
   await prisma.sesion_usuario.update({where:{id:sesion.id},data:{vence:vencePorInactividad}});

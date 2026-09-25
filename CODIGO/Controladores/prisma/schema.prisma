@@ -75,6 +75,7 @@ model cargo {
   descripcion_cargo String?
   estado_cargo      String     @default("activo") @db.VarChar(20)
   empleado          empleado[]
+  asignaciones_esquema_remuneracional asignacion_esquema_remuneracional[]
 
   @@schema("finanzas")
 }
@@ -110,7 +111,10 @@ model concepto_remuneracion {
   descripcion_concepto             String?
   naturaleza_concepto              String                             @db.VarChar(30)
   estado_concepto                  String                             @default("activo") @db.VarChar(20)
+  codigo_m6                        String?                            @unique @db.VarChar(40)
   detalle_liquidacion_remuneracion detalle_liquidacion_remuneracion[]
+  asignaciones_empleado_m6         asignacion_concepto_remuneracion_empleado[]
+  configuraciones_m6               configuracion_concepto_remuneracion[]
 
   @@schema("finanzas")
 }
@@ -420,6 +424,8 @@ model empleado {
   prestamo_herramientas    prestamo_herramientas[]
   usuario                  usuario[]
   relaciones_laborales     relacion_laboral_empleado[]
+  asignaciones_esquema_remuneracional asignacion_esquema_remuneracional[]
+  asignaciones_concepto_remuneracion asignacion_concepto_remuneracion_empleado[]
 
   @@index([id_cargo], map: "idx_empleado_cargo")
   @@schema("finanzas")
@@ -1705,6 +1711,88 @@ model relacion_laboral_empleado {
   tipo_vinculo_laboral         tipo_vinculo_laboral? @relation(fields: [id_tipo_vinculo_laboral], references: [id_tipo_vinculo_laboral], onDelete: Restrict, onUpdate: NoAction, map: "fk_relacion_laboral_tipo_vinculo")
 
   @@index([id_empleado, fecha_inicio], map: "idx_relacion_laboral_empleado_fecha")
+  @@schema("finanzas")
+}
+
+model esquema_remuneracional {
+  id_esquema_remuneracional Int                                  @id @default(autoincrement())
+  codigo                     String                               @unique @db.VarChar(40)
+  nombre                     String                               @unique @db.VarChar(120)
+  descripcion                String?
+  estado                     String                               @default("activo") @db.VarChar(20)
+  vigencia_desde             DateTime                             @db.Date
+  vigencia_hasta             DateTime?                            @db.Date
+  asignaciones               asignacion_esquema_remuneracional[]
+  tarifas                    tarifa_esquema_remuneracional[]
+
+  @@index([estado, vigencia_desde], map: "idx_esquema_remuneracional_estado_vigencia")
+  @@schema("finanzas")
+}
+
+model asignacion_esquema_remuneracional {
+  id_asignacion_esquema Int                      @id @default(autoincrement())
+  id_esquema            Int
+  id_empleado           Int?
+  id_cargo              Int?
+  vigencia_desde        DateTime                 @db.Date
+  vigencia_hasta        DateTime?                @db.Date
+  activa                Boolean                  @default(true)
+  esquema               esquema_remuneracional  @relation(fields: [id_esquema], references: [id_esquema_remuneracional], onDelete: Restrict, onUpdate: NoAction)
+  empleado              empleado?                @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  cargo                 cargo?                   @relation(fields: [id_cargo], references: [id_cargo], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_empleado, vigencia_desde], map: "idx_asignacion_esquema_empleado")
+  @@index([id_cargo, vigencia_desde], map: "idx_asignacion_esquema_cargo")
+  @@schema("finanzas")
+}
+
+model asignacion_concepto_remuneracion_empleado {
+  id_asignacion_concepto Int                     @id @default(autoincrement())
+  id_empleado            Int
+  id_concepto            Int
+  vigencia_desde         DateTime                @db.Date
+  vigencia_hasta         DateTime?               @db.Date
+  valor_aplicable        Decimal?                @db.Decimal(14, 4)
+  activa                 Boolean                 @default(true)
+  empleado               empleado                @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  concepto               concepto_remuneracion   @relation(fields: [id_concepto], references: [id_concepto_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_empleado, vigencia_desde], map: "idx_asignacion_concepto_empleado")
+  @@index([id_concepto, vigencia_desde], map: "idx_asignacion_concepto_concepto")
+  @@schema("finanzas")
+}
+
+model tarifa_esquema_remuneracional {
+  id_tarifa_esquema Int                     @id @default(autoincrement())
+  id_esquema        Int
+  modalidad         String                  @db.VarChar(20)
+  valor             Decimal?                @db.Decimal(14, 4)
+  regla_tipo        String?                 @db.VarChar(40)
+  referencia        String?                 @db.VarChar(120)
+  vigencia_desde    DateTime                @db.Date
+  vigencia_hasta    DateTime?               @db.Date
+  es_excepcion      Boolean                 @default(false)
+  estado_revision   String                  @default("pendiente") @db.VarChar(20)
+  causa_bloqueo     String?
+  esquema           esquema_remuneracional @relation(fields: [id_esquema], references: [id_esquema_remuneracional], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_esquema, vigencia_desde], map: "idx_tarifa_esquema_vigencia")
+  @@schema("finanzas")
+}
+
+model configuracion_concepto_remuneracion {
+  id_configuracion_concepto Int                    @id @default(autoincrement())
+  id_concepto               Int
+  modalidad                 String                 @db.VarChar(20)
+  valor                     Decimal?               @db.Decimal(14, 4)
+  regla_tipo                String?                @db.VarChar(40)
+  vigencia_desde            DateTime               @db.Date
+  vigencia_hasta            DateTime?              @db.Date
+  es_excepcion              Boolean                @default(false)
+  activa                    Boolean                @default(true)
+  concepto                  concepto_remuneracion  @relation(fields: [id_concepto], references: [id_concepto_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_concepto, vigencia_desde], map: "idx_configuracion_concepto_vigencia")
   @@schema("finanzas")
 }
 

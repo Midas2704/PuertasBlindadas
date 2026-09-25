@@ -357,4 +357,245 @@ export class M6Controller {
       throw error;
     }
   }
+
+  private intervalo(entrada: Record<string, unknown>) {
+    const desde = fechaEntrada(entrada.vigenciaDesde, 'Vigencia desde')!;
+    const hasta = fechaEntrada(entrada.vigenciaHasta, 'Vigencia hasta', false);
+    if (hasta && hasta < desde) throw new ErrorAplicacion(400, 'La vigencia hasta no puede ser anterior a la vigencia desde');
+    return { desde, hasta };
+  }
+
+  private conflictoConcurrente(error: unknown, mensaje: string): never {
+    if (error instanceof ErrorAplicacion) throw error;
+    if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new ErrorAplicacion(409, mensaje);
+    throw error;
+  }
+
+  async catalogosAsignacionEsquemas() {
+    const esquemas = await prisma.esquema_remuneracional.findMany({
+      where: { estado: 'activo' }, orderBy: [{ nombre: 'asc' }],
+      select: { id_esquema_remuneracional: true, codigo: true, nombre: true, vigencia_desde: true, vigencia_hasta: true },
+    });
+    return esquemas.map((item) => ({ id: item.id_esquema_remuneracional, codigo: item.codigo, nombre: item.nombre, vigenciaDesde: item.vigencia_desde, vigenciaHasta: item.vigencia_hasta }));
+  }
+
+  async listarAsignacionesEsquemaEmpleado(idEmpleado: number) {
+    if (!await prisma.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+    const filas = await prisma.asignacion_esquema_remuneracional.findMany({
+      where: { id_empleado: idEmpleado }, include: { esquema: true }, orderBy: [{ vigencia_desde: 'desc' }, { id_asignacion_esquema: 'desc' }],
+    });
+    return filas.map((fila) => ({ id: fila.id_asignacion_esquema, idEsquema: fila.id_esquema, esquema: fila.esquema.nombre, origen: 'INDIVIDUAL', vigenciaDesde: fila.vigencia_desde, vigenciaHasta: fila.vigencia_hasta, activa: fila.activa }));
+  }
+
+  async asignarEsquemaEmpleado(idEmpleado: number, entrada: Record<string, unknown>) {
+    const idEsquema = identificador(entrada.idEsquema);
+    const { desde, hasta } = this.intervalo(entrada);
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (!await tx.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+        const esquema = await tx.esquema_remuneracional.findFirst({ where: { id_esquema_remuneracional: idEsquema, estado: 'activo' } });
+        if (!esquema) throw new ErrorAplicacion(404, 'Esquema activo no encontrado');
+        if (desde < esquema.vigencia_desde || esquema.vigencia_hasta && (!hasta || hasta > esquema.vigencia_hasta)) throw new ErrorAplicacion(400, 'La asignación debe quedar dentro de la vigencia del esquema');
+        const conflicto = await tx.asignacion_esquema_remuneracional.count({ where: {
+          id_empleado: idEmpleado, id_esquema: idEsquema, activa: true,
+          vigencia_desde: hasta ? { lte: hasta } : undefined,
+          OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }],
+        } });
+        if (conflicto) throw new ErrorAplicacion(409, 'La asignación se superpone con otra vigencia del mismo esquema');
+        await tx.asignacion_esquema_remuneracional.create({ data: { id_empleado: idEmpleado, id_esquema: idEsquema, vigencia_desde: desde, vigencia_hasta: hasta } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.listarAsignacionesEsquemaEmpleado(idEmpleado);
+    } catch (error) { this.conflictoConcurrente(error, 'La asignación de esquema cambió concurrentemente'); }
+  }
+
+  async finalizarAsignacionEsquemaEmpleado(idEmpleado: number, idAsignacion: number, entrada: Record<string, unknown>) {
+    const hasta = fechaEntrada(entrada.vigenciaHasta, 'Vigencia hasta')!;
+    const actual = await prisma.asignacion_esquema_remuneracional.findFirst({ where: { id_asignacion_esquema: idAsignacion, id_empleado: idEmpleado } });
+    if (!actual) throw new ErrorAplicacion(404, 'Asignación de esquema no encontrada');
+    if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
+    await prisma.asignacion_esquema_remuneracional.update({ where: { id_asignacion_esquema: idAsignacion }, data: { vigencia_hasta: hasta, activa: false } });
+    return this.listarAsignacionesEsquemaEmpleado(idEmpleado);
+  }
+
+  async catalogoHaberes() {
+    const filas = await prisma.concepto_remuneracion.findMany({ where: { naturaleza_concepto: 'haber', estado_concepto: 'activo' }, orderBy: { nombre_concepto: 'asc' } });
+    return filas.map((fila) => ({ id: fila.id_concepto_remuneracion, codigo: fila.codigo_m6, nombre: fila.nombre_concepto }));
+  }
+
+  async listarAsignacionesHaberEmpleado(idEmpleado: number) {
+    if (!await prisma.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+    const filas = await prisma.asignacion_concepto_remuneracion_empleado.findMany({ where: { id_empleado: idEmpleado }, include: { concepto: true }, orderBy: { vigencia_desde: 'desc' } });
+    return filas.map((fila) => ({ id: fila.id_asignacion_concepto, idConcepto: fila.id_concepto, concepto: fila.concepto.nombre_concepto, vigenciaDesde: fila.vigencia_desde, vigenciaHasta: fila.vigencia_hasta, valorAplicable: fila.valor_aplicable === null ? null : Number(fila.valor_aplicable), activa: fila.activa }));
+  }
+
+  async asignarHaberEmpleado(idEmpleado: number, entrada: Record<string, unknown>) {
+    const idConcepto = identificador(entrada.idConcepto);
+    const { desde, hasta } = this.intervalo(entrada);
+    const valor = entrada.valorAplicable === undefined || entrada.valorAplicable === '' || entrada.valorAplicable === null ? null : numeroNoNegativo(entrada.valorAplicable, 'Valor aplicable');
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (!await tx.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+        const concepto = await tx.concepto_remuneracion.findUnique({ where: { id_concepto_remuneracion: idConcepto } });
+        if (!concepto || concepto.estado_concepto !== 'activo') throw new ErrorAplicacion(404, 'Concepto activo no encontrado');
+        if (concepto.naturaleza_concepto !== 'haber') throw new ErrorAplicacion(400, 'CU160 sólo permite conceptos HABER');
+        const conflicto = await tx.asignacion_concepto_remuneracion_empleado.count({ where: { id_empleado: idEmpleado, id_concepto: idConcepto, activa: true, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+        if (conflicto) throw new ErrorAplicacion(409, 'La asignación del haber se superpone con otra vigencia');
+        await tx.asignacion_concepto_remuneracion_empleado.create({ data: { id_empleado: idEmpleado, id_concepto: idConcepto, vigencia_desde: desde, vigencia_hasta: hasta, valor_aplicable: valor } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.listarAsignacionesHaberEmpleado(idEmpleado);
+    } catch (error) { this.conflictoConcurrente(error, 'La asignación del haber cambió concurrentemente'); }
+  }
+
+  async finalizarAsignacionHaberEmpleado(idEmpleado: number, idAsignacion: number, entrada: Record<string, unknown>) {
+    const hasta = fechaEntrada(entrada.vigenciaHasta, 'Vigencia hasta')!;
+    const actual = await prisma.asignacion_concepto_remuneracion_empleado.findFirst({ where: { id_asignacion_concepto: idAsignacion, id_empleado: idEmpleado } });
+    if (!actual) throw new ErrorAplicacion(404, 'Asignación de haber no encontrada');
+    if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
+    await prisma.asignacion_concepto_remuneracion_empleado.update({ where: { id_asignacion_concepto: idAsignacion }, data: { vigencia_hasta: hasta, activa: false } });
+    return this.listarAsignacionesHaberEmpleado(idEmpleado);
+  }
+
+  async obtenerConfiguracionDocumental(idEmpleado: number) {
+    const empleado = await prisma.empleado.findUnique({ where: { id_empleado: idEmpleado }, include: { cuenta_m4: { select: { usuario_correo: true } }, usuario: { select: { usuario_correo: true } } } });
+    if (!empleado) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+    const correoCorporativo = empleado.cuenta_m4?.usuario_correo || empleado.usuario.find((item) => item.usuario_correo)?.usuario_correo || null;
+    return { consentimientoElectronico: empleado.consentimiento_electronico, canalDocumental: empleado.canal_documental, correoParticular: empleado.correo_particular, correoCorporativo, canalesDisponibles: [...(empleado.correo_particular ? ['correo_particular'] : []), ...(correoCorporativo ? ['correo_corporativo'] : [])] };
+  }
+
+  async actualizarConfiguracionDocumental(idEmpleado: number, entrada: Record<string, unknown>) {
+    const actual = await this.obtenerConfiguracionDocumental(idEmpleado);
+    if (typeof entrada.consentimientoElectronico !== 'boolean') throw new ErrorAplicacion(400, 'El consentimiento debe indicarse explícitamente');
+    const canalEntrada = texto(entrada.canalDocumental, 30).toLowerCase();
+    if (canalEntrada && !['correo_particular', 'correo_corporativo'].includes(canalEntrada)) throw new ErrorAplicacion(400, 'Canal documental inválido');
+    const canal = entrada.consentimientoElectronico === true ? canalEntrada : null;
+    if (entrada.consentimientoElectronico === true && !canal) throw new ErrorAplicacion(400, 'Selecciona un canal electrónico disponible');
+    if (canal === 'correo_particular' && !actual.correoParticular) throw new ErrorAplicacion(409, 'El empleado no tiene correo particular');
+    if (canal === 'correo_corporativo' && !actual.correoCorporativo) throw new ErrorAplicacion(409, 'El empleado no tiene correo corporativo');
+    await prisma.empleado.update({ where: { id_empleado: idEmpleado }, data: { consentimiento_electronico: entrada.consentimientoElectronico, canal_documental: canal, tipo_correo: canal === 'correo_particular' ? 'particular' : canal === 'correo_corporativo' ? 'corporativo' : null } });
+    return this.obtenerConfiguracionDocumental(idEmpleado);
+  }
+
+  async listarEsquemas() {
+    const filas = await prisma.esquema_remuneracional.findMany({ include: { asignaciones: { where: { id_cargo: { not: null } }, include: { cargo: true } } }, orderBy: { nombre: 'asc' } });
+    return filas.map((fila) => ({ id: fila.id_esquema_remuneracional, codigo: fila.codigo, nombre: fila.nombre, descripcion: fila.descripcion, estado: fila.estado, vigenciaDesde: fila.vigencia_desde, vigenciaHasta: fila.vigencia_hasta, cargos: fila.asignaciones.map((item) => ({ idAsignacion: item.id_asignacion_esquema, idCargo: item.id_cargo, cargo: item.cargo?.nombre_cargo, vigenciaDesde: item.vigencia_desde, vigenciaHasta: item.vigencia_hasta, activa: item.activa })) }));
+  }
+
+  async catalogoCargosEsquemas() {
+    const cargos = await prisma.cargo.findMany({ where: { estado_cargo: 'activo' }, orderBy: { nombre_cargo: 'asc' } });
+    return cargos.map((cargo) => ({ id: cargo.id_cargo, nombre: cargo.nombre_cargo }));
+  }
+
+  async crearEsquema(entrada: Record<string, unknown>) {
+    const codigo = texto(entrada.codigo, 40).toUpperCase(); const nombre = texto(entrada.nombre, 120); const descripcion = texto(entrada.descripcion, 500) || null; const { desde, hasta } = this.intervalo(entrada);
+    if (!codigo || !nombre) throw new ErrorAplicacion(400, 'Código y nombre son obligatorios');
+    try { await prisma.esquema_remuneracional.create({ data: { codigo, nombre, descripcion, vigencia_desde: desde, vigencia_hasta: hasta } }); return this.listarEsquemas(); }
+    catch (error) { this.conflictoConcurrente(error, 'Ya existe un esquema con ese código o nombre'); }
+  }
+
+  async actualizarEsquema(idEsquema: number, entrada: Record<string, unknown>) {
+    const actual = await prisma.esquema_remuneracional.findUnique({ where: { id_esquema_remuneracional: idEsquema } });
+    if (!actual) throw new ErrorAplicacion(404, 'Esquema no encontrado');
+    const data: Prisma.esquema_remuneracionalUpdateInput = {};
+    if (entrada.nombre !== undefined) { const nombre = texto(entrada.nombre, 120); if (!nombre) throw new ErrorAplicacion(400, 'Nombre obligatorio'); data.nombre = nombre; }
+    if (entrada.descripcion !== undefined) data.descripcion = texto(entrada.descripcion, 500) || null;
+    if (entrada.estado !== undefined) { const estado = texto(entrada.estado, 20).toLowerCase(); if (!['activo', 'inactivo'].includes(estado)) throw new ErrorAplicacion(400, 'Estado inválido'); data.estado = estado; }
+    if (entrada.vigenciaDesde !== undefined) data.vigencia_desde = fechaEntrada(entrada.vigenciaDesde, 'Vigencia desde')!;
+    if (entrada.vigenciaHasta !== undefined) data.vigencia_hasta = fechaEntrada(entrada.vigenciaHasta, 'Vigencia hasta', false);
+    const desde = data.vigencia_desde instanceof Date ? data.vigencia_desde : actual.vigencia_desde;
+    const hasta = data.vigencia_hasta === undefined ? actual.vigencia_hasta : data.vigencia_hasta instanceof Date ? data.vigencia_hasta : null;
+    if (hasta && hasta < desde) throw new ErrorAplicacion(400, 'La vigencia hasta no puede ser anterior a la vigencia desde');
+    try { await prisma.esquema_remuneracional.update({ where: { id_esquema_remuneracional: idEsquema }, data }); return this.listarEsquemas(); }
+    catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') throw new ErrorAplicacion(404, 'Esquema no encontrado'); this.conflictoConcurrente(error, 'El esquema ya existe'); }
+  }
+
+  async asignarEsquemaCargo(idEsquema: number, entrada: Record<string, unknown>) {
+    const idCargo = identificador(entrada.idCargo); const { desde, hasta } = this.intervalo(entrada);
+    try {
+      await prisma.$transaction(async (tx) => {
+        const esquema = await tx.esquema_remuneracional.findUnique({ where: { id_esquema_remuneracional: idEsquema } });
+        if (!esquema) throw new ErrorAplicacion(404, 'Esquema no encontrado');
+        if (desde < esquema.vigencia_desde || esquema.vigencia_hasta && (!hasta || hasta > esquema.vigencia_hasta)) throw new ErrorAplicacion(400, 'El default debe quedar dentro de la vigencia del esquema');
+        if (!await tx.cargo.count({ where: { id_cargo: idCargo, estado_cargo: 'activo' } })) throw new ErrorAplicacion(404, 'Cargo activo no encontrado');
+        const conflicto = await tx.asignacion_esquema_remuneracional.count({ where: { id_cargo: idCargo, id_esquema: idEsquema, activa: true, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+        if (conflicto) throw new ErrorAplicacion(409, 'El default por cargo se superpone con otra vigencia del mismo esquema');
+        await tx.asignacion_esquema_remuneracional.create({ data: { id_cargo: idCargo, id_esquema: idEsquema, vigencia_desde: desde, vigencia_hasta: hasta } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.listarEsquemas();
+    } catch (error) { this.conflictoConcurrente(error, 'La asignación por cargo cambió concurrentemente'); }
+  }
+
+  async listarTarifasEsquema(idEsquema: number, fecha?: unknown) {
+    if (!await prisma.esquema_remuneracional.count({ where: { id_esquema_remuneracional: idEsquema } })) throw new ErrorAplicacion(404, 'Esquema no encontrado');
+    const efectiva = fecha ? fechaEntrada(fecha, 'Fecha')! : null;
+    const filas = await prisma.tarifa_esquema_remuneracional.findMany({ where: { id_esquema: idEsquema, estado_revision: efectiva ? 'activa' : undefined, vigencia_desde: efectiva ? { lte: efectiva } : undefined, OR: efectiva ? [{ vigencia_hasta: null }, { vigencia_hasta: { gte: efectiva } }] : undefined }, orderBy: [{ es_excepcion: 'desc' }, { vigencia_desde: 'desc' }] });
+    const presentadas = filas.map((fila) => ({ id: fila.id_tarifa_esquema, modalidad: fila.modalidad, valor: fila.valor === null ? null : Number(fila.valor), reglaTipo: fila.regla_tipo, referencia: fila.referencia, vigenciaDesde: fila.vigencia_desde, vigenciaHasta: fila.vigencia_hasta, esExcepcion: fila.es_excepcion, estadoRevision: fila.estado_revision, causaBloqueo: fila.causa_bloqueo }));
+    return efectiva ? presentadas.slice(0, 1) : presentadas;
+  }
+
+  async crearTarifaEsquema(idEsquema: number, entrada: Record<string, unknown>) {
+    const modalidad = texto(entrada.modalidad, 20).toUpperCase(); if (!['FIJO', 'PORCENTAJE', 'REGLA'].includes(modalidad)) throw new ErrorAplicacion(400, 'Modalidad inválida');
+    const valor = entrada.valor === undefined || entrada.valor === null || entrada.valor === '' ? null : numeroNoNegativo(entrada.valor, 'Valor');
+    const reglaTipo = texto(entrada.reglaTipo, 40).toUpperCase() || null; const referencia = texto(entrada.referencia, 120) || null; const esExcepcion = entrada.esExcepcion === true; const { desde, hasta } = this.intervalo(entrada);
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (!await tx.esquema_remuneracional.count({ where: { id_esquema_remuneracional: idEsquema } })) throw new ErrorAplicacion(404, 'Esquema no encontrado');
+        const conflicto = await tx.tarifa_esquema_remuneracional.count({ where: { id_esquema: idEsquema, es_excepcion: esExcepcion, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+        if (conflicto) throw new ErrorAplicacion(409, 'La configuración se superpone con otra vigencia equivalente');
+        await tx.tarifa_esquema_remuneracional.create({ data: { id_esquema: idEsquema, modalidad, valor, regla_tipo: reglaTipo, referencia, vigencia_desde: desde, vigencia_hasta: hasta, es_excepcion: esExcepcion } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.listarTarifasEsquema(idEsquema);
+    } catch (error) { this.conflictoConcurrente(error, 'La tarifa cambió concurrentemente'); }
+  }
+
+  async revisarTarifaEsquema(idEsquema: number, idTarifa: number) {
+    const tarifa = await prisma.tarifa_esquema_remuneracional.findFirst({ where: { id_tarifa_esquema: idTarifa, id_esquema: idEsquema } });
+    if (!tarifa) throw new ErrorAplicacion(404, 'Tarifa no encontrada');
+    let causa: string | null = null;
+    if (['FIJO', 'PORCENTAJE'].includes(tarifa.modalidad) && tarifa.valor === null) causa = 'La modalidad requiere un valor';
+    if (tarifa.modalidad === 'REGLA' && (!tarifa.regla_tipo || !tarifa.referencia)) causa = 'La regla requiere tipo y referencia controlada';
+    await prisma.tarifa_esquema_remuneracional.update({ where: { id_tarifa_esquema: idTarifa }, data: { estado_revision: causa ? 'bloqueada' : 'activa', causa_bloqueo: causa } });
+    return this.listarTarifasEsquema(idEsquema);
+  }
+
+  async listarHaberes() {
+    const conceptos = await prisma.concepto_remuneracion.findMany({ where: { naturaleza_concepto: 'haber' }, include: { configuraciones_m6: { orderBy: { vigencia_desde: 'desc' } } }, orderBy: { nombre_concepto: 'asc' } });
+    return conceptos.map((item) => ({ id: item.id_concepto_remuneracion, codigo: item.codigo_m6, nombre: item.nombre_concepto, descripcion: item.descripcion_concepto, estado: item.estado_concepto, configuraciones: item.configuraciones_m6.map((config) => ({ id: config.id_configuracion_concepto, modalidad: config.modalidad, valor: config.valor === null ? null : Number(config.valor), reglaTipo: config.regla_tipo, vigenciaDesde: config.vigencia_desde, vigenciaHasta: config.vigencia_hasta, esExcepcion: config.es_excepcion, activa: config.activa })) }));
+  }
+
+  async crearHaber(entrada: Record<string, unknown>) {
+    const codigo = texto(entrada.codigo, 40).toUpperCase(); const nombre = texto(entrada.nombre, 100); const descripcion = texto(entrada.descripcion, 500) || null; const modalidad = texto(entrada.modalidad, 20).toUpperCase();
+    if (!codigo || !nombre || !['FIJO', 'PORCENTAJE', 'REGLA'].includes(modalidad)) throw new ErrorAplicacion(400, 'Código, nombre y modalidad HABER válidos son obligatorios');
+    const valor = entrada.valor === undefined || entrada.valor === null || entrada.valor === '' ? null : numeroNoNegativo(entrada.valor, 'Valor'); const reglaTipo = texto(entrada.reglaTipo, 40).toUpperCase() || null; const { desde, hasta } = this.intervalo(entrada);
+    if (['FIJO', 'PORCENTAJE'].includes(modalidad) && valor === null) throw new ErrorAplicacion(400, 'La modalidad requiere valor');
+    if (modalidad === 'REGLA' && !reglaTipo) throw new ErrorAplicacion(400, 'La modalidad REGLA requiere metadata controlada');
+    try {
+      await prisma.$transaction(async (tx) => { const concepto = await tx.concepto_remuneracion.create({ data: { codigo_m6: codigo, nombre_concepto: nombre, descripcion_concepto: descripcion, naturaleza_concepto: 'haber' } }); await tx.configuracion_concepto_remuneracion.create({ data: { id_concepto: concepto.id_concepto_remuneracion, modalidad, valor, regla_tipo: reglaTipo, vigencia_desde: desde, vigencia_hasta: hasta } }); });
+      return this.listarHaberes();
+    } catch (error) { this.conflictoConcurrente(error, 'Ya existe un concepto con ese código o nombre'); }
+  }
+
+  async actualizarHaber(idConcepto: number, entrada: Record<string, unknown>) {
+    const actual = await prisma.concepto_remuneracion.findUnique({ where: { id_concepto_remuneracion: idConcepto } });
+    if (!actual || actual.naturaleza_concepto !== 'haber') throw new ErrorAplicacion(404, 'HABER no encontrado');
+    const data: Prisma.concepto_remuneracionUpdateInput = {};
+    if (entrada.nombre !== undefined) { const nombre = texto(entrada.nombre, 100); if (!nombre) throw new ErrorAplicacion(400, 'Nombre obligatorio'); data.nombre_concepto = nombre; }
+    if (entrada.descripcion !== undefined) data.descripcion_concepto = texto(entrada.descripcion, 500) || null;
+    if (entrada.estado !== undefined) { const estado = texto(entrada.estado, 20).toLowerCase(); if (!['activo', 'inactivo'].includes(estado)) throw new ErrorAplicacion(400, 'Estado inválido'); data.estado_concepto = estado; }
+    await prisma.concepto_remuneracion.update({ where: { id_concepto_remuneracion: idConcepto }, data }); return this.listarHaberes();
+  }
+
+  async crearConfiguracionHaber(idConcepto: number, entrada: Record<string, unknown>) {
+    const concepto = await prisma.concepto_remuneracion.findUnique({ where: { id_concepto_remuneracion: idConcepto } }); if (!concepto || concepto.naturaleza_concepto !== 'haber') throw new ErrorAplicacion(404, 'HABER no encontrado');
+    const modalidad = texto(entrada.modalidad, 20).toUpperCase(); if (!['FIJO', 'PORCENTAJE', 'REGLA'].includes(modalidad)) throw new ErrorAplicacion(400, 'Modalidad inválida');
+    const valor = entrada.valor === undefined || entrada.valor === null || entrada.valor === '' ? null : numeroNoNegativo(entrada.valor, 'Valor'); const reglaTipo = texto(entrada.reglaTipo, 40).toUpperCase() || null; const esExcepcion = entrada.esExcepcion === true; const { desde, hasta } = this.intervalo(entrada);
+    if (['FIJO', 'PORCENTAJE'].includes(modalidad) && valor === null) throw new ErrorAplicacion(400, 'La modalidad requiere valor'); if (modalidad === 'REGLA' && !reglaTipo) throw new ErrorAplicacion(400, 'REGLA requiere metadata controlada');
+    try {
+      await prisma.$transaction(async (tx) => { const conflicto = await tx.configuracion_concepto_remuneracion.count({ where: { id_concepto: idConcepto, es_excepcion: esExcepcion, activa: true, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } }); if (conflicto) throw new ErrorAplicacion(409, 'La configuración del HABER se superpone con otra vigencia equivalente'); await tx.configuracion_concepto_remuneracion.create({ data: { id_concepto: idConcepto, modalidad, valor, regla_tipo: reglaTipo, vigencia_desde: desde, vigencia_hasta: hasta, es_excepcion: esExcepcion } }); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.listarHaberes();
+    } catch (error) { this.conflictoConcurrente(error, 'La configuración del HABER cambió concurrentemente'); }
+  }
+
+  async resolverConfiguracionHaber(idConcepto: number, fecha: unknown) {
+    const dia = fechaEntrada(fecha, 'Fecha')!;
+    const configuracion = await prisma.configuracion_concepto_remuneracion.findFirst({ where: { id_concepto: idConcepto, activa: true, vigencia_desde: { lte: dia }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: dia } }] }, orderBy: [{ es_excepcion: 'desc' }, { vigencia_desde: 'desc' }] });
+    if (!configuracion) throw new ErrorAplicacion(404, 'No existe configuración HABER aplicable para la fecha');
+    return { id: configuracion.id_configuracion_concepto, modalidad: configuracion.modalidad, valor: configuracion.valor === null ? null : Number(configuracion.valor), reglaTipo: configuracion.regla_tipo, vigenciaDesde: configuracion.vigencia_desde, vigenciaHasta: configuracion.vigencia_hasta, esExcepcion: configuracion.es_excepcion };
+  }
 }

@@ -28,6 +28,7 @@ type MenuItem = {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   permission?: string;
+  permissions?: string[];
 };
 
 type MenuGroupDefinition = {
@@ -84,6 +85,7 @@ const menuGroups: MenuGroupDefinition[] = [
     icon: BriefcaseBusiness,
     items: [
       { path: '/empleados', label: 'Empleados', icon: BriefcaseBusiness, permission: 'CU155' },
+      { path: '/esquemas-remuneracionales', label: 'Esquemas y Haberes', icon: WalletCards, permissions: ['CU162', 'CU163', 'CU164', 'CU165', 'CU166'] },
     ],
   },
   {
@@ -174,7 +176,8 @@ const DashboardWrapper: React.FC = () => {
   const location = useLocation();
 
   const canSee = (item: MenuItem) =>
-    !item.permission || Boolean(sesion?.permisos.includes(item.permission));
+    (!item.permission || Boolean(sesion?.permisos.includes(item.permission))) &&
+    (!item.permissions || item.permissions.some((permiso) => sesion?.permisos.includes(permiso)));
 
   const visibleGroups = menuGroups
     .map((group) => ({ ...group, items: group.items.filter(canSee) }))
