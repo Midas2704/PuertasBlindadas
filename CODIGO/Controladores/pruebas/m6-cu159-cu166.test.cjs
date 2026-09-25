@@ -126,8 +126,8 @@ test('M6 T2 CU159-CU166 configura esquemas y HABER sin calcular remuneraciones',
     }finally{if(id)await borrarConcepto(id)}
   });
 
-  await t.test('permisos CU159-CU166 existen sin perfiles inventados ni CU167',async()=>{
-    assert.equal(codigosTodosLosCU.length,166);assert.equal(codigosTodosLosCU.includes('CU167'),false);
+  await t.test('permisos CU159-CU166 permanecen sin perfiles inventados',async()=>{
+    assert.equal(codigosTodosLosCU.length,171);assert.equal(codigosTodosLosCU.includes('CU172'),false);
     for(let numero=159;numero<=166;numero++)assert.deepEqual(matrizPermisosPorCU[`CU${numero}`],[]);
     assert.equal(operacionesPermiso.asignarEsquemaEmpleado,'CU159');assert.equal(operacionesPermiso.asignarHaberEmpleado,'CU160');assert.equal(operacionesPermiso.actualizarConfiguracionDocumental,'CU161');assert.equal(operacionesPermiso.crearEsquema,'CU162');assert.equal(operacionesPermiso.crearTarifaEsquema,'CU163');assert.equal(operacionesPermiso.revisarTarifaEsquema,'CU164');assert.equal(operacionesPermiso.crearHaber,'CU165');assert.equal(operacionesPermiso.crearConfiguracionHaber,'CU166');
     let ejecutado=false;const fachada=new C_Finanzas({autorizar:async()=>{const e=new Error('No autorizado');e.estado=403;throw e;}},{},{},{},{},{},{listarEsquemas:async()=>{ejecutado=true}});await assert.rejects(fachada.ejecutar('listarEsquemas',{contexto:{}}),e=>e.estado===403);assert.equal(ejecutado,false);

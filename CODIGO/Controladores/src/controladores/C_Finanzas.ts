@@ -40,7 +40,12 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'obtenerConfiguracionDocumental' | 'actualizarConfiguracionDocumental'
   | 'listarEsquemas' | 'catalogoCargosEsquemas' | 'crearEsquema' | 'actualizarEsquema' | 'asignarEsquemaCargo'
   | 'listarTarifasEsquema' | 'crearTarifaEsquema' | 'revisarTarifaEsquema'
-  | 'listarHaberes' | 'crearHaber' | 'actualizarHaber' | 'crearConfiguracionHaber' | 'resolverConfiguracionHaber';
+  | 'listarHaberes' | 'crearHaber' | 'actualizarHaber' | 'crearConfiguracionHaber' | 'resolverConfiguracionHaber'
+  | 'listarParametrosRemuneracionales' | 'crearParametroRemuneracional' | 'actualizarParametroRemuneracional' | 'resolverParametroRemuneracional' | 'listarTramosImpuestoRenta' | 'crearTramoImpuestoRenta'
+  | 'listarConceptosDeduccionAporte' | 'crearConceptoDeduccionAporte' | 'actualizarConceptoDeduccionAporte'
+  | 'listarConfiguracionProrrateo' | 'crearConfiguracionProrrateo'
+  | 'listarPoliticasConservacion' | 'crearPoliticaConservacion'
+  | 'listarMediosPagoM6' | 'crearMedioPagoM6' | 'actualizarMedioPagoM6';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -150,6 +155,22 @@ export class C_Finanzas {
       case 'actualizarHaber': return this.m6.actualizarHaber(identificador(parametros.id), cuerpo);
       case 'crearConfiguracionHaber': return this.m6.crearConfiguracionHaber(identificador(parametros.id), cuerpo);
       case 'resolverConfiguracionHaber': return this.m6.resolverConfiguracionHaber(identificador(parametros.id), solicitud.consulta?.fecha);
+      case 'listarParametrosRemuneracionales': return this.m6.listarParametrosRemuneracionales(solicitud.consulta?.tipo);
+      case 'crearParametroRemuneracional': return this.m6.crearParametroRemuneracional(cuerpo);
+      case 'actualizarParametroRemuneracional': return this.m6.actualizarParametroRemuneracional(identificador(parametros.id), cuerpo);
+      case 'resolverParametroRemuneracional': return this.m6.resolverParametroRemuneracional(solicitud.consulta?.codigo, solicitud.consulta?.fecha);
+      case 'listarTramosImpuestoRenta': return this.m6.listarTramosImpuestoRenta(solicitud.consulta?.fecha);
+      case 'crearTramoImpuestoRenta': return this.m6.crearTramoImpuestoRenta(cuerpo);
+      case 'listarConceptosDeduccionAporte': return this.m6.listarConceptosDeduccionAporte();
+      case 'crearConceptoDeduccionAporte': return this.m6.crearConceptoDeduccionAporte(cuerpo);
+      case 'actualizarConceptoDeduccionAporte': return this.m6.actualizarConceptoDeduccionAporte(identificador(parametros.id), cuerpo);
+      case 'listarConfiguracionProrrateo': return this.m6.listarConfiguracionProrrateo(solicitud.consulta?.fecha);
+      case 'crearConfiguracionProrrateo': return this.m6.crearConfiguracionProrrateo(cuerpo);
+      case 'listarPoliticasConservacion': return this.m6.listarPoliticasConservacion(solicitud.consulta?.fecha);
+      case 'crearPoliticaConservacion': return this.m6.crearPoliticaConservacion(cuerpo);
+      case 'listarMediosPagoM6': return this.m6.listarMediosPagoM6(solicitud.consulta?.activos === 'true');
+      case 'crearMedioPagoM6': return this.m6.crearMedioPagoM6(cuerpo);
+      case 'actualizarMedioPagoM6': return this.m6.actualizarMedioPagoM6(identificador(parametros.id), cuerpo);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

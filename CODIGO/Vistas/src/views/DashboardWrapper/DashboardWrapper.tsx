@@ -86,6 +86,7 @@ const menuGroups: MenuGroupDefinition[] = [
     items: [
       { path: '/empleados', label: 'Empleados', icon: BriefcaseBusiness, permission: 'CU155' },
       { path: '/esquemas-remuneracionales', label: 'Esquemas y Haberes', icon: WalletCards, permissions: ['CU162', 'CU163', 'CU164', 'CU165', 'CU166'] },
+      { path: '/parametros-remuneraciones', label: 'Parámetros de Remuneración', icon: Settings, permissions: ['CU167', 'CU168', 'CU169', 'CU170', 'CU171'] },
     ],
   },
   {

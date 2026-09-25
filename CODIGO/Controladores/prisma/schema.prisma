@@ -633,6 +633,8 @@ model medio_pago {
   nombre_medio_pago      String           @unique @db.VarChar(80)
   descripcion_medio_pago String?
   estado_medio_pago      String           @default("activo") @db.VarChar(20)
+  codigo_medio_pago      String?          @unique @db.VarChar(40)
+  requiere_respaldo      Boolean?
   pago_cliente           pago_cliente[]
   pago_proveedor         pago_proveedor[]
 
@@ -1793,6 +1795,58 @@ model configuracion_concepto_remuneracion {
   concepto                  concepto_remuneracion  @relation(fields: [id_concepto], references: [id_concepto_remuneracion], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([id_concepto, vigencia_desde], map: "idx_configuracion_concepto_vigencia")
+  @@schema("finanzas")
+}
+
+model parametro_remuneracional {
+  id_parametro_remuneracional Int       @id @default(autoincrement())
+  codigo                      String    @db.VarChar(50)
+  tipo                        String    @db.VarChar(30)
+  nombre                      String    @db.VarChar(120)
+  descripcion                 String?
+  valor                       Decimal?  @db.Decimal(18, 6)
+  unidad                      String?   @db.VarChar(30)
+  vigencia_desde              DateTime  @db.Date
+  vigencia_hasta              DateTime? @db.Date
+  fuente                      String?   @db.VarChar(200)
+  referencia                  String?   @db.VarChar(300)
+  estado                      String    @default("pendiente") @db.VarChar(20)
+
+  @@unique([codigo, vigencia_desde], map: "uq_parametro_remuneracional_codigo_vigencia")
+  @@index([codigo, vigencia_desde], map: "idx_parametro_remuneracional_resolucion")
+  @@schema("finanzas")
+}
+
+model tramo_impuesto_renta {
+  id_tramo_impuesto_renta Int       @id @default(autoincrement())
+  vigencia_desde          DateTime  @db.Date
+  vigencia_hasta          DateTime? @db.Date
+  orden                   Int
+  limite_desde            Decimal   @db.Decimal(18, 6)
+  limite_hasta            Decimal?  @db.Decimal(18, 6)
+  factor                  Decimal   @db.Decimal(18, 8)
+  rebaja                  Decimal   @db.Decimal(18, 6)
+  unidad                  String    @db.VarChar(30)
+  fuente                  String?   @db.VarChar(200)
+  referencia              String?   @db.VarChar(300)
+  estado                  String    @default("activo") @db.VarChar(20)
+
+  @@unique([vigencia_desde, orden], map: "uq_tramo_impuesto_vigencia_orden")
+  @@index([vigencia_desde, vigencia_hasta], map: "idx_tramo_impuesto_vigencia")
+  @@schema("finanzas")
+}
+
+model configuracion_conservacion_documental {
+  id_configuracion_conservacion Int       @id @default(autoincrement())
+  estado                        String    @default("pendiente") @db.VarChar(20)
+  criterio_descriptivo          String?
+  fuente                        String?   @db.VarChar(200)
+  referencia                    String?   @db.VarChar(300)
+  vigencia_desde                DateTime  @db.Date
+  vigencia_hasta                DateTime? @db.Date
+
+  @@unique([vigencia_desde], map: "uq_conservacion_documental_vigencia")
+  @@index([vigencia_desde, vigencia_hasta], map: "idx_conservacion_documental_vigencia")
   @@schema("finanzas")
 }
 

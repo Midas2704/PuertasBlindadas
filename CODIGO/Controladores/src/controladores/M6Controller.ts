@@ -24,6 +24,18 @@ const fechaEntrada = (valor: unknown, nombre: string, obligatoria = true) => {
   return fecha;
 };
 
+const decimalOpcional = (valor: unknown, nombre: string) => {
+  if (valor === undefined || valor === null || valor === '') return null;
+  const numero = numeroNoNegativo(valor, nombre);
+  return new Prisma.Decimal(numero);
+};
+
+const enteroPositivo = (valor: unknown, nombre: string) => {
+  const numero = Number(valor);
+  if (!Number.isInteger(numero) || numero <= 0) throw new ErrorAplicacion(400, `${nombre} debe ser un entero positivo`);
+  return numero;
+};
+
 export class M6Controller {
   async crearEmpleado(entrada: Record<string, unknown>) {
     const rut = validarYNormalizarRut(entrada.rut);
@@ -597,5 +609,194 @@ export class M6Controller {
     const configuracion = await prisma.configuracion_concepto_remuneracion.findFirst({ where: { id_concepto: idConcepto, activa: true, vigencia_desde: { lte: dia }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: dia } }] }, orderBy: [{ es_excepcion: 'desc' }, { vigencia_desde: 'desc' }] });
     if (!configuracion) throw new ErrorAplicacion(404, 'No existe configuración HABER aplicable para la fecha');
     return { id: configuracion.id_configuracion_concepto, modalidad: configuracion.modalidad, valor: configuracion.valor === null ? null : Number(configuracion.valor), reglaTipo: configuracion.regla_tipo, vigenciaDesde: configuracion.vigencia_desde, vigenciaHasta: configuracion.vigencia_hasta, esExcepcion: configuracion.es_excepcion };
+  }
+
+  private presentarParametro(item: {
+    id_parametro_remuneracional: number; codigo: string; tipo: string; nombre: string; descripcion: string | null;
+    valor: Prisma.Decimal | null; unidad: string | null; vigencia_desde: Date; vigencia_hasta: Date | null;
+    fuente: string | null; referencia: string | null; estado: string;
+  }) {
+    return { id: item.id_parametro_remuneracional, codigo: item.codigo, tipo: item.tipo, nombre: item.nombre, descripcion: item.descripcion, valor: item.valor === null ? null : Number(item.valor), unidad: item.unidad, vigenciaDesde: item.vigencia_desde, vigenciaHasta: item.vigencia_hasta, fuente: item.fuente, referencia: item.referencia, estado: item.estado };
+  }
+
+  async listarParametrosRemuneracionales(tipo?: unknown) {
+    const filtro = texto(tipo, 30).toUpperCase();
+    const permitidos = ['LEGAL', 'PREVISIONAL', 'TRIBUTARIO'];
+    if (filtro && !permitidos.includes(filtro)) throw new ErrorAplicacion(400, 'Tipo de parámetro inválido');
+    const filas = await prisma.parametro_remuneracional.findMany({ where: { tipo: filtro || { in: permitidos } }, orderBy: [{ codigo: 'asc' }, { vigencia_desde: 'desc' }] });
+    return filas.map((item) => this.presentarParametro(item));
+  }
+
+  private async crearParametroTipado(entrada: Record<string, unknown>, tipos: string[]) {
+    const codigo = texto(entrada.codigo, 50).toUpperCase();
+    const tipoEntrada = texto(entrada.tipo, 30).toUpperCase();
+    const tipo = tipos.length === 1 ? tipos[0] : tipoEntrada;
+    const nombre = texto(entrada.nombre, 120);
+    const descripcion = texto(entrada.descripcion, 1000) || null;
+    const valor = decimalOpcional(entrada.valor, 'Valor');
+    const unidad = texto(entrada.unidad, 30).toUpperCase() || null;
+    const fuente = texto(entrada.fuente, 200) || null;
+    const referencia = texto(entrada.referencia, 300) || null;
+    const estado = texto(entrada.estado || 'pendiente', 20).toLowerCase();
+    const { desde, hasta } = this.intervalo(entrada);
+    if (!codigo || !nombre || !tipos.includes(tipo)) throw new ErrorAplicacion(400, 'Código, tipo y nombre válidos son obligatorios');
+    if (!['pendiente', 'activo', 'inactivo'].includes(estado)) throw new ErrorAplicacion(400, 'Estado de parámetro inválido');
+    if (estado === 'activo' && valor === null && tipo !== 'PRORRATEO') throw new ErrorAplicacion(400, 'Un parámetro activo requiere valor');
+    try {
+      await prisma.$transaction(async (tx) => {
+        const conflicto = await tx.parametro_remuneracional.count({ where: { codigo, estado: { not: 'inactivo' }, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+        if (conflicto) throw new ErrorAplicacion(409, 'La vigencia del parámetro se superpone con otra configuración');
+        await tx.parametro_remuneracional.create({ data: { codigo, tipo, nombre, descripcion, valor, unidad, vigencia_desde: desde, vigencia_hasta: hasta, fuente, referencia, estado } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return tipo === 'PRORRATEO' ? this.listarConfiguracionProrrateo() : this.listarParametrosRemuneracionales();
+    } catch (error) { this.conflictoConcurrente(error, 'El parámetro cambió concurrentemente'); }
+  }
+
+  async crearParametroRemuneracional(entrada: Record<string, unknown>) {
+    return this.crearParametroTipado(entrada, ['LEGAL', 'PREVISIONAL', 'TRIBUTARIO']);
+  }
+
+  async actualizarParametroRemuneracional(id: number, entrada: Record<string, unknown>) {
+    const actual = await prisma.parametro_remuneracional.findUnique({ where: { id_parametro_remuneracional: id } });
+    if (!actual || actual.tipo === 'PRORRATEO') throw new ErrorAplicacion(404, 'Parámetro remuneracional no encontrado');
+    const data: Prisma.parametro_remuneracionalUpdateInput = {};
+    if (entrada.nombre !== undefined) { const nombre = texto(entrada.nombre, 120); if (!nombre) throw new ErrorAplicacion(400, 'Nombre obligatorio'); data.nombre = nombre; }
+    if (entrada.descripcion !== undefined) data.descripcion = texto(entrada.descripcion, 1000) || null;
+    if (entrada.fuente !== undefined) data.fuente = texto(entrada.fuente, 200) || null;
+    if (entrada.referencia !== undefined) data.referencia = texto(entrada.referencia, 300) || null;
+    if (entrada.estado !== undefined) { const estado = texto(entrada.estado, 20).toLowerCase(); if (!['pendiente', 'activo', 'inactivo'].includes(estado)) throw new ErrorAplicacion(400, 'Estado inválido'); if (estado === 'activo' && actual.valor === null) throw new ErrorAplicacion(400, 'Un parámetro activo requiere valor'); data.estado = estado; }
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (data.estado === 'activo') {
+          const conflicto = await tx.parametro_remuneracional.count({ where: { id_parametro_remuneracional: { not: id }, codigo: actual.codigo, estado: { not: 'inactivo' }, vigencia_desde: actual.vigencia_hasta ? { lte: actual.vigencia_hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: actual.vigencia_desde } }] } });
+          if (conflicto) throw new ErrorAplicacion(409, 'La vigencia del parámetro se superpone con otra configuración');
+        }
+        await tx.parametro_remuneracional.update({ where: { id_parametro_remuneracional: id }, data });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.listarParametrosRemuneracionales();
+    } catch (error) { this.conflictoConcurrente(error, 'El parámetro cambió concurrentemente'); }
+  }
+
+  async resolverParametroRemuneracional(codigoEntrada: unknown, fecha: unknown) {
+    const codigo = texto(codigoEntrada, 50).toUpperCase(); const dia = fechaEntrada(fecha, 'Fecha')!;
+    const filas = await prisma.parametro_remuneracional.findMany({ where: { codigo, tipo: { in: ['LEGAL', 'PREVISIONAL', 'TRIBUTARIO'] }, estado: 'activo', vigencia_desde: { lte: dia }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: dia } }] } });
+    if (filas.length === 0) throw new ErrorAplicacion(404, 'No existe parámetro efectivo para la fecha');
+    if (filas.length !== 1) throw new ErrorAplicacion(409, 'La vigencia del parámetro es ambigua');
+    return this.presentarParametro(filas[0]);
+  }
+
+  async listarTramosImpuestoRenta(fecha?: unknown) {
+    const dia = fecha ? fechaEntrada(fecha, 'Fecha')! : null;
+    const filas = await prisma.tramo_impuesto_renta.findMany({ where: dia ? { estado: 'activo', vigencia_desde: { lte: dia }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: dia } }] } : undefined, orderBy: [{ vigencia_desde: 'desc' }, { orden: 'asc' }] });
+    if (dia && new Set(filas.map((item) => `${item.vigencia_desde.toISOString()}|${item.vigencia_hasta?.toISOString() || ''}`)).size > 1) throw new ErrorAplicacion(409, 'Existe más de un conjunto tributario efectivo para la fecha');
+    return filas.map((item) => ({ id: item.id_tramo_impuesto_renta, vigenciaDesde: item.vigencia_desde, vigenciaHasta: item.vigencia_hasta, orden: item.orden, limiteDesde: Number(item.limite_desde), limiteHasta: item.limite_hasta === null ? null : Number(item.limite_hasta), factor: Number(item.factor), rebaja: Number(item.rebaja), unidad: item.unidad, fuente: item.fuente, referencia: item.referencia, estado: item.estado }));
+  }
+
+  async crearTramoImpuestoRenta(entrada: Record<string, unknown>) {
+    const { desde, hasta } = this.intervalo(entrada); const orden = enteroPositivo(entrada.orden, 'Orden');
+    const limiteDesde = decimalOpcional(entrada.limiteDesde, 'Límite desde'); const limiteHasta = decimalOpcional(entrada.limiteHasta, 'Límite hasta');
+    const factor = decimalOpcional(entrada.factor, 'Factor'); const rebaja = decimalOpcional(entrada.rebaja, 'Rebaja'); const unidad = texto(entrada.unidad, 30).toUpperCase();
+    if (limiteDesde === null || factor === null || rebaja === null || !unidad) throw new ErrorAplicacion(400, 'Límites, factor, rebaja y unidad son obligatorios');
+    if (limiteHasta && limiteHasta.lt(limiteDesde)) throw new ErrorAplicacion(400, 'El límite hasta no puede ser menor al límite desde');
+    try {
+      await prisma.$transaction(async (tx) => {
+        const coincidentes = await tx.tramo_impuesto_renta.findMany({ where: { estado: 'activo', vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+        const mismaFecha = (valor: Date | null, esperado: Date | null) => valor?.getTime() === esperado?.getTime();
+        if (coincidentes.some((item) => item.vigencia_desde.getTime() !== desde.getTime() || !mismaFecha(item.vigencia_hasta, hasta))) throw new ErrorAplicacion(409, 'La vigencia se superpone con otro conjunto tributario');
+        const conjunto = coincidentes;
+        const finNuevo = limiteHasta ? Number(limiteHasta) : Number.POSITIVE_INFINITY; const inicioNuevo = Number(limiteDesde);
+        if (conjunto.some((item) => inicioNuevo <= (item.limite_hasta === null ? Number.POSITIVE_INFINITY : Number(item.limite_hasta)) && Number(item.limite_desde) <= finNuevo)) throw new ErrorAplicacion(409, 'El tramo se superpone con otro del mismo conjunto');
+        await tx.tramo_impuesto_renta.create({ data: { vigencia_desde: desde, vigencia_hasta: hasta, orden, limite_desde: limiteDesde, limite_hasta: limiteHasta, factor, rebaja, unidad, fuente: texto(entrada.fuente, 200) || null, referencia: texto(entrada.referencia, 300) || null } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.listarTramosImpuestoRenta();
+    } catch (error) { this.conflictoConcurrente(error, 'Los tramos cambiaron concurrentemente'); }
+  }
+
+  async listarConceptosDeduccionAporte() {
+    const filas = await prisma.concepto_remuneracion.findMany({ where: { naturaleza_concepto: { in: ['descuento', 'aporte_empleador'] } }, include: { configuraciones_m6: { orderBy: { vigencia_desde: 'desc' } } }, orderBy: { nombre_concepto: 'asc' } });
+    return filas.map((item) => ({ id: item.id_concepto_remuneracion, codigo: item.codigo_m6, nombre: item.nombre_concepto, descripcion: item.descripcion_concepto, naturaleza: item.naturaleza_concepto === 'descuento' ? 'DEDUCCION' : 'APORTE_EMPLEADOR', estado: item.estado_concepto, configuraciones: item.configuraciones_m6.map((config) => ({ id: config.id_configuracion_concepto, modalidad: config.modalidad, valor: config.valor === null ? null : Number(config.valor), reglaTipo: config.regla_tipo, vigenciaDesde: config.vigencia_desde, vigenciaHasta: config.vigencia_hasta, activa: config.activa })) }));
+  }
+
+  async crearConceptoDeduccionAporte(entrada: Record<string, unknown>) {
+    const codigo = texto(entrada.codigo, 40).toUpperCase(); const nombre = texto(entrada.nombre, 100); const naturalezaEntrada = texto(entrada.naturaleza, 30).toUpperCase();
+    const naturaleza = naturalezaEntrada === 'DEDUCCION' ? 'descuento' : naturalezaEntrada === 'APORTE_EMPLEADOR' ? 'aporte_empleador' : '';
+    const modalidad = texto(entrada.modalidad, 20).toUpperCase(); const valor = decimalOpcional(entrada.valor, 'Valor'); const reglaTipo = texto(entrada.reglaTipo, 40).toUpperCase() || null; const { desde, hasta } = this.intervalo(entrada);
+    if (!codigo || !nombre || !naturaleza || modalidad && !['FIJO', 'PORCENTAJE', 'REGLA'].includes(modalidad)) throw new ErrorAplicacion(400, 'Código, nombre y naturaleza válidos son obligatorios');
+    if (['FIJO', 'PORCENTAJE'].includes(modalidad) && valor === null) throw new ErrorAplicacion(400, 'La modalidad requiere valor');
+    if (modalidad === 'REGLA' && !reglaTipo) throw new ErrorAplicacion(400, 'La regla requiere metadata controlada');
+    try {
+      await prisma.$transaction(async (tx) => {
+        const concepto = await tx.concepto_remuneracion.create({ data: { codigo_m6: codigo, nombre_concepto: nombre, descripcion_concepto: texto(entrada.descripcion, 1000) || null, naturaleza_concepto: naturaleza } });
+        if (modalidad) await tx.configuracion_concepto_remuneracion.create({ data: { id_concepto: concepto.id_concepto_remuneracion, modalidad, valor, regla_tipo: reglaTipo, vigencia_desde: desde, vigencia_hasta: hasta } });
+      });
+      return this.listarConceptosDeduccionAporte();
+    } catch (error) { this.conflictoConcurrente(error, 'Ya existe un concepto con ese código o nombre'); }
+  }
+
+  async actualizarConceptoDeduccionAporte(id: number, entrada: Record<string, unknown>) {
+    const actual = await prisma.concepto_remuneracion.findUnique({ where: { id_concepto_remuneracion: id } });
+    if (!actual || !['descuento', 'aporte_empleador'].includes(actual.naturaleza_concepto)) throw new ErrorAplicacion(404, 'Concepto de deducción o aporte no encontrado');
+    const data: Prisma.concepto_remuneracionUpdateInput = {};
+    if (entrada.nombre !== undefined) { const nombre = texto(entrada.nombre, 100); if (!nombre) throw new ErrorAplicacion(400, 'Nombre obligatorio'); data.nombre_concepto = nombre; }
+    if (entrada.descripcion !== undefined) data.descripcion_concepto = texto(entrada.descripcion, 1000) || null;
+    if (entrada.estado !== undefined) { const estado = texto(entrada.estado, 20).toLowerCase(); if (!['activo', 'inactivo'].includes(estado)) throw new ErrorAplicacion(400, 'Estado inválido'); data.estado_concepto = estado; }
+    await prisma.concepto_remuneracion.update({ where: { id_concepto_remuneracion: id }, data });
+    return this.listarConceptosDeduccionAporte();
+  }
+
+  async listarConfiguracionProrrateo(fecha?: unknown) {
+    const dia = fecha ? fechaEntrada(fecha, 'Fecha')! : null;
+    const filas = await prisma.parametro_remuneracional.findMany({ where: { tipo: 'PRORRATEO', ...(dia ? { estado: { not: 'inactivo' }, vigencia_desde: { lte: dia }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: dia } }] } : {}) }, orderBy: [{ codigo: 'asc' }, { vigencia_desde: 'desc' }] });
+    return filas.map((item) => this.presentarParametro(item));
+  }
+
+  async crearConfiguracionProrrateo(entrada: Record<string, unknown>) {
+    return this.crearParametroTipado({ ...entrada, tipo: 'PRORRATEO' }, ['PRORRATEO']);
+  }
+
+  async listarPoliticasConservacion(fecha?: unknown) {
+    const dia = fecha ? fechaEntrada(fecha, 'Fecha')! : null;
+    const filas = await prisma.configuracion_conservacion_documental.findMany({ where: dia ? { estado: { not: 'inactiva' }, vigencia_desde: { lte: dia }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: dia } }] } : undefined, orderBy: { vigencia_desde: 'desc' } });
+    return filas.map((item) => ({ id: item.id_configuracion_conservacion, estado: item.estado, criterioDescriptivo: item.criterio_descriptivo, fuente: item.fuente, referencia: item.referencia, vigenciaDesde: item.vigencia_desde, vigenciaHasta: item.vigencia_hasta, ejecutaTratamiento: false }));
+  }
+
+  async crearPoliticaConservacion(entrada: Record<string, unknown>) {
+    const estado = texto(entrada.estado || 'pendiente', 20).toLowerCase(); const criterio = texto(entrada.criterioDescriptivo, 2000) || null; const { desde, hasta } = this.intervalo(entrada);
+    if (!['pendiente', 'configurada', 'inactiva'].includes(estado)) throw new ErrorAplicacion(400, 'Estado de política inválido');
+    if (estado === 'configurada' && !criterio) throw new ErrorAplicacion(400, 'Una política configurada requiere un criterio descriptivo');
+    try {
+      await prisma.$transaction(async (tx) => {
+        const conflicto = await tx.configuracion_conservacion_documental.count({ where: { estado: { not: 'inactiva' }, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+        if (conflicto) throw new ErrorAplicacion(409, 'La política se superpone con otra vigencia');
+        await tx.configuracion_conservacion_documental.create({ data: { estado, criterio_descriptivo: criterio, fuente: texto(entrada.fuente, 200) || null, referencia: texto(entrada.referencia, 300) || null, vigencia_desde: desde, vigencia_hasta: hasta } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.listarPoliticasConservacion();
+    } catch (error) { this.conflictoConcurrente(error, 'La política documental cambió concurrentemente'); }
+  }
+
+  async listarMediosPagoM6(soloActivos = false) {
+    const filas = await prisma.medio_pago.findMany({ where: soloActivos ? { estado_medio_pago: 'activo', codigo_medio_pago: { not: null }, requiere_respaldo: { not: null } } : undefined, orderBy: { nombre_medio_pago: 'asc' } });
+    return filas.map((item) => ({ id: item.id_medio_pago, codigo: item.codigo_medio_pago, nombre: item.nombre_medio_pago, descripcion: item.descripcion_medio_pago, estado: item.estado_medio_pago, requiereRespaldo: item.requiere_respaldo }));
+  }
+
+  async crearMedioPagoM6(entrada: Record<string, unknown>) {
+    const codigo = texto(entrada.codigo, 40).toUpperCase(); const nombre = texto(entrada.nombre, 80);
+    if (!codigo || !nombre || typeof entrada.requiereRespaldo !== 'boolean') throw new ErrorAplicacion(400, 'Código, nombre y requisito de respaldo son obligatorios');
+    try {
+      await prisma.medio_pago.create({ data: { codigo_medio_pago: codigo, nombre_medio_pago: nombre, descripcion_medio_pago: texto(entrada.descripcion, 1000) || null, requiere_respaldo: entrada.requiereRespaldo } });
+      return this.listarMediosPagoM6();
+    } catch (error) { this.conflictoConcurrente(error, 'Ya existe un medio de pago con ese código o nombre'); }
+  }
+
+  async actualizarMedioPagoM6(id: number, entrada: Record<string, unknown>) {
+    const actual = await prisma.medio_pago.findUnique({ where: { id_medio_pago: id } }); if (!actual) throw new ErrorAplicacion(404, 'Medio de pago no encontrado');
+    const data: Prisma.medio_pagoUpdateInput = {};
+    if (entrada.codigo !== undefined) { const codigo = texto(entrada.codigo, 40).toUpperCase(); if (!codigo) throw new ErrorAplicacion(400, 'Código obligatorio'); data.codigo_medio_pago = codigo; }
+    if (entrada.nombre !== undefined) { const nombre = texto(entrada.nombre, 80); if (!nombre) throw new ErrorAplicacion(400, 'Nombre obligatorio'); data.nombre_medio_pago = nombre; }
+    if (entrada.descripcion !== undefined) data.descripcion_medio_pago = texto(entrada.descripcion, 1000) || null;
+    if (entrada.requiereRespaldo !== undefined) { if (typeof entrada.requiereRespaldo !== 'boolean') throw new ErrorAplicacion(400, 'Requisito de respaldo inválido'); data.requiere_respaldo = entrada.requiereRespaldo; }
+    if (entrada.estado !== undefined) { const estado = texto(entrada.estado, 20).toLowerCase(); if (!['activo', 'inactivo'].includes(estado)) throw new ErrorAplicacion(400, 'Estado inválido'); data.estado_medio_pago = estado; }
+    try { await prisma.medio_pago.update({ where: { id_medio_pago: id }, data }); return this.listarMediosPagoM6(); }
+    catch (error) { this.conflictoConcurrente(error, 'Ya existe un medio de pago con ese código o nombre'); }
   }
 }
