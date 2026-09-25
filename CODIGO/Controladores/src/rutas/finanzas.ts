@@ -83,6 +83,18 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/hechos-remunerables/:id/tratamiento', derivar('revisarHechoRemunerable'));
   rutas.get('/retrabajos-pendientes', derivar('listarRetrabajosPendientes'));
   rutas.post('/retrabajos/:id/resolucion-remuneracional', derivar('resolverRetrabajo'));
+  rutas.post('/remuneraciones/contexto', derivar('obtenerOCrearContextoRemuneracion'));
+  rutas.get('/remuneraciones/:id', derivar('obtenerRemuneracion'));
+  rutas.post('/remuneraciones/:id/componentes-excepcionales', derivar('proponerComponenteExcepcional'));
+  rutas.post('/componentes-remuneracion/:id/resolver-excepcional', derivar('resolverComponenteExcepcional'));
+  rutas.post('/remuneraciones/:id/variables', derivar('proponerVariableRemuneracion'));
+  rutas.post('/componentes-remuneracion/:id/resolver-variable', derivar('resolverVariableRemuneracion'));
+  rutas.post('/remuneraciones/:id/valores-externos', derivar('registrarValorExterno'));
+  rutas.post('/remuneraciones/:id/ajustes', derivar('proponerAjusteManual'));
+  rutas.post('/componentes-remuneracion/:id/resolver-valor', derivar('resolverValorOAjuste'));
+  rutas.get('/remuneraciones/:id/prorrateo', derivar('obtenerContextoProrrateo'));
+  rutas.post('/remuneraciones/:id/prorrateo', derivar('proponerProrrateoIndividual'));
+  rutas.post('/componentes-remuneracion/:id/resolver-prorrateo', derivar('resolverProrrateoIndividual'));
   rutas.get('/proveedores/catalogos', derivar('catalogosProveedores'));
   rutas.get('/proveedores', derivar('listarProveedores'));
   rutas.post('/proveedores', derivar('crearProveedor'));

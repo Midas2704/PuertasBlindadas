@@ -123,7 +123,7 @@ test('M5 P8 CU127-CU131 gestiona respaldos, ajustes y saldos a favor', async t =
     });
 
     await t.test('permisos llegan a CU131 y Secretaría no ejecuta CU127/CU130', async () => {
-      assert.equal(codigosTodosLosCU.length, 173);
+      assert.equal(codigosTodosLosCU.length, 177);
       for (const cu of ['CU127', 'CU130']) assert.deepEqual([...matrizPermisosPorCU[cu]].sort(), ['contador', 'gerencia']);
       for (const cu of ['CU128', 'CU129', 'CU131']) assert.deepEqual([...matrizPermisosPorCU[cu]].sort(), ['contador', 'gerencia', 'secretaria']);
       let llamada = false;

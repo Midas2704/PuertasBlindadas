@@ -115,6 +115,7 @@ model concepto_remuneracion {
   detalle_liquidacion_remuneracion detalle_liquidacion_remuneracion[]
   asignaciones_empleado_m6         asignacion_concepto_remuneracion_empleado[]
   configuraciones_m6               configuracion_concepto_remuneracion[]
+  componentes_m6                   componente_remuneracion[]
 
   @@schema("finanzas")
 }
@@ -427,6 +428,7 @@ model empleado {
   asignaciones_esquema_remuneracional asignacion_esquema_remuneracional[]
   asignaciones_concepto_remuneracion asignacion_concepto_remuneracion_empleado[]
   tratamientos_remuneracionales tratamiento_remuneracional_ejecucion[]
+  remuneraciones_m6            remuneracion[]
 
   @@index([id_cargo], map: "idx_empleado_cargo")
   @@schema("finanzas")
@@ -1826,6 +1828,75 @@ model decision_remuneracional_retrabajo {
   @@schema("finanzas")
 }
 
+model periodo_remuneracion {
+  id_periodo_remuneracion Int            @id @default(autoincrement())
+  anio                    Int
+  mes                     Int
+  fecha_inicio            DateTime       @db.Date
+  fecha_fin               DateTime       @db.Date
+  creado_en               DateTime       @default(now()) @db.Timestamptz(6)
+  remuneraciones          remuneracion[]
+
+  @@unique([anio, mes], map: "uq_periodo_remuneracion_anio_mes")
+  @@schema("finanzas")
+}
+
+model remuneracion {
+  id_remuneracion         Int                    @id @default(autoincrement())
+  id_periodo_remuneracion Int
+  id_empleado             Int
+  reemplaza_a_id          Int?
+  estado                  String                 @default("abierta") @db.VarChar(20)
+  creado_por              BigInt
+  creado_en               DateTime               @default(now()) @db.Timestamptz(6)
+  periodo                 periodo_remuneracion   @relation(fields: [id_periodo_remuneracion], references: [id_periodo_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+  empleado                empleado               @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  creador                 usuario                @relation("remuneracion_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  reemplaza_a             remuneracion?          @relation("reemplazo_remuneracion", fields: [reemplaza_a_id, id_periodo_remuneracion, id_empleado], references: [id_remuneracion, id_periodo_remuneracion, id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  reemplazada_por         remuneracion?          @relation("reemplazo_remuneracion")
+  componentes             componente_remuneracion[]
+
+  @@unique([id_remuneracion, id_periodo_remuneracion, id_empleado], map: "uq_remuneracion_identidad_contexto")
+  @@unique([reemplaza_a_id, id_periodo_remuneracion, id_empleado], map: "uq_remuneracion_reemplazo_contexto")
+  @@index([id_periodo_remuneracion, id_empleado], map: "idx_remuneracion_periodo_empleado")
+  @@index([id_empleado, estado], map: "idx_remuneracion_empleado_estado")
+  @@schema("finanzas")
+}
+
+model componente_remuneracion {
+  id_componente_remuneracion Int                       @id @default(autoincrement())
+  id_remuneracion            Int
+  id_concepto                Int?
+  tipo                       String                    @db.VarChar(40)
+  modalidad                  String                    @default("MONTO") @db.VarChar(30)
+  descripcion                String
+  monto                      Decimal?                  @db.Decimal(14, 4)
+  direccion                  String?                   @db.VarChar(20)
+  fuente_tipo                String                    @db.VarChar(30)
+  clave_negocio              String?                   @db.VarChar(120)
+  referencia_origen          String?                   @db.VarChar(200)
+  version_origen             String?                   @db.VarChar(100)
+  fecha_origen               DateTime?                 @db.Date
+  estado_revision            String                    @default("propuesto") @db.VarChar(30)
+  motivo                     String?
+  id_componente_origen       Int?
+  tipo_relacion              String?                   @db.VarChar(30)
+  creado_por                 BigInt
+  revisado_por               BigInt?
+  fecha_revision             DateTime?                 @db.Timestamptz(6)
+  creado_en                  DateTime                  @default(now()) @db.Timestamptz(6)
+  remuneracion               remuneracion              @relation(fields: [id_remuneracion], references: [id_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+  concepto                   concepto_remuneracion?    @relation(fields: [id_concepto], references: [id_concepto_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+  creador                    usuario                   @relation("componente_remuneracion_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  revisor                    usuario?                  @relation("componente_remuneracion_revisor", fields: [revisado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  componente_origen          componente_remuneracion? @relation("componente_remuneracion_origen", fields: [id_componente_origen], references: [id_componente_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+  componentes_derivados      componente_remuneracion[] @relation("componente_remuneracion_origen")
+
+  @@index([id_remuneracion, tipo, estado_revision], map: "idx_componente_remuneracion_contexto")
+  @@index([clave_negocio], map: "idx_componente_remuneracion_clave")
+  @@schema("finanzas")
+}
+
 model configuracion_concepto_remuneracion {
   id_configuracion_concepto Int                    @id @default(autoincrement())
   id_concepto               Int
@@ -2982,6 +3053,9 @@ model usuario {
   tarea                                            tarea[]
   ejecuciones_tarea                                ejecucion_tarea[] @relation("ejecucion_tarea_ejecutor")
   decisiones_retrabajo_resueltas                   decision_remuneracional_retrabajo[] @relation("decision_retrabajo_resolutor")
+  remuneraciones_creadas                           remuneracion[] @relation("remuneracion_creador")
+  componentes_remuneracion_creados                 componente_remuneracion[] @relation("componente_remuneracion_creador")
+  componentes_remuneracion_revisados               componente_remuneracion[] @relation("componente_remuneracion_revisor")
   empleado                                         empleado?                @relation(fields: [empleado_rut_empleado], references: [rut_empleado], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_empleado_rut_empleado")
   perfil                                           perfil?                  @relation(fields: [perfil_id_perfil], references: [perfil_id_perfil], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_perfil_id_perfil")
   usuario_contrasena                               usuario_contrasena[]

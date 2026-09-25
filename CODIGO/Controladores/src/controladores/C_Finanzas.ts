@@ -46,7 +46,10 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarConfiguracionProrrateo' | 'crearConfiguracionProrrateo'
   | 'listarPoliticasConservacion' | 'crearPoliticaConservacion'
   | 'listarMediosPagoM6' | 'crearMedioPagoM6' | 'actualizarMedioPagoM6'
-  | 'listarHechosRemunerables' | 'obtenerHechoRemunerable' | 'revisarHechoRemunerable' | 'listarRetrabajosPendientes' | 'resolverRetrabajo';
+  | 'listarHechosRemunerables' | 'obtenerHechoRemunerable' | 'revisarHechoRemunerable' | 'listarRetrabajosPendientes' | 'resolverRetrabajo'
+  | 'obtenerOCrearContextoRemuneracion' | 'obtenerRemuneracion' | 'proponerComponenteExcepcional' | 'resolverComponenteExcepcional'
+  | 'proponerVariableRemuneracion' | 'resolverVariableRemuneracion' | 'registrarValorExterno' | 'proponerAjusteManual' | 'resolverValorOAjuste'
+  | 'obtenerContextoProrrateo' | 'proponerProrrateoIndividual' | 'resolverProrrateoIndividual';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -177,6 +180,18 @@ export class C_Finanzas {
       case 'revisarHechoRemunerable': return this.m6.revisarHechoRemunerable(BigInt(identificador(parametros.id)));
       case 'listarRetrabajosPendientes': return this.m6.listarRetrabajosPendientes();
       case 'resolverRetrabajo': return this.m6.resolverRetrabajo(BigInt(identificador(parametros.id)), cuerpo, actor.id);
+      case 'obtenerOCrearContextoRemuneracion': return this.m6.obtenerOCrearContextoRemuneracion(cuerpo, actor.id);
+      case 'obtenerRemuneracion': return this.m6.obtenerRemuneracion(identificador(parametros.id));
+      case 'proponerComponenteExcepcional': return this.m6.proponerComponenteExcepcional(identificador(parametros.id), cuerpo, actor.id);
+      case 'resolverComponenteExcepcional': return this.m6.resolverComponenteExcepcional(identificador(parametros.id), cuerpo, actor.id);
+      case 'proponerVariableRemuneracion': return this.m6.proponerVariableRemuneracion(identificador(parametros.id), cuerpo, actor.id);
+      case 'resolverVariableRemuneracion': return this.m6.resolverVariableRemuneracion(identificador(parametros.id), cuerpo, actor.id);
+      case 'registrarValorExterno': return this.m6.registrarValorExterno(identificador(parametros.id), cuerpo, actor.id);
+      case 'proponerAjusteManual': return this.m6.proponerAjusteManual(identificador(parametros.id), cuerpo, actor.id);
+      case 'resolverValorOAjuste': return this.m6.resolverValorOAjuste(identificador(parametros.id), cuerpo, actor.id);
+      case 'obtenerContextoProrrateo': return this.m6.obtenerContextoProrrateo(identificador(parametros.id));
+      case 'proponerProrrateoIndividual': return this.m6.proponerProrrateoIndividual(identificador(parametros.id), cuerpo, actor.id);
+      case 'resolverProrrateoIndividual': return this.m6.resolverProrrateoIndividual(identificador(parametros.id), cuerpo, actor.id);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

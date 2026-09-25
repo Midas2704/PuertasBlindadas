@@ -37,6 +37,10 @@ export const operacionesPermiso: Record<string, string> = {
  listarMediosPagoM6:'CU171', crearMedioPagoM6:'CU171', actualizarMedioPagoM6:'CU171',
  listarHechosRemunerables:'CU172', obtenerHechoRemunerable:'CU172', revisarHechoRemunerable:'CU172',
  listarRetrabajosPendientes:'CU173', resolverRetrabajo:'CU173',
+ obtenerOCrearContextoRemuneracion:'CU174', obtenerRemuneracion:'CU174', proponerComponenteExcepcional:'CU174', resolverComponenteExcepcional:'CU174',
+ proponerVariableRemuneracion:'CU175', resolverVariableRemuneracion:'CU175',
+ registrarValorExterno:'CU176', proponerAjusteManual:'CU176', resolverValorOAjuste:'CU176',
+ obtenerContextoProrrateo:'CU177', proponerProrrateoIndividual:'CU177', resolverProrrateoIndividual:'CU177',
 };
 
 const permisosAlternativosOperacion: Record<string, string[]> = {
@@ -45,6 +49,8 @@ const permisosAlternativosOperacion: Record<string, string[]> = {
  listarHaberes: ['CU166'],
  listarHechosRemunerables: ['CU173'],
  obtenerHechoRemunerable: ['CU173'],
+ obtenerOCrearContextoRemuneracion: ['CU175', 'CU176', 'CU177'],
+ obtenerRemuneracion: ['CU175', 'CU176', 'CU177'],
 };
 
 export const permisosDeOperacion = (operacion: string) => {
@@ -68,7 +74,7 @@ export const permisosM4 = Array.from({length:16}, (_, indice) => `CU${indice + 5
 export const codigosImplementados = [...new Set([...Object.values(operacionesPermiso), 'CU31','CU33'])];
 /** El perfil Administrador representa acceso integral a la matriz de CU implementados. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
-export const codigosTodosLosCU = Array.from({ length: 173 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
+export const codigosTodosLosCU = Array.from({ length: 177 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
  return numero >= 155 ? 'M6' : numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
@@ -103,6 +109,10 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU171:[],
  CU172:['CU163'],
  CU173:[],
+ CU174:[],
+ CU175:[],
+ CU176:[],
+ CU177:['CU169'],
 };
 type PerfilFuncional = 'gerencia' | 'secretaria' | 'contador';
 const G: readonly PerfilFuncional[] = ['gerencia'];
@@ -137,7 +147,7 @@ export const matrizPermisosPorCU: Record<string, readonly PerfilFuncional[]> = {
  CU158:[],
  CU159:[],CU160:[],CU161:[],CU162:[],CU163:[],CU164:[],CU165:[],CU166:[],
  CU167:[],CU168:[],CU169:[],CU170:[],CU171:[],
- CU172:[],CU173:[],
+ CU172:[],CU173:[],CU174:[],CU175:[],CU176:[],CU177:[],
 };
 
 const operacionesPersonales = new Set(['CU68','CU69','CU70']);
