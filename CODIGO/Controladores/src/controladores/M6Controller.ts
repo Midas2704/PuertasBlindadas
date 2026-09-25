@@ -36,6 +36,14 @@ const enteroPositivo = (valor: unknown, nombre: string) => {
   return numero;
 };
 
+const normalizarUnidad = (valor: unknown) => {
+  const base = texto(valor, 30).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\./g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+  if (!base) return null;
+  if (['UN', 'UND', 'UNID', 'UNIDAD', 'UNIDADES'].includes(base)) return 'UNIDAD';
+  if (['H', 'HR', 'HRS', 'HORA', 'HORAS'].includes(base)) return 'HORA';
+  return base;
+};
+
 export class M6Controller {
   async crearEmpleado(entrada: Record<string, unknown>) {
     const rut = validarYNormalizarRut(entrada.rut);
@@ -539,20 +547,23 @@ export class M6Controller {
     if (!await prisma.esquema_remuneracional.count({ where: { id_esquema_remuneracional: idEsquema } })) throw new ErrorAplicacion(404, 'Esquema no encontrado');
     const efectiva = fecha ? fechaEntrada(fecha, 'Fecha')! : null;
     const filas = await prisma.tarifa_esquema_remuneracional.findMany({ where: { id_esquema: idEsquema, estado_revision: efectiva ? 'activa' : undefined, vigencia_desde: efectiva ? { lte: efectiva } : undefined, OR: efectiva ? [{ vigencia_hasta: null }, { vigencia_hasta: { gte: efectiva } }] : undefined }, orderBy: [{ es_excepcion: 'desc' }, { vigencia_desde: 'desc' }] });
-    const presentadas = filas.map((fila) => ({ id: fila.id_tarifa_esquema, modalidad: fila.modalidad, valor: fila.valor === null ? null : Number(fila.valor), reglaTipo: fila.regla_tipo, referencia: fila.referencia, vigenciaDesde: fila.vigencia_desde, vigenciaHasta: fila.vigencia_hasta, esExcepcion: fila.es_excepcion, estadoRevision: fila.estado_revision, causaBloqueo: fila.causa_bloqueo }));
+    const presentadas = filas.map((fila) => ({ id: fila.id_tarifa_esquema, modalidad: fila.modalidad, valor: fila.valor === null ? null : Number(fila.valor), reglaTipo: fila.regla_tipo, referencia: fila.referencia, unidad: fila.unidad, tipoAplicacion: fila.tipo_aplicacion, vigenciaDesde: fila.vigencia_desde, vigenciaHasta: fila.vigencia_hasta, esExcepcion: fila.es_excepcion, estadoRevision: fila.estado_revision, causaBloqueo: fila.causa_bloqueo }));
     return efectiva ? presentadas.slice(0, 1) : presentadas;
   }
 
   async crearTarifaEsquema(idEsquema: number, entrada: Record<string, unknown>) {
     const modalidad = texto(entrada.modalidad, 20).toUpperCase(); if (!['FIJO', 'PORCENTAJE', 'REGLA'].includes(modalidad)) throw new ErrorAplicacion(400, 'Modalidad inválida');
     const valor = entrada.valor === undefined || entrada.valor === null || entrada.valor === '' ? null : numeroNoNegativo(entrada.valor, 'Valor');
-    const reglaTipo = texto(entrada.reglaTipo, 40).toUpperCase() || null; const referencia = texto(entrada.referencia, 120) || null; const esExcepcion = entrada.esExcepcion === true; const { desde, hasta } = this.intervalo(entrada);
+    const reglaTipo = texto(entrada.reglaTipo, 40).toUpperCase() || null; const referencia = texto(entrada.referencia, 120) || null; const unidad = normalizarUnidad(entrada.unidad); const tipoAplicacion = texto(entrada.tipoAplicacion, 20).toLowerCase() || null; const esExcepcion = entrada.esExcepcion === true; const { desde, hasta } = this.intervalo(entrada);
+    if (tipoAplicacion && !['global', 'por_unidad'].includes(tipoAplicacion)) throw new ErrorAplicacion(400, 'Tipo de aplicación de tarifa inválido');
+    if (tipoAplicacion === 'global' && unidad) throw new ErrorAplicacion(400, 'Una tarifa global no utiliza unidad');
+    if (tipoAplicacion === 'por_unidad' && !unidad) throw new ErrorAplicacion(400, 'Una tarifa por unidad requiere unidad');
     try {
       await prisma.$transaction(async (tx) => {
         if (!await tx.esquema_remuneracional.count({ where: { id_esquema_remuneracional: idEsquema } })) throw new ErrorAplicacion(404, 'Esquema no encontrado');
         const conflicto = await tx.tarifa_esquema_remuneracional.count({ where: { id_esquema: idEsquema, es_excepcion: esExcepcion, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
         if (conflicto) throw new ErrorAplicacion(409, 'La configuración se superpone con otra vigencia equivalente');
-        await tx.tarifa_esquema_remuneracional.create({ data: { id_esquema: idEsquema, modalidad, valor, regla_tipo: reglaTipo, referencia, vigencia_desde: desde, vigencia_hasta: hasta, es_excepcion: esExcepcion } });
+        await tx.tarifa_esquema_remuneracional.create({ data: { id_esquema: idEsquema, modalidad, valor, regla_tipo: reglaTipo, referencia, unidad, tipo_aplicacion: tipoAplicacion, vigencia_desde: desde, vigencia_hasta: hasta, es_excepcion: esExcepcion } });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.listarTarifasEsquema(idEsquema);
     } catch (error) { this.conflictoConcurrente(error, 'La tarifa cambió concurrentemente'); }
   }
@@ -798,5 +809,111 @@ export class M6Controller {
     if (entrada.estado !== undefined) { const estado = texto(entrada.estado, 20).toLowerCase(); if (!['activo', 'inactivo'].includes(estado)) throw new ErrorAplicacion(400, 'Estado inválido'); data.estado_medio_pago = estado; }
     try { await prisma.medio_pago.update({ where: { id_medio_pago: id }, data }); return this.listarMediosPagoM6(); }
     catch (error) { this.conflictoConcurrente(error, 'Ya existe un medio de pago con ese código o nombre'); }
+  }
+
+  private incluirHecho = {
+    tarea: true,
+    ejecutor: { include: { empleado_seguridad: true, empleado: true } },
+    incidencias: { include: { decision_remuneracional: true }, orderBy: { fecha_registro: 'asc' as const } },
+    tratamiento_remuneracional: { include: { esquema: true, tarifa: true } },
+  };
+
+  private presentarHecho(ejecucion: any) {
+    const tratamiento = ejecucion.tratamiento_remuneracional;
+    const empleadoSeguridad = ejecucion.ejecutor.empleado_seguridad;
+    const empleadoLegacy = ejecucion.ejecutor.empleado;
+    const mapeoAmbiguo = empleadoSeguridad && empleadoLegacy && empleadoSeguridad.id_empleado !== empleadoLegacy.id_empleado;
+    const empleado = mapeoAmbiguo ? null : empleadoSeguridad || empleadoLegacy;
+    return {
+      idEjecucion: ejecucion.id_ejecucion_tarea.toString(), idTarea: ejecucion.id_tarea.toString(),
+      tarea: ejecucion.tarea.tarea_titulo || `Tarea ${ejecucion.id_tarea.toString()}`, fecha: ejecucion.fecha_ejecucion,
+      estadoOperacional: ejecucion.estado_ejecucion, validacionProductiva: ejecucion.estado_validacion_productiva,
+      cantidad: ejecucion.cantidad === null ? null : Number(ejecucion.cantidad), unidad: ejecucion.unidad,
+      ejecutor: { id: ejecucion.ejecutor.usuario_id_usuario.toString(), nombre: [ejecucion.ejecutor.usuario_nombre_completo_primer_nombre_usuario, ejecucion.ejecutor.usuario_nombre_completo_primer_apellido_usuario].filter(Boolean).join(' ') || ejecucion.ejecutor.usuario_username || 'Usuario operacional' },
+      empleado: empleado ? { id: empleado.id_empleado, rut: empleado.rut_empleado, nombre: nombreCompleto(empleado) } : null,
+      mapeoAmbiguo,
+      retrabajos: ejecucion.incidencias.map((incidencia: any) => ({ id: incidencia.id_incidencia_retrabajo.toString(), descripcion: incidencia.descripcion, causaReferencia: incidencia.causa_referencia, causaPendiente: incidencia.causa_referencia === null, estado: incidencia.estado, responsabilidad: incidencia.responsabilidad, fecha: incidencia.fecha_registro, decision: incidencia.decision_remuneracional ? { decision: incidencia.decision_remuneracional.decision, motivo: incidencia.decision_remuneracional.motivo, idUsuarioResolutor: incidencia.decision_remuneracional.id_usuario_resolutor.toString(), fecha: incidencia.decision_remuneracional.fecha_resolucion } : null })),
+      tratamiento: tratamiento ? {
+        id: tratamiento.id_tratamiento_remuneracional, estadoRemunerabilidad: tratamiento.estado_remunerabilidad,
+        estadoValorizacion: tratamiento.estado_valorizacion, motivo: tratamiento.motivo,
+        esquema: tratamiento.esquema ? { id: tratamiento.esquema.id_esquema_remuneracional, codigo: tratamiento.esquema.codigo, nombre: tratamiento.esquema.nombre } : null,
+        tarifa: tratamiento.tarifa ? { id: tratamiento.tarifa.id_tarifa_esquema, modalidad: tratamiento.tarifa.modalidad, valor: tratamiento.tarifa.valor === null ? null : Number(tratamiento.tarifa.valor), unidad: tratamiento.tarifa.unidad, tipoAplicacion: tratamiento.tarifa.tipo_aplicacion } : null,
+        valorPropuesto: tratamiento.valor_propuesto === null ? null : Number(tratamiento.valor_propuesto),
+      } : null,
+    };
+  }
+
+  async listarHechosRemunerables() {
+    const ejecuciones = await prisma.ejecucion_tarea.findMany({ where: { estado_ejecucion: 'terminada', estado_validacion_productiva: 'validada' }, include: this.incluirHecho, orderBy: { fecha_ejecucion: 'desc' } });
+    return ejecuciones.map((ejecucion) => this.presentarHecho(ejecucion));
+  }
+
+  async obtenerHechoRemunerable(idEjecucion: bigint) {
+    const ejecucion = await prisma.ejecucion_tarea.findFirst({ where: { id_ejecucion_tarea: idEjecucion, estado_ejecucion: 'terminada', estado_validacion_productiva: 'validada' }, include: this.incluirHecho });
+    if (!ejecucion) throw new ErrorAplicacion(404, 'Ejecución terminada y validada no encontrada');
+    return this.presentarHecho(ejecucion);
+  }
+
+  async revisarHechoRemunerable(idEjecucion: bigint) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        const ejecucion = await tx.ejecucion_tarea.findUnique({ where: { id_ejecucion_tarea: idEjecucion }, include: { ejecutor: { include: { empleado_seguridad: true, empleado: true } }, incidencias: { where: { estado: 'pendiente' }, include: { decision_remuneracional: true }, orderBy: { fecha_registro: 'asc' } }, tratamiento_remuneracional: true } });
+        if (!ejecucion || ejecucion.estado_ejecucion !== 'terminada' || ejecucion.estado_validacion_productiva !== 'validada') throw new ErrorAplicacion(409, 'La ejecución no está terminada y validada productivamente');
+        const seguridad = ejecucion.ejecutor.empleado_seguridad; const legacy = ejecucion.ejecutor.empleado;
+        let empleado = seguridad || legacy; let estadoRemunerabilidad = 'remunerable'; let estadoValorizacion = 'pendiente'; let motivo: string | null = null;
+        let idEsquema: number | null = null; let idTarifa: number | null = null; let valorPropuesto: Prisma.Decimal | null = null;
+        if (seguridad && legacy && seguridad.id_empleado !== legacy.id_empleado) { empleado = null; estadoRemunerabilidad = 'conflicto'; motivo = 'Las asociaciones Usuario→Empleado son incompatibles'; }
+        else if (!empleado) { estadoRemunerabilidad = 'pendiente'; motivo = 'Pendiente de correspondencia Usuario→Empleado'; }
+        if (empleado) {
+          const fecha = ejecucion.fecha_ejecucion;
+          let asignaciones = await tx.asignacion_esquema_remuneracional.findMany({ where: { id_empleado: empleado.id_empleado, activa: true, vigencia_desde: { lte: fecha }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }], esquema: { estado: 'activo', vigencia_desde: { lte: fecha }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }] } } });
+          if (!asignaciones.length && empleado.id_cargo) asignaciones = await tx.asignacion_esquema_remuneracional.findMany({ where: { id_cargo: empleado.id_cargo, activa: true, vigencia_desde: { lte: fecha }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }], esquema: { estado: 'activo', vigencia_desde: { lte: fecha }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }] } } });
+          if (!asignaciones.length) motivo = motivo || 'No existe esquema aplicable para la fecha de ejecución';
+          else if (asignaciones.length > 1) { estadoValorizacion = 'conflicto'; motivo = 'Existen múltiples esquemas aplicables'; }
+          else {
+            idEsquema = asignaciones[0].id_esquema;
+            const tarifas = await tx.tarifa_esquema_remuneracional.findMany({ where: { id_esquema: idEsquema, estado_revision: 'activa', vigencia_desde: { lte: fecha }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }] } });
+            if (!tarifas.length) motivo = motivo || 'No existe tarifa activa para la fecha de ejecución';
+            else if (tarifas.length > 1) { estadoValorizacion = 'conflicto'; motivo = 'Existen múltiples tarifas aplicables'; }
+            else {
+              const tarifa = tarifas[0]; idTarifa = tarifa.id_tarifa_esquema;
+              if (tarifa.modalidad === 'REGLA') motivo = 'La tarifa REGLA no tiene semántica ejecutable';
+              else if (tarifa.modalidad === 'PORCENTAJE') motivo = 'La tarifa porcentual no tiene base de cálculo disponible';
+              else if (tarifa.valor === null) motivo = 'La tarifa no tiene valor configurado';
+              else if (tarifa.tipo_aplicacion === null) motivo = 'La tarifa no define si su aplicación es global o por unidad';
+              else if (tarifa.tipo_aplicacion === 'por_unidad' && (!normalizarUnidad(ejecucion.unidad) || ejecucion.cantidad === null || normalizarUnidad(tarifa.unidad) !== normalizarUnidad(ejecucion.unidad))) motivo = 'La cantidad o unidad operacional no coincide con la tarifa';
+              else { valorPropuesto = tarifa.tipo_aplicacion === 'por_unidad' ? tarifa.valor.mul(ejecucion.cantidad!) : tarifa.valor; estadoValorizacion = 'valorizado'; motivo = null; }
+            }
+          }
+        }
+        if (ejecucion.incidencias.some((incidencia) => !incidencia.decision_remuneracional)) { estadoRemunerabilidad = 'pendiente'; motivo = 'Retrabajo pendiente de decisión remuneracional'; }
+        await tx.tratamiento_remuneracional_ejecucion.upsert({ where: { id_ejecucion_tarea: idEjecucion }, create: { id_ejecucion_tarea: idEjecucion, id_empleado: empleado?.id_empleado, estado_remunerabilidad: estadoRemunerabilidad, estado_valorizacion: estadoValorizacion, motivo, id_esquema: idEsquema, id_tarifa: idTarifa, valor_propuesto: valorPropuesto }, update: { id_empleado: empleado?.id_empleado, estado_remunerabilidad: estadoRemunerabilidad, estado_valorizacion: estadoValorizacion, motivo, id_esquema: idEsquema, id_tarifa: idTarifa, valor_propuesto: valorPropuesto } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerHechoRemunerable(idEjecucion);
+    } catch (error) { this.conflictoConcurrente(error, 'El tratamiento cambió concurrentemente'); }
+  }
+
+  async listarRetrabajosPendientes() {
+    const incidencias = await prisma.incidencia_retrabajo_tarea.findMany({ where: { estado: 'pendiente', decision_remuneracional: { is: null }, ejecucion: { estado_ejecucion: 'terminada', estado_validacion_productiva: 'validada' } }, include: { ejecucion: { include: this.incluirHecho } }, orderBy: { fecha_registro: 'asc' } });
+    return incidencias.map((incidencia) => ({ ...this.presentarHecho(incidencia.ejecucion), incidencia: { id: incidencia.id_incidencia_retrabajo.toString(), descripcion: incidencia.descripcion, causaReferencia: incidencia.causa_referencia, causaPendiente: incidencia.causa_referencia === null, responsabilidad: incidencia.responsabilidad, fecha: incidencia.fecha_registro } }));
+  }
+
+  async resolverRetrabajo(idIncidencia: bigint, entrada: Record<string, unknown>, idUsuarioResolutor: bigint) {
+    const decision = texto(entrada.decision, 30).toLowerCase(); const motivo = texto(entrada.motivo, 1000);
+    if (!['remunerable', 'no_remunerable'].includes(decision)) throw new ErrorAplicacion(400, 'La decisión debe ser REMUNERABLE o NO REMUNERABLE');
+    if (!motivo) throw new ErrorAplicacion(400, 'La justificación es obligatoria');
+    const incidencia = await prisma.incidencia_retrabajo_tarea.findUnique({ where: { id_incidencia_retrabajo: idIncidencia } });
+    if (!incidencia) throw new ErrorAplicacion(404, 'Retrabajo no encontrado');
+    await this.revisarHechoRemunerable(incidencia.id_ejecucion_tarea);
+    try {
+      await prisma.$transaction(async (tx) => {
+        const actual = await tx.tratamiento_remuneracional_ejecucion.findUnique({ where: { id_ejecucion_tarea: incidencia.id_ejecucion_tarea } });
+        if (!actual) throw new ErrorAplicacion(409, 'La ejecución no tiene tratamiento remuneracional');
+        const previa = await tx.decision_remuneracional_retrabajo.findUnique({ where: { id_incidencia_retrabajo: idIncidencia } });
+        if (previa && previa.decision !== decision) throw new ErrorAplicacion(409, 'El retrabajo ya tiene una decisión remuneracional incompatible');
+        await tx.decision_remuneracional_retrabajo.upsert({ where: { id_incidencia_retrabajo: idIncidencia }, create: { id_incidencia_retrabajo: idIncidencia, id_tratamiento_remuneracional: actual.id_tratamiento_remuneracional, decision, motivo, id_usuario_resolutor: idUsuarioResolutor }, update: { decision, motivo, id_usuario_resolutor: idUsuarioResolutor, fecha_resolucion: new Date() } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.revisarHechoRemunerable(incidencia.id_ejecucion_tarea);
+    } catch (error) { this.conflictoConcurrente(error, 'El retrabajo cambió concurrentemente'); }
   }
 }

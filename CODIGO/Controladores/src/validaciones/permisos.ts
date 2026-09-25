@@ -35,12 +35,16 @@ export const operacionesPermiso: Record<string, string> = {
  listarConfiguracionProrrateo:'CU169', crearConfiguracionProrrateo:'CU169',
  listarPoliticasConservacion:'CU170', crearPoliticaConservacion:'CU170',
  listarMediosPagoM6:'CU171', crearMedioPagoM6:'CU171', actualizarMedioPagoM6:'CU171',
+ listarHechosRemunerables:'CU172', obtenerHechoRemunerable:'CU172', revisarHechoRemunerable:'CU172',
+ listarRetrabajosPendientes:'CU173', resolverRetrabajo:'CU173',
 };
 
 const permisosAlternativosOperacion: Record<string, string[]> = {
  listarEsquemas: ['CU163', 'CU164'],
  listarTarifasEsquema: ['CU164'],
  listarHaberes: ['CU166'],
+ listarHechosRemunerables: ['CU173'],
+ obtenerHechoRemunerable: ['CU173'],
 };
 
 export const permisosDeOperacion = (operacion: string) => {
@@ -64,7 +68,7 @@ export const permisosM4 = Array.from({length:16}, (_, indice) => `CU${indice + 5
 export const codigosImplementados = [...new Set([...Object.values(operacionesPermiso), 'CU31','CU33'])];
 /** El perfil Administrador representa acceso integral a la matriz de CU implementados. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
-export const codigosTodosLosCU = Array.from({ length: 171 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
+export const codigosTodosLosCU = Array.from({ length: 173 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
  return numero >= 155 ? 'M6' : numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
@@ -97,6 +101,8 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU169:[],
  CU170:[],
  CU171:[],
+ CU172:['CU163'],
+ CU173:[],
 };
 type PerfilFuncional = 'gerencia' | 'secretaria' | 'contador';
 const G: readonly PerfilFuncional[] = ['gerencia'];
@@ -131,6 +137,7 @@ export const matrizPermisosPorCU: Record<string, readonly PerfilFuncional[]> = {
  CU158:[],
  CU159:[],CU160:[],CU161:[],CU162:[],CU163:[],CU164:[],CU165:[],CU166:[],
  CU167:[],CU168:[],CU169:[],CU170:[],CU171:[],
+ CU172:[],CU173:[],
 };
 
 const operacionesPersonales = new Set(['CU68','CU69','CU70']);

@@ -426,6 +426,7 @@ model empleado {
   relaciones_laborales     relacion_laboral_empleado[]
   asignaciones_esquema_remuneracional asignacion_esquema_remuneracional[]
   asignaciones_concepto_remuneracion asignacion_concepto_remuneracion_empleado[]
+  tratamientos_remuneracionales tratamiento_remuneracional_ejecucion[]
 
   @@index([id_cargo], map: "idx_empleado_cargo")
   @@schema("finanzas")
@@ -1726,6 +1727,7 @@ model esquema_remuneracional {
   vigencia_hasta             DateTime?                            @db.Date
   asignaciones               asignacion_esquema_remuneracional[]
   tarifas                    tarifa_esquema_remuneracional[]
+  tratamientos_remuneracionales tratamiento_remuneracional_ejecucion[]
 
   @@index([estado, vigencia_desde], map: "idx_esquema_remuneracional_estado_vigencia")
   @@schema("finanzas")
@@ -1771,14 +1773,56 @@ model tarifa_esquema_remuneracional {
   valor             Decimal?                @db.Decimal(14, 4)
   regla_tipo        String?                 @db.VarChar(40)
   referencia        String?                 @db.VarChar(120)
+  unidad            String?                 @db.VarChar(30)
+  tipo_aplicacion   String?                 @db.VarChar(20)
   vigencia_desde    DateTime                @db.Date
   vigencia_hasta    DateTime?               @db.Date
   es_excepcion      Boolean                 @default(false)
   estado_revision   String                  @default("pendiente") @db.VarChar(20)
   causa_bloqueo     String?
   esquema           esquema_remuneracional @relation(fields: [id_esquema], references: [id_esquema_remuneracional], onDelete: Restrict, onUpdate: NoAction)
+  tratamientos_remuneracionales tratamiento_remuneracional_ejecucion[]
 
   @@index([id_esquema, vigencia_desde], map: "idx_tarifa_esquema_vigencia")
+  @@schema("finanzas")
+}
+
+model tratamiento_remuneracional_ejecucion {
+  id_tratamiento_remuneracional Int       @id @default(autoincrement())
+  id_ejecucion_tarea              BigInt    @unique
+  id_empleado                     Int?
+  estado_remunerabilidad          String    @default("pendiente") @db.VarChar(30)
+  estado_valorizacion             String    @default("pendiente") @db.VarChar(30)
+  motivo                          String?
+  id_esquema                      Int?
+  id_tarifa                       Int?
+  valor_propuesto                 Decimal?  @db.Decimal(14, 4)
+  creado_en                       DateTime  @default(now()) @db.Timestamptz(6)
+  actualizado_en                  DateTime  @updatedAt @db.Timestamptz(6)
+  ejecucion                       ejecucion_tarea @relation(fields: [id_ejecucion_tarea], references: [id_ejecucion_tarea], onDelete: Restrict, onUpdate: NoAction)
+  empleado                        empleado? @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  esquema                         esquema_remuneracional? @relation(fields: [id_esquema], references: [id_esquema_remuneracional], onDelete: Restrict, onUpdate: NoAction)
+  tarifa                          tarifa_esquema_remuneracional? @relation(fields: [id_tarifa], references: [id_tarifa_esquema], onDelete: Restrict, onUpdate: NoAction)
+  decisiones_retrabajo           decision_remuneracional_retrabajo[]
+
+  @@index([estado_remunerabilidad, estado_valorizacion], map: "idx_tratamiento_remuneracional_estado")
+  @@index([id_empleado], map: "idx_tratamiento_remuneracional_empleado")
+  @@schema("finanzas")
+}
+
+model decision_remuneracional_retrabajo {
+  id_decision_retrabajo          Int       @id @default(autoincrement())
+  id_incidencia_retrabajo        BigInt    @unique
+  id_tratamiento_remuneracional  Int
+  decision                       String    @db.VarChar(30)
+  motivo                         String
+  id_usuario_resolutor           BigInt
+  fecha_resolucion               DateTime  @default(now()) @db.Timestamptz(6)
+  incidencia                     incidencia_retrabajo_tarea @relation(fields: [id_incidencia_retrabajo], references: [id_incidencia_retrabajo], onDelete: Restrict, onUpdate: NoAction)
+  tratamiento                    tratamiento_remuneracional_ejecucion @relation(fields: [id_tratamiento_remuneracional], references: [id_tratamiento_remuneracional], onDelete: Restrict, onUpdate: NoAction)
+  resolutor                      usuario @relation("decision_retrabajo_resolutor", fields: [id_usuario_resolutor], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_tratamiento_remuneracional], map: "idx_decision_retrabajo_tratamiento")
   @@schema("finanzas")
 }
 
@@ -2832,6 +2876,7 @@ model tarea {
   servicio_terreno                    servicio_terreno?        @relation(fields: [id_servicio_terreno], references: [servicio_terreno_servicio_terreno_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_servicio_terreno")
   usuario                             usuario?                 @relation(fields: [id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_usuario")
   tarea_tipo                          tarea_tipo[]
+  ejecuciones                        ejecucion_tarea[]
 
   @@schema("terreno")
 }
@@ -2851,6 +2896,41 @@ model tarea_usuario {
   tarea_usuario_usuario_id BigInt
 
   @@id([tarea_usuario_tarea_id, tarea_usuario_usuario_id], map: "pk_tarea_usuario")
+  @@schema("terreno")
+}
+
+model ejecucion_tarea {
+  id_ejecucion_tarea             BigInt    @id @default(autoincrement())
+  id_tarea                       BigInt
+  id_usuario_ejecutor            BigInt
+  fecha_ejecucion                DateTime  @db.Timestamptz(6)
+  estado_ejecucion               String    @default("pendiente") @db.VarChar(20)
+  estado_validacion_productiva   String    @default("pendiente") @db.VarChar(20)
+  cantidad                       Decimal?  @db.Decimal(14, 4)
+  unidad                         String?   @db.VarChar(30)
+  tarea                          tarea     @relation(fields: [id_tarea], references: [tarea_tarea_id], onDelete: Restrict, onUpdate: NoAction)
+  ejecutor                       usuario   @relation("ejecucion_tarea_ejecutor", fields: [id_usuario_ejecutor], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  incidencias                    incidencia_retrabajo_tarea[]
+  tratamiento_remuneracional     tratamiento_remuneracional_ejecucion?
+
+  @@index([estado_ejecucion, estado_validacion_productiva, fecha_ejecucion], map: "idx_ejecucion_tarea_revision_m6")
+  @@index([id_usuario_ejecutor, fecha_ejecucion], map: "idx_ejecucion_tarea_ejecutor")
+  @@schema("terreno")
+}
+
+model incidencia_retrabajo_tarea {
+  id_incidencia_retrabajo BigInt    @id @default(autoincrement())
+  id_ejecucion_tarea      BigInt
+  descripcion             String
+  causa_referencia        String?
+  estado                  String    @default("pendiente") @db.VarChar(20)
+  responsabilidad         String?   @db.VarChar(120)
+  fecha_registro          DateTime  @default(now()) @db.Timestamptz(6)
+  ejecucion               ejecucion_tarea @relation(fields: [id_ejecucion_tarea], references: [id_ejecucion_tarea], onDelete: Restrict, onUpdate: NoAction)
+  decision_remuneracional decision_remuneracional_retrabajo?
+
+  @@index([estado, fecha_registro], map: "idx_incidencia_retrabajo_pendiente")
+  @@index([id_ejecucion_tarea], map: "idx_incidencia_retrabajo_ejecucion")
   @@schema("terreno")
 }
 
@@ -2900,6 +2980,8 @@ model usuario {
   notificacion_terreno                             notificacion_terreno[]
   servicio_terreno                                 servicio_terreno[]
   tarea                                            tarea[]
+  ejecuciones_tarea                                ejecucion_tarea[] @relation("ejecucion_tarea_ejecutor")
+  decisiones_retrabajo_resueltas                   decision_remuneracional_retrabajo[] @relation("decision_retrabajo_resolutor")
   empleado                                         empleado?                @relation(fields: [empleado_rut_empleado], references: [rut_empleado], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_empleado_rut_empleado")
   perfil                                           perfil?                  @relation(fields: [perfil_id_perfil], references: [perfil_id_perfil], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_perfil_id_perfil")
   usuario_contrasena                               usuario_contrasena[]

@@ -174,7 +174,7 @@ test('permisos y fachada aplican actores específicos CU91-CU95', async () => {
   assert.deepEqual(actores('CU94'), ['gerencia']);
   assert.deepEqual(actores('CU95'), ['contador', 'gerencia', 'secretaria']);
   for (let numero = 91; numero <= 95; numero++) assert.equal(moduloPermiso(`CU${numero}`), 'M5');
-  assert.equal(codigosTodosLosCU.length, 171);
+  assert.equal(codigosTodosLosCU.length, 173);
 
   const permisosDe = perfil => Object.entries(matrizPermisosPorCU).filter(([, perfiles]) => perfiles.includes(perfil)).map(([codigo]) => codigo);
   const m5 = new Proxy({}, { get: () => async () => ({ ok: true }) });

@@ -78,6 +78,11 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/medios-pago-remuneraciones', derivar('listarMediosPagoM6'));
   rutas.post('/medios-pago-remuneraciones', derivar('crearMedioPagoM6'));
   rutas.patch('/medios-pago-remuneraciones/:id', derivar('actualizarMedioPagoM6'));
+  rutas.get('/hechos-remunerables', derivar('listarHechosRemunerables'));
+  rutas.get('/hechos-remunerables/:id', derivar('obtenerHechoRemunerable'));
+  rutas.post('/hechos-remunerables/:id/tratamiento', derivar('revisarHechoRemunerable'));
+  rutas.get('/retrabajos-pendientes', derivar('listarRetrabajosPendientes'));
+  rutas.post('/retrabajos/:id/resolucion-remuneracional', derivar('resolverRetrabajo'));
   rutas.get('/proveedores/catalogos', derivar('catalogosProveedores'));
   rutas.get('/proveedores', derivar('listarProveedores'));
   rutas.post('/proveedores', derivar('crearProveedor'));

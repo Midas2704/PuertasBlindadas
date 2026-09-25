@@ -45,7 +45,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarConceptosDeduccionAporte' | 'crearConceptoDeduccionAporte' | 'actualizarConceptoDeduccionAporte'
   | 'listarConfiguracionProrrateo' | 'crearConfiguracionProrrateo'
   | 'listarPoliticasConservacion' | 'crearPoliticaConservacion'
-  | 'listarMediosPagoM6' | 'crearMedioPagoM6' | 'actualizarMedioPagoM6';
+  | 'listarMediosPagoM6' | 'crearMedioPagoM6' | 'actualizarMedioPagoM6'
+  | 'listarHechosRemunerables' | 'obtenerHechoRemunerable' | 'revisarHechoRemunerable' | 'listarRetrabajosPendientes' | 'resolverRetrabajo';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -171,6 +172,11 @@ export class C_Finanzas {
       case 'listarMediosPagoM6': return this.m6.listarMediosPagoM6(solicitud.consulta?.activos === 'true');
       case 'crearMedioPagoM6': return this.m6.crearMedioPagoM6(cuerpo);
       case 'actualizarMedioPagoM6': return this.m6.actualizarMedioPagoM6(identificador(parametros.id), cuerpo);
+      case 'listarHechosRemunerables': return this.m6.listarHechosRemunerables();
+      case 'obtenerHechoRemunerable': return this.m6.obtenerHechoRemunerable(BigInt(identificador(parametros.id)));
+      case 'revisarHechoRemunerable': return this.m6.revisarHechoRemunerable(BigInt(identificador(parametros.id)));
+      case 'listarRetrabajosPendientes': return this.m6.listarRetrabajosPendientes();
+      case 'resolverRetrabajo': return this.m6.resolverRetrabajo(BigInt(identificador(parametros.id)), cuerpo, actor.id);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();
