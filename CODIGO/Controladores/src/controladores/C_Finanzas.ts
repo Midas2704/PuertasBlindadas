@@ -51,7 +51,11 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'proponerVariableRemuneracion' | 'resolverVariableRemuneracion' | 'registrarValorExterno' | 'proponerAjusteManual' | 'resolverValorOAjuste'
   | 'obtenerContextoProrrateo' | 'proponerProrrateoIndividual' | 'resolverProrrateoIndividual'
   | 'consultarPeriodoRemuneracion' | 'calcularRemuneracion' | 'cerrarRemuneracion' | 'obtenerLiquidacionRemuneracion'
-  | 'cerrarPeriodoRemuneracion' | 'solicitarReaperturaRemuneracion' | 'aprobarReaperturaRemuneracion';
+  | 'cerrarPeriodoRemuneracion' | 'solicitarReaperturaRemuneracion' | 'aprobarReaperturaRemuneracion'
+  | 'crearAjustePosterior' | 'obtenerAjustePosterior' | 'postergarAjustePosterior'
+  | 'crearRegularizacionExtraordinaria' | 'obtenerRegularizacion' | 'actualizarRegularizacion' | 'cerrarRegularizacion'
+  | 'registrarAnticipo' | 'obtenerAnticipo' | 'prepararPagoAnticipo' | 'actualizarPagoAnticipo' | 'confirmarPagoAnticipo'
+  | 'listarPagosRemuneracion' | 'obtenerPagoRemuneracion' | 'prepararPagoFinal' | 'actualizarPagoFinal' | 'confirmarPagoFinal';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -201,6 +205,23 @@ export class C_Finanzas {
       case 'cerrarPeriodoRemuneracion': return this.m6.cerrarPeriodoRemuneracion(cuerpo.anio, cuerpo.mes, actor.id);
       case 'solicitarReaperturaRemuneracion': return this.m6.solicitarReaperturaRemuneracion(identificador(parametros.id), cuerpo, actor.id);
       case 'aprobarReaperturaRemuneracion': return this.m6.aprobarReaperturaRemuneracion(identificador(parametros.id), actor.id);
+      case 'crearAjustePosterior': return this.m6.crearAjustePosterior(identificador(parametros.id), cuerpo, actor.id);
+      case 'obtenerAjustePosterior': return this.m6.obtenerAjustePosterior(identificador(parametros.id));
+      case 'postergarAjustePosterior': return this.m6.postergarAjustePosterior(identificador(parametros.id), cuerpo, actor.id);
+      case 'crearRegularizacionExtraordinaria': return this.m6.crearRegularizacionExtraordinaria(identificador(parametros.id), actor.id);
+      case 'obtenerRegularizacion': return this.m6.obtenerRegularizacion(identificador(parametros.id));
+      case 'actualizarRegularizacion': return this.m6.actualizarRegularizacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'cerrarRegularizacion': return this.m6.cerrarRegularizacion(identificador(parametros.id), actor.id);
+      case 'registrarAnticipo': return this.m6.registrarAnticipo(cuerpo, actor.id);
+      case 'obtenerAnticipo': return this.m6.obtenerAnticipo(identificador(parametros.id));
+      case 'prepararPagoAnticipo': return this.m6.prepararPagoAnticipo(identificador(parametros.id), cuerpo, actor.id);
+      case 'actualizarPagoAnticipo': return this.m6.actualizarPagoAnticipo(identificador(parametros.id), cuerpo);
+      case 'confirmarPagoAnticipo': return this.m6.confirmarPagoAnticipo(identificador(parametros.id), actor.id);
+      case 'listarPagosRemuneracion': return this.m6.listarPagosRemuneracion();
+      case 'obtenerPagoRemuneracion': return this.m6.obtenerPagoRemuneracion(identificador(parametros.id));
+      case 'prepararPagoFinal': return this.m6.prepararPagoFinal(cuerpo, actor.id);
+      case 'actualizarPagoFinal': return this.m6.actualizarPagoFinal(identificador(parametros.id), cuerpo);
+      case 'confirmarPagoFinal': return this.m6.confirmarPagoFinal(identificador(parametros.id), actor.id);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

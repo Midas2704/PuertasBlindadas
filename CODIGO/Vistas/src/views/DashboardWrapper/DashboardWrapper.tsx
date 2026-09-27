@@ -90,7 +90,8 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/esquemas-remuneracionales', label: 'Esquemas y Haberes', icon: WalletCards, permissions: ['CU162', 'CU163', 'CU164', 'CU165', 'CU166'] },
       { path: '/parametros-remuneraciones', label: 'Parámetros de Remuneración', icon: Settings, permissions: ['CU167', 'CU168', 'CU169', 'CU170', 'CU171'] },
       { path: '/periodos-remuneracion', label: 'Períodos de Remuneración', icon: CalendarRange, permissions: ['CU178', 'CU181'] },
-      { path: '/detalle-remuneracion', label: 'Detalle de Remuneración', icon: SearchCheck, permissions: ['CU172', 'CU173', 'CU174', 'CU175', 'CU176', 'CU177', 'CU179', 'CU180', 'CU182'] },
+      { path: '/detalle-remuneracion', label: 'Detalle de Remuneración', icon: SearchCheck, permissions: ['CU172', 'CU173', 'CU174', 'CU175', 'CU176', 'CU177', 'CU179', 'CU180', 'CU182', 'CU183', 'CU184'] },
+      { path: '/pagos-remuneraciones', label: 'Pagos de Remuneración', icon: Banknote, permissions: ['CU185', 'CU186'] },
     ],
   },
   {

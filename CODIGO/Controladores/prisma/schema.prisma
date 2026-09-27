@@ -429,6 +429,7 @@ model empleado {
   asignaciones_concepto_remuneracion asignacion_concepto_remuneracion_empleado[]
   tratamientos_remuneracionales tratamiento_remuneracional_ejecucion[]
   remuneraciones_m6            remuneracion[]
+  anticipos_remuneracion_m6    anticipo_remuneracion[]
 
   @@index([id_cargo], map: "idx_empleado_cargo")
   @@schema("finanzas")
@@ -640,6 +641,7 @@ model medio_pago {
   requiere_respaldo      Boolean?
   pago_cliente           pago_cliente[]
   pago_proveedor         pago_proveedor[]
+  pago_remuneracion      pago_remuneracion[]
 
   @@schema("finanzas")
 }
@@ -1838,6 +1840,7 @@ model periodo_remuneracion {
   cerrado_en              DateTime?      @db.Timestamptz(6)
   cerrado_por             BigInt?
   remuneraciones          remuneracion[]
+  anticipos               anticipo_remuneracion[]
   cerrador                usuario?       @relation("periodo_remuneracion_cerrador", fields: [cerrado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([anio, mes], map: "uq_periodo_remuneracion_anio_mes")
@@ -1877,11 +1880,100 @@ model remuneracion {
   reemplaza_a             remuneracion?          @relation("reemplazo_remuneracion", fields: [reemplaza_a_id, id_periodo_remuneracion, id_empleado], references: [id_remuneracion, id_periodo_remuneracion, id_empleado], onDelete: Restrict, onUpdate: NoAction)
   reemplazada_por         remuneracion?          @relation("reemplazo_remuneracion")
   componentes             componente_remuneracion[]
+  ajustes_posteriores     ajuste_posterior_remuneracion[]
 
   @@unique([id_remuneracion, id_periodo_remuneracion, id_empleado], map: "uq_remuneracion_identidad_contexto")
   @@unique([reemplaza_a_id, id_periodo_remuneracion, id_empleado], map: "uq_remuneracion_reemplazo_contexto")
   @@index([id_periodo_remuneracion, id_empleado], map: "idx_remuneracion_periodo_empleado")
   @@index([id_empleado, estado], map: "idx_remuneracion_empleado_estado")
+  @@schema("finanzas")
+}
+
+model ajuste_posterior_remuneracion {
+  id_ajuste_posterior        Int       @id @default(autoincrement())
+  id_remuneracion            Int
+  id_empleado                Int
+  id_periodo_origen          Int
+  fecha_hallazgo             DateTime  @db.Date
+  monto                      Decimal   @db.Decimal(14, 4)
+  direccion                  String    @db.VarChar(20)
+  motivo                     String
+  tratamiento                String    @default("PENDIENTE") @db.VarChar(30)
+  id_periodo_aplicable       Int?
+  estado                     String    @default("CONFIRMADO") @db.VarChar(20)
+  clave_idempotencia         String    @unique @db.VarChar(100)
+  motivo_tratamiento         String?
+  requiere_resolucion_humana Boolean   @default(false)
+  creado_por                 BigInt
+  creado_en                  DateTime  @default(now()) @db.Timestamptz(6)
+  postergado_por             BigInt?
+  postergado_en              DateTime? @db.Timestamptz(6)
+  remuneracion               remuneracion @relation(fields: [id_remuneracion], references: [id_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+  regularizacion             regularizacion_extraordinaria?
+
+  @@index([id_remuneracion, estado], map: "idx_ajuste_posterior_remuneracion")
+  @@index([id_empleado, id_periodo_origen], map: "idx_ajuste_posterior_empleado_periodo")
+  @@schema("finanzas")
+}
+
+model regularizacion_extraordinaria {
+  id_regularizacion   Int       @id @default(autoincrement())
+  id_ajuste_posterior Int       @unique
+  monto               Decimal   @db.Decimal(14, 4)
+  motivo              String
+  estado              String    @default("ABIERTA") @db.VarChar(20)
+  creado_por          BigInt
+  creado_en           DateTime  @default(now()) @db.Timestamptz(6)
+  actualizado_por     BigInt?
+  actualizado_en      DateTime? @db.Timestamptz(6)
+  cerrado_por         BigInt?
+  cerrado_en          DateTime? @db.Timestamptz(6)
+  ajuste              ajuste_posterior_remuneracion @relation(fields: [id_ajuste_posterior], references: [id_ajuste_posterior], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([estado], map: "idx_regularizacion_extraordinaria_estado")
+  @@schema("finanzas")
+}
+
+model anticipo_remuneracion {
+  id_anticipo             Int       @id @default(autoincrement())
+  id_empleado             Int
+  id_periodo_remuneracion Int
+  modalidad               String    @db.VarChar(20)
+  valor_ingresado         Decimal   @db.Decimal(14, 4)
+  codigo_base_porcentaje  String?   @db.VarChar(50)
+  monto_final             Decimal?  @db.Decimal(14, 4)
+  estado_valorizacion     String    @db.VarChar(30)
+  clave_idempotencia      String    @unique @db.VarChar(100)
+  creado_por              BigInt
+  creado_en               DateTime  @default(now()) @db.Timestamptz(6)
+  empleado                empleado @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  periodo                 periodo_remuneracion @relation(fields: [id_periodo_remuneracion], references: [id_periodo_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_empleado, id_periodo_remuneracion], map: "idx_anticipo_empleado_periodo")
+  @@schema("finanzas")
+}
+
+/// ORIGEN FISICO PROVISIONAL: origen_tipo + origen_id queda encapsulado por FuentePagoRemuneracion.
+model pago_remuneracion {
+  id_pago_remuneracion Int       @id @default(autoincrement())
+  origen_tipo          String    @db.VarChar(30)
+  origen_id            Int
+  monto                Decimal   @db.Decimal(14, 4)
+  id_medio_pago        Int
+  respaldo             String?
+  referencia           String?   @db.VarChar(200)
+  estado               String    @default("PREPARADO") @db.VarChar(20)
+  clave_idempotencia   String    @unique @db.VarChar(100)
+  creado_por           BigInt
+  creado_en            DateTime  @default(now()) @db.Timestamptz(6)
+  confirmado_por       BigInt?
+  confirmado_en        DateTime? @db.Timestamptz(6)
+  motivo_anulacion     String?
+  anulado_por          BigInt?
+  anulado_en           DateTime? @db.Timestamptz(6)
+  medio_pago           medio_pago @relation(fields: [id_medio_pago], references: [id_medio_pago], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([origen_tipo, origen_id, estado], map: "idx_pago_remuneracion_origen")
   @@schema("finanzas")
 }
 

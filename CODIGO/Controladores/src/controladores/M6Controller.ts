@@ -3,7 +3,8 @@ import { Prisma } from '@prisma/client';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { normalizarRut, validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
-import { FuentePagoRemuneracion, FuentePagoRemuneracionNoImplementada } from '../servicios/FuentePagoRemuneracion';
+import { FuentePagoRemuneracion, FuentePagoRemuneracionPrisma } from '../servicios/FuentePagoRemuneracion';
+import { OrigenPagoRemuneracion, RepositorioPagoRemuneracionPrisma } from '../servicios/RepositorioPagoRemuneracion';
 
 type Direccion = 'asc' | 'desc';
 
@@ -54,7 +55,14 @@ const decimalMonetario = (valor: unknown, nombre: string, positivo = false) => {
 };
 
 export class M6Controller {
-  constructor(private readonly fuentePagoRemuneracion: FuentePagoRemuneracion = new FuentePagoRemuneracionNoImplementada()) {}
+  private readonly fuentePagoRemuneracion: FuentePagoRemuneracion;
+
+  constructor(
+    fuentePagoRemuneracion?: FuentePagoRemuneracion,
+    private readonly repositorioPago = new RepositorioPagoRemuneracionPrisma(),
+  ) {
+    this.fuentePagoRemuneracion = fuentePagoRemuneracion ?? new FuentePagoRemuneracionPrisma(this.repositorioPago);
+  }
 
   async crearEmpleado(entrada: Record<string, unknown>) {
     const rut = validarYNormalizarRut(entrada.rut);
@@ -955,6 +963,7 @@ export class M6Controller {
     periodo: true,
     empleado: true,
     componentes: { include: { concepto: true }, orderBy: { creado_en: 'asc' as const } },
+    ajustes_posteriores: { include: { regularizacion: true }, orderBy: { creado_en: 'asc' as const } },
   };
 
   private presentarComponente(item: any) {
@@ -970,7 +979,7 @@ export class M6Controller {
     };
   }
 
-  private presentarRemuneracion(item: any) {
+  private presentarRemuneracion(item: any, estadoPago = { fuenteDisponible: true, tienePago: false }) {
     return {
       id: item.id_remuneracion, estado: item.estado,
       periodo: { id: item.periodo.id_periodo_remuneracion, anio: item.periodo.anio, mes: item.periodo.mes, fechaInicio: item.periodo.fecha_inicio, fechaFin: item.periodo.fecha_fin, cerradoEn: item.periodo.cerrado_en },
@@ -979,6 +988,15 @@ export class M6Controller {
       reapertura: { solicitadaEn: item.reapertura_solicitada_en, solicitadaPor: item.reapertura_solicitada_por?.toString() || null, motivo: item.reapertura_motivo, aprobadaEn: item.reapertura_aprobada_en, aprobadaPor: item.reapertura_aprobada_por?.toString() || null },
       totales: { haberes: item.total_haberes === null ? null : Number(item.total_haberes), deducciones: item.total_deducciones === null ? null : Number(item.total_deducciones), aportesEmpleador: item.total_aportes_empleador === null ? null : Number(item.total_aportes_empleador), baseImponible: item.base_imponible === null ? null : Number(item.base_imponible), baseTributable: item.base_tributable === null ? null : Number(item.base_tributable), liquidoPreliminar: item.liquido_preliminar === null ? null : Number(item.liquido_preliminar) },
       componentes: item.componentes.map((componente: any) => this.presentarComponente(componente)),
+      condicionPago: estadoPago,
+      ajustesPosteriores: (item.ajustes_posteriores || []).map((ajuste: any) => ({
+        id: ajuste.id_ajuste_posterior, fechaHallazgo: ajuste.fecha_hallazgo, monto: Number(ajuste.monto),
+        direccion: ajuste.direccion, motivo: ajuste.motivo, tratamiento: ajuste.tratamiento,
+        idPeriodoOrigen: ajuste.id_periodo_origen, idPeriodoAplicable: ajuste.id_periodo_aplicable,
+        estado: ajuste.estado, motivoTratamiento: ajuste.motivo_tratamiento,
+        requiereResolucionHumana: ajuste.requiere_resolucion_humana, postergadoEn: ajuste.postergado_en,
+        regularizacion: ajuste.regularizacion ? { id: ajuste.regularizacion.id_regularizacion, monto: Number(ajuste.regularizacion.monto), motivo: ajuste.regularizacion.motivo, estado: ajuste.regularizacion.estado, cerradoEn: ajuste.regularizacion.cerrado_en } : null,
+      })),
     };
   }
 
@@ -1037,9 +1055,11 @@ export class M6Controller {
   }
 
   async obtenerRemuneracion(idRemuneracion: number) {
-    const item = await prisma.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: this.incluirRemuneracion });
-    if (!item) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
-    return this.presentarRemuneracion(item);
+    return prisma.$transaction(async tx => {
+      const item = await tx.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: this.incluirRemuneracion });
+      if (!item) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+      return this.presentarRemuneracion(item, await this.estadoPagoRemuneracion(tx, idRemuneracion));
+    });
   }
 
   async obtenerOCrearContextoRemuneracion(entrada: Record<string, unknown>, idUsuario: bigint) {
@@ -1161,6 +1181,14 @@ export class M6Controller {
         } else monto = tarifa.valor;
       }
       agregar({ tipo: 'HECHO_TERRENO', descripcion: `Hecho Terreno ${hecho.id_ejecucion_tarea.toString()}`, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `EJECUCION:${hecho.id_ejecucion_tarea.toString()}`, referencia_origen: `TRATAMIENTO:${hecho.id_tratamiento_remuneracional}`, version_origen: hecho.id_tarifa ? `TARIFA:${hecho.id_tarifa}` : null, fecha_origen: hecho.ejecucion.fecha_ejecucion, estado_revision: monto === null ? 'pendiente_valorizacion' : 'aprobado', motivo, revisado_por: monto === null ? null : idUsuario, fecha_revision: monto === null ? null : new Date() });
+    }
+    const anticipos = await tx.anticipo_remuneracion.findMany({
+      where: { id_empleado: remuneracion.id_empleado, id_periodo_remuneracion: remuneracion.id_periodo_remuneracion, monto_final: { not: null } },
+    });
+    const pagosAnticipo = await this.repositorioPago.pagosEfectivosAnticipos(tx, anticipos.map(item => item.id_anticipo));
+    const anticiposPagados = new Set(pagosAnticipo.map(item => item.idAnticipo));
+    for (const anticipo of anticipos.filter(item => anticiposPagados.has(item.id_anticipo))) {
+      agregar({ tipo: 'DEDUCCION_AUTOMATICA', descripcion: 'Anticipo efectivamente pagado', monto: anticipo.monto_final, fuente_tipo: 'AUTOMATICA', clave_negocio: `ANTICIPO:${anticipo.id_anticipo}`, referencia_origen: `PAGO_ANTICIPO:${pagosAnticipo.find(item => item.idAnticipo === anticipo.id_anticipo)!.idPago}`, estado_revision: 'aprobado', revisado_por: idUsuario, fecha_revision: new Date() });
     }
     await this.sincronizarAutomaticos(tx, idRemuneracion, componentes, ['SUELDO_BASE', 'HABER_AUTOMATICO', 'HECHO_TERRENO', 'DEDUCCION_AUTOMATICA', 'APORTE_EMPLEADOR_AUTOMATICO']);
     let baseTributable = new Prisma.Decimal(0);
@@ -1400,4 +1428,248 @@ export class M6Controller {
   async resolverProrrateoIndividual(idComponente: number, entrada: Record<string, unknown>, idUsuario: bigint) {
     return this.resolverComponente(idComponente, ['PRORRATEO'], entrada, idUsuario);
   }
+
+  private claveIdempotencia(valor: unknown) {
+    const clave = texto(valor, 100);
+    if (!clave) throw new ErrorAplicacion(400, 'La clave de idempotencia es obligatoria');
+    return clave;
+  }
+
+  async crearAjustePosterior(idRemuneracion: number, entrada: Record<string, unknown>, idUsuario: bigint) {
+    const direccion = texto(entrada.direccion, 20).toUpperCase();
+    const monto = decimalMonetario(entrada.monto, 'Monto del ajuste posterior', true);
+    const motivo = texto(entrada.motivo, 1000);
+    const fechaHallazgo = fechaEntrada(entrada.fechaHallazgo, 'Fecha del hallazgo')!;
+    const clave = this.claveIdempotencia(entrada.claveIdempotencia);
+    const motivoTratamiento = texto(entrada.motivoTratamientoPosterior, 1000) || null;
+    if (!['POSITIVO', 'NEGATIVO'].includes(direccion) || !motivo) throw new ErrorAplicacion(400, 'Dirección y motivo son obligatorios');
+    try {
+      const id = await prisma.$transaction(async tx => {
+        const existente = await tx.ajuste_posterior_remuneracion.findUnique({ where: { clave_idempotencia: clave } });
+        if (existente) return existente.id_ajuste_posterior;
+        const remuneracion = await tx.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: { periodo: true } });
+        if (!remuneracion) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+        if (remuneracion.estado !== 'cerrada') throw new ErrorAplicacion(409, 'El ajuste posterior exige una remuneración oficial CERRADA');
+        const pago = await this.estadoPagoRemuneracion(tx, idRemuneracion);
+        if (!pago.tienePago && !motivoTratamiento) throw new ErrorAplicacion(409, 'La remuneración cerrada no pagada debe corregirse por CU182 o justificar su tratamiento posterior', 'REMUNERACION_CERRADA_NO_PAGADA');
+        const hoy = new Date();
+        const relacionActual = await tx.relacion_laboral_empleado.count({ where: { id_empleado: remuneracion.id_empleado, fecha_inicio: { lte: hoy }, OR: [{ fecha_termino: null }, { fecha_termino: { gte: hoy } }] } });
+        const resolucionHumana = direccion === 'NEGATIVO' && relacionActual === 0;
+        const ajuste = await tx.ajuste_posterior_remuneracion.create({ data: {
+          id_remuneracion: idRemuneracion, id_empleado: remuneracion.id_empleado,
+          id_periodo_origen: remuneracion.id_periodo_remuneracion, fecha_hallazgo: fechaHallazgo,
+          monto, direccion, motivo, clave_idempotencia: clave, motivo_tratamiento: motivoTratamiento,
+          tratamiento: resolucionHumana ? 'RESOLUCION_HUMANA' : 'PENDIENTE',
+          requiere_resolucion_humana: resolucionHumana, creado_por: idUsuario,
+        } });
+        return ajuste.id_ajuste_posterior;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerAjustePosterior(id);
+    } catch (error) { this.conflictoConcurrente(error, 'El ajuste posterior cambió concurrentemente'); }
+  }
+
+  async obtenerAjustePosterior(idAjuste: number) {
+    const ajuste = await prisma.ajuste_posterior_remuneracion.findUnique({ where: { id_ajuste_posterior: idAjuste }, include: { regularizacion: true } });
+    if (!ajuste) throw new ErrorAplicacion(404, 'Ajuste posterior no encontrado');
+    return { id: ajuste.id_ajuste_posterior, idRemuneracion: ajuste.id_remuneracion, idEmpleado: ajuste.id_empleado, idPeriodoOrigen: ajuste.id_periodo_origen, fechaHallazgo: ajuste.fecha_hallazgo, monto: Number(ajuste.monto), direccion: ajuste.direccion, motivo: ajuste.motivo, tratamiento: ajuste.tratamiento, idPeriodoAplicable: ajuste.id_periodo_aplicable, estado: ajuste.estado, motivoTratamiento: ajuste.motivo_tratamiento, requiereResolucionHumana: ajuste.requiere_resolucion_humana, postergadoEn: ajuste.postergado_en, regularizacion: ajuste.regularizacion ? { id: ajuste.regularizacion.id_regularizacion, monto: Number(ajuste.regularizacion.monto), motivo: ajuste.regularizacion.motivo, estado: ajuste.regularizacion.estado, cerradoEn: ajuste.regularizacion.cerrado_en } : null };
+  }
+
+  async postergarAjustePosterior(idAjuste: number, entrada: Record<string, unknown>, idUsuario: bigint) {
+    const motivo = texto(entrada.motivo, 1000); if (!motivo) throw new ErrorAplicacion(400, 'El motivo de postergación es obligatorio');
+    const { anio, mes, fechaInicio, fechaFin } = this.periodoEntrada(entrada.anio, entrada.mes);
+    try {
+      await prisma.$transaction(async tx => {
+        const periodo = await tx.periodo_remuneracion.upsert({ where: { anio_mes: { anio, mes } }, create: { anio, mes, fecha_inicio: fechaInicio, fecha_fin: fechaFin }, update: {} });
+        const cambio = await tx.ajuste_posterior_remuneracion.updateMany({ where: { id_ajuste_posterior: idAjuste, postergado_en: null }, data: { tratamiento: 'POSTERGADO', id_periodo_aplicable: periodo.id_periodo_remuneracion, motivo_tratamiento: motivo, postergado_por: idUsuario, postergado_en: new Date() } });
+        if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El ajuste ya fue postergado o cambió concurrentemente');
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerAjustePosterior(idAjuste);
+    } catch (error) { this.conflictoConcurrente(error, 'La postergación cambió concurrentemente'); }
+  }
+
+  async crearRegularizacionExtraordinaria(idAjuste: number, idUsuario: bigint) {
+    try {
+      const id = await prisma.$transaction(async tx => {
+        const ajuste = await tx.ajuste_posterior_remuneracion.findUnique({ where: { id_ajuste_posterior: idAjuste }, include: { regularizacion: true } });
+        if (!ajuste) throw new ErrorAplicacion(404, 'Ajuste posterior no encontrado');
+        if (ajuste.direccion !== 'POSITIVO') throw new ErrorAplicacion(409, 'Sólo un ajuste POSITIVO puede originar una regularización');
+        if (ajuste.regularizacion) return ajuste.regularizacion.id_regularizacion;
+        const regularizacion = await tx.regularizacion_extraordinaria.create({ data: { id_ajuste_posterior: idAjuste, monto: ajuste.monto, motivo: ajuste.motivo, creado_por: idUsuario } });
+        await tx.ajuste_posterior_remuneracion.update({ where: { id_ajuste_posterior: idAjuste }, data: { tratamiento: 'REGULARIZACION' } });
+        return regularizacion.id_regularizacion;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerRegularizacion(id);
+    } catch (error) { this.conflictoConcurrente(error, 'La regularización cambió concurrentemente'); }
+  }
+
+  async obtenerRegularizacion(idRegularizacion: number) {
+    const item = await prisma.regularizacion_extraordinaria.findUnique({ where: { id_regularizacion: idRegularizacion }, include: { ajuste: true } });
+    if (!item) throw new ErrorAplicacion(404, 'Regularización no encontrada');
+    const pagada = await this.repositorioPago.tienePagoEfectivo(prisma, this.repositorioPago.regularizacion(idRegularizacion));
+    return { id: item.id_regularizacion, idAjustePosterior: item.id_ajuste_posterior, idRemuneracion: item.ajuste.id_remuneracion, idEmpleado: item.ajuste.id_empleado, idPeriodoOrigen: item.ajuste.id_periodo_origen, monto: Number(item.monto), motivo: item.motivo, estado: item.estado, cerradoEn: item.cerrado_en, pagada };
+  }
+
+  async actualizarRegularizacion(idRegularizacion: number, entrada: Record<string, unknown>, idUsuario: bigint) {
+    const monto = decimalMonetario(entrada.monto, 'Monto de regularización', true); const motivo = texto(entrada.motivo, 1000);
+    if (!motivo) throw new ErrorAplicacion(400, 'El motivo es obligatorio');
+    try {
+      await prisma.$transaction(async tx => {
+        if (await this.repositorioPago.tienePagoEfectivo(tx, this.repositorioPago.regularizacion(idRegularizacion))) throw new ErrorAplicacion(409, 'La regularización pagada es inmutable');
+        const cambio = await tx.regularizacion_extraordinaria.updateMany({ where: { id_regularizacion: idRegularizacion, estado: 'ABIERTA' }, data: { monto, motivo, actualizado_por: idUsuario, actualizado_en: new Date() } });
+        if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La regularización no está editable');
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerRegularizacion(idRegularizacion);
+    } catch (error) { this.conflictoConcurrente(error, 'La regularización cambió concurrentemente'); }
+  }
+
+  async cerrarRegularizacion(idRegularizacion: number, idUsuario: bigint) {
+    const cambio = await prisma.regularizacion_extraordinaria.updateMany({ where: { id_regularizacion: idRegularizacion, estado: 'ABIERTA', monto: { gt: 0 } }, data: { estado: 'CERRADA', cerrado_por: idUsuario, cerrado_en: new Date() } });
+    if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La regularización no puede cerrarse');
+    return this.obtenerRegularizacion(idRegularizacion);
+  }
+
+  async registrarAnticipo(entrada: Record<string, unknown>, idUsuario: bigint) {
+    const idEmpleado = enteroPositivo(entrada.idEmpleado, 'Empleado'); const modalidad = texto(entrada.modalidad, 20).toUpperCase();
+    if (!['MONTO', 'PORCENTAJE'].includes(modalidad)) throw new ErrorAplicacion(400, 'Modalidad inválida');
+    const valor = decimalMonetario(entrada.valor, 'Valor del anticipo', true); const clave = this.claveIdempotencia(entrada.claveIdempotencia);
+    const codigoBase = modalidad === 'PORCENTAJE' ? texto(entrada.codigoBasePorcentaje, 50).toUpperCase() || null : null;
+    const { anio, mes, fechaInicio, fechaFin } = this.periodoEntrada(entrada.anio, entrada.mes);
+    try {
+      const id = await prisma.$transaction(async tx => {
+        const existente = await tx.anticipo_remuneracion.findUnique({ where: { clave_idempotencia: clave } }); if (existente) return existente.id_anticipo;
+        if (!await tx.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+        const periodo = await tx.periodo_remuneracion.upsert({ where: { anio_mes: { anio, mes } }, create: { anio, mes, fecha_inicio: fechaInicio, fecha_fin: fechaFin }, update: {} });
+        if (periodo.cerrado_en) throw new ErrorAplicacion(409, 'El período global está CERRADO');
+        const cerrada = await tx.remuneracion.count({ where: { id_periodo_remuneracion: periodo.id_periodo_remuneracion, id_empleado: idEmpleado, estado: 'cerrada' } });
+        if (cerrada) throw new ErrorAplicacion(409, 'La remuneración del período ya está CERRADA', 'REMUNERACION_CERRADA_ANTICIPO');
+        // CU167 no define una semántica de parámetro para la base porcentual del anticipo.
+        // El código se conserva como antecedente, pero no se ejecuta una fórmula hasta contar con esa configuración explícita.
+        const montoFinal: Prisma.Decimal | null = modalidad === 'MONTO' ? valor : null;
+        const anticipo = await tx.anticipo_remuneracion.create({ data: { id_empleado: idEmpleado, id_periodo_remuneracion: periodo.id_periodo_remuneracion, modalidad, valor_ingresado: valor, codigo_base_porcentaje: codigoBase, monto_final: montoFinal, estado_valorizacion: montoFinal ? 'VALORIZADO' : 'PENDIENTE_VALORIZACION', clave_idempotencia: clave, creado_por: idUsuario } });
+        return anticipo.id_anticipo;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerAnticipo(id);
+    } catch (error) { this.conflictoConcurrente(error, 'El anticipo cambió concurrentemente'); }
+  }
+
+  async obtenerAnticipo(idAnticipo: number) {
+    const item = await prisma.anticipo_remuneracion.findUnique({ where: { id_anticipo: idAnticipo }, include: { empleado: true, periodo: true } });
+    if (!item) throw new ErrorAplicacion(404, 'Anticipo no encontrado');
+    const pago = await this.repositorioPago.buscarPagoEfectivo(prisma, this.repositorioPago.anticipo(idAnticipo));
+    return { id: item.id_anticipo, empleado: { id: item.id_empleado, nombre: nombreCompleto(item.empleado) }, periodo: { id: item.id_periodo_remuneracion, anio: item.periodo.anio, mes: item.periodo.mes }, modalidad: item.modalidad, valorIngresado: Number(item.valor_ingresado), codigoBasePorcentaje: item.codigo_base_porcentaje, montoFinal: item.monto_final === null ? null : Number(item.monto_final), estadoValorizacion: item.estado_valorizacion, pagado: Boolean(pago) };
+  }
+
+  private async montoPagable(tx: Prisma.TransactionClient, origen: OrigenPagoRemuneracion) {
+    if (origen.clase === 'remuneracion') {
+      const item = await tx.remuneracion.findUnique({ where: { id_remuneracion: origen.id }, include: { periodo: true } });
+      if (!item) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+      if (item.estado !== 'cerrada') throw new ErrorAplicacion(409, 'Sólo puede pagarse una remuneración CERRADA y actual');
+      if (item.liquido_preliminar === null || item.liquido_preliminar.lte(0)) throw new ErrorAplicacion(409, 'La remuneración no tiene saldo positivo pagable');
+      return item.liquido_preliminar;
+    }
+    if (origen.clase === 'regularizacion') {
+      const item = await tx.regularizacion_extraordinaria.findUnique({ where: { id_regularizacion: origen.id } });
+      if (!item) throw new ErrorAplicacion(404, 'Regularización no encontrada');
+      if (item.estado !== 'CERRADA' || item.monto.lte(0)) throw new ErrorAplicacion(409, 'Sólo puede pagarse una regularización CERRADA y positiva');
+      return item.monto;
+    }
+    if (origen.clase === 'anticipo') {
+      const item = await tx.anticipo_remuneracion.findUnique({ where: { id_anticipo: origen.id }, include: { periodo: true } });
+      if (!item) throw new ErrorAplicacion(404, 'Anticipo no encontrado');
+      if (item.monto_final === null || item.estado_valorizacion !== 'VALORIZADO') throw new ErrorAplicacion(409, 'El anticipo está PENDIENTE DE VALORIZACIÓN');
+      if (item.periodo.cerrado_en) throw new ErrorAplicacion(409, 'El período global está CERRADO');
+      if (await tx.remuneracion.count({ where: { id_periodo_remuneracion: item.id_periodo_remuneracion, id_empleado: item.id_empleado, estado: 'cerrada' } })) throw new ErrorAplicacion(409, 'La remuneración del período ya está CERRADA', 'REMUNERACION_CERRADA_ANTICIPO');
+      return item.monto_final;
+    }
+    throw new ErrorAplicacion(400, 'Origen de pago inválido');
+  }
+
+  private presentarPago(item: any) {
+    const origen = this.repositorioPago.origenDesdePago(item);
+    return { id: item.id_pago_remuneracion, origenTipo: this.repositorioPago.tipoPublico(origen), origenId: origen.id, monto: Number(item.monto), medio: item.medio_pago ? { id: item.medio_pago.id_medio_pago, codigo: item.medio_pago.codigo_medio_pago, nombre: item.medio_pago.nombre_medio_pago } : null, respaldo: item.respaldo, referencia: item.referencia, estado: item.estado, creadoEn: item.creado_en, confirmadoEn: item.confirmado_en };
+  }
+
+  private async prepararPagoRemuneracion(origen: OrigenPagoRemuneracion, entrada: Record<string, unknown>, idUsuario: bigint) {
+    const monto = decimalMonetario(entrada.monto, 'Monto del pago', true); const idMedio = enteroPositivo(entrada.idMedioPago, 'Medio de pago'); const clave = this.claveIdempotencia(entrada.claveIdempotencia);
+    const respaldo = texto(entrada.respaldo, 2000) || null; const referencia = texto(entrada.referencia, 200) || null;
+    try {
+      const id = await prisma.$transaction(async tx => {
+        const existente = await this.repositorioPago.buscarPorClave(tx, clave); if (existente) return existente.id_pago_remuneracion;
+        await this.montoPagable(tx, origen);
+        const medio = await tx.medio_pago.findUnique({ where: { id_medio_pago: idMedio } });
+        if (!medio || medio.estado_medio_pago !== 'activo' || !medio.codigo_medio_pago || medio.requiere_respaldo === null) throw new ErrorAplicacion(409, 'El medio de pago no tiene configuración M6 válida');
+        if (medio.requiere_respaldo && !respaldo) throw new ErrorAplicacion(400, 'El medio de pago exige respaldo');
+        const pago = await this.repositorioPago.crearPreparado(tx, origen, { monto, idMedioPago: idMedio, respaldo, referencia, claveIdempotencia: clave, creadoPor: idUsuario });
+        return pago.id_pago_remuneracion;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerPagoRemuneracion(id);
+    } catch (error) { this.conflictoConcurrente(error, 'La preparación del pago cambió concurrentemente'); }
+  }
+
+  async obtenerPagoRemuneracion(idPago: number) {
+    const item = await this.repositorioPago.obtener(prisma, idPago, true);
+    if (!item) throw new ErrorAplicacion(404, 'Pago de remuneración no encontrado');
+    return this.presentarPago(item);
+  }
+
+  async actualizarPagoRemuneracion(idPago: number, entrada: Record<string, unknown>) {
+    const actual = await this.repositorioPago.obtener(prisma, idPago); if (!actual) throw new ErrorAplicacion(404, 'Pago de remuneración no encontrado');
+    if (actual.estado !== 'PREPARADO') throw new ErrorAplicacion(409, 'Sólo un pago PREPARADO puede corregirse');
+    const monto = entrada.monto === undefined ? actual.monto : decimalMonetario(entrada.monto, 'Monto del pago', true);
+    const idMedio = entrada.idMedioPago === undefined ? actual.id_medio_pago : enteroPositivo(entrada.idMedioPago, 'Medio de pago');
+    const respaldo = entrada.respaldo === undefined ? actual.respaldo : texto(entrada.respaldo, 2000) || null;
+    const referencia = entrada.referencia === undefined ? actual.referencia : texto(entrada.referencia, 200) || null;
+    const medio = await prisma.medio_pago.findUnique({ where: { id_medio_pago: idMedio } });
+    if (!medio || medio.estado_medio_pago !== 'activo' || !medio.codigo_medio_pago || medio.requiere_respaldo === null) throw new ErrorAplicacion(409, 'El medio de pago no tiene configuración M6 válida');
+    if (medio.requiere_respaldo && !respaldo) throw new ErrorAplicacion(400, 'El medio de pago exige respaldo');
+    await this.repositorioPago.actualizarPreparado(prisma, idPago, { monto, idMedioPago: idMedio, respaldo, referencia });
+    return this.obtenerPagoRemuneracion(idPago);
+  }
+
+  async confirmarPagoRemuneracion(idPago: number, idUsuario: bigint) {
+    try {
+      await prisma.$transaction(async tx => {
+        const pago: any = await this.repositorioPago.obtener(tx, idPago, true);
+        if (!pago) throw new ErrorAplicacion(404, 'Pago de remuneración no encontrado');
+        if (pago.estado === 'CONFIRMADO') return;
+        if (pago.estado !== 'PREPARADO') throw new ErrorAplicacion(409, 'El pago no está PREPARADO');
+        if (pago.medio_pago.estado_medio_pago !== 'activo' || !pago.medio_pago.codigo_medio_pago || pago.medio_pago.requiere_respaldo === null) throw new ErrorAplicacion(409, 'El medio de pago no tiene configuración M6 válida');
+        if (pago.medio_pago.requiere_respaldo && !pago.respaldo) throw new ErrorAplicacion(400, 'El medio de pago exige respaldo');
+        const pagable = await this.montoPagable(tx, this.repositorioPago.origenDesdePago(pago));
+        if (!pago.monto.equals(pagable)) throw new ErrorAplicacion(409, 'El monto preparado no coincide con el saldo pagable del origen');
+        const cambio = await this.repositorioPago.confirmarPreparado(tx, idPago, idUsuario);
+        if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El pago cambió concurrentemente');
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerPagoRemuneracion(idPago);
+    } catch (error) { this.conflictoConcurrente(error, 'El pago cambió concurrentemente o el origen ya fue pagado'); }
+  }
+
+  async listarPagosRemuneracion() {
+    const items = await this.repositorioPago.listar(prisma);
+    return items.map(item => this.presentarPago(item));
+  }
+
+  async prepararPagoAnticipo(idAnticipo: number, entrada: Record<string, unknown>, idUsuario: bigint) {
+    return this.prepararPagoRemuneracion(this.repositorioPago.anticipo(idAnticipo), entrada, idUsuario);
+  }
+
+  async prepararPagoFinal(entrada: Record<string, unknown>, idUsuario: bigint) {
+    const tipo = texto(entrada.origenTipo, 30).toUpperCase();
+    if (!['REMUNERACION', 'REGULARIZACION'].includes(tipo)) throw new ErrorAplicacion(400, 'CU186 sólo paga remuneraciones o regularizaciones');
+    const id = enteroPositivo(entrada.origenId, 'Origen');
+    const origen = tipo === 'REMUNERACION' ? this.repositorioPago.remuneracion(id) : this.repositorioPago.regularizacion(id);
+    return this.prepararPagoRemuneracion(origen, entrada, idUsuario);
+  }
+
+  private async exigirTipoPago(idPago: number, permitidos: string[]) {
+    const pago = await this.repositorioPago.obtener(prisma, idPago);
+    if (!pago) throw new ErrorAplicacion(404, 'Pago de remuneración no encontrado');
+    const origen = this.repositorioPago.origenDesdePago(pago);
+    if (!permitidos.includes(this.repositorioPago.tipoPublico(origen))) throw new ErrorAplicacion(403, 'El pago no pertenece al caso de uso autorizado');
+  }
+
+  async actualizarPagoAnticipo(idPago: number, entrada: Record<string, unknown>) { await this.exigirTipoPago(idPago, ['ANTICIPO']); return this.actualizarPagoRemuneracion(idPago, entrada); }
+  async confirmarPagoAnticipo(idPago: number, idUsuario: bigint) { await this.exigirTipoPago(idPago, ['ANTICIPO']); return this.confirmarPagoRemuneracion(idPago, idUsuario); }
+  async actualizarPagoFinal(idPago: number, entrada: Record<string, unknown>) { await this.exigirTipoPago(idPago, ['REMUNERACION', 'REGULARIZACION']); return this.actualizarPagoRemuneracion(idPago, entrada); }
+  async confirmarPagoFinal(idPago: number, idUsuario: bigint) { await this.exigirTipoPago(idPago, ['REMUNERACION', 'REGULARIZACION']); return this.confirmarPagoRemuneracion(idPago, idUsuario); }
 }
