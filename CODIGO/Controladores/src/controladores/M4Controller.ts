@@ -11,7 +11,7 @@ type Entrada = Record<string, unknown>;
 export interface ContextoSesion { direccion?: string; agente?: string; secretoSesion?: string }
 const incluirAccesos = { perfil: { include: { perfil_permiso: { include: { permiso: true } } } }, particulares: { include: { permiso: true } }, seguridad: true, empleado_seguridad: true } satisfies Prisma.usuarioInclude;
 type Cuenta = Prisma.usuarioGetPayload<{include: typeof incluirAccesos}>;
-export interface ActorAutenticado { id: bigint; sesion: string; permisos: string[]; configuracion: string; administrador: boolean; cambiarClave: boolean; nombre: string; acceso: string }
+export interface ActorAutenticado { id: bigint; sesion: string; permisos: string[]; configuracion: string; administrador: boolean; cambiarClave: boolean; nombre: string; acceso: string; alcanceEmpleadoId?: number | null }
 const error = (estado: number, mensaje: string): never => { throw new ErrorAplicacion(estado,mensaje); };
 const idCuenta = (valor: unknown) => { if (!/^\d+$/.test(String(valor))) return error(400,'Usuario inválido'); return BigInt(String(valor)); };
 const confirmar = (entrada: Entrada) => { if (entrada.confirmado !== true) error(400,'Debes confirmar la operación'); };
@@ -82,7 +82,8 @@ export class M4Controller {
   if(adicionales.some(p=>!permisos.includes(p))) return error(403,'No tienes permiso para los filtros o condiciones solicitados');
   const vencePorInactividad = new Date(Math.min(finAbsoluto.getTime(), ahora.getTime() + politica.inactividadMinutos * 60000));
   await prisma.sesion_usuario.update({where:{id:sesion.id},data:{vence:vencePorInactividad}});
-  return {id:cuenta.usuario_id_usuario,sesion:sesion.id,permisos,configuracion:cuenta.perfil?.codigo_m4 || '',administrador:!!cuenta.usuario_es_administrador,cambiarClave,nombre:this.presentar(cuenta).nombre || '',acceso:cuenta.acceso_m4 || ''};
+  const perfilInterno = ['gerencia','contador','secretaria'].includes(cuenta.perfil?.codigo_m4 || '');
+  return {id:cuenta.usuario_id_usuario,sesion:sesion.id,permisos,configuracion:cuenta.perfil?.codigo_m4 || '',administrador:!!cuenta.usuario_es_administrador,cambiarClave,nombre:this.presentar(cuenta).nombre || '',acceso:cuenta.acceso_m4 || '',alcanceEmpleadoId:perfilInterno?undefined:(cuenta.empleado_seguridad?.id_empleado ?? null)};
  }
  async iniciarSesion(entrada:Entrada, contexto:ContextoSesion) {
   const acceso=texto(entrada.acceso,100).replace(/\./g,'').toLowerCase();

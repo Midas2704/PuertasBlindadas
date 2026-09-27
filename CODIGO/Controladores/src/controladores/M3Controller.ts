@@ -5,17 +5,7 @@ import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, incluirNota, incluirPago, efectoPago, fechaNegocio, sincronizarEstadoPago } from '../utilidades/finanzas';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
-
-const textoPdf = (valor: unknown) => String(valor ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x20-\x7E]/g,'?').replace(/([\\()])/g,'\\$1');
-function crearPdf(lineas: string[]) {
-  const instrucciones = ['BT','/F1 18 Tf','50 790 Td',`(${textoPdf(lineas[0])}) Tj`,'/F1 11 Tf',...lineas.slice(1).flatMap(linea => ['0 -24 Td',`(${textoPdf(linea)}) Tj`]),'ET'].join('\n');
-  const objetos = ['', '<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>', `<< /Length ${Buffer.byteLength(instrucciones,'latin1')} >>\nstream\n${instrucciones}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'];
-  let salida = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'; const posiciones = [0];
-  for(let indice=1;indice<objetos.length;indice++) { posiciones[indice]=Buffer.byteLength(salida,'latin1'); salida += `${indice} 0 obj\n${objetos[indice]}\nendobj\n`; }
-  const inicioXref = Buffer.byteLength(salida,'latin1');
-  salida += `xref\n0 ${objetos.length}\n0000000000 65535 f \n${posiciones.slice(1).map(posicion=>`${String(posicion).padStart(10,'0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objetos.length} /Root 1 0 R >>\nstartxref\n${inicioXref}\n%%EOF\n`;
-  return Buffer.from(salida,'latin1');
-}
+import { crearPdf } from '../utilidades/pdf';
 
 /** M3 CU42–CU58: pagos, reversas, saldos a favor y conciliación. */
 export class M3Controller {

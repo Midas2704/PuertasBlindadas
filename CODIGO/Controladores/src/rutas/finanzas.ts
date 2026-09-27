@@ -126,6 +126,13 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/pagos-remuneracion/:id/detalle', derivar('obtenerDetallePagoRemuneracion'));
   rutas.post('/pagos-remuneracion/:id/anular', derivar('anularPagoRemuneracion'));
   rutas.post('/pagos-remuneracion/:id/reversiones', derivar('registrarReversionPagoRemuneracion'));
+  rutas.get('/documentos-remuneracion', derivar('listarDocumentosRemuneracion'));
+  rutas.post('/documentos-remuneracion/entregas', derivar('registrarEntregaDocumento'));
+  rutas.get('/documentos-remuneracion/:tipo/:id/entrega', derivar('consultarEntregaDocumento'));
+  rutas.get('/documentos-remuneracion/:tipo/:id/descarga', derivar('descargarDocumentoRemuneracion'));
+  rutas.post('/documentos-remuneracion/:tipo/:id/reenviar', derivar('reenviarDocumentoRemuneracion'));
+  rutas.get('/remuneraciones/:id/exportacion-preliminar', derivar('exportarCalculoPreliminar'));
+  rutas.get('/periodos-remuneracion/exportacion-oficial', derivar('exportarRemuneracionesOficiales'));
   rutas.get('/proveedores/catalogos', derivar('catalogosProveedores'));
   rutas.get('/proveedores', derivar('listarProveedores'));
   rutas.post('/proveedores', derivar('crearProveedor'));

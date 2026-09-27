@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, BriefcaseBusiness, CalendarDays, CircleDollarSign, FileCheck2, Layers3, Plus, Save, Sparkles } from 'lucide-react';
+import { ArrowLeft, BriefcaseBusiness, CalendarDays, CircleDollarSign, FileCheck2, FileText, Layers3, Plus, Save, Sparkles } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
@@ -200,7 +200,7 @@ export default function FichaEmpleado() {
     {mensaje && <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{mensaje}</div>}
     {!empleado && !error && <div className="py-16 text-center text-gray-500">Cargando ficha...</div>}
     {empleado && <>
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm font-semibold text-primary-600">Ficha de empleado</p><h1 className="text-2xl font-bold text-gray-900">{empleado.nombreCompleto}</h1><p className="mt-1 text-sm text-gray-500">{empleado.rut}</p></div><span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold capitalize text-gray-700">{empleado.estado}</span></header>
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-4"><div><p className="text-sm font-semibold text-primary-600">Ficha de empleado</p><h1 className="text-2xl font-bold text-gray-900">{empleado.nombreCompleto}</h1><p className="mt-1 text-sm text-gray-500">{empleado.rut}</p></div><div className="flex items-center gap-2">{sesion?.permisos.includes('CU191')&&<button title="Documentos de remuneración" onClick={()=>navegar(`/documentos-remuneracion?idEmpleado=${empleado.id}`)} className="rounded border bg-white p-2"><FileText className="h-4 w-4"/></button>}<span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold capitalize text-gray-700">{empleado.estado}</span></div></header>
 
       <section className="border-y border-gray-200 bg-white px-5 py-5">
         <div className="mb-4 flex items-center justify-between gap-3"><div className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5 text-primary-600" /><h2 className="font-bold text-gray-900">Datos generales</h2></div>{puedeCU157 && <button disabled={guardando} onClick={() => void guardarDatosBase()} className="flex items-center gap-2 rounded-md bg-primary-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" />Guardar</button>}</div>

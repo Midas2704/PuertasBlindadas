@@ -57,7 +57,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'registrarAnticipo' | 'obtenerAnticipo' | 'prepararPagoAnticipo' | 'actualizarPagoAnticipo' | 'confirmarPagoAnticipo'
   | 'listarPagosRemuneracion' | 'obtenerPagoRemuneracion' | 'prepararPagoFinal' | 'actualizarPagoFinal' | 'confirmarPagoFinal'
   | 'listarBoletasHonorariosConfirmadas' | 'prepararPagoHonorarios' | 'actualizarPagoHonorarios' | 'confirmarPagoHonorarios'
-  | 'obtenerDetallePagoRemuneracion' | 'anularPagoRemuneracion' | 'registrarReversionPagoRemuneracion';
+  | 'obtenerDetallePagoRemuneracion' | 'anularPagoRemuneracion' | 'registrarReversionPagoRemuneracion'
+  | 'listarDocumentosRemuneracion' | 'descargarDocumentoRemuneracion' | 'reenviarDocumentoRemuneracion'
+  | 'registrarEntregaDocumento' | 'consultarEntregaDocumento' | 'exportarCalculoPreliminar' | 'exportarRemuneracionesOficiales';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -231,6 +233,13 @@ export class C_Finanzas {
       case 'obtenerDetallePagoRemuneracion': return this.m6.obtenerPagoRemuneracion(identificador(parametros.id));
       case 'anularPagoRemuneracion': return this.m6.anularPagoRemuneracion(identificador(parametros.id), cuerpo, actor.id);
       case 'registrarReversionPagoRemuneracion': return this.m6.registrarReversionPagoRemuneracion(identificador(parametros.id), cuerpo, actor.id);
+      case 'listarDocumentosRemuneracion': return this.m6.listarDocumentosRemuneracion(solicitud.consulta || {}, actor);
+      case 'descargarDocumentoRemuneracion': return this.m6.descargarDocumentoRemuneracion(parametros.tipo, identificador(parametros.id), actor);
+      case 'reenviarDocumentoRemuneracion': return this.m6.reenviarDocumentoRemuneracion(parametros.tipo, identificador(parametros.id), actor);
+      case 'registrarEntregaDocumento': return this.m6.registrarEntregaDocumento(cuerpo, actor);
+      case 'consultarEntregaDocumento': return this.m6.consultarEntregaDocumento(parametros.tipo, identificador(parametros.id), actor);
+      case 'exportarCalculoPreliminar': return this.m6.exportarCalculoPreliminar(identificador(parametros.id), actor);
+      case 'exportarRemuneracionesOficiales': return this.m6.exportarRemuneracionesOficiales(solicitud.consulta || {}, actor);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

@@ -5,6 +5,11 @@ import { normalizarRut, validarYNormalizarRut, variantesRut } from '../utilidade
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
 import { FuentePagoRemuneracion, FuentePagoRemuneracionPrisma } from '../servicios/FuentePagoRemuneracion';
 import { OrigenPagoRemuneracion, RepositorioPagoRemuneracionPrisma } from '../servicios/RepositorioPagoRemuneracion';
+import { archivoPdf } from '../utilidades/pdf';
+import { CorreoDesarrollo, CorreoDocumental } from '../utilidades/correo';
+import { AuditoriaDocumental, AuditoriaDocumentalLegacyPrisma, CondicionDocumento } from '../servicios/AuditoriaDocumental';
+
+interface ActorDocumentoM6 { id: bigint; alcanceEmpleadoId?: number | null }
 
 type Direccion = 'asc' | 'desc';
 
@@ -60,6 +65,8 @@ export class M6Controller {
   constructor(
     fuentePagoRemuneracion?: FuentePagoRemuneracion,
     private readonly repositorioPago = new RepositorioPagoRemuneracionPrisma(),
+    private readonly correoDocumental: CorreoDocumental = new CorreoDesarrollo(),
+    private readonly auditoriaDocumental: AuditoriaDocumental = new AuditoriaDocumentalLegacyPrisma(),
   ) {
     this.fuentePagoRemuneracion = fuentePagoRemuneracion ?? new FuentePagoRemuneracionPrisma(this.repositorioPago);
   }
@@ -517,12 +524,14 @@ export class M6Controller {
     return this.listarAsignacionesHaberEmpleado(idEmpleado);
   }
 
-  async obtenerConfiguracionDocumental(idEmpleado: number) {
-    const empleado = await prisma.empleado.findUnique({ where: { id_empleado: idEmpleado }, include: { cuenta_m4: { select: { usuario_correo: true } }, usuario: { select: { usuario_correo: true } } } });
+  private async configuracionDocumental(tx: Prisma.TransactionClient | typeof prisma, idEmpleado: number) {
+    const empleado = await tx.empleado.findUnique({ where: { id_empleado: idEmpleado }, include: { cuenta_m4: { select: { usuario_correo: true } }, usuario: { select: { usuario_correo: true } } } });
     if (!empleado) throw new ErrorAplicacion(404, 'Empleado no encontrado');
     const correoCorporativo = empleado.cuenta_m4?.usuario_correo || empleado.usuario.find((item) => item.usuario_correo)?.usuario_correo || null;
     return { consentimientoElectronico: empleado.consentimiento_electronico, canalDocumental: empleado.canal_documental, correoParticular: empleado.correo_particular, correoCorporativo, canalesDisponibles: [...(empleado.correo_particular ? ['correo_particular'] : []), ...(correoCorporativo ? ['correo_corporativo'] : [])] };
   }
+
+  async obtenerConfiguracionDocumental(idEmpleado: number) { return this.configuracionDocumental(prisma, idEmpleado); }
 
   async actualizarConfiguracionDocumental(idEmpleado: number, entrada: Record<string, unknown>) {
     const actual = await this.obtenerConfiguracionDocumental(idEmpleado);
@@ -1724,5 +1733,196 @@ export class M6Controller {
   async registrarReversionPagoRemuneracion(idPago: number, entrada: Record<string, unknown>, idUsuario: bigint) {
     const monto = decimalMonetario(entrada.monto, 'Monto de reversión', true); const motivo = texto(entrada.motivo, 1000); if (!motivo) throw new ErrorAplicacion(400, 'El motivo de reversión es obligatorio');
     try { await prisma.$transaction(async tx => { const pago = await this.repositorioPago.obtener(tx, idPago); if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado'); if (pago.estado !== 'CONFIRMADO') throw new ErrorAplicacion(409, 'Sólo un pago CONFIRMADO admite reversión'); const total = pago.reversiones.reduce((suma, item) => suma.plus(item.monto), new Prisma.Decimal(0)); if (total.plus(monto).gt(pago.monto)) throw new ErrorAplicacion(409, 'La suma de reversiones excede el monto del pago'); await this.repositorioPago.registrarReversion(tx, idPago, monto, motivo, idUsuario); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.obtenerPagoRemuneracion(idPago); } catch (error) { this.conflictoConcurrente(error, 'La reversión cambió concurrentemente o excede el pago'); }
+  }
+
+  private exigirAlcanceDocumento(actor: ActorDocumentoM6, idEmpleado: number) {
+    if (actor.alcanceEmpleadoId === null) throw new ErrorAplicacion(403, 'La cuenta no está vinculada a un empleado para autoservicio documental');
+    if (actor.alcanceEmpleadoId !== undefined && actor.alcanceEmpleadoId !== null && actor.alcanceEmpleadoId !== idEmpleado) {
+      throw new ErrorAplicacion(403, 'Sólo puedes acceder a tus propios documentos de remuneración');
+    }
+  }
+
+  private lineasLiquidacion(item: any, marca: string) {
+    const periodo = `${String(item.periodo.mes).padStart(2, '0')}/${item.periodo.anio}`;
+    const monto = (valor: any) => valor === null || valor === undefined ? 'No disponible' : Number(valor).toFixed(2);
+    return [
+      `LIQUIDACION DE REMUNERACION - ${marca}`,
+      `Empleado: ${nombreCompleto(item.empleado)}`,
+      `RUT: ${item.empleado.rut_empleado}`,
+      `Periodo: ${periodo}`,
+      `Cierre: ${item.cerrado_en?.toISOString() || 'Pendiente'}`,
+      '', 'COMPONENTES',
+      ...item.componentes.map((componente: any) => `${componente.descripcion}: ${componente.monto === null ? 'PENDIENTE' : monto(componente.monto)} [${componente.estado_revision}]`),
+      '', `Total haberes: ${monto(item.total_haberes)}`,
+      `Total deducciones: ${monto(item.total_deducciones)}`,
+      `Aportes empleador: ${monto(item.total_aportes_empleador)}`,
+      `Base imponible: ${monto(item.base_imponible)}`,
+      `Base tributable: ${monto(item.base_tributable)}`,
+      `Liquido: ${monto(item.liquido_preliminar)}`,
+      `Referencia: remuneracion-${item.id_remuneracion}`,
+    ];
+  }
+
+  private archivoLiquidacion(item: any) {
+    const historica = item.estado === 'reemplazada';
+    const marca = historica ? 'OFICIAL HISTORICA / REEMPLAZADA' : 'OFICIAL / VIGENTE';
+    return archivoPdf(`liquidacion-${item.periodo.anio}-${String(item.periodo.mes).padStart(2, '0')}-${item.id_remuneracion}${historica ? '-historica' : ''}.pdf`, this.lineasLiquidacion(item, marca));
+  }
+
+  private async cargarLiquidacion(tx: Prisma.TransactionClient, idRemuneracion: number) {
+    const item = await tx.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: this.incluirRemuneracion });
+    if (!item) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+    if (!['cerrada', 'reemplazada'].includes(item.estado)) throw new ErrorAplicacion(409, 'La remuneración no posee una liquidación oficial');
+    return item;
+  }
+
+  private async cargarComprobanteAnticipo(tx: Prisma.TransactionClient, idAnticipo: number) {
+    const item = await tx.anticipo_remuneracion.findUnique({ where: { id_anticipo: idAnticipo }, include: { empleado: true, periodo: true } });
+    if (!item) throw new ErrorAplicacion(404, 'Anticipo no encontrado');
+    const pagos = await this.repositorioPago.pagosConfirmadosAnticipo(tx, idAnticipo);
+    if (!pagos.length) throw new ErrorAplicacion(409, 'El anticipo no posee un pago confirmado para emitir comprobante oficial');
+    return { item, pagos };
+  }
+
+  private archivoComprobanteAnticipo(item: any, pagos: any[]) {
+    const neto = pagos.reduce((total, pago) => pago.estado === 'CONFIRMADO'
+      ? total.plus(pago.monto).minus(pago.reversiones.reduce((suma: Prisma.Decimal, reversion: any) => suma.plus(reversion.monto), new Prisma.Decimal(0)))
+      : total, new Prisma.Decimal(0));
+    return archivoPdf(`comprobante-anticipo-${item.id_anticipo}.pdf`, [
+      'COMPROBANTE OFICIAL DE ANTICIPO',
+      `Empleado: ${nombreCompleto(item.empleado)}`,
+      `Periodo: ${String(item.periodo.mes).padStart(2, '0')}/${item.periodo.anio}`,
+      `Monto valorizado: ${item.monto_final?.toString() || 'No disponible'}`,
+      ...pagos.map((pago) => `Pago ${pago.id_pago_remuneracion}: ${pago.monto.toString()} - ${pago.estado} - neto ${pago.estado === 'CONFIRMADO' ? pago.monto.minus(pago.reversiones.reduce((s: Prisma.Decimal, r: any) => s.plus(r.monto), new Prisma.Decimal(0))).toString() : '0'}`),
+      `Monto efectivo actual: ${neto.toString()}`,
+      `Condicion economica: ${neto.gt(0) ? 'CON PAGO EFECTIVO' : 'SIN SALDO PAGADO VIGENTE'}`,
+      `Referencia: anticipo-${item.id_anticipo}`,
+    ]);
+  }
+
+  async listarDocumentosRemuneracion(consulta: Record<string, unknown>, actor: ActorDocumentoM6) {
+    if (actor.alcanceEmpleadoId === null) throw new ErrorAplicacion(403, 'La cuenta no está vinculada a un empleado para autoservicio documental');
+    const idEmpleadoEntrada = consulta.idEmpleado === undefined || consulta.idEmpleado === '' ? null : enteroPositivo(consulta.idEmpleado, 'Empleado');
+    const idEmpleado = actor.alcanceEmpleadoId ?? idEmpleadoEntrada;
+    if (actor.alcanceEmpleadoId !== null && actor.alcanceEmpleadoId !== undefined && idEmpleadoEntrada && idEmpleadoEntrada !== actor.alcanceEmpleadoId) this.exigirAlcanceDocumento(actor, idEmpleadoEntrada);
+    const anio = consulta.anio === undefined || consulta.anio === '' ? null : Number(consulta.anio);
+    const mes = consulta.mes === undefined || consulta.mes === '' ? null : Number(consulta.mes);
+    const remuneraciones = await prisma.remuneracion.findMany({
+      where: { estado: { in: ['cerrada', 'reemplazada'] }, id_empleado: idEmpleado ?? undefined, periodo: { anio: anio ?? undefined, mes: mes ?? undefined } },
+      include: { empleado: true, periodo: true }, orderBy: [{ periodo: { anio: 'desc' } }, { periodo: { mes: 'desc' } }, { id_remuneracion: 'desc' }],
+    });
+    const anticipos = await prisma.anticipo_remuneracion.findMany({
+      where: { id_empleado: idEmpleado ?? undefined, periodo: { anio: anio ?? undefined, mes: mes ?? undefined }, id_anticipo: { in: await this.repositorioPago.idsAnticiposConPagoConfirmado(prisma) } },
+      include: { empleado: true, periodo: true }, orderBy: { creado_en: 'desc' },
+    });
+    return [
+      ...remuneraciones.map((item) => ({ tipo: 'LIQUIDACION', id: item.id_remuneracion, idEmpleado: item.id_empleado, empleado: nombreCompleto(item.empleado), periodo: { anio: item.periodo.anio, mes: item.periodo.mes }, oficial: true, vigente: item.estado === 'cerrada', condicion: item.estado === 'cerrada' ? 'VIGENTE' : 'HISTORICA_REEMPLAZADA' })),
+      ...anticipos.map((item) => ({ tipo: 'COMPROBANTE_ANTICIPO', id: item.id_anticipo, idEmpleado: item.id_empleado, empleado: nombreCompleto(item.empleado), periodo: { anio: item.periodo.anio, mes: item.periodo.mes }, oficial: true, vigente: true, condicion: 'PAGO_CONFIRMADO' })),
+    ];
+  }
+
+  async descargarDocumentoRemuneracion(tipoEntrada: unknown, id: number, actor: ActorDocumentoM6) {
+    const tipo = texto(tipoEntrada, 40).toUpperCase();
+    if (tipo === 'LIQUIDACION') {
+      const item = await this.cargarLiquidacion(prisma, id); this.exigirAlcanceDocumento(actor, item.id_empleado);
+      return this.archivoLiquidacion(item);
+    }
+    if (tipo === 'COMPROBANTE_ANTICIPO') {
+      const { item, pagos } = await this.cargarComprobanteAnticipo(prisma, id); this.exigirAlcanceDocumento(actor, item.id_empleado);
+      return this.archivoComprobanteAnticipo(item, pagos);
+    }
+    throw new ErrorAplicacion(400, 'Tipo de documento no soportado');
+  }
+
+  async reenviarDocumentoRemuneracion(tipoEntrada: unknown, idEntrada: number, actor: ActorDocumentoM6) {
+    const tipo = texto(tipoEntrada, 40).toUpperCase();
+    let idDocumentoResuelto = idEntrada;
+    try {
+      return await prisma.$transaction(async (tx) => {
+        let id = idEntrada; let idEmpleado: number; let archivo: { nombre: string; mime: string; contenido: string };
+        if (tipo === 'LIQUIDACION') {
+          await this.repositorioPago.bloquearRemuneracion(tx, idEntrada);
+          let item = await this.cargarLiquidacion(tx, idEntrada);
+          if (item.estado === 'reemplazada') {
+            const vigente = await tx.remuneracion.findFirst({ where: { id_empleado: item.id_empleado, id_periodo_remuneracion: item.id_periodo_remuneracion, estado: 'cerrada' }, include: this.incluirRemuneracion, orderBy: { id_remuneracion: 'desc' } });
+            if (!vigente) throw new ErrorAplicacion(409, 'No existe una liquidación oficial vigente para reenviar');
+            item = vigente; id = item.id_remuneracion;
+            await this.repositorioPago.bloquearRemuneracion(tx, id);
+          }
+          idEmpleado = item.id_empleado; archivo = this.archivoLiquidacion(item);
+        } else if (tipo === 'COMPROBANTE_ANTICIPO') {
+          const comprobante = await this.cargarComprobanteAnticipo(tx, id); idEmpleado = comprobante.item.id_empleado; archivo = this.archivoComprobanteAnticipo(comprobante.item, comprobante.pagos);
+        } else throw new ErrorAplicacion(400, 'Tipo de documento no soportado');
+        idDocumentoResuelto = id;
+        this.exigirAlcanceDocumento(actor, idEmpleado);
+        const configuracion = await this.configuracionDocumental(tx, idEmpleado);
+        if (configuracion.consentimientoElectronico !== true || !configuracion.canalDocumental) throw new ErrorAplicacion(409, 'El empleado no posee consentimiento y canal documental vigentes');
+        const destinatario = configuracion.canalDocumental === 'correo_particular' ? configuracion.correoParticular : configuracion.correoCorporativo;
+        if (!destinatario) throw new ErrorAplicacion(409, 'El canal documental no posee un correo disponible');
+        await this.correoDocumental.enviarDocumento(destinatario, 'Documento oficial de remuneración', archivo);
+        const evento = await this.auditoriaDocumental.registrar(tx, { actorId: actor.id, tipoDocumento: tipo, idDocumento: id, accion: 'REENVIO_DOCUMENTO_OFICIAL', condicion: 'ACEPTADO_POR_TRANSPORTE', metadata: { canal: configuracion.canalDocumental, destinatarioLogico: configuracion.canalDocumental, nombre: archivo.nombre } });
+        return { enviado: true, entregado: false, idDocumento: id, referenciaEvento: evento.referenciaEvento };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30000 });
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      await this.auditoriaDocumental.registrar(prisma, { actorId: actor.id, tipoDocumento: tipo, idDocumento: idDocumentoResuelto, accion: 'REENVIO_DOCUMENTO_OFICIAL', condicion: 'FALLIDO', metadata: { errorIntegracion: (error as Error).message } }).catch(() => undefined);
+      throw new ErrorAplicacion(503, `No fue posible enviar el documento: ${(error as Error).message}`);
+    }
+  }
+
+  async registrarEntregaDocumento(entrada: Record<string, unknown>, actor: ActorDocumentoM6) {
+    if (actor.alcanceEmpleadoId !== undefined) throw new ErrorAplicacion(403, 'La entrega documental manual requiere un usuario interno');
+    const tipo = texto(entrada.tipo, 40).toUpperCase(); const id = enteroPositivo(entrada.id, 'Documento');
+    const canal = texto(entrada.canal, 30).toLowerCase(); const resultado = texto(entrada.resultado, 30).toLowerCase();
+    if (!['correo_particular', 'correo_corporativo', 'presencial', 'otro'].includes(canal)) throw new ErrorAplicacion(400, 'Canal de entrega inválido');
+    if (!['entregado', 'rechazado', 'pendiente'].includes(resultado)) throw new ErrorAplicacion(400, 'Resultado de entrega inválido');
+    if (tipo === 'LIQUIDACION') await this.cargarLiquidacion(prisma, id);
+    else if (tipo === 'COMPROBANTE_ANTICIPO') await this.cargarComprobanteAnticipo(prisma, id);
+    else throw new ErrorAplicacion(400, 'Tipo de documento no soportado');
+    const condicion = resultado.toUpperCase() as CondicionDocumento;
+    const evento = await this.auditoriaDocumental.registrar(prisma, { actorId: actor.id, tipoDocumento: tipo, idDocumento: id, accion: 'REGISTRO_ENTREGA_DOCUMENTAL', condicion, metadata: { canal, destinatarioLogico: texto(entrada.destinatarioLogico, 80) || 'empleado' } });
+    return { referenciaEvento: evento.referenciaEvento, resultado: condicion };
+  }
+
+  async consultarEntregaDocumento(tipoEntrada: unknown, id: number, actor: ActorDocumentoM6) {
+    if (actor.alcanceEmpleadoId !== undefined) throw new ErrorAplicacion(403, 'La consulta de entregas requiere un usuario interno');
+    const tipo = texto(tipoEntrada, 40).toUpperCase();
+    if (!['LIQUIDACION', 'COMPROBANTE_ANTICIPO'].includes(tipo)) throw new ErrorAplicacion(400, 'Tipo de documento no soportado');
+    const condicion = await this.auditoriaDocumental.ultimaCondicionEntrega(prisma, tipo, id);
+    if (!condicion) return { enviado: false, entregado: false, condicion: null };
+    return { enviado: ['ACEPTADO_POR_TRANSPORTE', 'ENTREGADO'].includes(condicion.resultado), entregado: condicion.resultado === 'ENTREGADO', condicion };
+  }
+
+  async exportarCalculoPreliminar(idRemuneracion: number, actor: ActorDocumentoM6) {
+    return prisma.$transaction(async (tx) => {
+      const item = await tx.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: this.incluirRemuneracion });
+      if (!item) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+      if (item.estado !== 'abierta') throw new ErrorAplicacion(409, 'Sólo una remuneración ABIERTA puede exportarse como cálculo preliminar');
+      this.exigirAlcanceDocumento(actor, item.id_empleado);
+      const revision = await this.bloqueosRemuneracion(tx, item);
+      const archivo = archivoPdf(`calculo-preliminar-no-oficial-${item.id_remuneracion}.pdf`, [
+        ...this.lineasLiquidacion(item, 'NO OFICIAL / CALCULO PRELIMINAR'),
+        '', 'BLOQUEOS', ...revision.bloqueos.map((bloqueo) => `${bloqueo.codigo}: ${bloqueo.detalle}`),
+        '', 'ADVERTENCIAS', ...revision.advertencias.map((advertencia) => `${advertencia.codigo}: ${advertencia.detalle}`),
+        `Exportado: ${new Date().toISOString()}`,
+      ]);
+      await this.auditoriaDocumental.registrar(tx, { actorId: actor.id, tipoDocumento: 'REMUNERACION', idDocumento: idRemuneracion, accion: 'EXPORTACION_PRELIMINAR', condicion: 'GENERADO', metadata: { oficial: false, nombre: archivo.nombre } });
+      return archivo;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async exportarRemuneracionesOficiales(consulta: Record<string, unknown>, actor: ActorDocumentoM6) {
+    if (actor.alcanceEmpleadoId === null) throw new ErrorAplicacion(403, 'La cuenta no está vinculada a un empleado para autoservicio documental');
+    const { anio, mes } = this.periodoEntrada(consulta.anio, consulta.mes);
+    const idEmpleadoEntrada = consulta.idEmpleado === undefined || consulta.idEmpleado === '' ? null : enteroPositivo(consulta.idEmpleado, 'Empleado');
+    const idEmpleado = actor.alcanceEmpleadoId ?? idEmpleadoEntrada;
+    if (actor.alcanceEmpleadoId !== null && actor.alcanceEmpleadoId !== undefined && idEmpleadoEntrada && idEmpleadoEntrada !== actor.alcanceEmpleadoId) this.exigirAlcanceDocumento(actor, idEmpleadoEntrada);
+    return prisma.$transaction(async (tx) => {
+      const items = await tx.remuneracion.findMany({ where: { estado: 'cerrada', id_empleado: idEmpleado ?? undefined, periodo: { anio, mes } }, include: this.incluirRemuneracion, orderBy: [{ empleado: { apellido_paterno: 'asc' } }, { id_remuneracion: 'desc' }] });
+      if (!items.length) throw new ErrorAplicacion(404, 'No existen remuneraciones oficiales vigentes para los filtros');
+      const archivo = archivoPdf(`remuneraciones-oficiales-${anio}-${String(mes).padStart(2, '0')}.pdf`, ['REMUNERACIONES OFICIALES / CERRADAS', `Periodo: ${String(mes).padStart(2, '0')}/${anio}`, `Cantidad: ${items.length}`, '', ...items.flatMap((item) => [`${nombreCompleto(item.empleado)} | RUT ${item.empleado.rut_empleado} | Remuneracion ${item.id_remuneracion} | Liquido ${item.liquido_preliminar?.toString() || 'No disponible'}`])]);
+      await this.auditoriaDocumental.registrar(tx, { actorId: actor.id, tipoDocumento: 'PERIODO_REMUNERACION', idDocumento: items[0].id_periodo_remuneracion, accion: 'EXPORTACION_OFICIAL', condicion: 'GENERADO', metadata: { oficial: true, anio, mes, idEmpleado, cantidad: items.length, nombre: archivo.nombre } });
+      return archivo;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 }

@@ -44,6 +44,26 @@ export class RepositorioPagoRemuneracionPrisma {
     await cliente.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${tipo})::integer, ${origen.id}::integer)::text AS lock_result`);
   }
 
+  async bloquearRemuneracion(cliente: ClientePago, id: number) {
+    await cliente.$queryRaw(Prisma.sql`SELECT id_remuneracion FROM finanzas.remuneracion WHERE id_remuneracion = ${id} FOR UPDATE`);
+  }
+
+  async pagosConfirmadosAnticipo(cliente: ClientePago, idAnticipo: number) {
+    return cliente.pago_remuneracion.findMany({
+      where: { origen_tipo: tiposFisicos.anticipo, origen_id: idAnticipo, confirmado_en: { not: null } },
+      include: { medio_pago: true, reversiones: true },
+      orderBy: { confirmado_en: 'asc' },
+    });
+  }
+
+  async idsAnticiposConPagoConfirmado(cliente: ClientePago) {
+    const pagos = await cliente.pago_remuneracion.findMany({
+      where: { origen_tipo: tiposFisicos.anticipo, confirmado_en: { not: null } },
+      select: { origen_id: true }, distinct: ['origen_id'],
+    });
+    return pagos.map((pago) => pago.origen_id);
+  }
+
   async tienePagoEfectivo(cliente: ClientePago, origen: OrigenPagoRemuneracion) {
     return (await this.estadoEconomicoOrigen(cliente, origen)).montoEfectivo.gt(0);
   }

@@ -89,8 +89,8 @@ test('M6 T4 CU172-CU173 integra Terreno por referencia sin adelantar CU futuros'
    assert.equal(carrera.filter(x=>x.status==='fulfilled').length,1);assert.equal(carrera.filter(x=>x.status==='rejected').length,1);assert.equal(await prisma.decision_remuneracional_retrabajo.count({where:{id_incidencia_retrabajo:incidencia.id_incidencia_retrabajo}}),1);
   });
 
-  await t.test('permisos CU172 y CU173 son independientes y no existe CU187+',async()=>{
-   assert.equal(codigosTodosLosCU.length,190);assert.equal(codigosTodosLosCU.includes('CU183'),true);assert.equal(codigosTodosLosCU.includes('CU191'),false);assert.deepEqual(matrizPermisosPorCU.CU172,[]);assert.deepEqual(matrizPermisosPorCU.CU173,[]);
+  await t.test('permisos CU172 y CU173 son independientes y no existe CU196+',async()=>{
+   assert.equal(codigosTodosLosCU.length,195);assert.equal(codigosTodosLosCU.includes('CU183'),true);assert.equal(codigosTodosLosCU.includes('CU196'),false);assert.deepEqual(matrizPermisosPorCU.CU172,[]);assert.deepEqual(matrizPermisosPorCU.CU173,[]);
    assert.equal(operacionesPermiso.revisarHechoRemunerable,'CU172');assert.equal(operacionesPermiso.resolverRetrabajo,'CU173');assert.equal(permiteOperacion('listarHechosRemunerables',['CU173']),true);assert.equal(permiteOperacion('resolverRetrabajo',['CU172']),false);assert.equal(permiteOperacion('revisarHechoRemunerable',['CU173']),false);
    for(const cu of ['CU208','CU209','CU212','CU213'])assert.equal(codigosTodosLosCU.includes(cu),false);
    const autorizacion=(permisos)=>({autorizar:async operacion=>{if(!permiteOperacion(operacion,permisos)){const error=new Error('No autorizado');error.estado=403;throw error}return{id:usuario.usuario_id_usuario,sesion:'x',permisos,configuracion:'particular',administrador:false,cambiarClave:false,nombre:'Eva',acceso:'eva'}}});
