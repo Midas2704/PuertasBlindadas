@@ -95,6 +95,13 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/remuneraciones/:id/prorrateo', derivar('obtenerContextoProrrateo'));
   rutas.post('/remuneraciones/:id/prorrateo', derivar('proponerProrrateoIndividual'));
   rutas.post('/componentes-remuneracion/:id/resolver-prorrateo', derivar('resolverProrrateoIndividual'));
+  rutas.get('/periodos-remuneracion', derivar('consultarPeriodoRemuneracion'));
+  rutas.post('/remuneraciones/calcular', derivar('calcularRemuneracion'));
+  rutas.post('/remuneraciones/:id/cerrar', derivar('cerrarRemuneracion'));
+  rutas.get('/remuneraciones/:id/liquidacion', derivar('obtenerLiquidacionRemuneracion'));
+  rutas.post('/periodos-remuneracion/cerrar', derivar('cerrarPeriodoRemuneracion'));
+  rutas.post('/remuneraciones/:id/reapertura', derivar('solicitarReaperturaRemuneracion'));
+  rutas.post('/remuneraciones/:id/reapertura/aprobar', derivar('aprobarReaperturaRemuneracion'));
   rutas.get('/proveedores/catalogos', derivar('catalogosProveedores'));
   rutas.get('/proveedores', derivar('listarProveedores'));
   rutas.post('/proveedores', derivar('crearProveedor'));

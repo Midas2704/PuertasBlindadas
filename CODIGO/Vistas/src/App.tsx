@@ -31,6 +31,7 @@ import FichaEmpleado from './views/FichaEmpleado/FichaEmpleado';
 import EsquemasRemuneracionales from './views/EsquemasRemuneracionales/EsquemasRemuneracionales';
 import MantenedorParametros from './views/MantenedorParametros/MantenedorParametros';
 import DetalleRemuneracion from './views/DetalleRemuneracion/DetalleRemuneracion';
+import PeriodosRemuneracion from './views/PeriodosRemuneracion/PeriodosRemuneracion';
 
 const App: React.FC = () => {
   return (
@@ -58,7 +59,8 @@ const App: React.FC = () => {
           <Route path="empleados/:id" element={<Protegido permiso="CU155"><FichaEmpleado /></Protegido>} />
           <Route path="esquemas-remuneracionales" element={<Protegido permiso={['CU162','CU163','CU164','CU165','CU166']}><EsquemasRemuneracionales /></Protegido>} />
           <Route path="parametros-remuneraciones" element={<Protegido permiso={['CU167','CU168','CU169','CU170','CU171']}><MantenedorParametros /></Protegido>} />
-          <Route path="detalle-remuneracion" element={<Protegido permiso={['CU172','CU173','CU174','CU175','CU176','CU177']}><DetalleRemuneracion /></Protegido>} />
+          <Route path="periodos-remuneracion" element={<Protegido permiso={['CU178','CU181']}><PeriodosRemuneracion /></Protegido>} />
+          <Route path="detalle-remuneracion" element={<Protegido permiso={['CU172','CU173','CU174','CU175','CU176','CU177','CU179','CU180','CU182']}><DetalleRemuneracion /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

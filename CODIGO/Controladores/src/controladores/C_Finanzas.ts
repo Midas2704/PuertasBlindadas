@@ -49,7 +49,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarHechosRemunerables' | 'obtenerHechoRemunerable' | 'revisarHechoRemunerable' | 'listarRetrabajosPendientes' | 'resolverRetrabajo'
   | 'obtenerOCrearContextoRemuneracion' | 'obtenerRemuneracion' | 'proponerComponenteExcepcional' | 'resolverComponenteExcepcional'
   | 'proponerVariableRemuneracion' | 'resolverVariableRemuneracion' | 'registrarValorExterno' | 'proponerAjusteManual' | 'resolverValorOAjuste'
-  | 'obtenerContextoProrrateo' | 'proponerProrrateoIndividual' | 'resolverProrrateoIndividual';
+  | 'obtenerContextoProrrateo' | 'proponerProrrateoIndividual' | 'resolverProrrateoIndividual'
+  | 'consultarPeriodoRemuneracion' | 'calcularRemuneracion' | 'cerrarRemuneracion' | 'obtenerLiquidacionRemuneracion'
+  | 'cerrarPeriodoRemuneracion' | 'solicitarReaperturaRemuneracion' | 'aprobarReaperturaRemuneracion';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -192,6 +194,13 @@ export class C_Finanzas {
       case 'obtenerContextoProrrateo': return this.m6.obtenerContextoProrrateo(identificador(parametros.id));
       case 'proponerProrrateoIndividual': return this.m6.proponerProrrateoIndividual(identificador(parametros.id), cuerpo, actor.id);
       case 'resolverProrrateoIndividual': return this.m6.resolverProrrateoIndividual(identificador(parametros.id), cuerpo, actor.id);
+      case 'consultarPeriodoRemuneracion': return this.m6.consultarPeriodoRemuneracion(solicitud.consulta?.anio, solicitud.consulta?.mes);
+      case 'calcularRemuneracion': return this.m6.calcularRemuneracion(cuerpo, actor.id);
+      case 'cerrarRemuneracion': return this.m6.cerrarRemuneracion(identificador(parametros.id), actor.id);
+      case 'obtenerLiquidacionRemuneracion': return this.m6.obtenerLiquidacionRemuneracion(identificador(parametros.id));
+      case 'cerrarPeriodoRemuneracion': return this.m6.cerrarPeriodoRemuneracion(cuerpo.anio, cuerpo.mes, actor.id);
+      case 'solicitarReaperturaRemuneracion': return this.m6.solicitarReaperturaRemuneracion(identificador(parametros.id), cuerpo, actor.id);
+      case 'aprobarReaperturaRemuneracion': return this.m6.aprobarReaperturaRemuneracion(identificador(parametros.id), actor.id);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

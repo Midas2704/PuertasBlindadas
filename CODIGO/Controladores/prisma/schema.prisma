@@ -1835,7 +1835,10 @@ model periodo_remuneracion {
   fecha_inicio            DateTime       @db.Date
   fecha_fin               DateTime       @db.Date
   creado_en               DateTime       @default(now()) @db.Timestamptz(6)
+  cerrado_en              DateTime?      @db.Timestamptz(6)
+  cerrado_por             BigInt?
   remuneraciones          remuneracion[]
+  cerrador                usuario?       @relation("periodo_remuneracion_cerrador", fields: [cerrado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([anio, mes], map: "uq_periodo_remuneracion_anio_mes")
   @@schema("finanzas")
@@ -1849,9 +1852,28 @@ model remuneracion {
   estado                  String                 @default("abierta") @db.VarChar(20)
   creado_por              BigInt
   creado_en               DateTime               @default(now()) @db.Timestamptz(6)
+  calculado_en            DateTime?              @db.Timestamptz(6)
+  calculado_por           BigInt?
+  total_haberes           Decimal?               @db.Decimal(14, 4)
+  total_deducciones       Decimal?               @db.Decimal(14, 4)
+  total_aportes_empleador Decimal?               @db.Decimal(14, 4)
+  base_imponible          Decimal?               @db.Decimal(14, 4)
+  base_tributable         Decimal?               @db.Decimal(14, 4)
+  liquido_preliminar      Decimal?               @db.Decimal(14, 4)
+  cerrado_en              DateTime?              @db.Timestamptz(6)
+  cerrado_por             BigInt?
+  reapertura_solicitada_en DateTime?             @db.Timestamptz(6)
+  reapertura_solicitada_por BigInt?
+  reapertura_motivo       String?
+  reapertura_aprobada_en  DateTime?              @db.Timestamptz(6)
+  reapertura_aprobada_por BigInt?
   periodo                 periodo_remuneracion   @relation(fields: [id_periodo_remuneracion], references: [id_periodo_remuneracion], onDelete: Restrict, onUpdate: NoAction)
   empleado                empleado               @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
   creador                 usuario                @relation("remuneracion_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  calculador              usuario?               @relation("remuneracion_calculador", fields: [calculado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  cerrador                usuario?               @relation("remuneracion_cerrador", fields: [cerrado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  solicitante_reapertura  usuario?               @relation("remuneracion_reapertura_solicitante", fields: [reapertura_solicitada_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  aprobador_reapertura    usuario?               @relation("remuneracion_reapertura_aprobador", fields: [reapertura_aprobada_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
   reemplaza_a             remuneracion?          @relation("reemplazo_remuneracion", fields: [reemplaza_a_id, id_periodo_remuneracion, id_empleado], references: [id_remuneracion, id_periodo_remuneracion, id_empleado], onDelete: Restrict, onUpdate: NoAction)
   reemplazada_por         remuneracion?          @relation("reemplazo_remuneracion")
   componentes             componente_remuneracion[]
@@ -3054,6 +3076,11 @@ model usuario {
   ejecuciones_tarea                                ejecucion_tarea[] @relation("ejecucion_tarea_ejecutor")
   decisiones_retrabajo_resueltas                   decision_remuneracional_retrabajo[] @relation("decision_retrabajo_resolutor")
   remuneraciones_creadas                           remuneracion[] @relation("remuneracion_creador")
+  periodos_remuneracion_cerrados                   periodo_remuneracion[] @relation("periodo_remuneracion_cerrador")
+  remuneraciones_calculadas                        remuneracion[] @relation("remuneracion_calculador")
+  remuneraciones_cerradas                          remuneracion[] @relation("remuneracion_cerrador")
+  reaperturas_remuneracion_solicitadas             remuneracion[] @relation("remuneracion_reapertura_solicitante")
+  reaperturas_remuneracion_aprobadas               remuneracion[] @relation("remuneracion_reapertura_aprobador")
   componentes_remuneracion_creados                 componente_remuneracion[] @relation("componente_remuneracion_creador")
   componentes_remuneracion_revisados               componente_remuneracion[] @relation("componente_remuneracion_revisor")
   empleado                                         empleado?                @relation(fields: [empleado_rut_empleado], references: [rut_empleado], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_empleado_rut_empleado")

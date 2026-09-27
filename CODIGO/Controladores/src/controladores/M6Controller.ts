@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { normalizarRut, validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
+import { FuentePagoRemuneracion, FuentePagoRemuneracionNoImplementada } from '../servicios/FuentePagoRemuneracion';
 
 type Direccion = 'asc' | 'desc';
 
@@ -53,6 +54,8 @@ const decimalMonetario = (valor: unknown, nombre: string, positivo = false) => {
 };
 
 export class M6Controller {
+  constructor(private readonly fuentePagoRemuneracion: FuentePagoRemuneracion = new FuentePagoRemuneracionNoImplementada()) {}
+
   async crearEmpleado(entrada: Record<string, unknown>) {
     const rut = validarYNormalizarRut(entrada.rut);
     const nombres = texto(entrada.nombres, 120);
@@ -230,6 +233,22 @@ export class M6Controller {
     return relaciones.map((relacion) => this.presentarRelacion(relacion));
   }
 
+  private async validarPeriodosCerradosParaIntervalos(tx: Prisma.TransactionClient, intervalos: Array<{ inicio: Date; termino: Date | null }>) {
+    const afectados = await tx.periodo_remuneracion.findFirst({
+      where: {
+        cerrado_en: { not: null },
+        OR: intervalos.map(({ inicio, termino }) => ({
+          fecha_fin: { gte: inicio },
+          ...(termino ? { fecha_inicio: { lte: termino } } : {}),
+        })),
+      },
+      select: { anio: true, mes: true },
+    });
+    if (afectados) {
+      throw new ErrorAplicacion(409, `La relación laboral afecta el período de remuneración cerrado ${afectados.anio}-${String(afectados.mes).padStart(2, '0')}`, 'PERIODO_REMUNERACION_CERRADO');
+    }
+  }
+
   async crearRelacionLaboral(idEmpleado: number, entrada: Record<string, unknown>) {
     const fechaInicio = fechaEntrada(entrada.fechaInicio, 'Fecha de inicio')!;
     const fechaTermino = fechaEntrada(entrada.fechaTermino, 'Fecha de término', false);
@@ -243,6 +262,7 @@ export class M6Controller {
           throw new ErrorAplicacion(404, 'Tipo de vínculo laboral activo no encontrado');
         }
         const estado = fechaTermino ? 'terminada' : 'vigente';
+        await this.validarPeriodosCerradosParaIntervalos(tx, [{ inicio: fechaInicio, termino: fechaTermino }]);
         await tx.relacion_laboral_empleado.create({ data: { id_empleado: idEmpleado, fecha_inicio: fechaInicio, fecha_termino: fechaTermino, estado, id_tipo_vinculo_laboral: idTipoVinculo, jornada } });
         if (estado === 'vigente') await tx.empleado.update({ where: { id_empleado: idEmpleado }, data: { estado_laboral: 'activo' } });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -271,6 +291,12 @@ export class M6Controller {
         }
         const jornada = entrada.jornada === undefined ? relacion.jornada : texto(entrada.jornada, 80) || null;
         const estado = fechaTermino ? 'terminada' : relacion.estado;
+        if (entrada.fechaInicio !== undefined || entrada.fechaTermino !== undefined) {
+          await this.validarPeriodosCerradosParaIntervalos(tx, [
+            { inicio: relacion.fecha_inicio, termino: relacion.fecha_termino },
+            { inicio: fechaInicio, termino: fechaTermino },
+          ]);
+        }
         await tx.relacion_laboral_empleado.update({ where: { id_relacion_laboral_empleado: idRelacion }, data: { fecha_inicio: fechaInicio, fecha_termino: fechaTermino, estado, id_tipo_vinculo_laboral: idTipoVinculo, jornada } });
         if (estado === 'terminada') {
           const vigentes = await tx.relacion_laboral_empleado.count({ where: { id_empleado: idEmpleado, estado: 'vigente', fecha_termino: null } });
@@ -947,10 +973,67 @@ export class M6Controller {
   private presentarRemuneracion(item: any) {
     return {
       id: item.id_remuneracion, estado: item.estado,
-      periodo: { id: item.periodo.id_periodo_remuneracion, anio: item.periodo.anio, mes: item.periodo.mes, fechaInicio: item.periodo.fecha_inicio, fechaFin: item.periodo.fecha_fin },
+      periodo: { id: item.periodo.id_periodo_remuneracion, anio: item.periodo.anio, mes: item.periodo.mes, fechaInicio: item.periodo.fecha_inicio, fechaFin: item.periodo.fecha_fin, cerradoEn: item.periodo.cerrado_en },
       empleado: { id: item.empleado.id_empleado, rut: item.empleado.rut_empleado, nombre: nombreCompleto(item.empleado) },
+      calculadoEn: item.calculado_en, cerradoEn: item.cerrado_en, reemplazaAId: item.reemplaza_a_id,
+      reapertura: { solicitadaEn: item.reapertura_solicitada_en, solicitadaPor: item.reapertura_solicitada_por?.toString() || null, motivo: item.reapertura_motivo, aprobadaEn: item.reapertura_aprobada_en, aprobadaPor: item.reapertura_aprobada_por?.toString() || null },
+      totales: { haberes: item.total_haberes === null ? null : Number(item.total_haberes), deducciones: item.total_deducciones === null ? null : Number(item.total_deducciones), aportesEmpleador: item.total_aportes_empleador === null ? null : Number(item.total_aportes_empleador), baseImponible: item.base_imponible === null ? null : Number(item.base_imponible), baseTributable: item.base_tributable === null ? null : Number(item.base_tributable), liquidoPreliminar: item.liquido_preliminar === null ? null : Number(item.liquido_preliminar) },
       componentes: item.componentes.map((componente: any) => this.presentarComponente(componente)),
     };
+  }
+
+  private periodoEntrada(anioEntrada: unknown, mesEntrada: unknown) {
+    const anio = Number(anioEntrada); const mes = Number(mesEntrada);
+    if (!Number.isInteger(anio) || anio < 2000 || anio > 2200 || !Number.isInteger(mes) || mes < 1 || mes > 12) throw new ErrorAplicacion(400, 'Año y mes válidos son obligatorios');
+    return { anio, mes, fechaInicio: new Date(Date.UTC(anio, mes - 1, 1)), fechaFin: new Date(Date.UTC(anio, mes, 0)) };
+  }
+
+  private async poblacionExigible(tx: Prisma.TransactionClient, fechaInicio: Date, fechaFin: Date) {
+    const relaciones = await tx.relacion_laboral_empleado.findMany({
+      where: { fecha_inicio: { lte: fechaFin }, OR: [{ fecha_termino: null }, { fecha_termino: { gte: fechaInicio } }] },
+      include: { empleado: true }, orderBy: [{ id_empleado: 'asc' }, { fecha_inicio: 'asc' }],
+    });
+    const agrupada = new Map<number, { empleado: any; relaciones: any[] }>();
+    for (const relacion of relaciones) {
+      const item = agrupada.get(relacion.id_empleado) || { empleado: relacion.empleado, relaciones: [] };
+      item.relaciones.push(relacion); agrupada.set(relacion.id_empleado, item);
+    }
+    return [...agrupada.values()];
+  }
+
+  private async bloqueosRemuneracion(tx: Prisma.TransactionClient, remuneracion: any) {
+    const bloqueos: { codigo: string; detalle: string }[] = []; const advertencias: { codigo: string; detalle: string }[] = [];
+    if (remuneracion.empleado.sueldo_base === null) bloqueos.push({ codigo: 'SUELDO_BASE_FALTANTE', detalle: 'El empleado no tiene sueldo base vigente' });
+    if (remuneracion.empleado.sueldo_base !== null && (!remuneracion.empleado.fecha_aplicacion_sueldo_base || remuneracion.empleado.fecha_aplicacion_sueldo_base > remuneracion.periodo.fecha_fin)) bloqueos.push({ codigo: 'VIGENCIA_SUELDO_BASE_NO_RESUELTA', detalle: 'No existe vigencia de sueldo base aplicable al período' });
+    const pendientes = remuneracion.componentes.filter((item: any) => ['propuesto', 'conflicto', 'pendiente_valorizacion'].includes(item.estado_revision));
+    for (const item of pendientes) bloqueos.push({ codigo: 'COMPONENTE_PENDIENTE', detalle: `${item.descripcion} (${item.estado_revision})` });
+    const tratamientos = await tx.tratamiento_remuneracional_ejecucion.findMany({ where: { id_empleado: remuneracion.id_empleado, ejecucion: { fecha_ejecucion: { gte: remuneracion.periodo.fecha_inicio, lte: remuneracion.periodo.fecha_fin } } }, include: { ejecucion: true, decisiones_retrabajo: true } });
+    for (const item of tratamientos) {
+      if (item.estado_remunerabilidad === 'pendiente' || item.estado_valorizacion === 'pendiente' || item.estado_valorizacion === 'conflicto') bloqueos.push({ codigo: 'HECHO_TERRENO_PENDIENTE', detalle: `La ejecución ${item.id_ejecucion_tarea.toString()} no está resuelta` });
+      if (item.estado_remunerabilidad === 'remunerable' && item.valor_propuesto === null) bloqueos.push({ codigo: 'HECHO_TERRENO_SIN_VALOR', detalle: `La ejecución ${item.id_ejecucion_tarea.toString()} no tiene valor` });
+    }
+    const relaciones = await tx.relacion_laboral_empleado.count({ where: { id_empleado: remuneracion.id_empleado, fecha_inicio: { lte: remuneracion.periodo.fecha_fin }, OR: [{ fecha_termino: null }, { fecha_termino: { gte: remuneracion.periodo.fecha_inicio } }] } });
+    if (relaciones === 0) bloqueos.push({ codigo: 'RELACION_LABORAL_NO_APLICABLE', detalle: 'El empleado no tiene relación laboral aplicable al período' });
+    if (relaciones > 1) advertencias.push({ codigo: 'MULTIPLES_RELACIONES_MES', detalle: 'El empleado presenta más de una relación laboral aplicable' });
+    if (!remuneracion.empleado.id_afp) advertencias.push({ codigo: 'AFP_NO_INFORMADA', detalle: 'AFP no informada; no se calculó una deducción previsional' });
+    if (!remuneracion.empleado.id_prevision_salud) advertencias.push({ codigo: 'SALUD_NO_INFORMADA', detalle: 'Previsión de salud no informada; no se calculó una deducción de salud' });
+    return { bloqueos, advertencias };
+  }
+
+  async consultarPeriodoRemuneracion(anioEntrada: unknown, mesEntrada: unknown) {
+    const { anio, mes, fechaInicio, fechaFin } = this.periodoEntrada(anioEntrada, mesEntrada);
+    return prisma.$transaction(async (tx) => {
+      const periodo = await tx.periodo_remuneracion.findUnique({ where: { anio_mes: { anio, mes } } });
+      const poblacion = await this.poblacionExigible(tx, fechaInicio, fechaFin);
+      const remuneraciones = periodo ? await tx.remuneracion.findMany({ where: { id_periodo_remuneracion: periodo.id_periodo_remuneracion }, include: this.incluirRemuneracion, orderBy: { id_remuneracion: 'desc' } }) : [];
+      const actuales = new Map<number, any>(); for (const item of remuneraciones) if (item.estado !== 'reemplazada' && !actuales.has(item.id_empleado)) actuales.set(item.id_empleado, item);
+      const empleados = [];
+      for (const item of poblacion) {
+        const actual = actuales.get(item.empleado.id_empleado); const revision = actual ? await this.bloqueosRemuneracion(tx, actual) : { bloqueos: [{ codigo: 'REMUNERACION_NO_CREADA', detalle: 'No existe remuneración actual para el período' }], advertencias: [] };
+        empleados.push({ idEmpleado: item.empleado.id_empleado, rut: item.empleado.rut_empleado, nombre: nombreCompleto(item.empleado), estadoLaboral: item.empleado.estado_laboral, relaciones: item.relaciones.map((r: any) => ({ id: r.id_relacion_laboral_empleado, fechaInicio: r.fecha_inicio, fechaTermino: r.fecha_termino, estado: r.estado })), remuneracion: actual ? this.presentarRemuneracion(actual) : null, ...revision });
+      }
+      return { periodo: periodo ? { id: periodo.id_periodo_remuneracion, anio, mes, fechaInicio, fechaFin, cerradoEn: periodo.cerrado_en } : { id: null, anio, mes, fechaInicio, fechaFin, cerradoEn: null }, resumen: { exigibles: empleados.length, sinRemuneracion: empleados.filter(x => !x.remuneracion).length, abiertas: empleados.filter(x => x.remuneracion?.estado === 'abierta').length, cerradas: empleados.filter(x => x.remuneracion?.estado === 'cerrada').length, conBloqueos: empleados.filter(x => x.bloqueos.length).length }, empleados };
+    });
   }
 
   async obtenerRemuneracion(idRemuneracion: number) {
@@ -961,13 +1044,12 @@ export class M6Controller {
 
   async obtenerOCrearContextoRemuneracion(entrada: Record<string, unknown>, idUsuario: bigint) {
     const idEmpleado = enteroPositivo(entrada.idEmpleado, 'Empleado');
-    const anio = Number(entrada.anio); const mes = Number(entrada.mes);
-    if (!Number.isInteger(anio) || anio < 2000 || anio > 2200 || !Number.isInteger(mes) || mes < 1 || mes > 12) throw new ErrorAplicacion(400, 'Año y mes válidos son obligatorios');
-    const fechaInicio = new Date(Date.UTC(anio, mes - 1, 1)); const fechaFin = new Date(Date.UTC(anio, mes, 0));
+    const { anio, mes, fechaInicio, fechaFin } = this.periodoEntrada(entrada.anio, entrada.mes);
     try {
       const id = await prisma.$transaction(async (tx) => {
         if (!await tx.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
         const periodo = await tx.periodo_remuneracion.upsert({ where: { anio_mes: { anio, mes } }, create: { anio, mes, fecha_inicio: fechaInicio, fecha_fin: fechaFin }, update: {} });
+        if (periodo.cerrado_en) throw new ErrorAplicacion(409, 'El período global está CERRADO');
         const vigente = await tx.remuneracion.findFirst({
           where: { id_periodo_remuneracion: periodo.id_periodo_remuneracion, id_empleado: idEmpleado, estado: { not: 'reemplazada' } },
           orderBy: { id_remuneracion: 'desc' },
@@ -983,7 +1065,214 @@ export class M6Controller {
     const remuneracion = await tx.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: { periodo: true } });
     if (!remuneracion) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
     if (remuneracion.estado !== 'abierta') throw new ErrorAplicacion(409, 'La remuneración no está ABIERTA');
+    if (remuneracion.periodo.cerrado_en) throw new ErrorAplicacion(409, 'El período global está CERRADO');
     return remuneracion;
+  }
+
+  private mismoAutomatico(actual: any, candidato: any) {
+    const mismoDecimal = (a: Prisma.Decimal | null, b: Prisma.Decimal | null | undefined) => a === null || b === null || b === undefined ? a === (b ?? null) : a.equals(b);
+    const mismaFecha = (a: Date | null, b: Date | string | null | undefined) => (a?.toISOString().slice(0, 10) || null) === (b ? new Date(b).toISOString().slice(0, 10) : null);
+    return actual.id_concepto === (candidato.id_concepto ?? null)
+      && actual.descripcion === candidato.descripcion
+      && mismoDecimal(actual.monto, candidato.monto)
+      && actual.referencia_origen === (candidato.referencia_origen ?? null)
+      && actual.version_origen === (candidato.version_origen ?? null)
+      && mismaFecha(actual.fecha_origen, candidato.fecha_origen);
+  }
+
+  private async sincronizarAutomaticos(tx: Prisma.TransactionClient, idRemuneracion: number, candidatos: Prisma.componente_remuneracionCreateManyInput[], tipos: string[]) {
+    const existentes = await tx.componente_remuneracion.findMany({
+      where: { id_remuneracion: idRemuneracion, tipo: { in: tipos }, fuente_tipo: 'AUTOMATICA' },
+      include: { _count: { select: { componentes_derivados: true } } },
+    });
+    const porClave = new Map(existentes.map(item => [`${item.tipo}|${item.clave_negocio || ''}`, item]));
+    const conservados = new Set<number>();
+    for (const original of candidatos) {
+      const candidato = { ...original };
+      const anterior = porClave.get(`${candidato.tipo}|${candidato.clave_negocio || ''}`);
+      if (anterior && this.mismoAutomatico(anterior, candidato)) {
+        conservados.add(anterior.id_componente_remuneracion);
+        continue;
+      }
+      if (anterior) {
+        const descartable = ['propuesto', 'conflicto', 'pendiente_valorizacion'].includes(anterior.estado_revision)
+          && anterior.revisado_por === null && anterior.fecha_revision === null && anterior._count.componentes_derivados === 0;
+        if (descartable) {
+          await tx.componente_remuneracion.delete({ where: { id_componente_remuneracion: anterior.id_componente_remuneracion } });
+        } else {
+          await tx.componente_remuneracion.update({
+            where: { id_componente_remuneracion: anterior.id_componente_remuneracion },
+            data: {
+              fuente_tipo: 'AUTOMATICA_HISTORICA',
+              estado_revision: anterior.estado_revision === 'aprobado' ? 'reemplazado' : anterior.estado_revision,
+              motivo: anterior.motivo || 'Antecedente automático preservado porque su fuente cambió',
+            },
+          });
+          candidato.estado_revision = 'conflicto';
+          candidato.motivo = 'La fuente cambió después de existir un antecedente automático revisado';
+          candidato.revisado_por = null;
+          candidato.fecha_revision = null;
+          candidato.id_componente_origen = anterior.id_componente_remuneracion;
+          candidato.tipo_relacion = 'NUEVA_VERSION';
+        }
+      }
+      await tx.componente_remuneracion.create({ data: candidato as Prisma.componente_remuneracionUncheckedCreateInput });
+    }
+    for (const anterior of existentes.filter(item => !conservados.has(item.id_componente_remuneracion) && !candidatos.some(candidato => `${candidato.tipo}|${candidato.clave_negocio || ''}` === `${item.tipo}|${item.clave_negocio || ''}`))) {
+      const descartable = ['propuesto', 'conflicto', 'pendiente_valorizacion'].includes(anterior.estado_revision)
+        && anterior.revisado_por === null && anterior.fecha_revision === null && anterior._count.componentes_derivados === 0;
+      if (descartable) await tx.componente_remuneracion.delete({ where: { id_componente_remuneracion: anterior.id_componente_remuneracion } });
+      else await tx.componente_remuneracion.update({ where: { id_componente_remuneracion: anterior.id_componente_remuneracion }, data: { fuente_tipo: 'AUTOMATICA_HISTORICA', estado_revision: anterior.estado_revision === 'aprobado' ? 'conflicto' : anterior.estado_revision, motivo: anterior.motivo || 'La fuente automática dejó de aplicar; requiere revisión' } });
+    }
+  }
+
+  private async calcularEnTransaccion(tx: Prisma.TransactionClient, idRemuneracion: number, idUsuario: bigint) {
+    const actual = await this.remuneracionAbierta(tx, idRemuneracion);
+    const remuneracion = await tx.remuneracion.findUniqueOrThrow({ where: { id_remuneracion: idRemuneracion }, include: { periodo: true, empleado: true, componentes: { include: { concepto: true } } } });
+    const componentes: Prisma.componente_remuneracionCreateManyInput[] = [];
+    const agregar = (data: Omit<Prisma.componente_remuneracionCreateManyInput, 'id_remuneracion' | 'creado_por'>) => componentes.push({ ...data, id_remuneracion: idRemuneracion, creado_por: idUsuario });
+    if (remuneracion.empleado.sueldo_base !== null && remuneracion.empleado.fecha_aplicacion_sueldo_base && remuneracion.empleado.fecha_aplicacion_sueldo_base <= remuneracion.periodo.fecha_fin) {
+      agregar({ tipo: 'SUELDO_BASE', descripcion: 'Sueldo base vigente', monto: remuneracion.empleado.sueldo_base, fuente_tipo: 'AUTOMATICA', clave_negocio: 'SUELDO_BASE', referencia_origen: `EMPLEADO:${remuneracion.id_empleado}`, version_origen: remuneracion.empleado.fecha_aplicacion_sueldo_base.toISOString().slice(0, 10), fecha_origen: remuneracion.empleado.fecha_aplicacion_sueldo_base, estado_revision: 'aprobado', revisado_por: idUsuario, fecha_revision: new Date() });
+    }
+    const asignaciones = await tx.asignacion_concepto_remuneracion_empleado.findMany({
+      where: { id_empleado: remuneracion.id_empleado, activa: true, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }], concepto: { naturaleza_concepto: 'haber' } },
+      include: { concepto: { include: { configuraciones_m6: { where: { activa: true, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }] } } } } },
+    });
+    for (const item of asignaciones) {
+      const configuraciones = item.concepto.configuraciones_m6; let monto: Prisma.Decimal | null = item.valor_aplicable; let referencia = `ASIGNACION:${item.id_asignacion_concepto}`;
+      if (monto === null && configuraciones.length === 1 && configuraciones[0].valor !== null) {
+        const config = configuraciones[0]; const valor = config.valor!; referencia = `CONFIGURACION:${config.id_configuracion_concepto}`;
+        if (config.modalidad === 'FIJO') monto = valor;
+        else if (config.modalidad === 'PORCENTAJE' && remuneracion.empleado.sueldo_base !== null) monto = remuneracion.empleado.sueldo_base.mul(valor).div(100);
+      }
+      agregar({ id_concepto: item.id_concepto, tipo: 'HABER_AUTOMATICO', descripcion: item.concepto.nombre_concepto, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `CONCEPTO:${item.id_concepto}`, referencia_origen: referencia, estado_revision: monto === null || configuraciones.length > 1 ? 'pendiente_valorizacion' : 'aprobado', motivo: configuraciones.length > 1 ? 'Configuración ambigua para el período' : monto === null ? 'No existe un valor determinístico aplicable' : null, revisado_por: monto === null || configuraciones.length > 1 ? null : idUsuario, fecha_revision: monto === null || configuraciones.length > 1 ? null : new Date() });
+    }
+    const hechos = await tx.tratamiento_remuneracional_ejecucion.findMany({ where: { id_empleado: remuneracion.id_empleado, estado_remunerabilidad: 'remunerable', estado_valorizacion: 'valorizado', valor_propuesto: { not: null }, ejecucion: { fecha_ejecucion: { gte: remuneracion.periodo.fecha_inicio, lte: remuneracion.periodo.fecha_fin } } }, include: { ejecucion: true, tarifa: true } });
+    for (const hecho of hechos) {
+      let monto = hecho.valor_propuesto; let motivo: string | null = null;
+      if (hecho.id_tarifa) {
+        const tarifa = hecho.tarifa;
+        if (!tarifa || tarifa.estado_revision !== 'activa' || tarifa.modalidad !== 'FIJO' || tarifa.valor === null || tarifa.tipo_aplicacion === null) {
+          monto = null; motivo = 'La tarifa usada por el tratamiento ya no es determinística';
+        } else if (tarifa.tipo_aplicacion === 'por_unidad') {
+          if (hecho.ejecucion.cantidad === null || normalizarUnidad(tarifa.unidad) !== normalizarUnidad(hecho.ejecucion.unidad)) {
+            monto = null; motivo = 'La tarifa vigente no coincide con la cantidad o unidad del hecho Terreno';
+          } else monto = tarifa.valor.mul(hecho.ejecucion.cantidad);
+        } else monto = tarifa.valor;
+      }
+      agregar({ tipo: 'HECHO_TERRENO', descripcion: `Hecho Terreno ${hecho.id_ejecucion_tarea.toString()}`, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `EJECUCION:${hecho.id_ejecucion_tarea.toString()}`, referencia_origen: `TRATAMIENTO:${hecho.id_tratamiento_remuneracional}`, version_origen: hecho.id_tarifa ? `TARIFA:${hecho.id_tarifa}` : null, fecha_origen: hecho.ejecucion.fecha_ejecucion, estado_revision: monto === null ? 'pendiente_valorizacion' : 'aprobado', motivo, revisado_por: monto === null ? null : idUsuario, fecha_revision: monto === null ? null : new Date() });
+    }
+    await this.sincronizarAutomaticos(tx, idRemuneracion, componentes, ['SUELDO_BASE', 'HABER_AUTOMATICO', 'HECHO_TERRENO', 'DEDUCCION_AUTOMATICA', 'APORTE_EMPLEADOR_AUTOMATICO']);
+    let baseTributable = new Prisma.Decimal(0);
+    const componentesBase = await tx.componente_remuneracion.findMany({ where: { id_remuneracion: idRemuneracion, estado_revision: 'aprobado', monto: { not: null } } });
+    for (const item of componentesBase.filter(x => x.direccion !== 'NEGATIVO' && !['DEDUCCION_AUTOMATICA', 'APORTE_EMPLEADOR_AUTOMATICO', 'IMPUESTO_RENTA'].includes(x.tipo))) baseTributable = baseTributable.add(item.monto!);
+    const tramos = await tx.tramo_impuesto_renta.findMany({ where: { estado: 'activo', vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }] }, orderBy: { orden: 'asc' } });
+    const setsTributarios = new Set(tramos.map(x => `${x.vigencia_desde.toISOString()}|${x.vigencia_hasta?.toISOString() || ''}`));
+    const tramo = setsTributarios.size === 1 ? tramos.find(x => baseTributable.gte(x.limite_desde) && (x.limite_hasta === null || baseTributable.lte(x.limite_hasta))) : null;
+    const impuesto: Prisma.componente_remuneracionCreateManyInput[] = [];
+    const agregarImpuesto = (data: Omit<Prisma.componente_remuneracionCreateManyInput, 'id_remuneracion' | 'creado_por'>) => impuesto.push({ ...data, id_remuneracion: idRemuneracion, creado_por: idUsuario });
+    if (tramo && tramo.factor.isZero() && tramo.rebaja.isZero()) {
+      agregarImpuesto({ tipo: 'IMPUESTO_RENTA', descripcion: 'Impuesto a la renta según tramo vigente sin cargo', monto: new Prisma.Decimal(0), fuente_tipo: 'AUTOMATICA', clave_negocio: 'IMPUESTO_RENTA', referencia_origen: `TRAMO:${tramo.id_tramo_impuesto_renta}`, version_origen: tramo.vigencia_desde.toISOString().slice(0, 10), estado_revision: 'aprobado', revisado_por: idUsuario, fecha_revision: new Date() });
+    } else {
+      agregarImpuesto({ tipo: 'IMPUESTO_RENTA', descripcion: 'Impuesto a la renta pendiente', monto: null, fuente_tipo: 'AUTOMATICA', clave_negocio: 'IMPUESTO_RENTA', referencia_origen: tramo ? `TRAMO:${tramo.id_tramo_impuesto_renta}` : null, version_origen: tramo?.vigencia_desde.toISOString().slice(0, 10) || null, estado_revision: 'pendiente_valorizacion', motivo: tramos.length === 0 ? 'No existe set tributario vigente' : setsTributarios.size > 1 ? 'Existen múltiples sets tributarios efectivos' : !tramo ? 'La base no coincide con un tramo configurado' : 'La fórmula tributaria no está definida explícitamente por el modelo vigente' });
+    }
+    await this.sincronizarAutomaticos(tx, idRemuneracion, impuesto, ['IMPUESTO_RENTA']);
+    const todos = await tx.componente_remuneracion.findMany({ where: { id_remuneracion: idRemuneracion } });
+    let haberes = new Prisma.Decimal(0), deducciones = new Prisma.Decimal(0), aportes = new Prisma.Decimal(0);
+    for (const item of todos.filter(x => x.estado_revision === 'aprobado' && x.monto !== null)) {
+      if (item.tipo === 'APORTE_EMPLEADOR_AUTOMATICO') aportes = aportes.add(item.monto!);
+      else if (item.tipo === 'DEDUCCION_AUTOMATICA' || item.tipo === 'IMPUESTO_RENTA' || item.direccion === 'NEGATIVO') deducciones = deducciones.add(item.monto!);
+      else haberes = haberes.add(item.monto!);
+    }
+    const recargada = await tx.remuneracion.findUniqueOrThrow({ where: { id_remuneracion: idRemuneracion }, include: { periodo: true, empleado: true, componentes: { include: { concepto: true } } } });
+    const revision = await this.bloqueosRemuneracion(tx, recargada); const liquido = haberes.sub(deducciones);
+    if (liquido.isNegative()) revision.bloqueos.push({ codigo: 'LIQUIDO_NEGATIVO', detalle: 'Las deducciones superan los haberes' });
+    await tx.remuneracion.update({ where: { id_remuneracion: actual.id_remuneracion }, data: { calculado_en: new Date(), calculado_por: idUsuario, total_haberes: haberes, total_deducciones: deducciones, total_aportes_empleador: aportes, base_imponible: haberes, base_tributable: haberes, liquido_preliminar: revision.bloqueos.length ? null : liquido } });
+    return revision;
+  }
+
+  async calcularRemuneracion(entrada: Record<string, unknown>, idUsuario: bigint) {
+    const idEmpleado = enteroPositivo(entrada.idEmpleado, 'Empleado'); const { fechaInicio, fechaFin } = this.periodoEntrada(entrada.anio, entrada.mes);
+    if (!await prisma.relacion_laboral_empleado.count({ where: { id_empleado: idEmpleado, fecha_inicio: { lte: fechaFin }, OR: [{ fecha_termino: null }, { fecha_termino: { gte: fechaInicio } }] } })) throw new ErrorAplicacion(409, 'El empleado no es exigible en el período');
+    const contexto = await this.obtenerOCrearContextoRemuneracion(entrada, idUsuario);
+    try {
+      const revision = await prisma.$transaction(tx => this.calcularEnTransaccion(tx, contexto.id, idUsuario), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return { remuneracion: await this.obtenerRemuneracion(contexto.id), ...revision };
+    } catch (error) { this.conflictoConcurrente(error, 'El cálculo preliminar cambió concurrentemente'); }
+  }
+
+  async cerrarRemuneracion(idRemuneracion: number, idUsuario: bigint) {
+    try {
+      const revision = await prisma.$transaction(async tx => {
+        const resultado = await this.calcularEnTransaccion(tx, idRemuneracion, idUsuario);
+        if (resultado.bloqueos.length) throw new ErrorAplicacion(409, 'La remuneración mantiene bloqueos de cálculo', 'REMUNERACION_CON_BLOQUEOS');
+        const actualizada = await tx.remuneracion.updateMany({ where: { id_remuneracion: idRemuneracion, estado: 'abierta' }, data: { estado: 'cerrada', cerrado_en: new Date(), cerrado_por: idUsuario } });
+        if (actualizada.count !== 1) throw new ErrorAplicacion(409, 'La remuneración cambió concurrentemente');
+        return resultado;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return { remuneracion: await this.obtenerRemuneracion(idRemuneracion), liquidacion: await this.obtenerLiquidacionRemuneracion(idRemuneracion), ...revision };
+    } catch (error) { this.conflictoConcurrente(error, 'El cierre individual cambió concurrentemente'); }
+  }
+
+  async obtenerLiquidacionRemuneracion(idRemuneracion: number) {
+    const item = await prisma.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: this.incluirRemuneracion });
+    if (!item) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+    if (item.estado !== 'cerrada') throw new ErrorAplicacion(409, 'La liquidación sólo se deriva de una remuneración CERRADA');
+    return { tipo: 'LIQUIDACION_DERIVADA', documentoGenerado: false, remuneracion: this.presentarRemuneracion(item) };
+  }
+
+  async cerrarPeriodoRemuneracion(anioEntrada: unknown, mesEntrada: unknown, idUsuario: bigint) {
+    const { anio, mes, fechaInicio, fechaFin } = this.periodoEntrada(anioEntrada, mesEntrada);
+    try {
+      const idPeriodo = await prisma.$transaction(async tx => {
+        const periodo = await tx.periodo_remuneracion.upsert({ where: { anio_mes: { anio, mes } }, create: { anio, mes, fecha_inicio: fechaInicio, fecha_fin: fechaFin }, update: {} });
+        if (periodo.cerrado_en) return periodo.id_periodo_remuneracion;
+        const exigibles = await this.poblacionExigible(tx, fechaInicio, fechaFin); const ids = exigibles.map(x => x.empleado.id_empleado);
+        const actuales = await tx.remuneracion.findMany({ where: { id_periodo_remuneracion: periodo.id_periodo_remuneracion, id_empleado: { in: ids }, estado: { not: 'reemplazada' } } });
+        if (actuales.length !== ids.length || actuales.some(x => x.estado !== 'cerrada')) throw new ErrorAplicacion(409, 'Todas las remuneraciones exigibles deben estar CERRADAS');
+        const cierre = await tx.periodo_remuneracion.updateMany({ where: { id_periodo_remuneracion: periodo.id_periodo_remuneracion, cerrado_en: null }, data: { cerrado_en: new Date(), cerrado_por: idUsuario } });
+        if (cierre.count !== 1) throw new ErrorAplicacion(409, 'El período cambió concurrentemente');
+        return periodo.id_periodo_remuneracion;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return { ...(await this.consultarPeriodoRemuneracion(anio, mes)), idPeriodo };
+    } catch (error) { this.conflictoConcurrente(error, 'El cierre global cambió concurrentemente'); }
+  }
+
+  private async estadoPagoRemuneracion(tx: Prisma.TransactionClient, _idRemuneracion: number) {
+    return this.fuentePagoRemuneracion.consultarEstado(tx, _idRemuneracion);
+  }
+
+  async solicitarReaperturaRemuneracion(idRemuneracion: number, entrada: Record<string, unknown>, idUsuario: bigint) {
+    const motivo = texto(entrada.motivo, 1000); if (!motivo) throw new ErrorAplicacion(400, 'El motivo de reapertura es obligatorio');
+    try {
+      await prisma.$transaction(async tx => {
+        const actual = await tx.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: { periodo: true } });
+        if (!actual) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+        if (actual.periodo.cerrado_en) throw new ErrorAplicacion(409, 'La reapertura de un período global cerrado está pendiente de definición', 'PERIODO_CERRADO_REAPERTURA_PENDIENTE_DE_DEFINICION');
+        if (actual.estado !== 'cerrada' || actual.reapertura_solicitada_en) throw new ErrorAplicacion(409, 'Sólo una remuneración CERRADA sin solicitud vigente puede solicitar reapertura');
+        if ((await this.estadoPagoRemuneracion(tx, idRemuneracion)).tienePago) throw new ErrorAplicacion(409, 'La remuneración ya tiene pago registrado');
+        await tx.remuneracion.update({ where: { id_remuneracion: idRemuneracion }, data: { reapertura_solicitada_en: new Date(), reapertura_solicitada_por: idUsuario, reapertura_motivo: motivo } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerRemuneracion(idRemuneracion);
+    } catch (error) { this.conflictoConcurrente(error, 'La solicitud de reapertura cambió concurrentemente'); }
+  }
+
+  async aprobarReaperturaRemuneracion(idRemuneracion: number, idUsuario: bigint) {
+    try {
+      const nuevoId = await prisma.$transaction(async tx => {
+        const actual = await tx.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: { periodo: true } });
+        if (!actual) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+        if (actual.periodo.cerrado_en) throw new ErrorAplicacion(409, 'La reapertura de un período global cerrado está pendiente de definición', 'PERIODO_CERRADO_REAPERTURA_PENDIENTE_DE_DEFINICION');
+        if (actual.estado !== 'cerrada' || !actual.reapertura_solicitada_en || !actual.reapertura_solicitada_por) throw new ErrorAplicacion(409, 'No existe una solicitud de reapertura aprobable');
+        if (actual.reapertura_solicitada_por === idUsuario) throw new ErrorAplicacion(409, 'El aprobador debe ser distinto del solicitante');
+        if ((await this.estadoPagoRemuneracion(tx, idRemuneracion)).tienePago) throw new ErrorAplicacion(409, 'La remuneración ya tiene pago registrado');
+        const cambio = await tx.remuneracion.updateMany({ where: { id_remuneracion: idRemuneracion, estado: 'cerrada', reapertura_aprobada_en: null }, data: { estado: 'reemplazada', reapertura_aprobada_en: new Date(), reapertura_aprobada_por: idUsuario } });
+        if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La reapertura cambió concurrentemente');
+        const nueva = await tx.remuneracion.create({ data: { id_periodo_remuneracion: actual.id_periodo_remuneracion, id_empleado: actual.id_empleado, reemplaza_a_id: actual.id_remuneracion, creado_por: idUsuario } });
+        return nueva.id_remuneracion;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerRemuneracion(nuevoId);
+    } catch (error) { this.conflictoConcurrente(error, 'La reapertura cambió concurrentemente'); }
   }
 
   async proponerComponenteExcepcional(idRemuneracion: number, entrada: Record<string, unknown>, idUsuario: bigint) {
@@ -1007,9 +1296,10 @@ export class M6Controller {
     if (decision === 'rechazar' && !motivo) throw new ErrorAplicacion(400, 'El rechazo requiere motivo');
     try {
       const idRemuneracion = await prisma.$transaction(async (tx) => {
-        const actual = await tx.componente_remuneracion.findUnique({ where: { id_componente_remuneracion: idComponente }, include: { remuneracion: true } });
+        const actual = await tx.componente_remuneracion.findUnique({ where: { id_componente_remuneracion: idComponente }, include: { remuneracion: { include: { periodo: true } } } });
         if (!actual || !tipos.includes(actual.tipo)) throw new ErrorAplicacion(404, 'Componente no encontrado');
         if (actual.remuneracion.estado !== 'abierta') throw new ErrorAplicacion(409, 'La remuneración no está ABIERTA');
+        if (actual.remuneracion.periodo.cerrado_en) throw new ErrorAplicacion(409, 'El período global está CERRADO');
         if (!['propuesto', 'conflicto', 'pendiente_valorizacion'].includes(actual.estado_revision)) throw new ErrorAplicacion(409, 'El componente ya fue resuelto');
         if (decision === 'aprobar' && actual.estado_revision === 'pendiente_valorizacion') throw new ErrorAplicacion(409, 'El componente aún está pendiente de valorización');
         if (decision === 'aprobar' && actual.estado_revision === 'conflicto' && !motivo) throw new ErrorAplicacion(400, 'La resolución del conflicto requiere fundamento');
