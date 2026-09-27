@@ -1114,6 +1114,14 @@ export class M6Controller {
         conservados.add(anterior.id_componente_remuneracion);
         continue;
       }
+      if (anterior && candidato.tipo === 'DEDUCCION_AUTOMATICA' && candidato.clave_negocio?.startsWith('ANTICIPO:') && anterior._count.componentes_derivados === 0) {
+        await tx.componente_remuneracion.update({
+          where: { id_componente_remuneracion: anterior.id_componente_remuneracion },
+          data: { monto: candidato.monto, referencia_origen: candidato.referencia_origen, estado_revision: 'aprobado', motivo: null, revisado_por: candidato.revisado_por, fecha_revision: candidato.fecha_revision },
+        });
+        conservados.add(anterior.id_componente_remuneracion);
+        continue;
+      }
       if (anterior) {
         const descartable = ['propuesto', 'conflicto', 'pendiente_valorizacion'].includes(anterior.estado_revision)
           && anterior.revisado_por === null && anterior.fecha_revision === null && anterior._count.componentes_derivados === 0;
@@ -1188,7 +1196,8 @@ export class M6Controller {
     const pagosAnticipo = await this.repositorioPago.pagosEfectivosAnticipos(tx, anticipos.map(item => item.id_anticipo));
     const anticiposPagados = new Set(pagosAnticipo.map(item => item.idAnticipo));
     for (const anticipo of anticipos.filter(item => anticiposPagados.has(item.id_anticipo))) {
-      agregar({ tipo: 'DEDUCCION_AUTOMATICA', descripcion: 'Anticipo efectivamente pagado', monto: anticipo.monto_final, fuente_tipo: 'AUTOMATICA', clave_negocio: `ANTICIPO:${anticipo.id_anticipo}`, referencia_origen: `PAGO_ANTICIPO:${pagosAnticipo.find(item => item.idAnticipo === anticipo.id_anticipo)!.idPago}`, estado_revision: 'aprobado', revisado_por: idUsuario, fecha_revision: new Date() });
+      const pagoAnticipo = pagosAnticipo.find(item => item.idAnticipo === anticipo.id_anticipo)!;
+      agregar({ tipo: 'DEDUCCION_AUTOMATICA', descripcion: 'Anticipo efectivamente pagado neto de reversiones', monto: pagoAnticipo.montoEfectivo, fuente_tipo: 'AUTOMATICA', clave_negocio: `ANTICIPO:${anticipo.id_anticipo}`, referencia_origen: `PAGO_ANTICIPO:${pagoAnticipo.idPago}`, estado_revision: 'aprobado', revisado_por: idUsuario, fecha_revision: new Date() });
     }
     await this.sincronizarAutomaticos(tx, idRemuneracion, componentes, ['SUELDO_BASE', 'HABER_AUTOMATICO', 'HECHO_TERRENO', 'DEDUCCION_AUTOMATICA', 'APORTE_EMPLEADOR_AUTOMATICO']);
     let baseTributable = new Prisma.Decimal(0);
@@ -1559,7 +1568,7 @@ export class M6Controller {
     return { id: item.id_anticipo, empleado: { id: item.id_empleado, nombre: nombreCompleto(item.empleado) }, periodo: { id: item.id_periodo_remuneracion, anio: item.periodo.anio, mes: item.periodo.mes }, modalidad: item.modalidad, valorIngresado: Number(item.valor_ingresado), codigoBasePorcentaje: item.codigo_base_porcentaje, montoFinal: item.monto_final === null ? null : Number(item.monto_final), estadoValorizacion: item.estado_valorizacion, pagado: Boolean(pago) };
   }
 
-  private async montoPagable(tx: Prisma.TransactionClient, origen: OrigenPagoRemuneracion) {
+  private async montoPagableOriginal(tx: Prisma.TransactionClient, origen: OrigenPagoRemuneracion) {
     if (origen.clase === 'remuneracion') {
       const item = await tx.remuneracion.findUnique({ where: { id_remuneracion: origen.id }, include: { periodo: true } });
       if (!item) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
@@ -1581,12 +1590,21 @@ export class M6Controller {
       if (await tx.remuneracion.count({ where: { id_periodo_remuneracion: item.id_periodo_remuneracion, id_empleado: item.id_empleado, estado: 'cerrada' } })) throw new ErrorAplicacion(409, 'La remuneración del período ya está CERRADA', 'REMUNERACION_CERRADA_ANTICIPO');
       return item.monto_final;
     }
+    if (origen.clase === 'boleta_honorarios') {
+      const item = await tx.boleta_honorarios.findUnique({ where: { id_boleta_honorarios: origen.id }, include: { prestador: true } });
+      if (!item) throw new ErrorAplicacion(404, 'Boleta de honorarios no encontrada');
+      if (item.estado_documental !== 'CONFIRMADA' || item.liquido === null || item.retencion === null || item.tasa_aplicada === null || item.bruto.lte(0) || !item.bruto.equals(item.liquido.plus(item.retencion)) || !item.prestador.identificador.trim()) throw new ErrorAplicacion(409, 'La boleta no está CONFIRMADA con antecedentes económicos coherentes');
+      return item.liquido;
+    }
     throw new ErrorAplicacion(400, 'Origen de pago inválido');
   }
 
   private presentarPago(item: any) {
     const origen = this.repositorioPago.origenDesdePago(item);
-    return { id: item.id_pago_remuneracion, origenTipo: this.repositorioPago.tipoPublico(origen), origenId: origen.id, monto: Number(item.monto), medio: item.medio_pago ? { id: item.medio_pago.id_medio_pago, codigo: item.medio_pago.codigo_medio_pago, nombre: item.medio_pago.nombre_medio_pago } : null, respaldo: item.respaldo, referencia: item.referencia, estado: item.estado, creadoEn: item.creado_en, confirmadoEn: item.confirmado_en };
+    const reversiones = item.reversiones || [];
+    const totalRevertido = reversiones.reduce((suma: Prisma.Decimal, reversion: any) => suma.plus(reversion.monto), new Prisma.Decimal(0));
+    const montoEfectivo = item.estado === 'CONFIRMADO' ? item.monto.minus(totalRevertido) : new Prisma.Decimal(0);
+    return { id: item.id_pago_remuneracion, origenTipo: this.repositorioPago.tipoPublico(origen), origenId: origen.id, monto: Number(item.monto), medio: item.medio_pago ? { id: item.medio_pago.id_medio_pago, codigo: item.medio_pago.codigo_medio_pago, nombre: item.medio_pago.nombre_medio_pago } : null, respaldo: item.respaldo, referencia: item.referencia, estado: item.estado, creadoPor: item.creado_por.toString(), creadoEn: item.creado_en, confirmadoPor: item.confirmado_por?.toString() || null, confirmadoEn: item.confirmado_en, motivoAnulacion: item.motivo_anulacion, anuladoPor: item.anulado_por?.toString() || null, anuladoEn: item.anulado_en, reversiones: reversiones.map((r: any) => ({ id: r.id_reversion_pago_remuneracion, monto: Number(r.monto), motivo: r.motivo, registradoPor: r.registrado_por.toString(), registradoEn: r.registrado_en })), totalRevertido: Number(totalRevertido), montoEfectivo: Number(montoEfectivo) };
   }
 
   private async prepararPagoRemuneracion(origen: OrigenPagoRemuneracion, entrada: Record<string, unknown>, idUsuario: bigint) {
@@ -1595,7 +1613,7 @@ export class M6Controller {
     try {
       const id = await prisma.$transaction(async tx => {
         const existente = await this.repositorioPago.buscarPorClave(tx, clave); if (existente) return existente.id_pago_remuneracion;
-        await this.montoPagable(tx, origen);
+        await this.montoPagableOriginal(tx, origen);
         const medio = await tx.medio_pago.findUnique({ where: { id_medio_pago: idMedio } });
         if (!medio || medio.estado_medio_pago !== 'activo' || !medio.codigo_medio_pago || medio.requiere_respaldo === null) throw new ErrorAplicacion(409, 'El medio de pago no tiene configuración M6 válida');
         if (medio.requiere_respaldo && !respaldo) throw new ErrorAplicacion(400, 'El medio de pago exige respaldo');
@@ -1609,7 +1627,20 @@ export class M6Controller {
   async obtenerPagoRemuneracion(idPago: number) {
     const item = await this.repositorioPago.obtener(prisma, idPago, true);
     if (!item) throw new ErrorAplicacion(404, 'Pago de remuneración no encontrado');
-    return this.presentarPago(item);
+    const presentado = this.presentarPago(item);
+    const origen = await this.resumenOrigenPago(this.repositorioPago.origenDesdePago(item));
+    const usuariosIds = [item.creado_por, item.confirmado_por, item.anulado_por, ...(item.reversiones || []).map((r: any) => r.registrado_por)].filter((id): id is bigint => id !== null);
+    const usuarios = await prisma.usuario.findMany({ where: { usuario_id_usuario: { in: usuariosIds } } });
+    const nombres = new Map(usuarios.map(usuario => [usuario.usuario_id_usuario.toString(), usuario.usuario_nombre_completo_primer_nombre_usuario || usuario.usuario_username]));
+    return { ...presentado, origen, actores: { creador: nombres.get(item.creado_por.toString()) || null, confirmador: item.confirmado_por ? nombres.get(item.confirmado_por.toString()) || null : null, anulador: item.anulado_por ? nombres.get(item.anulado_por.toString()) || null : null }, reversiones: presentado.reversiones.map((r: any) => ({ ...r, usuario: nombres.get(r.registradoPor) || null })) };
+  }
+
+  private async resumenOrigenPago(origen: OrigenPagoRemuneracion) {
+    if (origen.clase === 'remuneracion') { const item = await prisma.remuneracion.findUnique({ where: { id_remuneracion: origen.id }, include: { empleado: true, periodo: true } }); return item ? { tipo: 'REMUNERACION', id: origen.id, descripcion: `${nombreCompleto(item.empleado)} · ${item.periodo.mes}/${item.periodo.anio}` } : null; }
+    if (origen.clase === 'anticipo') { const item = await prisma.anticipo_remuneracion.findUnique({ where: { id_anticipo: origen.id }, include: { empleado: true, periodo: true } }); return item ? { tipo: 'ANTICIPO', id: origen.id, descripcion: `${nombreCompleto(item.empleado)} · ${item.periodo.mes}/${item.periodo.anio}` } : null; }
+    if (origen.clase === 'regularizacion') { const item = await prisma.regularizacion_extraordinaria.findUnique({ where: { id_regularizacion: origen.id }, include: { ajuste: true } }); if (!item) return null; const empleado = await prisma.empleado.findUnique({ where: { id_empleado: item.ajuste.id_empleado } }); return { tipo: 'REGULARIZACION', id: origen.id, descripcion: `${empleado ? nombreCompleto(empleado) : `Empleado #${item.ajuste.id_empleado}`} · ajuste #${item.id_ajuste_posterior}` }; }
+    const item = await prisma.boleta_honorarios.findUnique({ where: { id_boleta_honorarios: origen.id }, include: { prestador: true } });
+    return item ? { tipo: 'BOLETA_HONORARIOS', id: origen.id, descripcion: `${item.prestador.nombre_razon_social} · folio ${item.folio}` } : null;
   }
 
   async actualizarPagoRemuneracion(idPago: number, entrada: Record<string, unknown>) {
@@ -1635,8 +1666,11 @@ export class M6Controller {
         if (pago.estado !== 'PREPARADO') throw new ErrorAplicacion(409, 'El pago no está PREPARADO');
         if (pago.medio_pago.estado_medio_pago !== 'activo' || !pago.medio_pago.codigo_medio_pago || pago.medio_pago.requiere_respaldo === null) throw new ErrorAplicacion(409, 'El medio de pago no tiene configuración M6 válida');
         if (pago.medio_pago.requiere_respaldo && !pago.respaldo) throw new ErrorAplicacion(400, 'El medio de pago exige respaldo');
-        const pagable = await this.montoPagable(tx, this.repositorioPago.origenDesdePago(pago));
-        if (!pago.monto.equals(pagable)) throw new ErrorAplicacion(409, 'El monto preparado no coincide con el saldo pagable del origen');
+        const origen = this.repositorioPago.origenDesdePago(pago);
+        await this.repositorioPago.bloquearOrigen(tx, origen);
+        const montoOriginal = await this.montoPagableOriginal(tx, origen);
+        const economia = await this.repositorioPago.estadoEconomicoOrigen(tx, origen, montoOriginal);
+        if (economia.saldoPendiente === null || economia.saldoPendiente.lte(0) || !pago.monto.equals(economia.saldoPendiente)) throw new ErrorAplicacion(409, 'El monto preparado no coincide con el saldo económico pendiente del origen');
         const cambio = await this.repositorioPago.confirmarPreparado(tx, idPago, idUsuario);
         if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El pago cambió concurrentemente');
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -1672,4 +1706,23 @@ export class M6Controller {
   async confirmarPagoAnticipo(idPago: number, idUsuario: bigint) { await this.exigirTipoPago(idPago, ['ANTICIPO']); return this.confirmarPagoRemuneracion(idPago, idUsuario); }
   async actualizarPagoFinal(idPago: number, entrada: Record<string, unknown>) { await this.exigirTipoPago(idPago, ['REMUNERACION', 'REGULARIZACION']); return this.actualizarPagoRemuneracion(idPago, entrada); }
   async confirmarPagoFinal(idPago: number, idUsuario: bigint) { await this.exigirTipoPago(idPago, ['REMUNERACION', 'REGULARIZACION']); return this.confirmarPagoRemuneracion(idPago, idUsuario); }
+
+  async listarBoletasHonorariosConfirmadas() {
+    const items = await prisma.boleta_honorarios.findMany({ where: { estado_documental: 'CONFIRMADA' }, include: { prestador: true }, orderBy: { fecha_emision: 'desc' } });
+    return Promise.all(items.map(async item => { const economia = await this.repositorioPago.estadoEconomicoOrigen(prisma, this.repositorioPago.boletaHonorarios(item.id_boleta_honorarios), item.liquido!); return { id: item.id_boleta_honorarios, folio: item.folio, fechaEmision: item.fecha_emision, prestador: { id: item.id_prestador, identificador: item.prestador.identificador, nombre: item.prestador.nombre_razon_social }, bruto: Number(item.bruto), retencion: Number(item.retencion), liquido: Number(item.liquido), estadoDocumental: item.estado_documental, montoEfectivo: Number(economia.montoEfectivo), saldoPendiente: Number(economia.saldoPendiente), pendiente: economia.saldoPendiente!.gt(0) }; }));
+  }
+
+  async prepararPagoHonorarios(idBoleta: number, entrada: Record<string, unknown>, idUsuario: bigint) { return this.prepararPagoRemuneracion(this.repositorioPago.boletaHonorarios(idBoleta), entrada, idUsuario); }
+  async actualizarPagoHonorarios(idPago: number, entrada: Record<string, unknown>) { await this.exigirTipoPago(idPago, ['BOLETA_HONORARIOS']); return this.actualizarPagoRemuneracion(idPago, entrada); }
+  async confirmarPagoHonorarios(idPago: number, idUsuario: bigint) { await this.exigirTipoPago(idPago, ['BOLETA_HONORARIOS']); return this.confirmarPagoRemuneracion(idPago, idUsuario); }
+
+  async anularPagoRemuneracion(idPago: number, entrada: Record<string, unknown>, idUsuario: bigint) {
+    const motivo = texto(entrada.motivo, 1000); if (!motivo) throw new ErrorAplicacion(400, 'El motivo de anulación es obligatorio');
+    try { await prisma.$transaction(async tx => { const pago = await this.repositorioPago.obtener(tx, idPago); if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado'); if (pago.estado !== 'CONFIRMADO') throw new ErrorAplicacion(409, 'Sólo un pago CONFIRMADO puede anularse'); if (pago.reversiones.length) throw new ErrorAplicacion(409, 'Un pago con reversiones no puede anularse sin una regla explícita'); const cambio = await this.repositorioPago.anularConfirmado(tx, idPago, motivo, idUsuario); if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El pago cambió concurrentemente'); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.obtenerPagoRemuneracion(idPago); } catch (error) { this.conflictoConcurrente(error, 'La anulación cambió concurrentemente'); }
+  }
+
+  async registrarReversionPagoRemuneracion(idPago: number, entrada: Record<string, unknown>, idUsuario: bigint) {
+    const monto = decimalMonetario(entrada.monto, 'Monto de reversión', true); const motivo = texto(entrada.motivo, 1000); if (!motivo) throw new ErrorAplicacion(400, 'El motivo de reversión es obligatorio');
+    try { await prisma.$transaction(async tx => { const pago = await this.repositorioPago.obtener(tx, idPago); if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado'); if (pago.estado !== 'CONFIRMADO') throw new ErrorAplicacion(409, 'Sólo un pago CONFIRMADO admite reversión'); const total = pago.reversiones.reduce((suma, item) => suma.plus(item.monto), new Prisma.Decimal(0)); if (total.plus(monto).gt(pago.monto)) throw new ErrorAplicacion(409, 'La suma de reversiones excede el monto del pago'); await this.repositorioPago.registrarReversion(tx, idPago, monto, motivo, idUsuario); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.obtenerPagoRemuneracion(idPago); } catch (error) { this.conflictoConcurrente(error, 'La reversión cambió concurrentemente o excede el pago'); }
+  }
 }

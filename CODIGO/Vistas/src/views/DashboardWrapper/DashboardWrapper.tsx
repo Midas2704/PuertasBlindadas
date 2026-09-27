@@ -91,7 +91,7 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/parametros-remuneraciones', label: 'Parámetros de Remuneración', icon: Settings, permissions: ['CU167', 'CU168', 'CU169', 'CU170', 'CU171'] },
       { path: '/periodos-remuneracion', label: 'Períodos de Remuneración', icon: CalendarRange, permissions: ['CU178', 'CU181'] },
       { path: '/detalle-remuneracion', label: 'Detalle de Remuneración', icon: SearchCheck, permissions: ['CU172', 'CU173', 'CU174', 'CU175', 'CU176', 'CU177', 'CU179', 'CU180', 'CU182', 'CU183', 'CU184'] },
-      { path: '/pagos-remuneraciones', label: 'Pagos de Remuneración', icon: Banknote, permissions: ['CU185', 'CU186'] },
+      { path: '/pagos-remuneraciones', label: 'Pagos de Remuneración', icon: Banknote, permissions: ['CU185', 'CU186', 'CU187', 'CU188', 'CU189', 'CU190'] },
     ],
   },
   {

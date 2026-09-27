@@ -1972,8 +1972,53 @@ model pago_remuneracion {
   anulado_por          BigInt?
   anulado_en           DateTime? @db.Timestamptz(6)
   medio_pago           medio_pago @relation(fields: [id_medio_pago], references: [id_medio_pago], onDelete: Restrict, onUpdate: NoAction)
+  reversiones          reversion_pago_remuneracion[]
 
   @@index([origen_tipo, origen_id, estado], map: "idx_pago_remuneracion_origen")
+  @@schema("finanzas")
+}
+
+model prestador_honorarios {
+  id_prestador_honorarios Int       @id @default(autoincrement())
+  identificador          String    @unique @db.VarChar(30)
+  nombre_razon_social    String    @db.VarChar(160)
+  contacto               String?
+  estado                 String    @default("ACTIVO") @db.VarChar(20)
+  boletas                boleta_honorarios[]
+
+  @@schema("finanzas")
+}
+
+model boleta_honorarios {
+  id_boleta_honorarios Int       @id @default(autoincrement())
+  id_prestador          Int
+  folio                 String    @db.VarChar(80)
+  fecha_emision         DateTime  @db.Date
+  bruto                 Decimal   @db.Decimal(14, 4)
+  modalidad_tributaria  String    @db.VarChar(40)
+  tasa_aplicada         Decimal?  @db.Decimal(10, 6)
+  retencion             Decimal?  @db.Decimal(14, 4)
+  liquido               Decimal?  @db.Decimal(14, 4)
+  estado_documental     String    @default("PENDIENTE_CONFIRMACION") @db.VarChar(30)
+  respaldo              String?
+  referencia            String?   @db.VarChar(200)
+  prestador             prestador_honorarios @relation(fields: [id_prestador], references: [id_prestador_honorarios], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([id_prestador, folio], map: "uq_boleta_honorarios_prestador_folio")
+  @@index([estado_documental, fecha_emision], map: "idx_boleta_honorarios_estado_fecha")
+  @@schema("finanzas")
+}
+
+model reversion_pago_remuneracion {
+  id_reversion_pago_remuneracion Int       @id @default(autoincrement())
+  id_pago_remuneracion           Int
+  monto                          Decimal   @db.Decimal(14, 4)
+  motivo                         String
+  registrado_por                BigInt
+  registrado_en                 DateTime  @default(now()) @db.Timestamptz(6)
+  pago                           pago_remuneracion @relation(fields: [id_pago_remuneracion], references: [id_pago_remuneracion], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_pago_remuneracion, registrado_en], map: "idx_reversion_pago_remuneracion_pago")
   @@schema("finanzas")
 }
 
