@@ -62,7 +62,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'obtenerDetallePagoRemuneracion' | 'anularPagoRemuneracion' | 'registrarReversionPagoRemuneracion'
   | 'listarDocumentosRemuneracion' | 'descargarDocumentoRemuneracion' | 'reenviarDocumentoRemuneracion'
   | 'registrarEntregaDocumento' | 'consultarEntregaDocumento' | 'exportarCalculoPreliminar' | 'exportarRemuneracionesOficiales'
-  | 'crearVisitaTerreno' | 'listarObrasTerreno' | 'listarVisitasTerreno' | 'obtenerVisitaTerreno' | 'listarUsuariosTerreno' | 'asignarResponsableVisita' | 'listarMisTareasTerreno';
+  | 'crearVisitaTerreno' | 'listarObrasTerreno' | 'listarVisitasTerreno' | 'obtenerVisitaTerreno' | 'listarUsuariosTerreno' | 'asignarResponsableVisita' | 'listarMisTareasTerreno'
+  | 'obtenerLevantamientoTerreno' | 'guardarLevantamientoTerreno';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -259,6 +260,8 @@ export class C_Finanzas {
       case 'listarUsuariosTerreno': return this.m6.listarUsuariosTerreno();
       case 'asignarResponsableVisita': return this.m6.asignarResponsableVisita(identificador(parametros.id), cuerpo);
       case 'listarMisTareasTerreno': return this.m6.listarMisTareasTerreno(actor.id);
+      case 'obtenerLevantamientoTerreno': return this.m6.obtenerLevantamientoTerreno(identificador(parametros.id), actor);
+      case 'guardarLevantamientoTerreno': return this.m6.guardarLevantamientoTerreno(identificador(parametros.id), cuerpo, actor);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

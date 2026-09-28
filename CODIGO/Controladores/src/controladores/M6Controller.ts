@@ -10,6 +10,7 @@ import { CorreoDesarrollo, CorreoDocumental } from '../utilidades/correo';
 import { AuditoriaDocumental, AuditoriaDocumentalLegacyPrisma, CondicionDocumento } from '../servicios/AuditoriaDocumental';
 
 interface ActorDocumentoM6 { id: bigint; alcanceEmpleadoId?: number | null }
+interface ActorTerrenoM6 { id: bigint; administrador: boolean }
 
 type Direccion = 'asc' | 'desc';
 
@@ -2209,5 +2210,111 @@ export class M6Controller {
       visita: tarea.servicio_terreno ? this.presentarVisitaTerreno(tarea.servicio_terreno) : null,
       especificacion: tarea.especificaciones_puerta ? { id: tarea.especificaciones_puerta.especificacion_puerta_especificacion_puerta_id.toString(), modelo: tarea.especificaciones_puerta.especificacion_puerta_modelo_puerta, zona: tarea.especificaciones_puerta.especificacion_puerta_zona } : null,
     }));
+  }
+
+  private readonly incluirLevantamientoTerreno = {
+    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } } } },
+    servicio_terreno: {
+      include: {
+        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } } } } } },
+        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } } } } } },
+      },
+    },
+  };
+
+  private async resolverLevantamientoTerreno(id: number, actor: ActorTerrenoM6, cliente: Prisma.TransactionClient | typeof prisma = prisma) {
+    const tarea = await cliente.tarea.findUnique({ where: { tarea_tarea_id: BigInt(id) }, include: this.incluirLevantamientoTerreno });
+    if (!tarea) throw new ErrorAplicacion(404, 'Tarea no encontrada');
+    if (!actor.administrador) {
+      const asignacion = await cliente.tarea_usuario.findFirst({ where: { tarea_usuario_tarea_id: tarea.tarea_tarea_id, tarea_usuario_usuario_id: actor.id } });
+      if (!asignacion) throw new ErrorAplicacion(403, 'La tarea no está asignada al usuario autenticado');
+    }
+    const visita = tarea.servicio_terreno;
+    if (!visita) throw new ErrorAplicacion(409, 'La tarea no tiene una visita asociada');
+    if (!visita.obra) throw new ErrorAplicacion(409, 'La visita no tiene una obra asociada');
+    const asociadas = visita.especificacion_servicio_terreno.map((item) => item.especificaciones_puerta);
+    const especificacion = visita.obra.especificaciones_puerta || tarea.especificaciones_puerta || (asociadas.length === 1 ? asociadas[0] : null);
+    if (!especificacion) throw new ErrorAplicacion(409, asociadas.length > 1 ? 'La visita tiene más de una puerta y la tarea no identifica cuál levantar' : 'No existe una puerta asociada a la tarea, visita u obra');
+    return { tarea, visita, obra: visita.obra, especificacion, medidas: especificacion.medidas_puerta[0] || null };
+  }
+
+  private presentarLevantamientoTerreno(contexto: Awaited<ReturnType<M6Controller['resolverLevantamientoTerreno']>>) {
+    const { tarea, visita, obra, especificacion, medidas } = contexto;
+    return {
+      tarea: { id: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, estado: tarea.tarea_estado_de_tarea, fechaActualizacion: tarea.tarea_fecha_de_ultima_actualizacion },
+      visita: { id: visita.servicio_terreno_servicio_terreno_id.toString(), tipoServicio: visita.servicio_terreno_tipo_servicio },
+      obra: this.presentarObraTerreno(obra),
+      especificacion: {
+        id: especificacion.especificacion_puerta_especificacion_puerta_id.toString(),
+        modeloPuerta: especificacion.especificacion_puerta_modelo_puerta, zona: especificacion.especificacion_puerta_zona,
+        sentidoApertura: especificacion.especificacion_puerta_sentido_apertura, materialidadVano: especificacion.especificacion_puerta_materialidad_vano,
+        materialidadMarcoActual: especificacion.especificacion_puerta_materialidad_marco_actual, solucionMarco: especificacion.especificacion_puerta_solucion_marco,
+        hojaPasiva: especificacion.especificacion_puerta_hoja_pasiva, hojaActiva: especificacion.especificacion_puerta_hoja_activa,
+        disenoPuerta: especificacion.especificacion_puerta_diseno_puerta, observacionesDiseno: especificacion.especificacion_puerta_observaciones_de_diseno,
+        cubrejuntas: especificacion.especificacion_puerta_cubrejuntas, bisagras: especificacion.especificacion_puerta_bisagras,
+        observaciones: especificacion.especificacion_puerta_observaciones,
+      },
+      medidas: medidas ? {
+        id: medidas.medidas_puerta_medidas_id.toString(), marcoAncho: medidas.medidas_puerta_medidas_marco_ancho?.toString() || null,
+        marcoAlto: medidas.medidas_puerta_medidas_marco_alto?.toString() || null, marcoEspesor: medidas.medidas_puerta_medidas_marco_espesor?.toString() || null,
+        vanoVerticalAncho: medidas.medidas_puerta_medidas_vano_vertical_ancho?.toString() || null, vanoVerticalAlto: medidas.medidas_puerta_medidas_vano_vertical_alto?.toString() || null,
+        vanoVerticalEspesor: medidas.medidas_puerta_medidas_vano_vertical_espesor?.toString() || null, vanoHorizontalAncho: medidas.medidas_puerta_medidas_vano_horizontal_ancho?.toString() || null,
+        vanoHorizontalAlto: medidas.medidas_puerta_medidas_vano_horizontal_alto?.toString() || null, vanoHorizontalEspesor: medidas.medidas_puerta_medidas_vano_horizontal_espesor?.toString() || null,
+        alojamientoVerticalAlto: medidas.medidas_puerta_medidas_alojamiento_vertical_alto?.toString() || null, alojamientoVerticalAncho: medidas.medidas_puerta_medidas_alojamiento_vertical_ancho?.toString() || null,
+        alojamientoVerticalEspesor: medidas.medidas_puerta_medidas_alojamiento_vertical_espesor?.toString() || null, alojamientoHorizontalAlto: medidas.medidas_puerta_medidas_alojamiento_horizontal_alto?.toString() || null,
+        alojamientoHorizontalAncho: medidas.medidas_puerta_medidas_alojamiento_horizontal_ancho?.toString() || null, alojamientoHorizontalEspesor: medidas.medidas_puerta_medidas_alojamiento_horizontal_espesor?.toString() || null,
+        alojamientoVertical: medidas.medidas_puerta_alojamiento_vertical?.toString() || null, medidaMarcoAncho: medidas.medidas_puerta_medidas_de_marco_ancho?.toString() || null,
+        medidaMarcoAlto: medidas.medidas_puerta_medidas_de_marco_alto?.toString() || null, medidaMarcoEspesor: medidas.medidas_puerta_medidas_de_marco_espesor?.toString() || null,
+      } : null,
+    };
+  }
+
+  async obtenerLevantamientoTerreno(id: number, actor: ActorTerrenoM6) {
+    return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor));
+  }
+
+  async guardarLevantamientoTerreno(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
+    const textos: Record<string, string> = {
+      modeloPuerta: 'especificacion_puerta_modelo_puerta', zona: 'especificacion_puerta_zona', sentidoApertura: 'especificacion_puerta_sentido_apertura',
+      materialidadVano: 'especificacion_puerta_materialidad_vano', materialidadMarcoActual: 'especificacion_puerta_materialidad_marco_actual', solucionMarco: 'especificacion_puerta_solucion_marco',
+      hojaPasiva: 'especificacion_puerta_hoja_pasiva', hojaActiva: 'especificacion_puerta_hoja_activa', disenoPuerta: 'especificacion_puerta_diseno_puerta',
+      observacionesDiseno: 'especificacion_puerta_observaciones_de_diseno', bisagras: 'especificacion_puerta_bisagras', observaciones: 'especificacion_puerta_observaciones',
+    };
+    const decimales: Record<string, string> = {
+      marcoAncho: 'medidas_puerta_medidas_marco_ancho', marcoAlto: 'medidas_puerta_medidas_marco_alto', marcoEspesor: 'medidas_puerta_medidas_marco_espesor',
+      vanoVerticalAncho: 'medidas_puerta_medidas_vano_vertical_ancho', vanoVerticalAlto: 'medidas_puerta_medidas_vano_vertical_alto', vanoVerticalEspesor: 'medidas_puerta_medidas_vano_vertical_espesor',
+      vanoHorizontalAncho: 'medidas_puerta_medidas_vano_horizontal_ancho', vanoHorizontalAlto: 'medidas_puerta_medidas_vano_horizontal_alto', vanoHorizontalEspesor: 'medidas_puerta_medidas_vano_horizontal_espesor',
+      alojamientoVerticalAlto: 'medidas_puerta_medidas_alojamiento_vertical_alto', alojamientoVerticalAncho: 'medidas_puerta_medidas_alojamiento_vertical_ancho', alojamientoVerticalEspesor: 'medidas_puerta_medidas_alojamiento_vertical_espesor',
+      alojamientoHorizontalAlto: 'medidas_puerta_medidas_alojamiento_horizontal_alto', alojamientoHorizontalAncho: 'medidas_puerta_medidas_alojamiento_horizontal_ancho', alojamientoHorizontalEspesor: 'medidas_puerta_medidas_alojamiento_horizontal_espesor',
+      alojamientoVertical: 'medidas_puerta_alojamiento_vertical', medidaMarcoAncho: 'medidas_puerta_medidas_de_marco_ancho', medidaMarcoAlto: 'medidas_puerta_medidas_de_marco_alto', medidaMarcoEspesor: 'medidas_puerta_medidas_de_marco_espesor',
+    };
+    const especificacionEntrada = entrada.especificacion && typeof entrada.especificacion === 'object' ? entrada.especificacion as Record<string, unknown> : {};
+    const medidasEntrada = entrada.medidas && typeof entrada.medidas === 'object' ? entrada.medidas as Record<string, unknown> : {};
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const contexto = await this.resolverLevantamientoTerreno(id, actor, tx);
+        const datosEspecificacion: Record<string, unknown> = {};
+        for (const [campo, columna] of Object.entries(textos)) if (Object.prototype.hasOwnProperty.call(especificacionEntrada, campo)) datosEspecificacion[columna] = texto(especificacionEntrada[campo], campo === 'observaciones' || campo === 'observacionesDiseno' ? 2000 : 200) || null;
+        if (Object.prototype.hasOwnProperty.call(especificacionEntrada, 'cubrejuntas')) {
+          const valor = especificacionEntrada.cubrejuntas;
+          if (valor !== null && typeof valor !== 'boolean') throw new ErrorAplicacion(400, 'Cubrejuntas debe ser verdadero, falso o vacío');
+          datosEspecificacion.especificacion_puerta_cubrejuntas = valor;
+        }
+        if (Object.keys(datosEspecificacion).length) await tx.especificaciones_puerta.update({ where: { especificacion_puerta_especificacion_puerta_id: contexto.especificacion.especificacion_puerta_especificacion_puerta_id }, data: datosEspecificacion });
+        const datosMedidas: Record<string, unknown> = {};
+        for (const [campo, columna] of Object.entries(decimales)) if (Object.prototype.hasOwnProperty.call(medidasEntrada, campo)) datosMedidas[columna] = decimalOpcional(medidasEntrada[campo], campo);
+        if (Object.keys(datosMedidas).length) {
+          const idEspecificacion = contexto.especificacion.especificacion_puerta_especificacion_puerta_id;
+          const existente = await tx.medidas_puerta.findFirst({ where: { id_especificacion_puerta: idEspecificacion }, orderBy: { medidas_puerta_medidas_id: 'asc' } });
+          if (existente) await tx.medidas_puerta.update({ where: { medidas_puerta_medidas_id: existente.medidas_puerta_medidas_id }, data: datosMedidas });
+          else await tx.medidas_puerta.create({ data: { ...datosMedidas, id_especificacion_puerta: idEspecificacion } });
+        }
+        await tx.tarea.update({ where: { tarea_tarea_id: contexto.tarea.tarea_tarea_id }, data: { tarea_fecha_de_ultima_actualizacion: new Date() } });
+        return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor, tx));
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'El levantamiento fue modificado concurrentemente; vuelve a intentarlo');
+      throw error;
+    }
   }
 }

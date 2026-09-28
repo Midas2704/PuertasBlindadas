@@ -38,6 +38,7 @@ import DocumentosRemuneracion from './views/DocumentosRemuneracion/DocumentosRem
 import Honorarios from './views/Honorarios/Honorarios';
 import GestionTerreno from './views/GestionTerreno/GestionTerreno';
 import MisTareasTerreno from './views/MisTareasTerreno/MisTareasTerreno';
+import LevantamientoTecnico from './views/LevantamientoTecnico/LevantamientoTecnico';
 
 const App: React.FC = () => {
   return (
@@ -73,6 +74,7 @@ const App: React.FC = () => {
           <Route path="honorarios" element={<Protegido permiso={['CU196','CU197','CU198']}><Honorarios /></Protegido>} />
           <Route path="terreno/visitas" element={<Protegido permiso={['CU199','CU200']}><GestionTerreno /></Protegido>} />
           <Route path="terreno/mis-tareas" element={<Protegido permiso="CU201"><MisTareasTerreno /></Protegido>} />
+          <Route path="terreno/tareas/:id/levantamiento" element={<Protegido permiso="CU202"><LevantamientoTecnico /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />
