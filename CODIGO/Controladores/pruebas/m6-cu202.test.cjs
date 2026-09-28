@@ -44,15 +44,15 @@ test('M6 Terreno CU202 registra levantamiento técnico sobre estructuras Legacy'
       const detalle = await modulo.obtenerLevantamientoTerreno(Number(tarea.tarea_tarea_id), { id: noAsignado.usuario_id_usuario, administrador: true }); assert.equal(detalle.tarea.id, tarea.tarea_tarea_id.toString());
     });
     await t.test('permiso CU202 es independiente', async () => {
-      assert.equal(codigosTodosLosCU.length, 202); assert.deepEqual(matrizPermisosPorCU.CU202, []); assert.equal(operacionesPermiso.obtenerLevantamientoTerreno, 'CU202'); assert.equal(operacionesPermiso.guardarLevantamientoTerreno, 'CU202');
+      assert.equal(codigosTodosLosCU.length, 203); assert.deepEqual(matrizPermisosPorCU.CU202, []); assert.equal(operacionesPermiso.obtenerLevantamientoTerreno, 'CU202'); assert.equal(operacionesPermiso.guardarLevantamientoTerreno, 'CU202');
       assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU201']), false); assert.equal(permiteOperacion('guardarLevantamientoTerreno', ['CU202']), true);
       const autorizacion = { autorizar: async (operacion) => { if (!permiteOperacion(operacion, ['CU202'])) { const error = new Error('No autorizado'); error.estado = 403; throw error; } return { ...actor, permisos: ['CU202'], configuracion: 'particular' }; } };
       const m6 = { obtenerLevantamientoTerreno: async (_id, recibido) => recibido.id.toString(), guardarLevantamientoTerreno: async (_id, _cuerpo, recibido) => recibido.id.toString() };
       const fachada = new C_Finanzas(autorizacion, {}, {}, {}, {}, {}, m6); assert.equal(await fachada.ejecutar('obtenerLevantamientoTerreno', { parametros: { id: tarea.tarea_tarea_id.toString() }, contexto: {} }), asignado.usuario_id_usuario.toString());
     });
-    await t.test('CU203 no está implementado y no se crea tabla paralela', () => {
-      assert.equal(codigosTodosLosCU.includes('CU203'), false); const schema = readFileSync(resolve('prisma/schema.prisma'), 'utf8'); assert.doesNotMatch(schema, /model\s+levantamiento/i);
-      const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8'); assert.doesNotMatch(rutas, /CU203|corregirLevantamiento/);
+    await t.test('CU204 no está implementado y no se crea tabla paralela', () => {
+      assert.equal(codigosTodosLosCU.includes('CU203'), true); assert.equal(codigosTodosLosCU.includes('CU204'), false); const schema = readFileSync(resolve('prisma/schema.prisma'), 'utf8'); assert.doesNotMatch(schema, /model\s+levantamiento/i);
+      const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8'); assert.doesNotMatch(rutas, /generarOrdenTrabajoTerreno|\/terreno\/ordenes-trabajo/);
     });
   } finally {
     await prisma.medidas_puerta.deleteMany({ where: { id_especificacion_puerta: { in: ids.especificaciones } } });

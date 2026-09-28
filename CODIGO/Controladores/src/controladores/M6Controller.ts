@@ -2213,13 +2213,29 @@ export class M6Controller {
   }
 
   private readonly incluirLevantamientoTerreno = {
-    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } } } },
+    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } } } },
     servicio_terreno: {
       include: {
-        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } } } } } },
-        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } } } } } },
+        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } } } } } },
+        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } } } } } },
       },
     },
+  };
+
+  private readonly camposTextoLevantamiento: Record<string, string> = {
+    modeloPuerta: 'especificacion_puerta_modelo_puerta', zona: 'especificacion_puerta_zona', sentidoApertura: 'especificacion_puerta_sentido_apertura',
+    materialidadVano: 'especificacion_puerta_materialidad_vano', materialidadMarcoActual: 'especificacion_puerta_materialidad_marco_actual', solucionMarco: 'especificacion_puerta_solucion_marco',
+    hojaPasiva: 'especificacion_puerta_hoja_pasiva', hojaActiva: 'especificacion_puerta_hoja_activa', disenoPuerta: 'especificacion_puerta_diseno_puerta',
+    observacionesDiseno: 'especificacion_puerta_observaciones_de_diseno', bisagras: 'especificacion_puerta_bisagras', observaciones: 'especificacion_puerta_observaciones',
+  };
+
+  private readonly camposMedidasLevantamiento: Record<string, string> = {
+    marcoAncho: 'medidas_puerta_medidas_marco_ancho', marcoAlto: 'medidas_puerta_medidas_marco_alto', marcoEspesor: 'medidas_puerta_medidas_marco_espesor',
+    vanoVerticalAncho: 'medidas_puerta_medidas_vano_vertical_ancho', vanoVerticalAlto: 'medidas_puerta_medidas_vano_vertical_alto', vanoVerticalEspesor: 'medidas_puerta_medidas_vano_vertical_espesor',
+    vanoHorizontalAncho: 'medidas_puerta_medidas_vano_horizontal_ancho', vanoHorizontalAlto: 'medidas_puerta_medidas_vano_horizontal_alto', vanoHorizontalEspesor: 'medidas_puerta_medidas_vano_horizontal_espesor',
+    alojamientoVerticalAlto: 'medidas_puerta_medidas_alojamiento_vertical_alto', alojamientoVerticalAncho: 'medidas_puerta_medidas_alojamiento_vertical_ancho', alojamientoVerticalEspesor: 'medidas_puerta_medidas_alojamiento_vertical_espesor',
+    alojamientoHorizontalAlto: 'medidas_puerta_medidas_alojamiento_horizontal_alto', alojamientoHorizontalAncho: 'medidas_puerta_medidas_alojamiento_horizontal_ancho', alojamientoHorizontalEspesor: 'medidas_puerta_medidas_alojamiento_horizontal_espesor',
+    alojamientoVertical: 'medidas_puerta_alojamiento_vertical', medidaMarcoAncho: 'medidas_puerta_medidas_de_marco_ancho', medidaMarcoAlto: 'medidas_puerta_medidas_de_marco_alto', medidaMarcoEspesor: 'medidas_puerta_medidas_de_marco_espesor',
   };
 
   private async resolverLevantamientoTerreno(id: number, actor: ActorTerrenoM6, cliente: Prisma.TransactionClient | typeof prisma = prisma) {
@@ -2235,7 +2251,11 @@ export class M6Controller {
     const asociadas = visita.especificacion_servicio_terreno.map((item) => item.especificaciones_puerta);
     const especificacion = visita.obra.especificaciones_puerta || tarea.especificaciones_puerta || (asociadas.length === 1 ? asociadas[0] : null);
     if (!especificacion) throw new ErrorAplicacion(409, asociadas.length > 1 ? 'La visita tiene más de una puerta y la tarea no identifica cuál levantar' : 'No existe una puerta asociada a la tarea, visita u obra');
-    return { tarea, visita, obra: visita.obra, especificacion, medidas: especificacion.medidas_puerta[0] || null };
+    const medidaVigente = especificacion.id_medidas === null
+      ? especificacion.medidas_puerta[0] || null
+      : especificacion.medidas_puerta.find((medida) => medida.medidas_puerta_medidas_id === especificacion.id_medidas) || null;
+    if (especificacion.id_medidas !== null && !medidaVigente) throw new ErrorAplicacion(409, 'La medida vigente del levantamiento no pertenece a la puerta asociada');
+    return { tarea, visita, obra: visita.obra, especificacion, medidas: medidaVigente };
   }
 
   private presentarLevantamientoTerreno(contexto: Awaited<ReturnType<M6Controller['resolverLevantamientoTerreno']>>) {
@@ -2266,6 +2286,11 @@ export class M6Controller {
         alojamientoVertical: medidas.medidas_puerta_alojamiento_vertical?.toString() || null, medidaMarcoAncho: medidas.medidas_puerta_medidas_de_marco_ancho?.toString() || null,
         medidaMarcoAlto: medidas.medidas_puerta_medidas_de_marco_alto?.toString() || null, medidaMarcoEspesor: medidas.medidas_puerta_medidas_de_marco_espesor?.toString() || null,
       } : null,
+      historial: especificacion.historial_cambio_orden_trabajo.map((cambio) => ({
+        id: cambio.historial_cambio_orden_trabajo_id_cambio.toString(), versionAnterior: cambio.historial_cambio_orden_trabajo_version_antigua,
+        versionNueva: cambio.historial_cambio_orden_trabajo_version_nueva, fecha: cambio.historial_cambio_orden_trabajo_fecha_hora,
+        descripcion: cambio.historial_cambio_orden_trabajo_descripcion,
+      })),
     };
   }
 
@@ -2274,27 +2299,13 @@ export class M6Controller {
   }
 
   async guardarLevantamientoTerreno(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
-    const textos: Record<string, string> = {
-      modeloPuerta: 'especificacion_puerta_modelo_puerta', zona: 'especificacion_puerta_zona', sentidoApertura: 'especificacion_puerta_sentido_apertura',
-      materialidadVano: 'especificacion_puerta_materialidad_vano', materialidadMarcoActual: 'especificacion_puerta_materialidad_marco_actual', solucionMarco: 'especificacion_puerta_solucion_marco',
-      hojaPasiva: 'especificacion_puerta_hoja_pasiva', hojaActiva: 'especificacion_puerta_hoja_activa', disenoPuerta: 'especificacion_puerta_diseno_puerta',
-      observacionesDiseno: 'especificacion_puerta_observaciones_de_diseno', bisagras: 'especificacion_puerta_bisagras', observaciones: 'especificacion_puerta_observaciones',
-    };
-    const decimales: Record<string, string> = {
-      marcoAncho: 'medidas_puerta_medidas_marco_ancho', marcoAlto: 'medidas_puerta_medidas_marco_alto', marcoEspesor: 'medidas_puerta_medidas_marco_espesor',
-      vanoVerticalAncho: 'medidas_puerta_medidas_vano_vertical_ancho', vanoVerticalAlto: 'medidas_puerta_medidas_vano_vertical_alto', vanoVerticalEspesor: 'medidas_puerta_medidas_vano_vertical_espesor',
-      vanoHorizontalAncho: 'medidas_puerta_medidas_vano_horizontal_ancho', vanoHorizontalAlto: 'medidas_puerta_medidas_vano_horizontal_alto', vanoHorizontalEspesor: 'medidas_puerta_medidas_vano_horizontal_espesor',
-      alojamientoVerticalAlto: 'medidas_puerta_medidas_alojamiento_vertical_alto', alojamientoVerticalAncho: 'medidas_puerta_medidas_alojamiento_vertical_ancho', alojamientoVerticalEspesor: 'medidas_puerta_medidas_alojamiento_vertical_espesor',
-      alojamientoHorizontalAlto: 'medidas_puerta_medidas_alojamiento_horizontal_alto', alojamientoHorizontalAncho: 'medidas_puerta_medidas_alojamiento_horizontal_ancho', alojamientoHorizontalEspesor: 'medidas_puerta_medidas_alojamiento_horizontal_espesor',
-      alojamientoVertical: 'medidas_puerta_alojamiento_vertical', medidaMarcoAncho: 'medidas_puerta_medidas_de_marco_ancho', medidaMarcoAlto: 'medidas_puerta_medidas_de_marco_alto', medidaMarcoEspesor: 'medidas_puerta_medidas_de_marco_espesor',
-    };
     const especificacionEntrada = entrada.especificacion && typeof entrada.especificacion === 'object' ? entrada.especificacion as Record<string, unknown> : {};
     const medidasEntrada = entrada.medidas && typeof entrada.medidas === 'object' ? entrada.medidas as Record<string, unknown> : {};
     try {
       return await prisma.$transaction(async (tx) => {
         const contexto = await this.resolverLevantamientoTerreno(id, actor, tx);
         const datosEspecificacion: Record<string, unknown> = {};
-        for (const [campo, columna] of Object.entries(textos)) if (Object.prototype.hasOwnProperty.call(especificacionEntrada, campo)) datosEspecificacion[columna] = texto(especificacionEntrada[campo], campo === 'observaciones' || campo === 'observacionesDiseno' ? 2000 : 200) || null;
+        for (const [campo, columna] of Object.entries(this.camposTextoLevantamiento)) if (Object.prototype.hasOwnProperty.call(especificacionEntrada, campo)) datosEspecificacion[columna] = texto(especificacionEntrada[campo], campo === 'observaciones' || campo === 'observacionesDiseno' ? 2000 : 200) || null;
         if (Object.prototype.hasOwnProperty.call(especificacionEntrada, 'cubrejuntas')) {
           const valor = especificacionEntrada.cubrejuntas;
           if (valor !== null && typeof valor !== 'boolean') throw new ErrorAplicacion(400, 'Cubrejuntas debe ser verdadero, falso o vacío');
@@ -2302,18 +2313,72 @@ export class M6Controller {
         }
         if (Object.keys(datosEspecificacion).length) await tx.especificaciones_puerta.update({ where: { especificacion_puerta_especificacion_puerta_id: contexto.especificacion.especificacion_puerta_especificacion_puerta_id }, data: datosEspecificacion });
         const datosMedidas: Record<string, unknown> = {};
-        for (const [campo, columna] of Object.entries(decimales)) if (Object.prototype.hasOwnProperty.call(medidasEntrada, campo)) datosMedidas[columna] = decimalOpcional(medidasEntrada[campo], campo);
+        for (const [campo, columna] of Object.entries(this.camposMedidasLevantamiento)) if (Object.prototype.hasOwnProperty.call(medidasEntrada, campo)) datosMedidas[columna] = decimalOpcional(medidasEntrada[campo], campo);
         if (Object.keys(datosMedidas).length) {
           const idEspecificacion = contexto.especificacion.especificacion_puerta_especificacion_puerta_id;
-          const existente = await tx.medidas_puerta.findFirst({ where: { id_especificacion_puerta: idEspecificacion }, orderBy: { medidas_puerta_medidas_id: 'asc' } });
-          if (existente) await tx.medidas_puerta.update({ where: { medidas_puerta_medidas_id: existente.medidas_puerta_medidas_id }, data: datosMedidas });
-          else await tx.medidas_puerta.create({ data: { ...datosMedidas, id_especificacion_puerta: idEspecificacion } });
+          const existente = contexto.medidas;
+          const medida = existente
+            ? await tx.medidas_puerta.update({ where: { medidas_puerta_medidas_id: existente.medidas_puerta_medidas_id }, data: datosMedidas })
+            : await tx.medidas_puerta.create({ data: { ...datosMedidas, id_especificacion_puerta: idEspecificacion } });
+          if (contexto.especificacion.id_medidas !== medida.medidas_puerta_medidas_id) await tx.especificaciones_puerta.update({ where: { especificacion_puerta_especificacion_puerta_id: idEspecificacion }, data: { id_medidas: medida.medidas_puerta_medidas_id } });
         }
         await tx.tarea.update({ where: { tarea_tarea_id: contexto.tarea.tarea_tarea_id }, data: { tarea_fecha_de_ultima_actualizacion: new Date() } });
         return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor, tx));
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'El levantamiento fue modificado concurrentemente; vuelve a intentarlo');
+      throw error;
+    }
+  }
+
+  async corregirLevantamientoTerreno(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
+    const motivo = texto(entrada.motivo, 1000);
+    if (!motivo) throw new ErrorAplicacion(400, 'El motivo de la corrección es obligatorio');
+    const especificacionEntrada = entrada.especificacion && typeof entrada.especificacion === 'object' ? entrada.especificacion as Record<string, unknown> : {};
+    const medidasEntrada = entrada.medidas && typeof entrada.medidas === 'object' ? entrada.medidas as Record<string, unknown> : {};
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const contexto = await this.resolverLevantamientoTerreno(id, actor, tx);
+        if (!contexto.medidas) throw new ErrorAplicacion(409, 'La tarea todavía no tiene un levantamiento técnico registrado');
+        const datosEspecificacion: Record<string, unknown> = {};
+        const camposModificados: string[] = [];
+        for (const [campo, columna] of Object.entries(this.camposTextoLevantamiento)) if (Object.prototype.hasOwnProperty.call(especificacionEntrada, campo)) {
+          const valor = texto(especificacionEntrada[campo], campo === 'observaciones' || campo === 'observacionesDiseno' ? 2000 : 200) || null;
+          if ((contexto.especificacion as unknown as Record<string, unknown>)[columna] !== valor) { datosEspecificacion[columna] = valor; camposModificados.push(campo); }
+        }
+        if (Object.prototype.hasOwnProperty.call(especificacionEntrada, 'cubrejuntas')) {
+          const valor = especificacionEntrada.cubrejuntas;
+          if (valor !== null && typeof valor !== 'boolean') throw new ErrorAplicacion(400, 'Cubrejuntas debe ser verdadero, falso o vacío');
+          if (contexto.especificacion.especificacion_puerta_cubrejuntas !== valor) { datosEspecificacion.especificacion_puerta_cubrejuntas = valor; camposModificados.push('cubrejuntas'); }
+        }
+        const datosMedidas: Record<string, unknown> = {};
+        for (const [campo, columna] of Object.entries(this.camposMedidasLevantamiento)) if (Object.prototype.hasOwnProperty.call(medidasEntrada, campo)) {
+          const valor = decimalOpcional(medidasEntrada[campo], campo);
+          const actual = contexto.medidas ? (contexto.medidas as unknown as Record<string, unknown>)[columna] as Prisma.Decimal | null : null;
+          if ((actual?.toString() || null) !== (valor?.toString() || null)) { datosMedidas[columna] = valor; camposModificados.push(campo); }
+        }
+        if (!camposModificados.length) throw new ErrorAplicacion(400, 'Debes indicar al menos un campo para corregir');
+        const versiones = contexto.especificacion.historial_cambio_orden_trabajo.flatMap((cambio) => [cambio.historial_cambio_orden_trabajo_version_antigua, cambio.historial_cambio_orden_trabajo_version_nueva]).map((version) => /^v(\d+)$/.exec(version || '')).filter(Boolean).map((coincidencia) => Number(coincidencia![1]));
+        const numeroAnterior = versiones.length ? Math.max(...versiones) : 1;
+        const cambio = await tx.historial_cambio_orden_trabajo.create({ data: {
+          id_especificaciones_puerta: contexto.especificacion.especificacion_puerta_especificacion_puerta_id,
+          historial_cambio_orden_trabajo_version_antigua: `v${numeroAnterior}`,
+          historial_cambio_orden_trabajo_version_nueva: `v${numeroAnterior + 1}`,
+          historial_cambio_orden_trabajo_fecha_hora: new Date(),
+          historial_cambio_orden_trabajo_descripcion: `${motivo} | Campos modificados: ${camposModificados.join(', ')}`,
+        } });
+        if (Object.keys(datosMedidas).length) {
+          const base = contexto.medidas;
+          const datosBase = base ? Object.fromEntries(Object.values(this.camposMedidasLevantamiento).map((columna) => [columna, (base as unknown as Record<string, unknown>)[columna]])) : {};
+          const nueva = await tx.medidas_puerta.create({ data: { ...datosBase, ...datosMedidas, id_especificacion_puerta: contexto.especificacion.especificacion_puerta_especificacion_puerta_id, id_cambio: cambio.historial_cambio_orden_trabajo_id_cambio } });
+          datosEspecificacion.id_medidas = nueva.medidas_puerta_medidas_id;
+        }
+        if (Object.keys(datosEspecificacion).length) await tx.especificaciones_puerta.update({ where: { especificacion_puerta_especificacion_puerta_id: contexto.especificacion.especificacion_puerta_especificacion_puerta_id }, data: datosEspecificacion });
+        await tx.tarea.update({ where: { tarea_tarea_id: contexto.tarea.tarea_tarea_id }, data: { tarea_fecha_de_ultima_actualizacion: new Date() } });
+        return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor, tx));
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'El levantamiento fue corregido concurrentemente; vuelve a intentarlo');
       throw error;
     }
   }

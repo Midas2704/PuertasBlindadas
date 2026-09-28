@@ -83,10 +83,10 @@ test('M6 T11 CU198 confirma boletas con tributación parametrizada', async t => 
       const detalle = await modulo.obtenerBoletaHonorarios(confirmada.id);
       assert.equal(detalle.economia.saldoPendiente, 0); assert.equal(detalle.economia.condicion, 'PAGADA');
     });
-    await t.test('CU198 usa permiso específico y no crea CU203', () => {
-      assert.equal(codigosTodosLosCU.length, 202); assert.deepEqual(matrizPermisosPorCU.CU198, []);
+    await t.test('CU198 usa permiso específico y no crea CU204', () => {
+      assert.equal(codigosTodosLosCU.length, 203); assert.deepEqual(matrizPermisosPorCU.CU198, []);
       assert.equal(operacionesPermiso.previsualizarConfirmacionBoletaHonorarios, 'CU198'); assert.equal(operacionesPermiso.confirmarBoletaHonorarios, 'CU198'); assert.equal(operacionesPermiso.consultarRetencionesHonorariosMensuales, 'CU198');
-      assert.equal(permiteOperacion('confirmarBoletaHonorarios', ['CU197']), false); assert.equal(permiteOperacion('confirmarBoletaHonorarios', ['CU198']), true); assert.equal(codigosTodosLosCU.includes('CU201'), true); assert.equal(codigosTodosLosCU.includes('CU202'), true); assert.equal(codigosTodosLosCU.includes('CU203'), false);
+      assert.equal(permiteOperacion('confirmarBoletaHonorarios', ['CU197']), false); assert.equal(permiteOperacion('confirmarBoletaHonorarios', ['CU198']), true); assert.equal(codigosTodosLosCU.includes('CU201'), true); assert.equal(codigosTodosLosCU.includes('CU202'), true); assert.equal(codigosTodosLosCU.includes('CU203'), true); assert.equal(codigosTodosLosCU.includes('CU204'), false);
     });
     await t.test('no existe tasa tributaria hardcodeada ni obligación paralela', () => {
       const controlador = readFileSync(resolve('src/controladores/M6Controller.ts'), 'utf8');
