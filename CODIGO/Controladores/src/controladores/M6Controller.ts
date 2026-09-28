@@ -2213,11 +2213,11 @@ export class M6Controller {
   }
 
   private readonly incluirLevantamientoTerreno = {
-    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } } } },
+    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { where: { orden_trabajo_estado: 'activa' }, orderBy: { orden_trabajo_id_orden: 'asc' as const } } } },
     servicio_terreno: {
       include: {
-        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } } } } } },
-        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } } } } } },
+        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { where: { orden_trabajo_estado: 'activa' }, orderBy: { orden_trabajo_id_orden: 'asc' as const } } } } } },
+        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { where: { orden_trabajo_estado: 'activa' }, orderBy: { orden_trabajo_id_orden: 'asc' as const } } } } } },
       },
     },
   };
@@ -2291,6 +2291,12 @@ export class M6Controller {
         versionNueva: cambio.historial_cambio_orden_trabajo_version_nueva, fecha: cambio.historial_cambio_orden_trabajo_fecha_hora,
         descripcion: cambio.historial_cambio_orden_trabajo_descripcion,
       })),
+      ordenTrabajo: especificacion.orden_trabajo[0] ? {
+        id: especificacion.orden_trabajo[0].orden_trabajo_id_orden.toString(), estado: especificacion.orden_trabajo[0].orden_trabajo_estado,
+        fecha: especificacion.orden_trabajo[0].orden_trabajo_fecha_hora, idEspecificacion: especificacion.especificacion_puerta_especificacion_puerta_id.toString(),
+        proyecto: especificacion.orden_trabajo[0].proyecto_id_proyecto?.toString() || null, area: especificacion.orden_trabajo[0].area_trabajo_id_area?.toString() || null,
+        usuario: especificacion.orden_trabajo[0].usuario_id_usuario?.toString() || null,
+      } : null,
     };
   }
 
@@ -2379,6 +2385,36 @@ export class M6Controller {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'El levantamiento fue corregido concurrentemente; vuelve a intentarlo');
+      throw error;
+    }
+  }
+
+  async generarOrdenTrabajoLevantamiento(id: number, actor: ActorTerrenoM6) {
+    let idEspecificacion: bigint | null = null;
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const contexto = await this.resolverLevantamientoTerreno(id, actor, tx);
+        if (!contexto.medidas) throw new ErrorAplicacion(409, 'La tarea todavía no tiene un levantamiento técnico registrado');
+        idEspecificacion = contexto.especificacion.especificacion_puerta_especificacion_puerta_id;
+        const existente = await tx.orden_trabajo.findFirst({
+          where: { especificaciones_puerta_id_especificacion_puerta: idEspecificacion, orden_trabajo_estado: 'activa' },
+          orderBy: { orden_trabajo_id_orden: 'asc' },
+        });
+        if (!existente) await tx.orden_trabajo.create({ data: {
+          orden_trabajo_fecha_hora: new Date(), orden_trabajo_estado: 'activa',
+          especificaciones_puerta_id_especificacion_puerta: idEspecificacion,
+          proyecto_id_proyecto: null, area_trabajo_id_area: null, usuario_id_usuario: null,
+        } });
+        return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor, tx));
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+        if (idEspecificacion !== null) {
+          const existente = await prisma.orden_trabajo.findFirst({ where: { especificaciones_puerta_id_especificacion_puerta: idEspecificacion, orden_trabajo_estado: 'activa' } });
+          if (existente) return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor));
+        }
+        throw new ErrorAplicacion(409, 'La Orden de Trabajo fue generada concurrentemente; vuelve a consultar');
+      }
       throw error;
     }
   }

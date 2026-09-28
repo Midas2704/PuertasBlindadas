@@ -7,7 +7,7 @@ type Tarea={id:string;titulo:string|null;descripcion:string|null;estado:string|n
 const json=async(ruta:string)=>{const respuesta=await fetch(`/api/finanzas${ruta}`,{credentials:'same-origin'});const dato=await respuesta.json();if(!respuesta.ok)throw new Error(dato.error||'No fue posible completar la operación');return dato};
 
 export default function MisTareasTerreno(){
- const {sesion}=usarSesion();const puedeLevantar=Boolean(sesion?.permisos.some(permiso=>['CU202','CU203'].includes(permiso)));
+ const {sesion}=usarSesion();const puedeLevantar=Boolean(sesion?.permisos.some(permiso=>['CU202','CU203','CU204'].includes(permiso)));
  const [tareas,setTareas]=useState<Tarea[]>([]),[error,setError]=useState('');
  const cargar=async()=>{setError('');try{setTareas(await json('/terreno/mis-tareas'))}catch(e){setError((e as Error).message)}};
  useEffect(()=>{void cargar()},[]);
