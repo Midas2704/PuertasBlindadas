@@ -2955,6 +2955,7 @@ model obra {
   id_especificacion_puerta     BigInt?
   especificaciones_puerta      especificaciones_puerta? @relation(fields: [id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_obra_id_especificacion_puerta")
   cliente                      cliente?                 @relation(fields: [rut_cliente], references: [cliente_cliente_rut], onDelete: NoAction, onUpdate: NoAction, map: "fk_obra_rut_cliente")
+  servicios_terreno           servicio_terreno[]
 
   @@schema("terreno")
 }
@@ -3060,12 +3061,14 @@ model servicio_terreno {
   servicio_terreno_estado                   String?
   servicio_terreno_observaciones            String?
   id_usuario                                BigInt?
+  id_obra                                   BigInt?
   id_checklist_de_materials                 BigInt?
   especificacion_servicio_terreno           especificacion_servicio_terreno[]
   evidencia_terreno                         evidencia_terreno[]
   notificacion_tecnico                      notificacion_tecnico[]
   checklist_de_materiales                   checklist_de_materiales?                    @relation(fields: [id_checklist_de_materials], references: [checklist_de_materiales_checklist_de_materials_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_servicio_terreno_id_checklist_de_materials")
   usuario                                   usuario?                                    @relation(fields: [id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_servicio_terreno_id_usuario")
+  obra                                      obra?                                       @relation(fields: [id_obra], references: [obra_obra_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_servicio_terreno_id_obra")
   servicio_tterreno_herramientas_materiales servicio_tterreno_herramientas_materiales[]
   tarea                                     tarea[]
 

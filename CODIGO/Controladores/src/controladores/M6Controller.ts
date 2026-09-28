@@ -59,6 +59,12 @@ const decimalMonetario = (valor: unknown, nombre: string, positivo = false) => {
   return decimal;
 };
 
+const horaEntrada = (valor: unknown, nombre: string) => {
+  if (valor === undefined || valor === null || valor === '') return null;
+  if (typeof valor !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(valor)) throw new ErrorAplicacion(400, `${nombre} inválido`);
+  return new Date(`1970-01-01T${valor}:00.000Z`);
+};
+
 export class M6Controller {
   private readonly fuentePagoRemuneracion: FuentePagoRemuneracion;
 
@@ -2098,5 +2104,110 @@ export class M6Controller {
       await this.auditoriaDocumental.registrar(tx, { actorId: actor.id, tipoDocumento: 'PERIODO_REMUNERACION', idDocumento: items[0].id_periodo_remuneracion, accion: 'EXPORTACION_OFICIAL', condicion: 'GENERADO', metadata: { oficial: true, anio, mes, idEmpleado, cantidad: items.length, nombre: archivo.nombre } });
       return archivo;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  private readonly incluirVisitaTerreno = {
+    usuario: true,
+    obra: { include: { cliente: true, especificaciones_puerta: true } },
+  } as const;
+
+  private presentarUsuarioTerreno(usuario: any) {
+    if (!usuario) return null;
+    const nombre = [usuario.usuario_nombre_completo_primer_nombre_usuario, usuario.usuario_nombre_completo_segundo_nombre_usuario, usuario.usuario_nombre_completo_primer_apellido_usuario, usuario.usuario_nombre_completo_segundo_apellido_usuario].filter(Boolean).join(' ');
+    return { id: usuario.usuario_id_usuario.toString(), acceso: usuario.acceso_m4 || usuario.usuario_username || null, nombre: nombre || usuario.usuario_username || `Usuario ${usuario.usuario_id_usuario.toString()}` };
+  }
+
+  private presentarObraTerreno(obra: any) {
+    if (!obra) return null;
+    const especificacion = obra.especificaciones_puerta;
+    return {
+      id: obra.obra_obra_id.toString(), nombre: obra.obra_nombre_obra, referencia: obra.obra_referencia,
+      direccion: obra.obra_direccion_obra, comuna: obra.obra_comuna, region: obra.obra_region, estado: obra.obra_estado,
+      cliente: obra.cliente ? { rut: obra.cliente.cliente_cliente_rut, nombre: obra.cliente.cliente_razon_social || obra.cliente.cliente_cliente_b2b_razon_social || null } : null,
+      especificacion: especificacion ? { id: especificacion.especificacion_puerta_especificacion_puerta_id.toString(), modelo: especificacion.especificacion_puerta_modelo_puerta, zona: especificacion.especificacion_puerta_zona, observaciones: especificacion.especificacion_puerta_observaciones } : null,
+    };
+  }
+
+  private presentarVisitaTerreno(visita: any) {
+    return {
+      id: visita.servicio_terreno_servicio_terreno_id.toString(), tipoServicio: visita.servicio_terreno_tipo_servicio,
+      fecha: visita.servicio_terreno_fecha_real, bloqueHorario: visita.servicio_terreno_bloque_horario,
+      prioridad: visita.servicio_terreno_prioridad, estado: visita.servicio_terreno_estado,
+      observaciones: visita.servicio_terreno_observaciones, responsable: this.presentarUsuarioTerreno(visita.usuario),
+      obra: this.presentarObraTerreno(visita.obra),
+    };
+  }
+
+  async crearVisitaTerreno(entrada: Record<string, unknown>) {
+    const idObra = BigInt(identificador(entrada.idObra));
+    const tipoServicio = texto(entrada.tipoServicio, 50);
+    if (!tipoServicio) throw new ErrorAplicacion(400, 'Tipo de servicio es obligatorio');
+    const obra = await prisma.obra.findUnique({ where: { obra_obra_id: idObra } });
+    if (!obra) throw new ErrorAplicacion(404, 'Obra no encontrada');
+    const visita = await prisma.servicio_terreno.create({
+      data: {
+        id_obra: idObra, servicio_terreno_tipo_servicio: tipoServicio,
+        servicio_terreno_fecha_real: fechaEntrada(entrada.fecha, 'Fecha', false),
+        servicio_terreno_bloque_horario: horaEntrada(entrada.bloqueHorario, 'Bloque horario'),
+        servicio_terreno_prioridad: texto(entrada.prioridad, 80) || null,
+        servicio_terreno_observaciones: texto(entrada.observaciones, 1000) || null,
+        servicio_terreno_estado: 'pendiente',
+      },
+      include: this.incluirVisitaTerreno,
+    });
+    return this.presentarVisitaTerreno(visita);
+  }
+
+  async listarObrasTerreno() {
+    const obras = await prisma.obra.findMany({ include: { cliente: true, especificaciones_puerta: true }, orderBy: { obra_obra_id: 'desc' } });
+    return obras.map((obra) => this.presentarObraTerreno(obra));
+  }
+
+  async listarVisitasTerreno() {
+    const visitas = await prisma.servicio_terreno.findMany({ include: this.incluirVisitaTerreno, orderBy: { servicio_terreno_servicio_terreno_id: 'desc' } });
+    return visitas.map((visita) => this.presentarVisitaTerreno(visita));
+  }
+
+  async obtenerVisitaTerreno(id: number) {
+    const visita = await prisma.servicio_terreno.findUnique({ where: { servicio_terreno_servicio_terreno_id: BigInt(id) }, include: this.incluirVisitaTerreno });
+    if (!visita) throw new ErrorAplicacion(404, 'Visita no encontrada');
+    return this.presentarVisitaTerreno(visita);
+  }
+
+  async listarUsuariosTerreno() {
+    const usuarios = await prisma.usuario.findMany({ orderBy: [{ usuario_nombre_completo_primer_apellido_usuario: 'asc' }, { usuario_username: 'asc' }] });
+    return usuarios.map((usuario) => this.presentarUsuarioTerreno(usuario));
+  }
+
+  async asignarResponsableVisita(id: number, entrada: Record<string, unknown>) {
+    const idUsuario = BigInt(identificador(entrada.idUsuario));
+    const [visita, usuario] = await Promise.all([
+      prisma.servicio_terreno.findUnique({ where: { servicio_terreno_servicio_terreno_id: BigInt(id) } }),
+      prisma.usuario.findUnique({ where: { usuario_id_usuario: idUsuario } }),
+    ]);
+    if (!visita) throw new ErrorAplicacion(404, 'Visita no encontrada');
+    if (!usuario) throw new ErrorAplicacion(404, 'Usuario responsable no encontrado');
+    await prisma.servicio_terreno.update({ where: { servicio_terreno_servicio_terreno_id: BigInt(id) }, data: { id_usuario: idUsuario } });
+    return this.obtenerVisitaTerreno(id);
+  }
+
+  async listarMisTareasTerreno(idUsuario: bigint) {
+    const asignaciones = await prisma.tarea_usuario.findMany({ where: { tarea_usuario_usuario_id: idUsuario }, select: { tarea_usuario_tarea_id: true } });
+    if (!asignaciones.length) return [];
+    const tareas = await prisma.tarea.findMany({
+      where: { tarea_tarea_id: { in: asignaciones.map((item) => item.tarea_usuario_tarea_id) } },
+      include: {
+        servicio_terreno: { include: this.incluirVisitaTerreno },
+        especificaciones_puerta: true,
+      },
+      orderBy: [{ tarea_fecha_de_visita: 'asc' }, { tarea_tarea_id: 'asc' }],
+    });
+    return tareas.map((tarea) => ({
+      id: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, descripcion: tarea.tarea_descripcion,
+      estado: tarea.tarea_estado_de_tarea, urgencia: tarea.tarea_urgencia,
+      fecha: tarea.tarea_fecha_de_visita || tarea.tarea_fecha_de_inicio, bloqueHorario: tarea.tarea_bloque_horario,
+      visita: tarea.servicio_terreno ? this.presentarVisitaTerreno(tarea.servicio_terreno) : null,
+      especificacion: tarea.especificaciones_puerta ? { id: tarea.especificaciones_puerta.especificacion_puerta_especificacion_puerta_id.toString(), modelo: tarea.especificaciones_puerta.especificacion_puerta_modelo_puerta, zona: tarea.especificaciones_puerta.especificacion_puerta_zona } : null,
+    }));
   }
 }

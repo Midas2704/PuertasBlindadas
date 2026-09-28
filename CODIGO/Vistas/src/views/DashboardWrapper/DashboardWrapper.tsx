@@ -13,6 +13,8 @@ import {
   Landmark,
   LayoutDashboard,
   ListChecks,
+  ListTodo,
+  MapPinned,
   Receipt,
   SearchCheck,
   Settings,
@@ -94,6 +96,15 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/pagos-remuneraciones', label: 'Pagos de Remuneración', icon: Banknote, permissions: ['CU185', 'CU186', 'CU187', 'CU188', 'CU189', 'CU190'] },
       { path: '/documentos-remuneracion', label: 'Documentos de Remuneración', icon: FileSearch, permissions: ['CU191', 'CU192', 'CU193'] },
       { path: '/honorarios', label: 'Honorarios', icon: Receipt, permissions: ['CU196', 'CU197', 'CU198'] },
+    ],
+  },
+  {
+    id: 'terreno',
+    label: 'Terreno',
+    icon: MapPinned,
+    items: [
+      { path: '/terreno/visitas', label: 'Visitas y Servicios', icon: MapPinned, permissions: ['CU199', 'CU200'] },
+      { path: '/terreno/mis-tareas', label: 'Mis Tareas', icon: ListTodo, permission: 'CU201' },
     ],
   },
   {

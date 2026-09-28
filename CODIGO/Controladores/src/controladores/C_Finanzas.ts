@@ -61,7 +61,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'previsualizarConfirmacionBoletaHonorarios' | 'confirmarBoletaHonorarios' | 'consultarRetencionesHonorariosMensuales'
   | 'obtenerDetallePagoRemuneracion' | 'anularPagoRemuneracion' | 'registrarReversionPagoRemuneracion'
   | 'listarDocumentosRemuneracion' | 'descargarDocumentoRemuneracion' | 'reenviarDocumentoRemuneracion'
-  | 'registrarEntregaDocumento' | 'consultarEntregaDocumento' | 'exportarCalculoPreliminar' | 'exportarRemuneracionesOficiales';
+  | 'registrarEntregaDocumento' | 'consultarEntregaDocumento' | 'exportarCalculoPreliminar' | 'exportarRemuneracionesOficiales'
+  | 'crearVisitaTerreno' | 'listarObrasTerreno' | 'listarVisitasTerreno' | 'obtenerVisitaTerreno' | 'listarUsuariosTerreno' | 'asignarResponsableVisita' | 'listarMisTareasTerreno';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -251,6 +252,13 @@ export class C_Finanzas {
       case 'consultarEntregaDocumento': return this.m6.consultarEntregaDocumento(parametros.tipo, identificador(parametros.id), actor);
       case 'exportarCalculoPreliminar': return this.m6.exportarCalculoPreliminar(identificador(parametros.id), actor);
       case 'exportarRemuneracionesOficiales': return this.m6.exportarRemuneracionesOficiales(solicitud.consulta || {}, actor);
+      case 'crearVisitaTerreno': return this.m6.crearVisitaTerreno(cuerpo);
+      case 'listarObrasTerreno': return this.m6.listarObrasTerreno();
+      case 'listarVisitasTerreno': return this.m6.listarVisitasTerreno();
+      case 'obtenerVisitaTerreno': return this.m6.obtenerVisitaTerreno(identificador(parametros.id));
+      case 'listarUsuariosTerreno': return this.m6.listarUsuariosTerreno();
+      case 'asignarResponsableVisita': return this.m6.asignarResponsableVisita(identificador(parametros.id), cuerpo);
+      case 'listarMisTareasTerreno': return this.m6.listarMisTareasTerreno(actor.id);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

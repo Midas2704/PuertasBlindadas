@@ -22,6 +22,13 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   // Alias antiguos conservados como contratos HTTP; ninguno accede a módulos o BD.
   // los dejamos juntos para que nadie los confunda con rutas nuevas
   rutas.get('/salud', derivar('salud'));
+  rutas.get('/terreno/visitas', derivar('listarVisitasTerreno'));
+  rutas.post('/terreno/visitas', derivar('crearVisitaTerreno'));
+  rutas.get('/terreno/obras', derivar('listarObrasTerreno'));
+  rutas.get('/terreno/usuarios', derivar('listarUsuariosTerreno'));
+  rutas.get('/terreno/mis-tareas', derivar('listarMisTareasTerreno'));
+  rutas.patch('/terreno/visitas/:id/responsable', derivar('asignarResponsableVisita'));
+  rutas.get('/terreno/visitas/:id', derivar('obtenerVisitaTerreno'));
   rutas.get(['/clientes', '/clients'], derivar('listarClientes'));
   rutas.post(['/clientes', '/clients'], derivar('crearCliente'));
   rutas.put(['/clientes/:id', '/clients/:id'], derivar('actualizarCliente'));
