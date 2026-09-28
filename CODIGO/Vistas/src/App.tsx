@@ -35,6 +35,7 @@ import PeriodosRemuneracion from './views/PeriodosRemuneracion/PeriodosRemunerac
 import RegistroPagosRemuneracion from './views/RegistroPagosRemuneracion/RegistroPagosRemuneracion';
 import DetallePagoRemuneracion from './views/DetallePagoRemuneracion/DetallePagoRemuneracion';
 import DocumentosRemuneracion from './views/DocumentosRemuneracion/DocumentosRemuneracion';
+import Honorarios from './views/Honorarios/Honorarios';
 
 const App: React.FC = () => {
   return (
@@ -67,6 +68,7 @@ const App: React.FC = () => {
           <Route path="pagos-remuneraciones" element={<Protegido permiso={['CU185','CU186','CU187','CU188','CU189','CU190']}><RegistroPagosRemuneracion /></Protegido>} />
           <Route path="pagos-remuneraciones/:id" element={<Protegido permiso={['CU188','CU189','CU190']}><DetallePagoRemuneracion /></Protegido>} />
           <Route path="documentos-remuneracion" element={<Protegido permiso={['CU191','CU192','CU193']}><DocumentosRemuneracion /></Protegido>} />
+          <Route path="honorarios" element={<Protegido permiso={['CU196','CU197']}><Honorarios /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

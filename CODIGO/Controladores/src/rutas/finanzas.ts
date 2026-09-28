@@ -120,6 +120,12 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.patch('/pagos-remuneracion/finales/:id', derivar('actualizarPagoFinal'));
   rutas.post('/pagos-remuneracion/finales/:id/confirmar', derivar('confirmarPagoFinal'));
   rutas.get('/boletas-honorarios/confirmadas', derivar('listarBoletasHonorariosConfirmadas'));
+  rutas.get('/boletas-honorarios/prestadores', derivar('listarPrestadoresHonorarios'));
+  rutas.post('/boletas-honorarios/prestadores', derivar('crearPrestadorHonorarios'));
+  rutas.get('/boletas-honorarios', derivar('listarBoletasHonorarios'));
+  rutas.post('/boletas-honorarios', derivar('crearBoletaHonorarios'));
+  rutas.get('/boletas-honorarios/:id', derivar('obtenerBoletaHonorarios'));
+  rutas.patch('/boletas-honorarios/:id', derivar('actualizarBoletaHonorarios'));
   rutas.post('/boletas-honorarios/:id/pagos', derivar('prepararPagoHonorarios'));
   rutas.patch('/pagos-remuneracion/honorarios/:id', derivar('actualizarPagoHonorarios'));
   rutas.post('/pagos-remuneracion/honorarios/:id/confirmar', derivar('confirmarPagoHonorarios'));

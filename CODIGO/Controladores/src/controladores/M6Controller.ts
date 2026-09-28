@@ -1716,6 +1716,114 @@ export class M6Controller {
   async actualizarPagoFinal(idPago: number, entrada: Record<string, unknown>) { await this.exigirTipoPago(idPago, ['REMUNERACION', 'REGULARIZACION']); return this.actualizarPagoRemuneracion(idPago, entrada); }
   async confirmarPagoFinal(idPago: number, idUsuario: bigint) { await this.exigirTipoPago(idPago, ['REMUNERACION', 'REGULARIZACION']); return this.confirmarPagoRemuneracion(idPago, idUsuario); }
 
+  async listarPrestadoresHonorarios() {
+    const items = await prisma.prestador_honorarios.findMany({ orderBy: [{ nombre_razon_social: 'asc' }, { identificador: 'asc' }] });
+    return items.map(item => ({ id: item.id_prestador_honorarios, identificador: item.identificador, nombre: item.nombre_razon_social, contacto: item.contacto, estado: item.estado }));
+  }
+
+  async crearPrestadorHonorarios(entrada: Record<string, unknown>) {
+    const identificador = texto(entrada.identificador, 30);
+    const nombre = texto(entrada.nombreRazonSocial, 160);
+    const contacto = texto(entrada.contacto, 2000) || null;
+    const estado = texto(entrada.estado || 'ACTIVO', 20).toUpperCase();
+    if (!identificador || !nombre) throw new ErrorAplicacion(400, 'Identificador y nombre o razón social son obligatorios');
+    if (!['ACTIVO', 'INACTIVO'].includes(estado)) throw new ErrorAplicacion(400, 'Estado de prestador inválido');
+    try {
+      const item = await prisma.prestador_honorarios.create({ data: { identificador, nombre_razon_social: nombre, contacto, estado } });
+      return { id: item.id_prestador_honorarios, identificador: item.identificador, nombre: item.nombre_razon_social, contacto: item.contacto, estado: item.estado };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe un prestador con ese identificador');
+      throw error;
+    }
+  }
+
+  private async presentarBoletaHonorarios(item: any) {
+    const origen = this.repositorioPago.boletaHonorarios(item.id_boleta_honorarios);
+    const economia = await this.repositorioPago.estadoEconomicoOrigen(prisma, origen, item.liquido ?? undefined);
+    const montoEfectivo = Number(economia.montoEfectivo);
+    const saldoPendiente = economia.saldoPendiente === null ? null : Number(economia.saldoPendiente);
+    const condicionEconomica = item.estado_documental === 'PENDIENTE_CONFIRMACION'
+      ? 'PENDIENTE_TRIBUTARIA'
+      : saldoPendiente === 0 ? 'PAGADA' : montoEfectivo > 0 ? 'PAGO_PARCIAL' : 'PENDIENTE_PAGO';
+    return {
+      id: item.id_boleta_honorarios,
+      prestador: { id: item.id_prestador, identificador: item.prestador.identificador, nombre: item.prestador.nombre_razon_social, contacto: item.prestador.contacto, estado: item.prestador.estado },
+      folio: item.folio,
+      fechaEmision: item.fecha_emision,
+      bruto: Number(item.bruto),
+      modalidadTributaria: item.modalidad_tributaria,
+      tasaAplicada: item.tasa_aplicada === null ? null : Number(item.tasa_aplicada),
+      retencion: item.retencion === null ? null : Number(item.retencion),
+      liquido: item.liquido === null ? null : Number(item.liquido),
+      estadoDocumental: item.estado_documental,
+      respaldo: item.respaldo,
+      referencia: item.referencia,
+      economia: { montoOriginal: economia.montoOriginal === null ? null : Number(economia.montoOriginal), montoEfectivo, saldoPendiente, condicion: condicionEconomica },
+    };
+  }
+
+  async listarBoletasHonorarios(consulta: Record<string, unknown>) {
+    const estado = texto(consulta.estado || 'TODOS', 30).toUpperCase();
+    if (!['TODOS', 'PENDIENTE_CONFIRMACION', 'CONFIRMADA'].includes(estado)) throw new ErrorAplicacion(400, 'Estado documental inválido');
+    const busqueda = texto(consulta.busqueda, 160);
+    const idPrestador = consulta.idPrestador === undefined || consulta.idPrestador === '' ? null : enteroPositivo(consulta.idPrestador, 'Prestador');
+    const fechaDesde = fechaEntrada(consulta.fechaDesde, 'Fecha desde', false);
+    const fechaHasta = fechaEntrada(consulta.fechaHasta, 'Fecha hasta', false);
+    if (fechaDesde && fechaHasta && fechaHasta < fechaDesde) throw new ErrorAplicacion(400, 'El rango de fechas es inválido');
+    const where: Prisma.boleta_honorariosWhereInput = {
+      estado_documental: estado === 'TODOS' ? undefined : estado,
+      id_prestador: idPrestador ?? undefined,
+      fecha_emision: fechaDesde || fechaHasta ? { gte: fechaDesde ?? undefined, lte: fechaHasta ?? undefined } : undefined,
+      OR: busqueda ? [
+        { folio: { contains: busqueda, mode: 'insensitive' } },
+        { prestador: { is: { nombre_razon_social: { contains: busqueda, mode: 'insensitive' } } } },
+        { prestador: { is: { identificador: { contains: busqueda, mode: 'insensitive' } } } },
+      ] : undefined,
+    };
+    const items = await prisma.boleta_honorarios.findMany({ where, include: { prestador: true }, orderBy: [{ fecha_emision: 'desc' }, { id_boleta_honorarios: 'desc' }] });
+    return Promise.all(items.map(item => this.presentarBoletaHonorarios(item)));
+  }
+
+  async obtenerBoletaHonorarios(id: number) {
+    const item = await prisma.boleta_honorarios.findUnique({ where: { id_boleta_honorarios: id }, include: { prestador: true } });
+    if (!item) throw new ErrorAplicacion(404, 'Boleta de honorarios no encontrada');
+    return this.presentarBoletaHonorarios(item);
+  }
+
+  private async datosBoletaPendiente(entrada: Record<string, unknown>) {
+    const idPrestador = enteroPositivo(entrada.idPrestador, 'Prestador');
+    const folio = texto(entrada.folio, 80);
+    const fechaEmision = fechaEntrada(entrada.fechaEmision, 'Fecha de emisión')!;
+    const bruto = decimalMonetario(entrada.bruto, 'Bruto', true);
+    const modalidadTributaria = texto(entrada.modalidadTributaria, 40);
+    const respaldo = texto(entrada.respaldo, 2000) || null;
+    const referencia = texto(entrada.referencia, 200) || null;
+    if (!folio) throw new ErrorAplicacion(400, 'El folio es obligatorio');
+    if (!modalidadTributaria) throw new ErrorAplicacion(400, 'La modalidad tributaria es obligatoria');
+    if (!await prisma.prestador_honorarios.findUnique({ where: { id_prestador_honorarios: idPrestador } })) throw new ErrorAplicacion(404, 'Prestador de honorarios no encontrado');
+    return { id_prestador: idPrestador, folio, fecha_emision: fechaEmision, bruto, modalidad_tributaria: modalidadTributaria, respaldo, referencia };
+  }
+
+  async crearBoletaHonorarios(entrada: Record<string, unknown>) {
+    const data = await this.datosBoletaPendiente(entrada);
+    try {
+      const item = await prisma.boleta_honorarios.create({ data: { ...data, tasa_aplicada: null, retencion: null, liquido: null, estado_documental: 'PENDIENTE_CONFIRMACION' }, include: { prestador: true } });
+      return this.presentarBoletaHonorarios(item);
+    } catch (error) { this.conflictoConcurrente(error, 'Ya existe una boleta con ese folio para el prestador'); }
+  }
+
+  async actualizarBoletaHonorarios(id: number, entrada: Record<string, unknown>) {
+    const actual = await prisma.boleta_honorarios.findUnique({ where: { id_boleta_honorarios: id } });
+    if (!actual) throw new ErrorAplicacion(404, 'Boleta de honorarios no encontrada');
+    if (actual.estado_documental !== 'PENDIENTE_CONFIRMACION') throw new ErrorAplicacion(409, 'Sólo una boleta PENDIENTE_CONFIRMACION puede editarse');
+    const data = await this.datosBoletaPendiente(entrada);
+    try {
+      const cambio = await prisma.boleta_honorarios.updateMany({ where: { id_boleta_honorarios: id, estado_documental: 'PENDIENTE_CONFIRMACION' }, data });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La boleta cambió concurrentemente');
+      return this.obtenerBoletaHonorarios(id);
+    } catch (error) { this.conflictoConcurrente(error, 'La boleta cambió concurrentemente o el folio está duplicado'); }
+  }
+
   async listarBoletasHonorariosConfirmadas() {
     const items = await prisma.boleta_honorarios.findMany({ where: { estado_documental: 'CONFIRMADA' }, include: { prestador: true }, orderBy: { fecha_emision: 'desc' } });
     return Promise.all(items.map(async item => { const economia = await this.repositorioPago.estadoEconomicoOrigen(prisma, this.repositorioPago.boletaHonorarios(item.id_boleta_honorarios), item.liquido!); return { id: item.id_boleta_honorarios, folio: item.folio, fechaEmision: item.fecha_emision, prestador: { id: item.id_prestador, identificador: item.prestador.identificador, nombre: item.prestador.nombre_razon_social }, bruto: Number(item.bruto), retencion: Number(item.retencion), liquido: Number(item.liquido), estadoDocumental: item.estado_documental, montoEfectivo: Number(economia.montoEfectivo), saldoPendiente: Number(economia.saldoPendiente), pendiente: economia.saldoPendiente!.gt(0) }; }));
