@@ -58,9 +58,9 @@ test('M6 T10 CU196-CU197 consulta y prepara boletas sin implementar tributación
       await assert.rejects(modulo.actualizarBoletaHonorarios(confirmada.id_boleta_honorarios, { idPrestador: prestador.id_prestador_honorarios, folio: confirmada.folio, fechaEmision: '2099-06-02', bruto: 1000, modalidadTributaria: confirmada.modalidad_tributaria }), error => error.estado === 409);
     });
     await t.test('permisos CU196/CU197 siguen específicos al incorporar CU198', () => {
-      assert.equal(codigosTodosLosCU.length, 204); assert.deepEqual(matrizPermisosPorCU.CU196, []); assert.deepEqual(matrizPermisosPorCU.CU197, []); assert.deepEqual(matrizPermisosPorCU.CU198, []);
+      assert.equal(codigosTodosLosCU.length, 205); assert.deepEqual(matrizPermisosPorCU.CU196, []); assert.deepEqual(matrizPermisosPorCU.CU197, []); assert.deepEqual(matrizPermisosPorCU.CU198, []);
       assert.equal(operacionesPermiso.listarBoletasHonorarios, 'CU196'); assert.equal(operacionesPermiso.crearPrestadorHonorarios, 'CU197'); assert.equal(operacionesPermiso.crearBoletaHonorarios, 'CU197');
-      assert.equal(permiteOperacion('crearBoletaHonorarios', ['CU196']), false); assert.equal(codigosTodosLosCU.includes('CU198'), true); assert.equal(codigosTodosLosCU.includes('CU201'), true); assert.equal(codigosTodosLosCU.includes('CU202'), true); assert.equal(codigosTodosLosCU.includes('CU203'), true); assert.equal(codigosTodosLosCU.includes('CU204'), true); assert.equal(codigosTodosLosCU.includes('CU205'), false);
+      assert.equal(permiteOperacion('crearBoletaHonorarios', ['CU196']), false); assert.equal(codigosTodosLosCU.includes('CU198'), true); assert.equal(codigosTodosLosCU.includes('CU201'), true); assert.equal(codigosTodosLosCU.includes('CU202'), true); assert.equal(codigosTodosLosCU.includes('CU203'), true); assert.equal(codigosTodosLosCU.includes('CU204'), true); assert.equal(codigosTodosLosCU.includes('CU205'), true); assert.equal(codigosTodosLosCU.includes('CU206'), false);
       const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8'); assert.match(rutas, /confirmarBoletaHonorarios/);
     });
   } finally {

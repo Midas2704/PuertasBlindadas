@@ -63,7 +63,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarDocumentosRemuneracion' | 'descargarDocumentoRemuneracion' | 'reenviarDocumentoRemuneracion'
   | 'registrarEntregaDocumento' | 'consultarEntregaDocumento' | 'exportarCalculoPreliminar' | 'exportarRemuneracionesOficiales'
   | 'crearVisitaTerreno' | 'listarObrasTerreno' | 'listarVisitasTerreno' | 'obtenerVisitaTerreno' | 'listarUsuariosTerreno' | 'asignarResponsableVisita' | 'listarMisTareasTerreno'
-  | 'obtenerLevantamientoTerreno' | 'guardarLevantamientoTerreno' | 'corregirLevantamientoTerreno' | 'generarOrdenTrabajoLevantamiento';
+  | 'obtenerLevantamientoTerreno' | 'guardarLevantamientoTerreno' | 'corregirLevantamientoTerreno' | 'generarOrdenTrabajoLevantamiento'
+  | 'ajustarOrdenTrabajoTerreno' | 'liberarOrdenTrabajoTerreno';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -264,6 +265,8 @@ export class C_Finanzas {
       case 'guardarLevantamientoTerreno': return this.m6.guardarLevantamientoTerreno(identificador(parametros.id), cuerpo, actor);
       case 'corregirLevantamientoTerreno': return this.m6.corregirLevantamientoTerreno(identificador(parametros.id), cuerpo, actor);
       case 'generarOrdenTrabajoLevantamiento': return this.m6.generarOrdenTrabajoLevantamiento(identificador(parametros.id), actor);
+      case 'ajustarOrdenTrabajoTerreno': return this.m6.ajustarOrdenTrabajoTerreno(identificador(parametros.id), cuerpo, actor);
+      case 'liberarOrdenTrabajoTerreno': return this.m6.liberarOrdenTrabajoTerreno(identificador(parametros.id), identificador(parametros.ordenId), actor);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

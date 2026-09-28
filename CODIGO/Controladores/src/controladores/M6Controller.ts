@@ -66,6 +66,11 @@ const horaEntrada = (valor: unknown, nombre: string) => {
   return new Date(`1970-01-01T${valor}:00.000Z`);
 };
 
+const esConflictoSerializable = (error: unknown) => {
+  const detalle = error as { code?: string; cause?: { originalCode?: string; kind?: string } };
+  return detalle.code === 'P2034' || detalle.cause?.originalCode === '40001' || detalle.cause?.kind === 'TransactionWriteConflict';
+};
+
 export class M6Controller {
   private readonly fuentePagoRemuneracion: FuentePagoRemuneracion;
 
@@ -2213,11 +2218,11 @@ export class M6Controller {
   }
 
   private readonly incluirLevantamientoTerreno = {
-    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { where: { orden_trabajo_estado: 'activa' }, orderBy: { orden_trabajo_id_orden: 'asc' as const } } } },
+    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { orderBy: { orden_trabajo_id_orden: 'desc' as const } } } },
     servicio_terreno: {
       include: {
-        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { where: { orden_trabajo_estado: 'activa' }, orderBy: { orden_trabajo_id_orden: 'asc' as const } } } } } },
-        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { where: { orden_trabajo_estado: 'activa' }, orderBy: { orden_trabajo_id_orden: 'asc' as const } } } } } },
+        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { orderBy: { orden_trabajo_id_orden: 'desc' as const } } } } } },
+        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { orderBy: { orden_trabajo_id_orden: 'desc' as const } } } } } },
       },
     },
   };
@@ -2337,7 +2342,7 @@ export class M6Controller {
     }
   }
 
-  async corregirLevantamientoTerreno(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
+  async corregirLevantamientoTerreno(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6, estadosOrdenTrabajoPermitidos?: string[]) {
     const motivo = texto(entrada.motivo, 1000);
     if (!motivo) throw new ErrorAplicacion(400, 'El motivo de la corrección es obligatorio');
     const especificacionEntrada = entrada.especificacion && typeof entrada.especificacion === 'object' ? entrada.especificacion as Record<string, unknown> : {};
@@ -2346,6 +2351,7 @@ export class M6Controller {
       return await prisma.$transaction(async (tx) => {
         const contexto = await this.resolverLevantamientoTerreno(id, actor, tx);
         if (!contexto.medidas) throw new ErrorAplicacion(409, 'La tarea todavía no tiene un levantamiento técnico registrado');
+        if (estadosOrdenTrabajoPermitidos && !contexto.especificacion.orden_trabajo.some((orden) => estadosOrdenTrabajoPermitidos.includes(orden.orden_trabajo_estado || ''))) throw new ErrorAplicacion(409, 'La Orden de Trabajo ya no admite ajustes técnicos antes de su liberación');
         const datosEspecificacion: Record<string, unknown> = {};
         const camposModificados: string[] = [];
         for (const [campo, columna] of Object.entries(this.camposTextoLevantamiento)) if (Object.prototype.hasOwnProperty.call(especificacionEntrada, campo)) {
@@ -2397,24 +2403,51 @@ export class M6Controller {
         if (!contexto.medidas) throw new ErrorAplicacion(409, 'La tarea todavía no tiene un levantamiento técnico registrado');
         idEspecificacion = contexto.especificacion.especificacion_puerta_especificacion_puerta_id;
         const existente = await tx.orden_trabajo.findFirst({
-          where: { especificaciones_puerta_id_especificacion_puerta: idEspecificacion, orden_trabajo_estado: 'activa' },
+          where: { especificaciones_puerta_id_especificacion_puerta: idEspecificacion },
           orderBy: { orden_trabajo_id_orden: 'asc' },
         });
         if (!existente) await tx.orden_trabajo.create({ data: {
-          orden_trabajo_fecha_hora: new Date(), orden_trabajo_estado: 'activa',
+          orden_trabajo_fecha_hora: new Date(), orden_trabajo_estado: 'pendiente',
           especificaciones_puerta_id_especificacion_puerta: idEspecificacion,
           proyecto_id_proyecto: null, area_trabajo_id_area: null, usuario_id_usuario: null,
         } });
         return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor, tx));
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      if (esConflictoSerializable(error)) {
         if (idEspecificacion !== null) {
-          const existente = await prisma.orden_trabajo.findFirst({ where: { especificaciones_puerta_id_especificacion_puerta: idEspecificacion, orden_trabajo_estado: 'activa' } });
+          const existente = await prisma.orden_trabajo.findFirst({ where: { especificaciones_puerta_id_especificacion_puerta: idEspecificacion } });
           if (existente) return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor));
         }
         throw new ErrorAplicacion(409, 'La Orden de Trabajo fue generada concurrentemente; vuelve a consultar');
       }
+      throw error;
+    }
+  }
+
+  async ajustarOrdenTrabajoTerreno(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
+    return this.corregirLevantamientoTerreno(id, entrada, actor, ['pendiente', 'activa']);
+  }
+
+  async liberarOrdenTrabajoTerreno(id: number, idOrden: number, actor: ActorTerrenoM6) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const contexto = await this.resolverLevantamientoTerreno(id, actor, tx);
+        if (!contexto.medidas || contexto.especificacion.id_medidas === null) throw new ErrorAplicacion(409, 'La Orden de Trabajo requiere una medida vigente antes de liberarse');
+        const orden = await tx.orden_trabajo.findUnique({ where: { orden_trabajo_id_orden: BigInt(idOrden) } });
+        if (!orden) throw new ErrorAplicacion(404, 'Orden de Trabajo no encontrada');
+        if (orden.especificaciones_puerta_id_especificacion_puerta !== contexto.especificacion.especificacion_puerta_especificacion_puerta_id) throw new ErrorAplicacion(409, 'La Orden de Trabajo no pertenece al levantamiento indicado');
+        const estado = orden.orden_trabajo_estado || '';
+        if (!['pendiente', 'activa'].includes(estado)) throw new ErrorAplicacion(409, ['en_progreso', 'completada', 'cancelada'].includes(estado) ? `La Orden de Trabajo en estado ${estado} no puede liberarse nuevamente` : 'La Orden de Trabajo tiene un estado no reconocido');
+        const actualizada = await tx.orden_trabajo.updateMany({
+          where: { orden_trabajo_id_orden: orden.orden_trabajo_id_orden, orden_trabajo_estado: estado },
+          data: { orden_trabajo_estado: 'en_progreso' },
+        });
+        if (actualizada.count !== 1) throw new ErrorAplicacion(409, 'La Orden de Trabajo fue liberada o modificada concurrentemente');
+        return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor, tx));
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (esConflictoSerializable(error)) throw new ErrorAplicacion(409, 'La Orden de Trabajo fue liberada o modificada concurrentemente');
       throw error;
     }
   }

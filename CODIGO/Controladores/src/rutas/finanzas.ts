@@ -31,6 +31,8 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.put('/terreno/tareas/:id/levantamiento', derivar('guardarLevantamientoTerreno'));
   rutas.post('/terreno/tareas/:id/levantamiento/correcciones', derivar('corregirLevantamientoTerreno'));
   rutas.post('/terreno/tareas/:id/orden-trabajo', derivar('generarOrdenTrabajoLevantamiento'));
+  rutas.post('/terreno/tareas/:id/orden-trabajo/ajustes', derivar('ajustarOrdenTrabajoTerreno'));
+  rutas.post('/terreno/tareas/:id/orden-trabajo/:ordenId/liberar', derivar('liberarOrdenTrabajoTerreno'));
   rutas.patch('/terreno/visitas/:id/responsable', derivar('asignarResponsableVisita'));
   rutas.get('/terreno/visitas/:id', derivar('obtenerVisitaTerreno'));
   rutas.get(['/clientes', '/clients'], derivar('listarClientes'));
