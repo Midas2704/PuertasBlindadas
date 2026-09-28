@@ -58,6 +58,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarPagosRemuneracion' | 'obtenerPagoRemuneracion' | 'prepararPagoFinal' | 'actualizarPagoFinal' | 'confirmarPagoFinal'
   | 'listarBoletasHonorariosConfirmadas' | 'prepararPagoHonorarios' | 'actualizarPagoHonorarios' | 'confirmarPagoHonorarios'
   | 'listarPrestadoresHonorarios' | 'crearPrestadorHonorarios' | 'listarBoletasHonorarios' | 'obtenerBoletaHonorarios' | 'crearBoletaHonorarios' | 'actualizarBoletaHonorarios'
+  | 'previsualizarConfirmacionBoletaHonorarios' | 'confirmarBoletaHonorarios' | 'consultarRetencionesHonorariosMensuales'
   | 'obtenerDetallePagoRemuneracion' | 'anularPagoRemuneracion' | 'registrarReversionPagoRemuneracion'
   | 'listarDocumentosRemuneracion' | 'descargarDocumentoRemuneracion' | 'reenviarDocumentoRemuneracion'
   | 'registrarEntregaDocumento' | 'consultarEntregaDocumento' | 'exportarCalculoPreliminar' | 'exportarRemuneracionesOficiales';
@@ -234,6 +235,9 @@ export class C_Finanzas {
       case 'obtenerBoletaHonorarios': return this.m6.obtenerBoletaHonorarios(identificador(parametros.id));
       case 'crearBoletaHonorarios': return this.m6.crearBoletaHonorarios(cuerpo);
       case 'actualizarBoletaHonorarios': return this.m6.actualizarBoletaHonorarios(identificador(parametros.id), cuerpo);
+      case 'previsualizarConfirmacionBoletaHonorarios': return this.m6.previsualizarConfirmacionBoletaHonorarios(identificador(parametros.id));
+      case 'confirmarBoletaHonorarios': return this.m6.confirmarBoletaHonorarios(identificador(parametros.id));
+      case 'consultarRetencionesHonorariosMensuales': return this.m6.consultarRetencionesHonorariosMensuales(solicitud.consulta?.anio, solicitud.consulta?.mes);
       case 'prepararPagoHonorarios': return this.m6.prepararPagoHonorarios(identificador(parametros.id), cuerpo, actor.id);
       case 'actualizarPagoHonorarios': return this.m6.actualizarPagoHonorarios(identificador(parametros.id), cuerpo);
       case 'confirmarPagoHonorarios': return this.m6.confirmarPagoHonorarios(identificador(parametros.id), actor.id);

@@ -1824,6 +1824,72 @@ export class M6Controller {
     } catch (error) { this.conflictoConcurrente(error, 'La boleta cambió concurrentemente o el folio está duplicado'); }
   }
 
+  private async calcularTributacionBoletaHonorarios(
+    cliente: Pick<Prisma.TransactionClient, 'parametro_remuneracional'>,
+    boleta: { bruto: Prisma.Decimal; modalidad_tributaria: string; fecha_emision: Date },
+  ) {
+    const modalidades = ['CON_RETENCION_RECEPTOR', 'SIN_RETENCION_PPM_EMISOR'];
+    if (!modalidades.includes(boleta.modalidad_tributaria)) throw new ErrorAplicacion(400, 'Modalidad tributaria de boleta inválida');
+    if (!boleta.bruto.isFinite() || boleta.bruto.lte(0)) throw new ErrorAplicacion(400, 'El bruto de la boleta debe ser mayor que cero');
+    const parametros = await cliente.parametro_remuneracional.findMany({
+      where: {
+        codigo: 'BH_TASA_RETENCION_PPM',
+        estado: 'activo',
+        vigencia_desde: { lte: boleta.fecha_emision },
+        OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: boleta.fecha_emision } }],
+      },
+    });
+    if (parametros.length === 0) throw new ErrorAplicacion(409, 'No existe una tasa de retención/PPM vigente para la fecha de emisión');
+    if (parametros.length !== 1) throw new ErrorAplicacion(409, 'Existe más de una tasa de retención/PPM vigente para la fecha de emisión');
+    const parametro = parametros[0];
+    if (parametro.codigo !== 'BH_TASA_RETENCION_PPM' || parametro.unidad !== 'FACTOR_DECIMAL' || parametro.valor === null) {
+      throw new ErrorAplicacion(409, 'El parámetro tributario vigente no tiene el código, unidad o valor esperado');
+    }
+    const tasa = new Prisma.Decimal(parametro.valor);
+    if (!tasa.isFinite() || tasa.isNegative()) throw new ErrorAplicacion(409, 'La tasa tributaria vigente es inválida');
+    const retencion = boleta.modalidad_tributaria === 'CON_RETENCION_RECEPTOR'
+      ? boleta.bruto.mul(tasa).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP)
+      : new Prisma.Decimal(0);
+    const liquido = boleta.bruto.minus(retencion);
+    if (liquido.lte(0)) throw new ErrorAplicacion(409, 'La tasa tributaria vigente produce un líquido inválido');
+    return { tasa, retencion, liquido };
+  }
+
+  async previsualizarConfirmacionBoletaHonorarios(id: number) {
+    const boleta = await prisma.boleta_honorarios.findUnique({ where: { id_boleta_honorarios: id } });
+    if (!boleta) throw new ErrorAplicacion(404, 'Boleta de honorarios no encontrada');
+    if (boleta.estado_documental !== 'PENDIENTE_CONFIRMACION') throw new ErrorAplicacion(409, 'Sólo una boleta PENDIENTE_CONFIRMACION puede confirmarse');
+    const calculo = await this.calcularTributacionBoletaHonorarios(prisma, boleta);
+    return { id, modalidadTributaria: boleta.modalidad_tributaria, bruto: Number(boleta.bruto), tasaAplicada: Number(calculo.tasa), retencion: Number(calculo.retencion), liquido: Number(calculo.liquido) };
+  }
+
+  async confirmarBoletaHonorarios(id: number) {
+    try {
+      await prisma.$transaction(async tx => {
+        const boleta = await tx.boleta_honorarios.findUnique({ where: { id_boleta_honorarios: id } });
+        if (!boleta) throw new ErrorAplicacion(404, 'Boleta de honorarios no encontrada');
+        if (boleta.estado_documental !== 'PENDIENTE_CONFIRMACION') throw new ErrorAplicacion(409, 'Sólo una boleta PENDIENTE_CONFIRMACION puede confirmarse');
+        const calculo = await this.calcularTributacionBoletaHonorarios(tx, boleta);
+        const cambio = await tx.boleta_honorarios.updateMany({
+          where: { id_boleta_honorarios: id, estado_documental: 'PENDIENTE_CONFIRMACION' },
+          data: { tasa_aplicada: calculo.tasa, retencion: calculo.retencion, liquido: calculo.liquido, estado_documental: 'CONFIRMADA' },
+        });
+        if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La boleta cambió concurrentemente');
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.obtenerBoletaHonorarios(id);
+    } catch (error) { this.conflictoConcurrente(error, 'La confirmación de la boleta cambió concurrentemente'); }
+  }
+
+  async consultarRetencionesHonorariosMensuales(anioEntrada: unknown, mesEntrada: unknown) {
+    const { anio, mes, fechaInicio, fechaFin } = this.periodoEntrada(anioEntrada, mesEntrada);
+    const resultado = await prisma.boleta_honorarios.aggregate({
+      where: { estado_documental: 'CONFIRMADA', fecha_emision: { gte: fechaInicio, lte: fechaFin } },
+      _sum: { retencion: true },
+      _count: { _all: true },
+    });
+    return { anio, mes, totalRetenciones: Number(resultado._sum.retencion ?? 0), cantidadBoletas: resultado._count._all };
+  }
+
   async listarBoletasHonorariosConfirmadas() {
     const items = await prisma.boleta_honorarios.findMany({ where: { estado_documental: 'CONFIRMADA' }, include: { prestador: true }, orderBy: { fecha_emision: 'desc' } });
     return Promise.all(items.map(async item => { const economia = await this.repositorioPago.estadoEconomicoOrigen(prisma, this.repositorioPago.boletaHonorarios(item.id_boleta_honorarios), item.liquido!); return { id: item.id_boleta_honorarios, folio: item.folio, fechaEmision: item.fecha_emision, prestador: { id: item.id_prestador, identificador: item.prestador.identificador, nombre: item.prestador.nombre_razon_social }, bruto: Number(item.bruto), retencion: Number(item.retencion), liquido: Number(item.liquido), estadoDocumental: item.estado_documental, montoEfectivo: Number(economia.montoEfectivo), saldoPendiente: Number(economia.saldoPendiente), pendiente: economia.saldoPendiente!.gt(0) }; }));

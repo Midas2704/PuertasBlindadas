@@ -57,11 +57,11 @@ test('M6 T10 CU196-CU197 consulta y prepara boletas sin implementar tributación
       assert.equal(editada.folio, `PE-${marca}`); assert.equal(editada.bruto, 1100); assert.equal(editada.tasaAplicada, null);
       await assert.rejects(modulo.actualizarBoletaHonorarios(confirmada.id_boleta_honorarios, { idPrestador: prestador.id_prestador_honorarios, folio: confirmada.folio, fechaEmision: '2099-06-02', bruto: 1000, modalidadTributaria: confirmada.modalidad_tributaria }), error => error.estado === 409);
     });
-    await t.test('permisos CU196/CU197 son específicos y no existe CU198', () => {
-      assert.equal(codigosTodosLosCU.length, 197); assert.deepEqual(matrizPermisosPorCU.CU196, []); assert.deepEqual(matrizPermisosPorCU.CU197, []);
+    await t.test('permisos CU196/CU197 siguen específicos al incorporar CU198', () => {
+      assert.equal(codigosTodosLosCU.length, 198); assert.deepEqual(matrizPermisosPorCU.CU196, []); assert.deepEqual(matrizPermisosPorCU.CU197, []); assert.deepEqual(matrizPermisosPorCU.CU198, []);
       assert.equal(operacionesPermiso.listarBoletasHonorarios, 'CU196'); assert.equal(operacionesPermiso.crearPrestadorHonorarios, 'CU197'); assert.equal(operacionesPermiso.crearBoletaHonorarios, 'CU197');
-      assert.equal(permiteOperacion('crearBoletaHonorarios', ['CU196']), false); assert.equal(codigosTodosLosCU.includes('CU198'), false);
-      const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8'); assert.doesNotMatch(rutas, /confirmarBoletaHonorarios/);
+      assert.equal(permiteOperacion('crearBoletaHonorarios', ['CU196']), false); assert.equal(codigosTodosLosCU.includes('CU198'), true); assert.equal(codigosTodosLosCU.includes('CU199'), false);
+      const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8'); assert.match(rutas, /confirmarBoletaHonorarios/);
     });
   } finally {
     await prisma.reversion_pago_remuneracion.deleteMany({ where: { id_reversion_pago_remuneracion: { in: ids.reversiones } } });

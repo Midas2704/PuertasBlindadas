@@ -93,7 +93,7 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/detalle-remuneracion', label: 'Detalle de Remuneración', icon: SearchCheck, permissions: ['CU172', 'CU173', 'CU174', 'CU175', 'CU176', 'CU177', 'CU179', 'CU180', 'CU182', 'CU183', 'CU184'] },
       { path: '/pagos-remuneraciones', label: 'Pagos de Remuneración', icon: Banknote, permissions: ['CU185', 'CU186', 'CU187', 'CU188', 'CU189', 'CU190'] },
       { path: '/documentos-remuneracion', label: 'Documentos de Remuneración', icon: FileSearch, permissions: ['CU191', 'CU192', 'CU193'] },
-      { path: '/honorarios', label: 'Honorarios', icon: Receipt, permissions: ['CU196', 'CU197'] },
+      { path: '/honorarios', label: 'Honorarios', icon: Receipt, permissions: ['CU196', 'CU197', 'CU198'] },
     ],
   },
   {

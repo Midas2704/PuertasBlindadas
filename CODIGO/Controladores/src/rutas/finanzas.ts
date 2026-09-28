@@ -122,8 +122,11 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/boletas-honorarios/confirmadas', derivar('listarBoletasHonorariosConfirmadas'));
   rutas.get('/boletas-honorarios/prestadores', derivar('listarPrestadoresHonorarios'));
   rutas.post('/boletas-honorarios/prestadores', derivar('crearPrestadorHonorarios'));
+  rutas.get('/boletas-honorarios/retenciones-mensuales', derivar('consultarRetencionesHonorariosMensuales'));
   rutas.get('/boletas-honorarios', derivar('listarBoletasHonorarios'));
   rutas.post('/boletas-honorarios', derivar('crearBoletaHonorarios'));
+  rutas.get('/boletas-honorarios/:id/calculo-confirmacion', derivar('previsualizarConfirmacionBoletaHonorarios'));
+  rutas.post('/boletas-honorarios/:id/confirmar', derivar('confirmarBoletaHonorarios'));
   rutas.get('/boletas-honorarios/:id', derivar('obtenerBoletaHonorarios'));
   rutas.patch('/boletas-honorarios/:id', derivar('actualizarBoletaHonorarios'));
   rutas.post('/boletas-honorarios/:id/pagos', derivar('prepararPagoHonorarios'));
