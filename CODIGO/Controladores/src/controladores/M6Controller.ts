@@ -478,7 +478,7 @@ export class M6Controller {
         if (!esquema) throw new ErrorAplicacion(404, 'Esquema activo no encontrado');
         if (desde < esquema.vigencia_desde || esquema.vigencia_hasta && (!hasta || hasta > esquema.vigencia_hasta)) throw new ErrorAplicacion(400, 'La asignación debe quedar dentro de la vigencia del esquema');
         const conflicto = await tx.asignacion_esquema_remuneracional.count({ where: {
-          id_empleado: idEmpleado, id_esquema: idEsquema, activa: true,
+          id_empleado: idEmpleado, id_esquema: idEsquema,
           vigencia_desde: hasta ? { lte: hasta } : undefined,
           OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }],
         } });
@@ -491,11 +491,17 @@ export class M6Controller {
 
   async finalizarAsignacionEsquemaEmpleado(idEmpleado: number, idAsignacion: number, entrada: Record<string, unknown>) {
     const hasta = fechaEntrada(entrada.vigenciaHasta, 'Vigencia hasta')!;
-    const actual = await prisma.asignacion_esquema_remuneracional.findFirst({ where: { id_asignacion_esquema: idAsignacion, id_empleado: idEmpleado } });
-    if (!actual) throw new ErrorAplicacion(404, 'Asignación de esquema no encontrada');
-    if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
-    await prisma.asignacion_esquema_remuneracional.update({ where: { id_asignacion_esquema: idAsignacion }, data: { vigencia_hasta: hasta, activa: false } });
-    return this.listarAsignacionesEsquemaEmpleado(idEmpleado);
+    try {
+      await prisma.$transaction(async (tx) => {
+        const actual = await tx.asignacion_esquema_remuneracional.findFirst({ where: { id_asignacion_esquema: idAsignacion, id_empleado: idEmpleado } });
+        if (!actual) throw new ErrorAplicacion(404, 'Asignación de esquema no encontrada');
+        if (!actual.activa) throw new ErrorAplicacion(409, 'La asignación de esquema ya fue finalizada');
+        if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
+        const actualizada = await tx.asignacion_esquema_remuneracional.updateMany({ where: { id_asignacion_esquema: idAsignacion, id_empleado: idEmpleado, activa: true }, data: { vigencia_hasta: hasta, activa: false } });
+        if (actualizada.count !== 1) throw new ErrorAplicacion(409, 'La asignación de esquema fue finalizada o modificada concurrentemente');
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.listarAsignacionesEsquemaEmpleado(idEmpleado);
+    } catch (error) { this.conflictoConcurrente(error, 'La asignación de esquema fue finalizada o modificada concurrentemente'); }
   }
 
   async catalogoHaberes() {
@@ -519,7 +525,7 @@ export class M6Controller {
         const concepto = await tx.concepto_remuneracion.findUnique({ where: { id_concepto_remuneracion: idConcepto } });
         if (!concepto || concepto.estado_concepto !== 'activo') throw new ErrorAplicacion(404, 'Concepto activo no encontrado');
         if (concepto.naturaleza_concepto !== 'haber') throw new ErrorAplicacion(400, 'CU160 sólo permite conceptos HABER');
-        const conflicto = await tx.asignacion_concepto_remuneracion_empleado.count({ where: { id_empleado: idEmpleado, id_concepto: idConcepto, activa: true, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+        const conflicto = await tx.asignacion_concepto_remuneracion_empleado.count({ where: { id_empleado: idEmpleado, id_concepto: idConcepto, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
         if (conflicto) throw new ErrorAplicacion(409, 'La asignación del haber se superpone con otra vigencia');
         await tx.asignacion_concepto_remuneracion_empleado.create({ data: { id_empleado: idEmpleado, id_concepto: idConcepto, vigencia_desde: desde, vigencia_hasta: hasta, valor_aplicable: valor } });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -529,11 +535,17 @@ export class M6Controller {
 
   async finalizarAsignacionHaberEmpleado(idEmpleado: number, idAsignacion: number, entrada: Record<string, unknown>) {
     const hasta = fechaEntrada(entrada.vigenciaHasta, 'Vigencia hasta')!;
-    const actual = await prisma.asignacion_concepto_remuneracion_empleado.findFirst({ where: { id_asignacion_concepto: idAsignacion, id_empleado: idEmpleado } });
-    if (!actual) throw new ErrorAplicacion(404, 'Asignación de haber no encontrada');
-    if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
-    await prisma.asignacion_concepto_remuneracion_empleado.update({ where: { id_asignacion_concepto: idAsignacion }, data: { vigencia_hasta: hasta, activa: false } });
-    return this.listarAsignacionesHaberEmpleado(idEmpleado);
+    try {
+      await prisma.$transaction(async (tx) => {
+        const actual = await tx.asignacion_concepto_remuneracion_empleado.findFirst({ where: { id_asignacion_concepto: idAsignacion, id_empleado: idEmpleado, concepto: { naturaleza_concepto: 'haber' } } });
+        if (!actual) throw new ErrorAplicacion(404, 'Asignación de haber no encontrada');
+        if (!actual.activa) throw new ErrorAplicacion(409, 'La asignación de haber ya fue finalizada');
+        if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
+        const actualizada = await tx.asignacion_concepto_remuneracion_empleado.updateMany({ where: { id_asignacion_concepto: idAsignacion, id_empleado: idEmpleado, activa: true }, data: { vigencia_hasta: hasta, activa: false } });
+        if (actualizada.count !== 1) throw new ErrorAplicacion(409, 'La asignación de haber fue finalizada o modificada concurrentemente');
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.listarAsignacionesHaberEmpleado(idEmpleado);
+    } catch (error) { this.conflictoConcurrente(error, 'La asignación de haber fue finalizada o modificada concurrentemente'); }
   }
 
   private async configuracionDocumental(tx: Prisma.TransactionClient | typeof prisma, idEmpleado: number) {
@@ -1184,27 +1196,34 @@ export class M6Controller {
       agregar({ tipo: 'SUELDO_BASE', descripcion: 'Sueldo base vigente', monto: remuneracion.empleado.sueldo_base, fuente_tipo: 'AUTOMATICA', clave_negocio: 'SUELDO_BASE', referencia_origen: `EMPLEADO:${remuneracion.id_empleado}`, version_origen: remuneracion.empleado.fecha_aplicacion_sueldo_base.toISOString().slice(0, 10), fecha_origen: remuneracion.empleado.fecha_aplicacion_sueldo_base, estado_revision: 'aprobado', revisado_por: idUsuario, fecha_revision: new Date() });
     }
     const asignaciones = await tx.asignacion_concepto_remuneracion_empleado.findMany({
-      where: { id_empleado: remuneracion.id_empleado, activa: true, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }], concepto: { naturaleza_concepto: 'haber' } },
+      where: { id_empleado: remuneracion.id_empleado, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }], concepto: { naturaleza_concepto: 'haber' } },
       include: { concepto: { include: { configuraciones_m6: { where: { activa: true, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }] } } } } },
     });
     for (const item of asignaciones) {
-      const configuraciones = item.concepto.configuraciones_m6; let monto: Prisma.Decimal | null = item.valor_aplicable; let referencia = `ASIGNACION:${item.id_asignacion_concepto}`;
-      if (monto === null && configuraciones.length === 1 && configuraciones[0].valor !== null) {
-        const config = configuraciones[0]; const valor = config.valor!; referencia = `CONFIGURACION:${config.id_configuracion_concepto}`;
-        if (config.modalidad === 'FIJO') monto = valor;
-        else if (config.modalidad === 'PORCENTAJE' && remuneracion.empleado.sueldo_base !== null) monto = remuneracion.empleado.sueldo_base.mul(valor).div(100);
+      const configuraciones = item.concepto.configuraciones_m6; let monto: Prisma.Decimal | null = item.valor_aplicable; let referencia = `ASIGNACION:${item.id_asignacion_concepto}`; let motivo: string | null = null;
+      if (monto === null) {
+        if (configuraciones.length > 1) motivo = 'Configuración ambigua para el período';
+        else if (configuraciones.length === 0) motivo = 'No existe un valor determinístico aplicable';
+        else {
+          const config = configuraciones[0]; referencia = `CONFIGURACION:${config.id_configuracion_concepto}`;
+          if (config.modalidad === 'FIJO' && config.valor !== null) monto = config.valor;
+          else if (config.modalidad === 'PORCENTAJE') motivo = 'El HABER porcentual no tiene una base de cálculo explícita';
+          else if (config.modalidad === 'REGLA') motivo = 'El HABER basado en regla no tiene semántica ejecutable';
+          else motivo = 'No existe un valor determinístico aplicable';
+        }
       }
-      agregar({ id_concepto: item.id_concepto, tipo: 'HABER_AUTOMATICO', descripcion: item.concepto.nombre_concepto, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `CONCEPTO:${item.id_concepto}`, referencia_origen: referencia, estado_revision: monto === null || configuraciones.length > 1 ? 'pendiente_valorizacion' : 'aprobado', motivo: configuraciones.length > 1 ? 'Configuración ambigua para el período' : monto === null ? 'No existe un valor determinístico aplicable' : null, revisado_por: monto === null || configuraciones.length > 1 ? null : idUsuario, fecha_revision: monto === null || configuraciones.length > 1 ? null : new Date() });
+      const pendiente = monto === null;
+      agregar({ id_concepto: item.id_concepto, tipo: 'HABER_AUTOMATICO', descripcion: item.concepto.nombre_concepto, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `CONCEPTO:${item.id_concepto}`, referencia_origen: referencia, estado_revision: pendiente ? 'pendiente_valorizacion' : 'aprobado', motivo: pendiente ? motivo : null, revisado_por: pendiente ? null : idUsuario, fecha_revision: pendiente ? null : new Date() });
     }
     const deduccionesRecurrentes = await tx.asignacion_concepto_remuneracion_empleado.findMany({
-      where: { id_empleado: remuneracion.id_empleado, activa: true, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }], concepto: { naturaleza_concepto: 'descuento' } },
+      where: { id_empleado: remuneracion.id_empleado, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }], concepto: { naturaleza_concepto: 'descuento' } },
       include: { concepto: { include: { configuraciones_m6: { where: { activa: true, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }] } } } } },
     });
     for (const item of deduccionesRecurrentes) {
       const configuraciones = item.concepto.configuraciones_m6; let monto: Prisma.Decimal | null = item.valor_aplicable; let referencia = `ASIGNACION:${item.id_asignacion_concepto}`;
       if (monto === null && configuraciones.length === 1 && configuraciones[0].modalidad === 'FIJO' && configuraciones[0].valor !== null) { monto = configuraciones[0].valor; referencia = `CONFIGURACION:${configuraciones[0].id_configuracion_concepto}`; }
       const pendiente = monto === null || configuraciones.length > 1;
-      agregar({ id_concepto: item.id_concepto, tipo: 'DEDUCCION_AUTOMATICA', direccion: 'NEGATIVO', descripcion: item.concepto.nombre_concepto, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `DEDUCCION:${item.id_asignacion_concepto}`, referencia_origen: referencia, estado_revision: pendiente ? 'pendiente_valorizacion' : 'aprobado', motivo: configuraciones.length > 1 ? 'Configuración ambigua para el período' : monto === null ? 'La deducción no tiene un valor FIJO determinístico' : null, revisado_por: pendiente ? null : idUsuario, fecha_revision: pendiente ? null : new Date() });
+      agregar({ id_concepto: item.id_concepto, tipo: 'DEDUCCION_AUTOMATICA', descripcion: item.concepto.nombre_concepto, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `DEDUCCION:${item.id_asignacion_concepto}`, referencia_origen: referencia, estado_revision: pendiente ? 'pendiente_valorizacion' : 'aprobado', motivo: configuraciones.length > 1 ? 'Configuración ambigua para el período' : monto === null ? 'La deducción no tiene un valor FIJO determinístico' : null, revisado_por: pendiente ? null : idUsuario, fecha_revision: pendiente ? null : new Date() });
     }
     const hechos = await tx.tratamiento_remuneracional_ejecucion.findMany({ where: { id_empleado: remuneracion.id_empleado, estado_remunerabilidad: 'remunerable', estado_valorizacion: 'valorizado', valor_propuesto: { not: null }, ejecucion: { fecha_ejecucion: { gte: remuneracion.periodo.fecha_inicio, lte: remuneracion.periodo.fecha_fin } } }, include: { ejecucion: true, tarifa: true } });
     for (const hecho of hechos) {
@@ -2718,7 +2737,7 @@ export class M6Controller {
       if (!await tx.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
       const concepto = await tx.concepto_remuneracion.findUnique({ where: { id_concepto_remuneracion: idConcepto } });
       if (!concepto || concepto.estado_concepto !== 'activo' || concepto.naturaleza_concepto !== 'descuento') throw new ErrorAplicacion(400, 'CU214 sólo permite conceptos DEDUCCION activos');
-      const conflicto = await tx.asignacion_concepto_remuneracion_empleado.count({ where: { id_empleado: idEmpleado, id_concepto: idConcepto, activa: true, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+      const conflicto = await tx.asignacion_concepto_remuneracion_empleado.count({ where: { id_empleado: idEmpleado, id_concepto: idConcepto, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
       if (conflicto) throw new ErrorAplicacion(409, 'La deducción se superpone con otra vigencia');
       await tx.asignacion_concepto_remuneracion_empleado.create({ data: { id_empleado: idEmpleado, id_concepto: idConcepto, vigencia_desde: desde, vigencia_hasta: hasta, valor_aplicable: valor, fundamento, autorizacion_referencia: autorizacion } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.listarDeduccionesEmpleado(idEmpleado); } catch (error) { this.conflictoConcurrente(error, 'La deducción cambió concurrentemente'); }
@@ -2726,8 +2745,16 @@ export class M6Controller {
 
   async finalizarDeduccionEmpleado(idEmpleado: number, idAsignacion: number, entrada: Record<string, unknown>) {
     const hasta = fechaEntrada(entrada.vigenciaHasta, 'Vigencia hasta')!;
-    const actual = await prisma.asignacion_concepto_remuneracion_empleado.findFirst({ where: { id_asignacion_concepto: idAsignacion, id_empleado: idEmpleado, concepto: { naturaleza_concepto: 'descuento' } } });
-    if (!actual) throw new ErrorAplicacion(404, 'Deducción no encontrada'); if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
-    await prisma.asignacion_concepto_remuneracion_empleado.update({ where: { id_asignacion_concepto: idAsignacion }, data: { vigencia_hasta: hasta, activa: false } }); return this.listarDeduccionesEmpleado(idEmpleado);
+    try {
+      await prisma.$transaction(async (tx) => {
+        const actual = await tx.asignacion_concepto_remuneracion_empleado.findFirst({ where: { id_asignacion_concepto: idAsignacion, id_empleado: idEmpleado, concepto: { naturaleza_concepto: 'descuento' } } });
+        if (!actual) throw new ErrorAplicacion(404, 'Deducción no encontrada');
+        if (!actual.activa) throw new ErrorAplicacion(409, 'La deducción ya fue finalizada');
+        if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
+        const actualizada = await tx.asignacion_concepto_remuneracion_empleado.updateMany({ where: { id_asignacion_concepto: idAsignacion, id_empleado: idEmpleado, activa: true }, data: { vigencia_hasta: hasta, activa: false } });
+        if (actualizada.count !== 1) throw new ErrorAplicacion(409, 'La deducción fue finalizada o modificada concurrentemente');
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.listarDeduccionesEmpleado(idEmpleado);
+    } catch (error) { this.conflictoConcurrente(error, 'La deducción fue finalizada o modificada concurrentemente'); }
   }
 }
