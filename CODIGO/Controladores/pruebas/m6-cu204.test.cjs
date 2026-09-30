@@ -49,7 +49,7 @@ test('M6 Terreno CU204 genera una OT idempotente desde el levantamiento vigente'
       assert.equal(corregido.medidas.marcoAncho, '96'); assert.equal(corregido.ordenTrabajo.id, ids.ots[0].toString()); assert.equal(corregido.ordenTrabajo.idEspecificacion, puerta.especificacion_puerta_especificacion_puerta_id.toString());
     });
     await t.test('permiso CU204 sigue independiente al incorporar CU205', async () => {
-      assert.equal(codigosTodosLosCU.length, 205); assert.deepEqual(matrizPermisosPorCU.CU204, []); assert.equal(operacionesPermiso.generarOrdenTrabajoLevantamiento, 'CU204');
+      assert.equal(codigosTodosLosCU.length, 210); assert.deepEqual(matrizPermisosPorCU.CU204, []); assert.equal(operacionesPermiso.generarOrdenTrabajoLevantamiento, 'CU204');
       assert.equal(permiteOperacion('generarOrdenTrabajoLevantamiento', ['CU203']), false); assert.equal(permiteOperacion('generarOrdenTrabajoLevantamiento', ['CU205']), false); assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU204']), true); assert.equal(codigosTodosLosCU.includes('CU205'), true);
       const autorizacion = { autorizar: async (operacion) => { if (!permiteOperacion(operacion, ['CU204'])) { const error = new Error('No autorizado'); error.estado = 403; throw error; } return { ...actor, permisos: ['CU204'], configuracion: 'particular' }; } };
       const m6 = { generarOrdenTrabajoLevantamiento: async (_id, recibido) => recibido.id.toString() };

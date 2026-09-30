@@ -69,13 +69,13 @@ test('M6 Terreno CU205 ajusta y libera la OT reutilizando el levantamiento vigen
       assert.equal(resultados.filter((resultado) => resultado.status === 'fulfilled').length, 1); assert.equal(resultados.filter((resultado) => resultado.status === 'rejected' && resultado.reason.estado === 409).length, 1);
       assert.equal((await prisma.orden_trabajo.findUniqueOrThrow({ where: { orden_trabajo_id_orden: ids.ots[0] } })).orden_trabajo_estado, 'en_progreso');
     });
-    await t.test('CU205 es independiente y CU206 permanece ausente', async () => {
-      assert.equal(codigosTodosLosCU.length, 205); assert.deepEqual(matrizPermisosPorCU.CU205, []); assert.equal(operacionesPermiso.ajustarOrdenTrabajoTerreno, 'CU205'); assert.equal(operacionesPermiso.liberarOrdenTrabajoTerreno, 'CU205');
-      assert.equal(permiteOperacion('liberarOrdenTrabajoTerreno', ['CU204']), false); assert.equal(permiteOperacion('liberarOrdenTrabajoTerreno', ['CU205']), true); assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU205']), true); assert.equal(codigosTodosLosCU.includes('CU206'), false);
+    await t.test('CU205 es independiente y CU207 permanece ausente', async () => {
+      assert.equal(codigosTodosLosCU.length, 210); assert.deepEqual(matrizPermisosPorCU.CU205, []); assert.equal(operacionesPermiso.ajustarOrdenTrabajoTerreno, 'CU205'); assert.equal(operacionesPermiso.liberarOrdenTrabajoTerreno, 'CU205');
+      assert.equal(permiteOperacion('liberarOrdenTrabajoTerreno', ['CU204']), false); assert.equal(permiteOperacion('liberarOrdenTrabajoTerreno', ['CU205']), true); assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU205']), true); assert.equal(codigosTodosLosCU.includes('CU206'), true); assert.equal(codigosTodosLosCU.includes('CU211'), false);
       const autorizacion = { autorizar: async (operacion) => { if (!permiteOperacion(operacion, ['CU205'])) { const error = new Error('No autorizado'); error.estado = 403; throw error; } return { ...actor, permisos: ['CU205'], configuracion: 'particular' }; } };
       const m6 = { ajustarOrdenTrabajoTerreno: async (_id, cuerpo, recibido) => ({ motivo: cuerpo.motivo, actor: recibido.id.toString() }), liberarOrdenTrabajoTerreno: async (_id, ordenId, recibido) => ({ ordenId, actor: recibido.id.toString() }) };
       const fachada = new C_Finanzas(autorizacion, {}, {}, {}, {}, {}, m6); assert.equal((await fachada.ejecutar('ajustarOrdenTrabajoTerreno', { parametros: { id: tarea.tarea_tarea_id.toString() }, cuerpo: { motivo: 'x' }, contexto: {} })).actor, tecnico.usuario_id_usuario.toString()); assert.equal((await fachada.ejecutar('liberarOrdenTrabajoTerreno', { parametros: { id: tarea.tarea_tarea_id.toString(), ordenId: ids.ots[0].toString() }, contexto: {} })).ordenId, Number(ids.ots[0]));
-      const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8'); assert.match(rutas, /ajustarOrdenTrabajoTerreno/); assert.match(rutas, /liberarOrdenTrabajoTerreno/); assert.doesNotMatch(rutas, /generarTareasProduccion|CU206/);
+      const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8'); assert.match(rutas, /ajustarOrdenTrabajoTerreno/); assert.match(rutas, /liberarOrdenTrabajoTerreno/); assert.match(rutas, /generarTareasProduccion/); assert.doesNotMatch(rutas, /CU207/);
     });
   } finally {
     await prisma.orden_trabajo.deleteMany({ where: { especificaciones_puerta_id_especificacion_puerta: { in: ids.especificaciones } } });

@@ -2218,11 +2218,11 @@ export class M6Controller {
   }
 
   private readonly incluirLevantamientoTerreno = {
-    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { orderBy: { orden_trabajo_id_orden: 'desc' as const } } } },
+    especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { include: { tareas_produccion: { orderBy: { tarea_tarea_id: 'asc' as const } } }, orderBy: { orden_trabajo_id_orden: 'desc' as const } } } },
     servicio_terreno: {
       include: {
-        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { orderBy: { orden_trabajo_id_orden: 'desc' as const } } } } } },
-        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { orderBy: { orden_trabajo_id_orden: 'desc' as const } } } } } },
+        obra: { include: { cliente: true, especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { include: { tareas_produccion: { orderBy: { tarea_tarea_id: 'asc' as const } } }, orderBy: { orden_trabajo_id_orden: 'desc' as const } } } } } },
+        especificacion_servicio_terreno: { include: { especificaciones_puerta: { include: { medidas_puerta: { orderBy: { medidas_puerta_medidas_id: 'asc' as const } }, historial_cambio_orden_trabajo: { orderBy: { historial_cambio_orden_trabajo_id_cambio: 'asc' as const } }, orden_trabajo: { include: { tareas_produccion: { orderBy: { tarea_tarea_id: 'asc' as const } } }, orderBy: { orden_trabajo_id_orden: 'desc' as const } } } } } },
       },
     },
   };
@@ -2301,6 +2301,11 @@ export class M6Controller {
         fecha: especificacion.orden_trabajo[0].orden_trabajo_fecha_hora, idEspecificacion: especificacion.especificacion_puerta_especificacion_puerta_id.toString(),
         proyecto: especificacion.orden_trabajo[0].proyecto_id_proyecto?.toString() || null, area: especificacion.orden_trabajo[0].area_trabajo_id_area?.toString() || null,
         usuario: especificacion.orden_trabajo[0].usuario_id_usuario?.toString() || null,
+        tareasProduccion: especificacion.orden_trabajo[0].tareas_produccion.map((item) => ({
+          id: item.tarea_tarea_id.toString(), titulo: item.tarea_titulo, descripcion: item.tarea_descripcion,
+          instrucciones: item.tarea_instrucciones_de_oficina, estado: item.tarea_estado_de_tarea,
+          idOrdenTrabajo: item.id_orden_trabajo?.toString() || null, idEspecificacion: item.id_especificacion_puerta?.toString() || null,
+        })),
       } : null,
     };
   }
@@ -2450,5 +2455,176 @@ export class M6Controller {
       if (esConflictoSerializable(error)) throw new ErrorAplicacion(409, 'La Orden de Trabajo fue liberada o modificada concurrentemente');
       throw error;
     }
+  }
+
+  async generarTareasProduccion(id: number, idOrden: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
+    if (!Array.isArray(entrada.tareas) || entrada.tareas.length === 0) throw new ErrorAplicacion(400, 'Debes ingresar al menos una tarea de producción');
+    const tareas = entrada.tareas.map((valor, indice) => {
+      if (!valor || typeof valor !== 'object' || Array.isArray(valor)) throw new ErrorAplicacion(400, `Tarea ${indice + 1} inválida`);
+      const item = valor as Record<string, unknown>;
+      const camposNoPermitidos = ['idUsuario', 'trabajador', 'responsable', 'tarifa', 'materiales', 'fecha', 'prioridad', 'urgencia'];
+      if (camposNoPermitidos.some((campo) => Object.prototype.hasOwnProperty.call(item, campo))) throw new ErrorAplicacion(400, `Tarea ${indice + 1} contiene campos que pertenecen a otro flujo`);
+      const titulo = texto(item.titulo, 200);
+      if (!titulo) throw new ErrorAplicacion(400, `El título de la tarea ${indice + 1} es obligatorio`);
+      return { titulo, descripcion: texto(item.descripcion, 2000) || null, instrucciones: texto(item.instrucciones, 2000) || null };
+    });
+    const idOrdenTrabajo = BigInt(idOrden);
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const contexto = await this.resolverLevantamientoTerreno(id, actor, tx);
+        const orden = await tx.orden_trabajo.findUnique({ where: { orden_trabajo_id_orden: idOrdenTrabajo } });
+        if (!orden) throw new ErrorAplicacion(404, 'Orden de Trabajo no encontrada');
+        if (orden.orden_trabajo_estado !== 'en_progreso') throw new ErrorAplicacion(409, 'La Orden de Trabajo debe estar liberada para generar tareas de producción');
+        const idEspecificacion = orden.especificaciones_puerta_id_especificacion_puerta;
+        if (idEspecificacion === null) throw new ErrorAplicacion(409, 'La Orden de Trabajo no tiene una especificación asociada');
+        if (idEspecificacion !== contexto.especificacion.especificacion_puerta_especificacion_puerta_id) throw new ErrorAplicacion(409, 'La Orden de Trabajo no pertenece al levantamiento indicado');
+        const existentes = await tx.tarea.findMany({ where: { id_orden_trabajo: idOrdenTrabajo }, orderBy: { tarea_tarea_id: 'asc' } });
+        if (!existentes.length) {
+          const ahora = new Date();
+          await tx.tarea.createMany({ data: tareas.map((item) => ({
+            tarea_titulo: item.titulo, tarea_descripcion: item.descripcion, tarea_instrucciones_de_oficina: item.instrucciones,
+            tarea_estado_de_tarea: 'pendiente', tarea_fecha_de_creacion: ahora, tarea_fecha_de_ultima_actualizacion: ahora,
+            id_orden_trabajo: idOrdenTrabajo, id_especificacion_puerta: idEspecificacion, id_usuario: null, id_servicio_terreno: null,
+          })) });
+        }
+        return this.presentarLevantamientoTerreno(await this.resolverLevantamientoTerreno(id, actor, tx));
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (esConflictoSerializable(error)) {
+        const contexto = await this.resolverLevantamientoTerreno(id, actor);
+        const existentes = await prisma.tarea.count({ where: { id_orden_trabajo: idOrdenTrabajo } });
+        if (existentes) return this.presentarLevantamientoTerreno(contexto);
+        throw new ErrorAplicacion(409, 'Las tareas de producción fueron generadas concurrentemente; vuelve a consultar');
+      }
+      throw error;
+    }
+  }
+
+  private async obtenerTareaProduccion(id: number, cliente: Prisma.TransactionClient | typeof prisma = prisma) {
+    const tarea = await cliente.tarea.findUnique({
+      where: { tarea_tarea_id: BigInt(id) },
+      include: { orden_trabajo: true, especificaciones_puerta: true },
+    });
+    if (!tarea || !tarea.orden_trabajo) throw new ErrorAplicacion(404, 'Tarea de producción no encontrada');
+    if (tarea.orden_trabajo.orden_trabajo_estado !== 'en_progreso') throw new ErrorAplicacion(409, 'La Orden de Trabajo debe estar liberada');
+    return tarea;
+  }
+
+  private async presentarTareaProduccion(tarea: any, cliente: Prisma.TransactionClient | typeof prisma = prisma) {
+    const asignaciones = await cliente.tarea_usuario.findMany({ where: { tarea_usuario_tarea_id: tarea.tarea_tarea_id }, orderBy: { tarea_usuario_usuario_id: 'asc' } });
+    const usuarios = asignaciones.length ? await cliente.usuario.findMany({ where: { usuario_id_usuario: { in: asignaciones.map((item) => item.tarea_usuario_usuario_id) } } }) : [];
+    return {
+      id: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, descripcion: tarea.tarea_descripcion,
+      instrucciones: tarea.tarea_instrucciones_de_oficina, estado: tarea.tarea_estado_de_tarea, prioridad: tarea.tarea_urgencia,
+      idOrdenTrabajo: tarea.id_orden_trabajo?.toString() || null, idEspecificacion: tarea.id_especificacion_puerta?.toString() || null,
+      asignados: usuarios.map((usuario) => this.presentarUsuarioTerreno(usuario)),
+    };
+  }
+
+  async listarTareasProduccion(idOrden: number) {
+    const tareas = await prisma.tarea.findMany({ where: { id_orden_trabajo: BigInt(idOrden) }, include: { orden_trabajo: true }, orderBy: { tarea_tarea_id: 'asc' } });
+    return Promise.all(tareas.map((tarea) => this.presentarTareaProduccion(tarea)));
+  }
+
+  async asignarTareaProduccion(id: number, entrada: Record<string, unknown>) {
+    if (!Array.isArray(entrada.idsUsuarios) || entrada.idsUsuarios.length === 0) throw new ErrorAplicacion(400, 'Debes seleccionar al menos un trabajador');
+    const ids = entrada.idsUsuarios.map((valor) => BigInt(identificador(valor)));
+    if (new Set(ids.map(String)).size !== ids.length) throw new ErrorAplicacion(400, 'No puedes repetir trabajadores');
+    const prioridad = entrada.prioridad === undefined ? undefined : texto(entrada.prioridad, 80) || null;
+    return prisma.$transaction(async (tx) => {
+      const tarea = await this.obtenerTareaProduccion(id, tx);
+      const existentes = await tx.usuario.count({ where: { usuario_id_usuario: { in: ids } } });
+      if (existentes !== ids.length) throw new ErrorAplicacion(404, 'Uno o más trabajadores no existen');
+      await tx.tarea_usuario.deleteMany({ where: { tarea_usuario_tarea_id: tarea.tarea_tarea_id } });
+      await tx.tarea_usuario.createMany({ data: ids.map((idUsuario) => ({ tarea_usuario_tarea_id: tarea.tarea_tarea_id, tarea_usuario_usuario_id: idUsuario })) });
+      const actualizada = prioridad === undefined ? tarea : await tx.tarea.update({ where: { tarea_tarea_id: tarea.tarea_tarea_id }, data: { tarea_urgencia: prioridad, tarea_fecha_de_ultima_actualizacion: new Date() }, include: { orden_trabajo: true, especificaciones_puerta: true } });
+      return this.presentarTareaProduccion(actualizada, tx);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  private presentarEjecucion(ejecucion: any) {
+    return {
+      id: ejecucion.id_ejecucion_tarea.toString(), idTarea: ejecucion.id_tarea.toString(), idUsuarioEjecutor: ejecucion.id_usuario_ejecutor.toString(),
+      fecha: ejecucion.fecha_ejecucion, estado: ejecucion.estado_ejecucion, validacion: ejecucion.estado_validacion_productiva,
+      cantidad: ejecucion.cantidad?.toString() || null, unidad: ejecucion.unidad,
+      tarea: ejecucion.tarea ? { id: ejecucion.tarea.tarea_tarea_id.toString(), titulo: ejecucion.tarea.tarea_titulo, idOrdenTrabajo: ejecucion.tarea.id_orden_trabajo?.toString() || null } : undefined,
+      ejecutor: this.presentarUsuarioTerreno(ejecucion.ejecutor),
+    };
+  }
+
+  async registrarEjecucionTarea(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
+    const idEjecutor = entrada.idUsuario === undefined || entrada.idUsuario === '' ? actor.id : BigInt(identificador(entrada.idUsuario));
+    if (!actor.administrador && idEjecutor !== actor.id) throw new ErrorAplicacion(403, 'Sólo un administrador puede registrar la ejecución de otro trabajador');
+    const tieneCantidad = entrada.cantidad !== undefined && entrada.cantidad !== null && entrada.cantidad !== '';
+    const tieneUnidad = Boolean(texto(entrada.unidad, 30));
+    if (tieneCantidad !== tieneUnidad) throw new ErrorAplicacion(400, 'Cantidad y unidad deben informarse juntas');
+    const cantidad = tieneCantidad ? decimalOpcional(entrada.cantidad, 'Cantidad') : null;
+    const unidad = tieneUnidad ? texto(entrada.unidad, 30) : null;
+    return prisma.$transaction(async (tx) => {
+      const tarea = await this.obtenerTareaProduccion(id, tx);
+      const [usuario, asignacion] = await Promise.all([
+        tx.usuario.findUnique({ where: { usuario_id_usuario: idEjecutor } }),
+        tx.tarea_usuario.findFirst({ where: { tarea_usuario_tarea_id: tarea.tarea_tarea_id, tarea_usuario_usuario_id: idEjecutor } }),
+      ]);
+      if (!usuario) throw new ErrorAplicacion(404, 'Trabajador ejecutor no encontrado');
+      if (!asignacion) throw new ErrorAplicacion(409, 'El trabajador no está asignado a la tarea');
+      const ejecucion = await tx.ejecucion_tarea.create({ data: { id_tarea: tarea.tarea_tarea_id, id_usuario_ejecutor: idEjecutor, fecha_ejecucion: new Date(), estado_ejecucion: 'terminada', estado_validacion_productiva: 'pendiente', cantidad, unidad }, include: { tarea: true, ejecutor: true } });
+      return this.presentarEjecucion(ejecucion);
+    });
+  }
+
+  async listarEjecucionesPendientes() {
+    const ejecuciones = await prisma.ejecucion_tarea.findMany({ where: { estado_ejecucion: 'terminada', estado_validacion_productiva: 'pendiente' }, include: { tarea: true, ejecutor: true }, orderBy: { fecha_ejecucion: 'asc' } });
+    return ejecuciones.map((item) => this.presentarEjecucion(item));
+  }
+
+  async validarEjecucionProductiva(id: number, entrada: Record<string, unknown>) {
+    const decision = texto(entrada.decision, 20).toLowerCase();
+    if (!['validada', 'rechazada', 'devuelta'].includes(decision)) throw new ErrorAplicacion(400, 'Decisión productiva inválida');
+    return prisma.$transaction(async (tx) => {
+      const cambio = await tx.ejecucion_tarea.updateMany({ where: { id_ejecucion_tarea: BigInt(id), estado_ejecucion: 'terminada', estado_validacion_productiva: 'pendiente' }, data: { estado_validacion_productiva: decision } });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La ejecución no existe, no está terminada o ya fue revisada');
+      const ejecucion = await tx.ejecucion_tarea.findUnique({ where: { id_ejecucion_tarea: BigInt(id) }, include: { tarea: true, ejecutor: true } });
+      return this.presentarEjecucion(ejecucion);
+    });
+  }
+
+  async obtenerPreparacionSalida(id: number) {
+    const visita = await prisma.servicio_terreno.findUnique({ where: { servicio_terreno_servicio_terreno_id: BigInt(id) }, include: { ...this.incluirVisitaTerreno, checklist_de_materiales: true } });
+    if (!visita) throw new ErrorAplicacion(404, 'Visita no encontrada');
+    const idEspecificacion = visita.obra?.especificaciones_puerta?.especificacion_puerta_especificacion_puerta_id || null;
+    const ordenes = idEspecificacion === null ? [] : await prisma.orden_trabajo.findMany({
+      where: { especificaciones_puerta_id_especificacion_puerta: idEspecificacion },
+      include: { reserva_inventario: { include: { preparacion_pedido: { include: { preparacion_pedido_estado: { orderBy: { preparacion_pedido_estado_id_estado_preparacion: 'asc' } } } } } } },
+      orderBy: { orden_trabajo_id_orden: 'desc' },
+    });
+    return {
+      visita: this.presentarVisitaTerreno(visita),
+      checklist: visita.checklist_de_materiales ? {
+        id: visita.checklist_de_materiales.checklist_de_materiales_checklist_de_materials_id.toString(), item: visita.checklist_de_materiales.checklist_de_materiales_item,
+        inicio: visita.checklist_de_materiales.checklist_de_materiales_tipo_inicio_tarea, cierre: visita.checklist_de_materiales.checklist_de_materiales_tipo_cierre_tarea,
+        marcado: visita.checklist_de_materiales.checklist_de_materiales_es_marcado, detalleMarcado: visita.checklist_de_materiales.checklist_de_materiales_marcado,
+        noMarcado: visita.checklist_de_materiales.checklist_de_materiales_es_no_marcado, detalleNoMarcado: visita.checklist_de_materiales.checklist_de_materiales_no_marcado,
+      } : null,
+      ordenesTrabajo: ordenes.map((orden) => ({ id: orden.orden_trabajo_id_orden.toString(), estado: orden.orden_trabajo_estado, reservas: orden.reserva_inventario.map((reserva) => ({
+        id: reserva.reserva_inventario_id_reserva.toString(), materialSku: reserva.material_sku, cantidad: reserva.reserva_inventario_cantidad_reservada?.toString() || null,
+        estado: reserva.reserva_inventario_estado_reserva, fechaReserva: reserva.reserva_inventario_fecha_reserva,
+        preparaciones: reserva.preparacion_pedido.map((preparacion) => ({ id: preparacion.preparacion_pedido_id_preparacion.toString(), observacion: preparacion.preparacion_pedido_observacion, estados: preparacion.preparacion_pedido_estado.map((estado) => ({ nombre: estado.pedido_preparacion_estado_nombre_estado, fecha: estado.pedido_preparacion_estado_timestamp_accion })) })),
+      })) })),
+    };
+  }
+
+  async actualizarChecklistSalida(id: number, entrada: Record<string, unknown>) {
+    const visita = await prisma.servicio_terreno.findUnique({ where: { servicio_terreno_servicio_terreno_id: BigInt(id) } });
+    if (!visita) throw new ErrorAplicacion(404, 'Visita no encontrada');
+    if (visita.id_checklist_de_materials === null) throw new ErrorAplicacion(409, 'La visita no tiene un checklist existente que pueda actualizarse');
+    const datos: Record<string, unknown> = {};
+    if (typeof entrada.marcado === 'boolean') datos.checklist_de_materiales_es_marcado = entrada.marcado;
+    if (typeof entrada.noMarcado === 'boolean') datos.checklist_de_materiales_es_no_marcado = entrada.noMarcado;
+    if (Object.prototype.hasOwnProperty.call(entrada, 'detalleMarcado')) datos.checklist_de_materiales_marcado = texto(entrada.detalleMarcado, 1000) || null;
+    if (Object.prototype.hasOwnProperty.call(entrada, 'detalleNoMarcado')) datos.checklist_de_materiales_no_marcado = texto(entrada.detalleNoMarcado, 1000) || null;
+    if (!Object.keys(datos).length) throw new ErrorAplicacion(400, 'No se informaron cambios de checklist');
+    await prisma.checklist_de_materiales.update({ where: { checklist_de_materiales_checklist_de_materials_id: visita.id_checklist_de_materials }, data: datos });
+    return this.obtenerPreparacionSalida(id);
   }
 }

@@ -2506,6 +2506,7 @@ model orden_trabajo {
   area_trabajo_id_area                             BigInt?
   usuario_id_usuario                               BigInt?
   tarea_remunerable                                tarea_remunerable[]
+  tareas_produccion                                tarea[]
   material_orden_trabajo                           material_orden_trabajo[]
   area_trabajo                                     area_trabajo?            @relation(fields: [area_trabajo_id_area], references: [area_trabajo_id_area], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_area_trabajo_id_area")
   especificaciones_puerta                          especificaciones_puerta? @relation(fields: [especificaciones_puerta_id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_especificaciones_puerta_id_especif_6a769728")
@@ -3102,15 +3103,18 @@ model tarea {
   id_usuario                          BigInt?
   id_servicio_terreno                 BigInt?
   id_especificacion_puerta            BigInt?
+  id_orden_trabajo                    BigInt?
   formulario_de_cierre                formulario_de_cierre[]
   notificacion_terreno                notificacion_terreno[]
   receptor                            receptor[]
   especificaciones_puerta             especificaciones_puerta? @relation(fields: [id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_especificacion_puerta")
   servicio_terreno                    servicio_terreno?        @relation(fields: [id_servicio_terreno], references: [servicio_terreno_servicio_terreno_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_servicio_terreno")
   usuario                             usuario?                 @relation(fields: [id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_usuario")
+  orden_trabajo                       orden_trabajo?           @relation(fields: [id_orden_trabajo], references: [orden_trabajo_id_orden], onDelete: Restrict, onUpdate: NoAction, map: "fk_tarea_orden_trabajo")
   tarea_tipo                          tarea_tipo[]
   ejecuciones                        ejecucion_tarea[]
 
+  @@index([id_orden_trabajo], map: "idx_tarea_orden_trabajo")
   @@schema("terreno")
 }
 

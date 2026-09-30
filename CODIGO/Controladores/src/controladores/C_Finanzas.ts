@@ -64,7 +64,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'registrarEntregaDocumento' | 'consultarEntregaDocumento' | 'exportarCalculoPreliminar' | 'exportarRemuneracionesOficiales'
   | 'crearVisitaTerreno' | 'listarObrasTerreno' | 'listarVisitasTerreno' | 'obtenerVisitaTerreno' | 'listarUsuariosTerreno' | 'asignarResponsableVisita' | 'listarMisTareasTerreno'
   | 'obtenerLevantamientoTerreno' | 'guardarLevantamientoTerreno' | 'corregirLevantamientoTerreno' | 'generarOrdenTrabajoLevantamiento'
-  | 'ajustarOrdenTrabajoTerreno' | 'liberarOrdenTrabajoTerreno';
+  | 'ajustarOrdenTrabajoTerreno' | 'liberarOrdenTrabajoTerreno' | 'generarTareasProduccion'
+  | 'listarTareasProduccion' | 'asignarTareaProduccion' | 'registrarEjecucionTarea'
+  | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -267,6 +269,14 @@ export class C_Finanzas {
       case 'generarOrdenTrabajoLevantamiento': return this.m6.generarOrdenTrabajoLevantamiento(identificador(parametros.id), actor);
       case 'ajustarOrdenTrabajoTerreno': return this.m6.ajustarOrdenTrabajoTerreno(identificador(parametros.id), cuerpo, actor);
       case 'liberarOrdenTrabajoTerreno': return this.m6.liberarOrdenTrabajoTerreno(identificador(parametros.id), identificador(parametros.ordenId), actor);
+      case 'generarTareasProduccion': return this.m6.generarTareasProduccion(identificador(parametros.id), identificador(parametros.ordenId), cuerpo, actor);
+      case 'listarTareasProduccion': return this.m6.listarTareasProduccion(identificador(parametros.ordenId));
+      case 'asignarTareaProduccion': return this.m6.asignarTareaProduccion(identificador(parametros.id), cuerpo);
+      case 'registrarEjecucionTarea': return this.m6.registrarEjecucionTarea(identificador(parametros.id), cuerpo, actor);
+      case 'listarEjecucionesPendientes': return this.m6.listarEjecucionesPendientes();
+      case 'validarEjecucionProductiva': return this.m6.validarEjecucionProductiva(identificador(parametros.id), cuerpo);
+      case 'obtenerPreparacionSalida': return this.m6.obtenerPreparacionSalida(identificador(parametros.id));
+      case 'actualizarChecklistSalida': return this.m6.actualizarChecklistSalida(identificador(parametros.id), cuerpo);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

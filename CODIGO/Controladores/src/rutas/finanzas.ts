@@ -33,6 +33,14 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/terreno/tareas/:id/orden-trabajo', derivar('generarOrdenTrabajoLevantamiento'));
   rutas.post('/terreno/tareas/:id/orden-trabajo/ajustes', derivar('ajustarOrdenTrabajoTerreno'));
   rutas.post('/terreno/tareas/:id/orden-trabajo/:ordenId/liberar', derivar('liberarOrdenTrabajoTerreno'));
+  rutas.post('/terreno/tareas/:id/orden-trabajo/:ordenId/tareas-produccion', derivar('generarTareasProduccion'));
+  rutas.get('/terreno/ordenes-trabajo/:ordenId/tareas-produccion', derivar('listarTareasProduccion'));
+  rutas.put('/terreno/tareas-produccion/:id/asignaciones', derivar('asignarTareaProduccion'));
+  rutas.post('/terreno/tareas-produccion/:id/ejecuciones', derivar('registrarEjecucionTarea'));
+  rutas.get('/terreno/ejecuciones/pendientes', derivar('listarEjecucionesPendientes'));
+  rutas.patch('/terreno/ejecuciones/:id/validacion', derivar('validarEjecucionProductiva'));
+  rutas.get('/terreno/visitas/:id/preparacion-salida', derivar('obtenerPreparacionSalida'));
+  rutas.patch('/terreno/visitas/:id/preparacion-salida/checklist', derivar('actualizarChecklistSalida'));
   rutas.patch('/terreno/visitas/:id/responsable', derivar('asignarResponsableVisita'));
   rutas.get('/terreno/visitas/:id', derivar('obtenerVisitaTerreno'));
   rutas.get(['/clientes', '/clients'], derivar('listarClientes'));
