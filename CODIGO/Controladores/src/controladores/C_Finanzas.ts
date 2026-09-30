@@ -66,7 +66,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'obtenerLevantamientoTerreno' | 'guardarLevantamientoTerreno' | 'corregirLevantamientoTerreno' | 'generarOrdenTrabajoLevantamiento'
   | 'ajustarOrdenTrabajoTerreno' | 'liberarOrdenTrabajoTerreno' | 'generarTareasProduccion'
   | 'listarTareasProduccion' | 'asignarTareaProduccion' | 'registrarEjecucionTarea'
-  | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida';
+  | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida'
+  | 'registrarResultadoVisita' | 'registrarIncidenciaRetrabajo' | 'listarIncidenciasOperativas' | 'actualizarIncidenciaOperativa'
+  | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -277,6 +279,14 @@ export class C_Finanzas {
       case 'validarEjecucionProductiva': return this.m6.validarEjecucionProductiva(identificador(parametros.id), cuerpo);
       case 'obtenerPreparacionSalida': return this.m6.obtenerPreparacionSalida(identificador(parametros.id));
       case 'actualizarChecklistSalida': return this.m6.actualizarChecklistSalida(identificador(parametros.id), cuerpo);
+      case 'registrarResultadoVisita': return this.m6.registrarResultadoVisita(identificador(parametros.id), cuerpo);
+      case 'registrarIncidenciaRetrabajo': return this.m6.registrarIncidenciaRetrabajo(identificador(parametros.id), cuerpo);
+      case 'listarIncidenciasOperativas': return this.m6.listarIncidenciasOperativas();
+      case 'actualizarIncidenciaOperativa': return this.m6.actualizarIncidenciaOperativa(identificador(parametros.id), cuerpo);
+      case 'catalogoDeduccionesEmpleado': return this.m6.catalogoDeduccionesEmpleado();
+      case 'listarDeduccionesEmpleado': return this.m6.listarDeduccionesEmpleado(identificador(parametros.id));
+      case 'asignarDeduccionEmpleado': return this.m6.asignarDeduccionEmpleado(identificador(parametros.id), cuerpo);
+      case 'finalizarDeduccionEmpleado': return this.m6.finalizarDeduccionEmpleado(identificador(parametros.id), identificador(parametros.asignacionId), cuerpo);
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();

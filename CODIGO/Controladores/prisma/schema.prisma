@@ -1762,6 +1762,8 @@ model asignacion_concepto_remuneracion_empleado {
   vigencia_hasta         DateTime?               @db.Date
   valor_aplicable        Decimal?                @db.Decimal(14, 4)
   activa                 Boolean                 @default(true)
+  fundamento             String?
+  autorizacion_referencia String?                @db.VarChar(200)
   empleado               empleado                @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
   concepto               concepto_remuneracion   @relation(fields: [id_concepto], references: [id_concepto_remuneracion], onDelete: Restrict, onUpdate: NoAction)
 

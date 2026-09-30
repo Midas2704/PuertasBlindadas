@@ -29,6 +29,7 @@ type RelacionLaboral = {
 type TipoVinculo = { id: number; nombre: string };
 type Catalogo = { id: number; nombre: string };
 type Asignacion = { id: number; esquema?: string; concepto?: string; vigenciaDesde: string; vigenciaHasta: string | null; activa: boolean };
+type Deduccion = Asignacion & { idConcepto:number; valorAplicable:string|null; fundamento:string; autorizacionReferencia:string };
 type PerfilRemuneracional = {
   idCargo: number | null;
   sueldoBaseActual: number | null;
@@ -60,6 +61,7 @@ export default function FichaEmpleado() {
   const puedeCU159 = Boolean(sesion?.permisos.includes('CU159'));
   const puedeCU160 = Boolean(sesion?.permisos.includes('CU160'));
   const puedeCU161 = Boolean(sesion?.permisos.includes('CU161'));
+  const puedeCU214 = Boolean(sesion?.permisos.includes('CU214'));
   const [empleado, setEmpleado] = useState<Empleado | null>(null);
   const [relaciones, setRelaciones] = useState<RelacionLaboral[]>([]);
   const [tiposVinculo, setTiposVinculo] = useState<TipoVinculo[]>([]);
@@ -76,6 +78,8 @@ export default function FichaEmpleado() {
   const [nuevaAsignacionEsquema, setNuevaAsignacionEsquema] = useState({ idEsquema: '', vigenciaDesde: '', vigenciaHasta: '' });
   const [nuevaAsignacionHaber, setNuevaAsignacionHaber] = useState({ idConcepto: '', vigenciaDesde: '', vigenciaHasta: '', valorAplicable: '' });
   const [documental, setDocumental] = useState({ consentimientoElectronico: false, canalDocumental: '', canalesDisponibles: [] as string[] });
+  const [deducciones,setDeducciones]=useState<Deduccion[]>([]),[catalogoDeducciones,setCatalogoDeducciones]=useState<Catalogo[]>([]);
+  const [nuevaDeduccion,setNuevaDeduccion]=useState({idConcepto:'',vigenciaDesde:'',vigenciaHasta:'',valorAplicable:'',fundamento:'',autorizacionReferencia:''});
   const [version, setVersion] = useState(0);
   const [error, setError] = useState('');
   const [mensaje, setMensaje] = useState('');
@@ -141,6 +145,8 @@ export default function FichaEmpleado() {
     return () => cancelacion.abort();
   }, [id, puedeCU159, puedeCU160, puedeCU161, version]);
 
+  useEffect(()=>{if(!puedeCU214)return;const c=new AbortController();Promise.all([respuestaJson(`/empleados/${id}/deducciones`,{signal:c.signal}),respuestaJson('/empleados/catalogos/deducciones',{signal:c.signal})]).then(([a,catalogo])=>{setDeducciones(a);setCatalogoDeducciones(catalogo)}).catch(e=>{if(!c.signal.aborted)setError(e.message)});return()=>c.abort()},[id,puedeCU214,version]);
+
   const guardarDatosBase = async () => {
     setGuardando(true); setError(''); setMensaje('');
     try {
@@ -193,6 +199,8 @@ export default function FichaEmpleado() {
     try { await respuestaJson(`/empleados/${id}/configuracion-documental`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(documental) }); setMensaje('Configuración documental actualizada.'); setVersion((valor) => valor + 1); }
     catch (causa) { setError((causa as Error).message); } finally { setGuardando(false); }
   };
+  const asignarDeduccion=async()=>{setGuardando(true);setError('');try{await respuestaJson(`/empleados/${id}/deducciones`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nuevaDeduccion)});setNuevaDeduccion({idConcepto:'',vigenciaDesde:'',vigenciaHasta:'',valorAplicable:'',fundamento:'',autorizacionReferencia:''});setMensaje('Deducción recurrente asignada.');setVersion(v=>v+1)}catch(e){setError((e as Error).message)}finally{setGuardando(false)}};
+  const finalizarDeduccion=async(a:Deduccion)=>{const vigenciaHasta=window.prompt('Fecha de término (AAAA-MM-DD)');if(!vigenciaHasta)return;try{await respuestaJson(`/empleados/${id}/deducciones/${a.id}/finalizar`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({vigenciaHasta})});setVersion(v=>v+1)}catch(e){setError((e as Error).message)}};
 
   return <div className="min-h-full bg-slate-50 p-5 lg:p-8"><div className="mx-auto max-w-6xl">
     <button onClick={() => navegar('/empleados')} className="mb-5 flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900"><ArrowLeft className="h-4 w-4" />Volver al catálogo</button>
@@ -243,6 +251,7 @@ export default function FichaEmpleado() {
       </section>}
 
       {puedeCU161 && <section className="mt-6 border-y border-gray-200 bg-white px-5 py-5"><div className="mb-4 flex items-center gap-2"><FileCheck2 className="h-5 w-5 text-primary-600"/><h2 className="font-bold">Consentimiento y canal documental</h2></div><div className="grid gap-4 md:grid-cols-3"><label className="flex items-center gap-3 rounded-md border px-3 py-2.5 text-sm font-medium"><input type="checkbox" checked={documental.consentimientoElectronico} onChange={e=>setDocumental({...documental,consentimientoElectronico:e.target.checked,canalDocumental:e.target.checked?documental.canalDocumental:''})}/>Consentimiento electrónico vigente</label><select disabled={!documental.consentimientoElectronico} value={documental.canalDocumental} onChange={e=>setDocumental({...documental,canalDocumental:e.target.value})} className="rounded-md border p-2.5 disabled:bg-gray-100"><option value="">Sin canal configurado</option>{documental.canalesDisponibles.map(c=><option key={c} value={c}>{c.replaceAll('_',' ')}</option>)}</select><button disabled={guardando} onClick={()=>void guardarDocumental()} className="flex items-center justify-center gap-2 rounded-md bg-primary-600 px-4 text-sm font-semibold text-white"><Save className="h-4 w-4"/>Guardar configuración</button></div></section>}
+      {puedeCU214&&<section className="mt-6 border-y border-gray-200 bg-white px-5 py-5"><h2 className="mb-4 font-bold">Deducciones recurrentes</h2><div className="grid gap-2 md:grid-cols-3"><select value={nuevaDeduccion.idConcepto} onChange={e=>setNuevaDeduccion({...nuevaDeduccion,idConcepto:e.target.value})} className="rounded border p-2"><option value="">Concepto DEDUCCIÓN</option>{catalogoDeducciones.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}</select><input type="number" min="0" placeholder="Valor opcional" value={nuevaDeduccion.valorAplicable} onChange={e=>setNuevaDeduccion({...nuevaDeduccion,valorAplicable:e.target.value})} className="rounded border p-2"/><input type="date" value={nuevaDeduccion.vigenciaDesde} onChange={e=>setNuevaDeduccion({...nuevaDeduccion,vigenciaDesde:e.target.value})} className="rounded border p-2"/><input placeholder="Fundamento" value={nuevaDeduccion.fundamento} onChange={e=>setNuevaDeduccion({...nuevaDeduccion,fundamento:e.target.value})} className="rounded border p-2"/><input placeholder="Autorización / referencia" value={nuevaDeduccion.autorizacionReferencia} onChange={e=>setNuevaDeduccion({...nuevaDeduccion,autorizacionReferencia:e.target.value})} className="rounded border p-2"/><button disabled={guardando} onClick={()=>void asignarDeduccion()} className="rounded bg-black px-4 text-white">Asignar</button></div><div className="mt-4">{deducciones.map(d=><div key={d.id} className="flex justify-between border-t py-2 text-sm"><span>{d.concepto} · {d.valorAplicable||'Pendiente de valorización'} · {d.fundamento}</span>{d.activa&&<button onClick={()=>void finalizarDeduccion(d)} className="font-semibold text-red-700">Finalizar</button>}</div>)}</div></section>}
     </>}
   </div></div>;
 }

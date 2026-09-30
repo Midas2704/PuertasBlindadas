@@ -103,9 +103,10 @@ const menuGroups: MenuGroupDefinition[] = [
     label: 'Terreno',
     icon: MapPinned,
     items: [
-      { path: '/terreno/visitas', label: 'Visitas y Servicios', icon: MapPinned, permissions: ['CU199', 'CU200', 'CU210'] },
+      { path: '/terreno/visitas', label: 'Visitas y Servicios', icon: MapPinned, permissions: ['CU199', 'CU200', 'CU210', 'CU211'] },
       { path: '/terreno/mis-tareas', label: 'Mis Tareas', icon: ListTodo, permissions: ['CU201', 'CU208'] },
       { path: '/terreno/produccion', label: 'Producción', icon: ListTodo, permissions: ['CU207', 'CU209'] },
+      { path: '/terreno/incidencias', label: 'Incidencias', icon: ListTodo, permissions: ['CU212', 'CU213'] },
     ],
   },
   {

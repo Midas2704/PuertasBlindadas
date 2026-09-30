@@ -40,6 +40,7 @@ import GestionTerreno from './views/GestionTerreno/GestionTerreno';
 import MisTareasTerreno from './views/MisTareasTerreno/MisTareasTerreno';
 import LevantamientoTecnico from './views/LevantamientoTecnico/LevantamientoTecnico';
 import ProduccionTerreno from './views/ProduccionTerreno/ProduccionTerreno';
+import IncidenciasTerreno from './views/IncidenciasTerreno/IncidenciasTerreno';
 
 const App: React.FC = () => {
   return (
@@ -73,9 +74,10 @@ const App: React.FC = () => {
           <Route path="pagos-remuneraciones/:id" element={<Protegido permiso={['CU188','CU189','CU190']}><DetallePagoRemuneracion /></Protegido>} />
           <Route path="documentos-remuneracion" element={<Protegido permiso={['CU191','CU192','CU193']}><DocumentosRemuneracion /></Protegido>} />
           <Route path="honorarios" element={<Protegido permiso={['CU196','CU197','CU198']}><Honorarios /></Protegido>} />
-          <Route path="terreno/visitas" element={<Protegido permiso={['CU199','CU200','CU210']}><GestionTerreno /></Protegido>} />
+          <Route path="terreno/visitas" element={<Protegido permiso={['CU199','CU200','CU210','CU211']}><GestionTerreno /></Protegido>} />
           <Route path="terreno/mis-tareas" element={<Protegido permiso={['CU201','CU208']}><MisTareasTerreno /></Protegido>} />
           <Route path="terreno/produccion" element={<Protegido permiso={['CU207','CU209']}><ProduccionTerreno /></Protegido>} />
+          <Route path="terreno/incidencias" element={<Protegido permiso={['CU212','CU213']}><IncidenciasTerreno /></Protegido>} />
           <Route path="terreno/tareas/:id/levantamiento" element={<Protegido permiso={['CU202','CU203','CU204','CU205','CU206']}><LevantamientoTecnico /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />

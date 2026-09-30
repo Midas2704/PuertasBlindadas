@@ -78,8 +78,8 @@ test('M6 Terreno CU206 genera tareas explícitas para una OT liberada', async (t
     });
 
     await t.test('CU206 tiene permiso independiente y CU207 permanece ausente', async () => {
-      assert.equal(codigosTodosLosCU.length, 210); assert.deepEqual(matrizPermisosPorCU.CU206, []); assert.equal(operacionesPermiso.generarTareasProduccion, 'CU206');
-      assert.equal(permiteOperacion('generarTareasProduccion', ['CU205']), false); assert.equal(permiteOperacion('generarTareasProduccion', ['CU206']), true); assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU206']), true); assert.equal(codigosTodosLosCU.includes('CU211'), false);
+      assert.equal(codigosTodosLosCU.length, 214); assert.deepEqual(matrizPermisosPorCU.CU206, []); assert.equal(operacionesPermiso.generarTareasProduccion, 'CU206');
+      assert.equal(permiteOperacion('generarTareasProduccion', ['CU205']), false); assert.equal(permiteOperacion('generarTareasProduccion', ['CU206']), true); assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU206']), true); assert.equal(codigosTodosLosCU.includes('CU215'), false);
       const autorizacion = { autorizar: async (operacion) => { if (!permiteOperacion(operacion, ['CU206'])) { const error = new Error('No autorizado'); error.estado = 403; throw error; } return { ...actor, permisos: ['CU206'], configuracion: 'particular' }; } };
       const m6 = { generarTareasProduccion: async (_id, ordenId, cuerpo, recibido) => ({ ordenId, cantidad: cuerpo.tareas.length, actor: recibido.id.toString() }) };
       const fachada = new C_Finanzas(autorizacion, {}, {}, {}, {}, {}, m6); const respuesta = await fachada.ejecutar('generarTareasProduccion', { parametros: { id: tareaOrigen.tarea_tarea_id.toString(), ordenId: ids.ots[0].toString() }, cuerpo: entrada, contexto: {} });

@@ -1196,6 +1196,16 @@ export class M6Controller {
       }
       agregar({ id_concepto: item.id_concepto, tipo: 'HABER_AUTOMATICO', descripcion: item.concepto.nombre_concepto, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `CONCEPTO:${item.id_concepto}`, referencia_origen: referencia, estado_revision: monto === null || configuraciones.length > 1 ? 'pendiente_valorizacion' : 'aprobado', motivo: configuraciones.length > 1 ? 'Configuración ambigua para el período' : monto === null ? 'No existe un valor determinístico aplicable' : null, revisado_por: monto === null || configuraciones.length > 1 ? null : idUsuario, fecha_revision: monto === null || configuraciones.length > 1 ? null : new Date() });
     }
+    const deduccionesRecurrentes = await tx.asignacion_concepto_remuneracion_empleado.findMany({
+      where: { id_empleado: remuneracion.id_empleado, activa: true, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }], concepto: { naturaleza_concepto: 'descuento' } },
+      include: { concepto: { include: { configuraciones_m6: { where: { activa: true, vigencia_desde: { lte: remuneracion.periodo.fecha_fin }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: remuneracion.periodo.fecha_inicio } }] } } } } },
+    });
+    for (const item of deduccionesRecurrentes) {
+      const configuraciones = item.concepto.configuraciones_m6; let monto: Prisma.Decimal | null = item.valor_aplicable; let referencia = `ASIGNACION:${item.id_asignacion_concepto}`;
+      if (monto === null && configuraciones.length === 1 && configuraciones[0].modalidad === 'FIJO' && configuraciones[0].valor !== null) { monto = configuraciones[0].valor; referencia = `CONFIGURACION:${configuraciones[0].id_configuracion_concepto}`; }
+      const pendiente = monto === null || configuraciones.length > 1;
+      agregar({ id_concepto: item.id_concepto, tipo: 'DEDUCCION_AUTOMATICA', direccion: 'NEGATIVO', descripcion: item.concepto.nombre_concepto, monto, fuente_tipo: 'AUTOMATICA', clave_negocio: `DEDUCCION:${item.id_asignacion_concepto}`, referencia_origen: referencia, estado_revision: pendiente ? 'pendiente_valorizacion' : 'aprobado', motivo: configuraciones.length > 1 ? 'Configuración ambigua para el período' : monto === null ? 'La deducción no tiene un valor FIJO determinístico' : null, revisado_por: pendiente ? null : idUsuario, fecha_revision: pendiente ? null : new Date() });
+    }
     const hechos = await tx.tratamiento_remuneracional_ejecucion.findMany({ where: { id_empleado: remuneracion.id_empleado, estado_remunerabilidad: 'remunerable', estado_valorizacion: 'valorizado', valor_propuesto: { not: null }, ejecucion: { fecha_ejecucion: { gte: remuneracion.periodo.fecha_inicio, lte: remuneracion.periodo.fecha_fin } } }, include: { ejecucion: true, tarifa: true } });
     for (const hecho of hechos) {
       let monto = hecho.valor_propuesto; let motivo: string | null = null;
@@ -2626,5 +2636,98 @@ export class M6Controller {
     if (!Object.keys(datos).length) throw new ErrorAplicacion(400, 'No se informaron cambios de checklist');
     await prisma.checklist_de_materiales.update({ where: { checklist_de_materiales_checklist_de_materials_id: visita.id_checklist_de_materials }, data: datos });
     return this.obtenerPreparacionSalida(id);
+  }
+
+  async registrarResultadoVisita(id: number, entrada: Record<string, unknown>) {
+    const finalizada = entrada.finalizada === true;
+    const resultado = texto(entrada.resultado, 1000);
+    const observaciones = texto(entrada.observaciones, 2000) || null;
+    if (!resultado) throw new ErrorAplicacion(400, 'El resultado del servicio es obligatorio');
+    return prisma.$transaction(async (tx) => {
+      const visita = await tx.servicio_terreno.findUnique({ where: { servicio_terreno_servicio_terreno_id: BigInt(id) } });
+      if (!visita) throw new ErrorAplicacion(404, 'Visita no encontrada');
+      let idTarea: bigint | null = null;
+      if (entrada.idTarea !== undefined && entrada.idTarea !== null && entrada.idTarea !== '') {
+        idTarea = BigInt(identificador(entrada.idTarea));
+        if (!await tx.tarea.count({ where: { tarea_tarea_id: idTarea, id_servicio_terreno: visita.servicio_terreno_servicio_terreno_id } })) throw new ErrorAplicacion(409, 'La tarea no pertenece a la visita');
+      }
+      const formulario = await tx.formulario_de_cierre.create({ data: {
+        id_tarea: idTarea, formulario_de_cierre_detalle_de_observaciones: observaciones,
+        formulario_de_cierre_resultado_finalizado: resultado,
+        formulario_de_cierre_sentido_de_apertura_correcto: typeof entrada.sentidoAperturaCorrecto === 'boolean' ? entrada.sentidoAperturaCorrecto : null,
+        formulario_de_cierre_pilastras_incluidas_y_ajustadas: typeof entrada.pilastrasAjustadas === 'boolean' ? entrada.pilastrasAjustadas : null,
+        formulario_de_cierre_cilindro_correcto: typeof entrada.cilindroCorrecto === 'boolean' ? entrada.cilindroCorrecto : null,
+        formulario_de_cierre_ausencia_de_rayones_o_danos: typeof entrada.sinDanos === 'boolean' ? entrada.sinDanos : null,
+      } });
+      if (entrada.evidencia && typeof entrada.evidencia === 'object' && !Array.isArray(entrada.evidencia)) {
+        const evidencia = entrada.evidencia as Record<string, unknown>;
+        await tx.evidencia_terreno.create({ data: {
+          id_formulario_de_cierre: formulario.formulario_de_cierre_formulario_de_cierre_id, id_servicio_terreno: visita.servicio_terreno_servicio_terreno_id,
+          evidencia_terreno_tipo_evidencia: texto(evidencia.tipo, 100) || null, evidencia_terreno_observacion: texto(evidencia.observacion, 1000) || null,
+          evidencia_terreno_fecha_captura: new Date(), evidencia_terreno_estado_evidencia: 'registrada',
+        } });
+      }
+      await tx.servicio_terreno.update({ where: { servicio_terreno_servicio_terreno_id: visita.servicio_terreno_servicio_terreno_id }, data: { servicio_terreno_estado: finalizada ? 'cerrada' : 'pendiente', servicio_terreno_observaciones: observaciones ?? visita.servicio_terreno_observaciones } });
+      return { idFormulario: formulario.formulario_de_cierre_formulario_de_cierre_id.toString(), estadoVisita: finalizada ? 'cerrada' : 'pendiente' };
+    });
+  }
+
+  async registrarIncidenciaRetrabajo(idEjecucion: number, entrada: Record<string, unknown>) {
+    const descripcion = texto(entrada.descripcion, 2000); if (!descripcion) throw new ErrorAplicacion(400, 'La descripción es obligatoria');
+    const ejecucion = await prisma.ejecucion_tarea.findUnique({ where: { id_ejecucion_tarea: BigInt(idEjecucion) } });
+    if (!ejecucion) throw new ErrorAplicacion(404, 'Ejecución no encontrada');
+    const incidencia = await prisma.incidencia_retrabajo_tarea.create({ data: { id_ejecucion_tarea: ejecucion.id_ejecucion_tarea, descripcion, causa_referencia: texto(entrada.causaReferencia, 500) || null, responsabilidad: texto(entrada.responsabilidad, 120) || null, estado: 'pendiente', fecha_registro: new Date() } });
+    return { id: incidencia.id_incidencia_retrabajo.toString(), idEjecucion: incidencia.id_ejecucion_tarea.toString(), descripcion: incidencia.descripcion, causaReferencia: incidencia.causa_referencia, responsabilidad: incidencia.responsabilidad, estado: incidencia.estado, fecha: incidencia.fecha_registro };
+  }
+
+  async listarIncidenciasOperativas() {
+    const filas = await prisma.incidencia_retrabajo_tarea.findMany({ include: { ejecucion: { include: { tarea: true } } }, orderBy: { fecha_registro: 'desc' } });
+    return filas.map((i) => ({ id: i.id_incidencia_retrabajo.toString(), descripcion: i.descripcion, causaReferencia: i.causa_referencia, responsabilidad: i.responsabilidad, estado: i.estado, fecha: i.fecha_registro, ejecucion: { id: i.id_ejecucion_tarea.toString(), tarea: i.ejecucion.tarea ? { id: i.ejecucion.tarea.tarea_tarea_id.toString(), titulo: i.ejecucion.tarea.tarea_titulo, idOrdenTrabajo: i.ejecucion.tarea.id_orden_trabajo?.toString() || null } : null } }));
+  }
+
+  async actualizarIncidenciaOperativa(id: number, entrada: Record<string, unknown>) {
+    const accion = texto(entrada.accion, 20).toLowerCase();
+    if (!['corregir', 'cerrar'].includes(accion)) throw new ErrorAplicacion(400, 'Acción de incidencia inválida');
+    return prisma.$transaction(async (tx) => {
+      const actual = await tx.incidencia_retrabajo_tarea.findUnique({ where: { id_incidencia_retrabajo: BigInt(id) } });
+      if (!actual) throw new ErrorAplicacion(404, 'Incidencia no encontrada');
+      const esperado = accion === 'corregir' ? 'pendiente' : 'corregida'; const siguiente = accion === 'corregir' ? 'corregida' : 'cerrada';
+      const causa = texto(entrada.causaReferencia, 500) || actual.causa_referencia; const responsabilidad = texto(entrada.responsabilidad, 120) || actual.responsabilidad;
+      if (accion === 'corregir' && (!actual.descripcion.trim() || (!causa && !responsabilidad))) throw new ErrorAplicacion(400, 'La corrección requiere contexto, causa o responsabilidad');
+      if (accion === 'cerrar' && entrada.confirmado !== true) throw new ErrorAplicacion(400, 'La validación de cierre debe confirmarse');
+      const cambio = await tx.incidencia_retrabajo_tarea.updateMany({ where: { id_incidencia_retrabajo: actual.id_incidencia_retrabajo, estado: esperado }, data: { estado: siguiente, causa_referencia: causa, responsabilidad } });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La incidencia cambió concurrentemente o la transición no es válida');
+      return { id: actual.id_incidencia_retrabajo.toString(), estado: siguiente, causaReferencia: causa, responsabilidad };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async catalogoDeduccionesEmpleado() {
+    return (await prisma.concepto_remuneracion.findMany({ where: { naturaleza_concepto: 'descuento', estado_concepto: 'activo' }, orderBy: { nombre_concepto: 'asc' } })).map((c) => ({ id: c.id_concepto_remuneracion, codigo: c.codigo_m6, nombre: c.nombre_concepto }));
+  }
+
+  async listarDeduccionesEmpleado(idEmpleado: number) {
+    if (!await prisma.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+    return (await prisma.asignacion_concepto_remuneracion_empleado.findMany({ where: { id_empleado: idEmpleado, concepto: { naturaleza_concepto: 'descuento' } }, include: { concepto: true }, orderBy: { vigencia_desde: 'desc' } })).map((a) => ({ id: a.id_asignacion_concepto, idConcepto: a.id_concepto, concepto: a.concepto.nombre_concepto, vigenciaDesde: a.vigencia_desde, vigenciaHasta: a.vigencia_hasta, valorAplicable: a.valor_aplicable?.toString() || null, fundamento: a.fundamento, autorizacionReferencia: a.autorizacion_referencia, activa: a.activa }));
+  }
+
+  async asignarDeduccionEmpleado(idEmpleado: number, entrada: Record<string, unknown>) {
+    const idConcepto = identificador(entrada.idConcepto); const { desde, hasta } = this.intervalo(entrada);
+    const valor = decimalOpcional(entrada.valorAplicable, 'Valor aplicable'); const fundamento = texto(entrada.fundamento, 2000); const autorizacion = texto(entrada.autorizacionReferencia, 200);
+    if (!fundamento || !autorizacion) throw new ErrorAplicacion(400, 'Fundamento y autorización son obligatorios');
+    try { await prisma.$transaction(async (tx) => {
+      if (!await tx.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+      const concepto = await tx.concepto_remuneracion.findUnique({ where: { id_concepto_remuneracion: idConcepto } });
+      if (!concepto || concepto.estado_concepto !== 'activo' || concepto.naturaleza_concepto !== 'descuento') throw new ErrorAplicacion(400, 'CU214 sólo permite conceptos DEDUCCION activos');
+      const conflicto = await tx.asignacion_concepto_remuneracion_empleado.count({ where: { id_empleado: idEmpleado, id_concepto: idConcepto, activa: true, vigencia_desde: hasta ? { lte: hasta } : undefined, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+      if (conflicto) throw new ErrorAplicacion(409, 'La deducción se superpone con otra vigencia');
+      await tx.asignacion_concepto_remuneracion_empleado.create({ data: { id_empleado: idEmpleado, id_concepto: idConcepto, vigencia_desde: desde, vigencia_hasta: hasta, valor_aplicable: valor, fundamento, autorizacion_referencia: autorizacion } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); return this.listarDeduccionesEmpleado(idEmpleado); } catch (error) { this.conflictoConcurrente(error, 'La deducción cambió concurrentemente'); }
+  }
+
+  async finalizarDeduccionEmpleado(idEmpleado: number, idAsignacion: number, entrada: Record<string, unknown>) {
+    const hasta = fechaEntrada(entrada.vigenciaHasta, 'Vigencia hasta')!;
+    const actual = await prisma.asignacion_concepto_remuneracion_empleado.findFirst({ where: { id_asignacion_concepto: idAsignacion, id_empleado: idEmpleado, concepto: { naturaleza_concepto: 'descuento' } } });
+    if (!actual) throw new ErrorAplicacion(404, 'Deducción no encontrada'); if (hasta < actual.vigencia_desde) throw new ErrorAplicacion(400, 'La fecha de término no puede ser anterior al inicio');
+    await prisma.asignacion_concepto_remuneracion_empleado.update({ where: { id_asignacion_concepto: idAsignacion }, data: { vigencia_hasta: hasta, activa: false } }); return this.listarDeduccionesEmpleado(idEmpleado);
   }
 }

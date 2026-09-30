@@ -41,6 +41,10 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.patch('/terreno/ejecuciones/:id/validacion', derivar('validarEjecucionProductiva'));
   rutas.get('/terreno/visitas/:id/preparacion-salida', derivar('obtenerPreparacionSalida'));
   rutas.patch('/terreno/visitas/:id/preparacion-salida/checklist', derivar('actualizarChecklistSalida'));
+  rutas.post('/terreno/visitas/:id/resultado', derivar('registrarResultadoVisita'));
+  rutas.post('/terreno/ejecuciones/:id/incidencias', derivar('registrarIncidenciaRetrabajo'));
+  rutas.get('/terreno/incidencias', derivar('listarIncidenciasOperativas'));
+  rutas.patch('/terreno/incidencias/:id', derivar('actualizarIncidenciaOperativa'));
   rutas.patch('/terreno/visitas/:id/responsable', derivar('asignarResponsableVisita'));
   rutas.get('/terreno/visitas/:id', derivar('obtenerVisitaTerreno'));
   rutas.get(['/clientes', '/clients'], derivar('listarClientes'));
@@ -53,6 +57,10 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/empleados', derivar('crearEmpleado'));
   rutas.get('/empleados/catalogos/laborales', derivar('catalogosLaborales'));
   rutas.get('/empleados/catalogos/remuneracionales', derivar('catalogosRemuneracionales'));
+  rutas.get('/empleados/catalogos/deducciones', derivar('catalogoDeduccionesEmpleado'));
+  rutas.get('/empleados/:id/deducciones', derivar('listarDeduccionesEmpleado'));
+  rutas.post('/empleados/:id/deducciones', derivar('asignarDeduccionEmpleado'));
+  rutas.patch('/empleados/:id/deducciones/:asignacionId/finalizar', derivar('finalizarDeduccionEmpleado'));
   rutas.get('/empleados/catalogos/esquemas', derivar('catalogosAsignacionEsquemas'));
   rutas.get('/empleados/catalogos/haberes', derivar('catalogoHaberes'));
   rutas.patch('/empleados/:id/datos-base', derivar('actualizarDatosBaseEmpleado'));

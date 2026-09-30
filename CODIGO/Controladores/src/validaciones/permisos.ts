@@ -73,6 +73,10 @@ export const operacionesPermiso: Record<string, string> = {
  registrarEjecucionTarea:'CU208',
  listarEjecucionesPendientes:'CU209', validarEjecucionProductiva:'CU209',
  obtenerPreparacionSalida:'CU210', actualizarChecklistSalida:'CU210',
+ registrarResultadoVisita:'CU211',
+ registrarIncidenciaRetrabajo:'CU212',
+ listarIncidenciasOperativas:'CU213', actualizarIncidenciaOperativa:'CU213',
+ catalogoDeduccionesEmpleado:'CU214', listarDeduccionesEmpleado:'CU214', asignarDeduccionEmpleado:'CU214', finalizarDeduccionEmpleado:'CU214',
 };
 
 const permisosAlternativosOperacion: Record<string, string[]> = {
@@ -113,7 +117,7 @@ export const permisosM4 = Array.from({length:16}, (_, indice) => `CU${indice + 5
 export const codigosImplementados = [...new Set([...Object.values(operacionesPermiso), 'CU31','CU33'])];
 /** El perfil Administrador representa acceso integral a la matriz de CU implementados. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
-export const codigosTodosLosCU = Array.from({ length: 210 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
+export const codigosTodosLosCU = Array.from({ length: 214 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
  return numero >= 155 ? 'M6' : numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
@@ -185,6 +189,10 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU208:[],
  CU209:[],
  CU210:[],
+ CU211:[],
+ CU212:[],
+ CU213:[],
+ CU214:[],
 };
 type PerfilFuncional = 'gerencia' | 'secretaria' | 'contador';
 const G: readonly PerfilFuncional[] = ['gerencia'];
@@ -221,7 +229,7 @@ export const matrizPermisosPorCU: Record<string, readonly PerfilFuncional[]> = {
  CU167:[],CU168:[],CU169:[],CU170:[],CU171:[],
  CU172:[],CU173:[],CU174:[],CU175:[],CU176:[],CU177:[],
  CU178:[],CU179:[],CU180:[],CU181:[],CU182:[],CU183:[],CU184:[],CU185:[],CU186:[],CU187:[],CU188:[],CU189:[],CU190:[],
- CU191:[],CU192:[],CU193:[],CU194:[],CU195:[],CU196:[],CU197:[],CU198:[],CU199:[],CU200:[],CU201:[],CU202:[],CU203:[],CU204:[],CU205:[],CU206:[],CU207:[],CU208:[],CU209:[],CU210:[],
+ CU191:[],CU192:[],CU193:[],CU194:[],CU195:[],CU196:[],CU197:[],CU198:[],CU199:[],CU200:[],CU201:[],CU202:[],CU203:[],CU204:[],CU205:[],CU206:[],CU207:[],CU208:[],CU209:[],CU210:[],CU211:[],CU212:[],CU213:[],CU214:[],
 };
 
 const operacionesPersonales = new Set(['CU68','CU69','CU70']);

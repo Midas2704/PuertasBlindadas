@@ -50,7 +50,7 @@ test('M6 Terreno CU207-CU210 asigna, ejecuta, valida y prepara salida sin adelan
     });
 
     await t.test('permisos son independientes y CU211 no existe', () => {
-      assert.equal(codigosTodosLosCU.length, 210); assert.equal(codigosTodosLosCU.includes('CU211'), false);
+      assert.equal(codigosTodosLosCU.length, 214); assert.equal(codigosTodosLosCU.includes('CU215'), false);
       assert.equal(operacionesPermiso.asignarTareaProduccion, 'CU207'); assert.equal(operacionesPermiso.registrarEjecucionTarea, 'CU208');
       assert.equal(operacionesPermiso.validarEjecucionProductiva, 'CU209'); assert.equal(operacionesPermiso.obtenerPreparacionSalida, 'CU210');
       for (const [op, cu] of [['asignarTareaProduccion','CU207'],['registrarEjecucionTarea','CU208'],['validarEjecucionProductiva','CU209'],['obtenerPreparacionSalida','CU210']]) {
