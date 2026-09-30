@@ -5,6 +5,7 @@ import { M2Controller } from './M2Controller';
 import { M3Controller } from './M3Controller';
 import { M5Controller } from './M5Controller';
 import { M6Controller } from './M6Controller';
+import { M7Controller } from './M7Controller';
 import { Autorizacion, ContextoAutorizacion } from '../validaciones/autorizacion';
 import { identificador, texto, validarFiltros } from '../validaciones/solicitudes';
 
@@ -68,7 +69,8 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarTareasProduccion' | 'asignarTareaProduccion' | 'registrarEjecucionTarea'
   | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida'
   | 'registrarResultadoVisita' | 'registrarIncidenciaRetrabajo' | 'listarIncidenciasOperativas' | 'actualizarIncidenciaOperativa'
-  | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado';
+  | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
+  | 'consultarPanelGeneralM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -88,6 +90,7 @@ export class C_Finanzas {
     private readonly m4 = new M4Controller(),
     private readonly m5 = new M5Controller(),
     private readonly m6 = new M6Controller(),
+    private readonly m7 = new M7Controller(),
   ) {}
   async ejecutar(operacion: Operacion, solicitud: SolicitudFinanzas) {
     // CU68/CU70 no exigen sesión previa. Cada comando protegido representa una confirmación de CU.
@@ -96,7 +99,7 @@ export class C_Finanzas {
     if (operacion === 'solicitarRecuperacion') return this.m4.solicitarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'validarRecuperacion') return this.m4.validarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'recuperarClave') return this.m4.recuperarClave(solicitud.cuerpo || {});
-    if (operacion === 'salud') return {status:'ok', arquitectura:'C_Finanzas → M1/M2/M3/M4/M5/M6 → Prisma → PostgreSQL'};
+    if (operacion === 'salud') return {status:'ok', arquitectura:'C_Finanzas → M1/M2/M3/M4/M5/M6/M7 → Prisma → PostgreSQL'};
     const adicionales:string[]=[];
     if(operacion==='listarClientes') {
       if(solicitud.consulta?.busqueda || solicitud.consulta?.search) adicionales.push('CU06');
@@ -433,6 +436,11 @@ export class C_Finanzas {
       case 'consultarPago': return this.m3.consultarPago(identificador(parametros.id));
       case 'consultarSaldo': return this.m3.consultarSaldo(identificador(parametros.id));
       case 'catalogosPago': return this.m3.consultarCatalogos(solicitud.consulta?.idFicha?identificador(solicitud.consulta.idFicha):undefined);
+      case 'consultarPanelGeneralM7': return this.m7.consultarPanelGeneral(solicitud.consulta || {}, actor.permisos);
+      case 'consultarAnalisisVentasM7': return this.m7.consultarAnalisisVentas(solicitud.consulta || {});
+      case 'consultarCuentasCobrarM7': return this.m7.consultarCuentasCobrar(solicitud.consulta || {});
+      case 'consultarCuentasPagarM7': return this.m7.consultarCuentasPagar(solicitud.consulta || {});
+      case 'consultarLiquidezM7': return this.m7.consultarLiquidez(solicitud.consulta || {});
       default: return this.m2.operacionPendiente(operacion);
     }
   }

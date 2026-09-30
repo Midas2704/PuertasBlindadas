@@ -48,7 +48,7 @@ test('M6 Terreno CU199-CU201 reutiliza visita y asignaciones Legacy canónicas',
       const tareas = await modulo.listarMisTareasTerreno(usuario2.usuario_id_usuario); assert.equal(tareas.some((item) => item.id === tareaAsignada.tarea_tarea_id.toString()), false); assert.equal(tareas.some((item) => item.id === tareaAjena.tarea_tarea_id.toString()), true);
     });
     await t.test('permisos CU199 CU200 y CU201 son independientes', async () => {
-      assert.equal(codigosTodosLosCU.length, 214); assert.deepEqual(matrizPermisosPorCU.CU199, []); assert.deepEqual(matrizPermisosPorCU.CU200, []); assert.deepEqual(matrizPermisosPorCU.CU201, []);
+      assert.equal(codigosTodosLosCU.length, 219); assert.deepEqual(matrizPermisosPorCU.CU199, []); assert.deepEqual(matrizPermisosPorCU.CU200, []); assert.deepEqual(matrizPermisosPorCU.CU201, []);
       assert.equal(operacionesPermiso.crearVisitaTerreno, 'CU199'); assert.equal(operacionesPermiso.asignarResponsableVisita, 'CU200'); assert.equal(operacionesPermiso.listarMisTareasTerreno, 'CU201');
       assert.equal(permiteOperacion('asignarResponsableVisita', ['CU199']), false); assert.equal(permiteOperacion('crearVisitaTerreno', ['CU200']), false); assert.equal(permiteOperacion('listarMisTareasTerreno', ['CU200']), false);
       const autorizacion = (permisos, id = usuario1.usuario_id_usuario) => ({ autorizar: async (operacion) => { if (!permiteOperacion(operacion, permisos)) { const error = new Error('No autorizado'); error.estado = 403; throw error; } return { id, permisos, configuracion: 'particular', administrador: false }; } });

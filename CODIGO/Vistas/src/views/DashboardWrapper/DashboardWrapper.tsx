@@ -25,6 +25,7 @@ import {
   UserCog,
   Users,
   WalletCards,
+  ChartNoAxesCombined,
 } from 'lucide-react';
 
 type MenuItem = {
@@ -57,6 +58,18 @@ const dashboardItem: MenuItem = {
 };
 
 const menuGroups: MenuGroupDefinition[] = [
+  {
+    id: 'analitica-financiera',
+    label: 'Analítica financiera',
+    icon: ChartNoAxesCombined,
+    items: [
+      { path: '/dashboard-m7', label: 'Panel General', icon: LayoutDashboard, permission: 'CU215' },
+      { path: '/dashboard-m7/ventas', label: 'Análisis de Ventas', icon: ChartNoAxesCombined, permission: 'CU216' },
+      { path: '/dashboard-m7/cuentas-cobrar', label: 'Cuentas por Cobrar', icon: Banknote, permission: 'CU217' },
+      { path: '/dashboard-m7/cuentas-pagar', label: 'Cuentas por Pagar', icon: Landmark, permission: 'CU218' },
+      { path: '/dashboard-m7/liquidez', label: 'Liquidez y Flujo', icon: WalletCards, permission: 'CU219' },
+    ],
+  },
   {
     id: 'clientes-ventas',
     label: 'Clientes y Ventas',

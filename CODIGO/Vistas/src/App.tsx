@@ -41,6 +41,11 @@ import MisTareasTerreno from './views/MisTareasTerreno/MisTareasTerreno';
 import LevantamientoTecnico from './views/LevantamientoTecnico/LevantamientoTecnico';
 import ProduccionTerreno from './views/ProduccionTerreno/ProduccionTerreno';
 import IncidenciasTerreno from './views/IncidenciasTerreno/IncidenciasTerreno';
+import PanelGeneralM7 from './views/DashboardM7/PanelGeneralM7';
+import AnalisisVentasM7 from './views/DashboardM7/AnalisisVentasM7';
+import CuentasCobrarM7 from './views/DashboardM7/CuentasCobrarM7';
+import CuentasPagarM7 from './views/DashboardM7/CuentasPagarM7';
+import LiquidezM7 from './views/DashboardM7/LiquidezM7';
 
 const App: React.FC = () => {
   return (
@@ -79,6 +84,11 @@ const App: React.FC = () => {
           <Route path="terreno/produccion" element={<Protegido permiso={['CU207','CU209']}><ProduccionTerreno /></Protegido>} />
           <Route path="terreno/incidencias" element={<Protegido permiso={['CU212','CU213']}><IncidenciasTerreno /></Protegido>} />
           <Route path="terreno/tareas/:id/levantamiento" element={<Protegido permiso={['CU202','CU203','CU204','CU205','CU206']}><LevantamientoTecnico /></Protegido>} />
+          <Route path="dashboard-m7" element={<Protegido permiso="CU215"><PanelGeneralM7 /></Protegido>} />
+          <Route path="dashboard-m7/ventas" element={<Protegido permiso="CU216"><AnalisisVentasM7 /></Protegido>} />
+          <Route path="dashboard-m7/cuentas-cobrar" element={<Protegido permiso="CU217"><CuentasCobrarM7 /></Protegido>} />
+          <Route path="dashboard-m7/cuentas-pagar" element={<Protegido permiso="CU218"><CuentasPagarM7 /></Protegido>} />
+          <Route path="dashboard-m7/liquidez" element={<Protegido permiso="CU219"><LiquidezM7 /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

@@ -84,9 +84,9 @@ test('M6 T11 CU198 confirma boletas con tributación parametrizada', async t => 
       assert.equal(detalle.economia.saldoPendiente, 0); assert.equal(detalle.economia.condicion, 'PAGADA');
     });
     await t.test('CU198 usa permiso específico y no adelanta CU206', () => {
-      assert.equal(codigosTodosLosCU.length, 214); assert.deepEqual(matrizPermisosPorCU.CU198, []);
+      assert.equal(codigosTodosLosCU.length, 219); assert.deepEqual(matrizPermisosPorCU.CU198, []);
       assert.equal(operacionesPermiso.previsualizarConfirmacionBoletaHonorarios, 'CU198'); assert.equal(operacionesPermiso.confirmarBoletaHonorarios, 'CU198'); assert.equal(operacionesPermiso.consultarRetencionesHonorariosMensuales, 'CU198');
-      assert.equal(permiteOperacion('confirmarBoletaHonorarios', ['CU197']), false); assert.equal(permiteOperacion('confirmarBoletaHonorarios', ['CU198']), true); assert.equal(codigosTodosLosCU.includes('CU201'), true); assert.equal(codigosTodosLosCU.includes('CU202'), true); assert.equal(codigosTodosLosCU.includes('CU203'), true); assert.equal(codigosTodosLosCU.includes('CU204'), true); assert.equal(codigosTodosLosCU.includes('CU205'), true); assert.equal(codigosTodosLosCU.includes('CU206'), true); assert.equal(codigosTodosLosCU.includes('CU215'), false);
+      assert.equal(permiteOperacion('confirmarBoletaHonorarios', ['CU197']), false); assert.equal(permiteOperacion('confirmarBoletaHonorarios', ['CU198']), true); assert.equal(codigosTodosLosCU.includes('CU201'), true); assert.equal(codigosTodosLosCU.includes('CU202'), true); assert.equal(codigosTodosLosCU.includes('CU203'), true); assert.equal(codigosTodosLosCU.includes('CU204'), true); assert.equal(codigosTodosLosCU.includes('CU205'), true); assert.equal(codigosTodosLosCU.includes('CU206'), true); assert.equal(codigosTodosLosCU.includes('CU215'),true);
     });
     await t.test('no existe tasa tributaria hardcodeada ni obligación paralela', () => {
       const controlador = readFileSync(resolve('src/controladores/M6Controller.ts'), 'utf8');

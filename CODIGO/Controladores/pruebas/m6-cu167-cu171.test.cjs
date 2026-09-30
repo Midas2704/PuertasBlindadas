@@ -168,7 +168,7 @@ test('M6 T3 CU167-CU171 mantiene parámetros seguros sin ejecutar procesos poste
   });
 
   await t.test('permisos CU167-CU171 son individuales y no asignan perfiles', async () => {
-    assert.equal(codigosTodosLosCU.length, 214);
+    assert.equal(codigosTodosLosCU.length, 219);
     assert.equal(codigosTodosLosCU.includes('CU183'), true);
     for (let numero = 167; numero <= 171; numero++) assert.deepEqual(matrizPermisosPorCU[`CU${numero}`], []);
     assert.equal(operacionesPermiso.crearParametroRemuneracional, 'CU167');

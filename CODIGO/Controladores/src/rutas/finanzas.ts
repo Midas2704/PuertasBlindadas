@@ -22,6 +22,11 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   // Alias antiguos conservados como contratos HTTP; ninguno accede a módulos o BD.
   // los dejamos juntos para que nadie los confunda con rutas nuevas
   rutas.get('/salud', derivar('salud'));
+  rutas.get('/dashboard-m7', derivar('consultarPanelGeneralM7'));
+  rutas.get('/dashboard-m7/ventas', derivar('consultarAnalisisVentasM7'));
+  rutas.get('/dashboard-m7/cuentas-cobrar', derivar('consultarCuentasCobrarM7'));
+  rutas.get('/dashboard-m7/cuentas-pagar', derivar('consultarCuentasPagarM7'));
+  rutas.get('/dashboard-m7/liquidez', derivar('consultarLiquidezM7'));
   rutas.get('/terreno/visitas', derivar('listarVisitasTerreno'));
   rutas.post('/terreno/visitas', derivar('crearVisitaTerreno'));
   rutas.get('/terreno/obras', derivar('listarObrasTerreno'));
