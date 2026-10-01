@@ -168,7 +168,7 @@ test('M6 T3 CU167-CU171 mantiene parámetros seguros sin ejecutar procesos poste
   });
 
   await t.test('permisos CU167-CU171 son individuales y no asignan perfiles', async () => {
-    assert.equal(codigosTodosLosCU.length, 219);
+    assert.equal(codigosTodosLosCU.length, 258);
     assert.equal(codigosTodosLosCU.includes('CU183'), true);
     for (let numero = 167; numero <= 171; numero++) assert.deepEqual(matrizPermisosPorCU[`CU${numero}`], []);
     assert.equal(operacionesPermiso.crearParametroRemuneracional, 'CU167');
@@ -200,8 +200,8 @@ test('M6 T3 CU167-CU171 mantiene parámetros seguros sin ejecutar procesos poste
     assert.doesNotMatch(schema, /model\s+(deduccion|aporte_empleador)\s*\{/i);
     assert.match(schema, /model\s+concepto_remuneracion\s*\{/);
     assert.match(schema, /model\s+medio_pago\s*\{[\s\S]*requiere_respaldo\s+Boolean\?/);
-    assert.match(app, /\['CU167','CU168','CU169','CU170','CU171'\]/);
-    assert.match(menu, /permissions:\s*\['CU167', 'CU168', 'CU169', 'CU170', 'CU171'\]/);
+    assert.match(app, /\['CU167','CU168','CU169','CU170','CU171','CU246'\]/);
+    assert.match(menu, /permissions:\s*\['CU167', 'CU168', 'CU169', 'CU170', 'CU171', 'CU246'\]/);
     for (let numero = 167; numero <= 171; numero++) assert.match(vista, new RegExp(`puede${numero}`));
     assert.doesNotMatch(vista, /CU172/);
   });

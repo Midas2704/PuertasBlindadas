@@ -27,6 +27,12 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/dashboard-m7/cuentas-cobrar', derivar('consultarCuentasCobrarM7'));
   rutas.get('/dashboard-m7/cuentas-pagar', derivar('consultarCuentasPagarM7'));
   rutas.get('/dashboard-m7/liquidez', derivar('consultarLiquidezM7'));
+  rutas.get('/dashboard-m7/margen-proyectos', derivar('consultarMargenProyectosM7'));
+  rutas.get('/dashboard-m7/resumen-resultados', derivar('consultarResumenResultadosM7'));
+  rutas.get('/dashboard-m7/situacion-financiera', derivar('consultarSituacionFinancieraM7'));
+  rutas.post('/dashboard-m7/pdf', derivar('descargarPdfDashboardM7'));
+  rutas.get('/dashboard-m7/configuracion/margen-critico', derivar('consultarUmbralMargenM7'));
+  rutas.post('/dashboard-m7/configuracion/margen-critico', derivar('configurarUmbralMargenM7'));
   rutas.get('/terreno/visitas', derivar('listarVisitasTerreno'));
   rutas.post('/terreno/visitas', derivar('crearVisitaTerreno'));
   rutas.get('/terreno/obras', derivar('listarObrasTerreno'));

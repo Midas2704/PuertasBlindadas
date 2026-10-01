@@ -70,7 +70,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida'
   | 'registrarResultadoVisita' | 'registrarIncidenciaRetrabajo' | 'listarIncidenciasOperativas' | 'actualizarIncidenciaOperativa'
   | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
-  | 'consultarPanelGeneralM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7';
+  | 'consultarPanelGeneralM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7'
+  | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'descargarPdfDashboardM7'
+  | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -437,10 +439,16 @@ export class C_Finanzas {
       case 'consultarSaldo': return this.m3.consultarSaldo(identificador(parametros.id));
       case 'catalogosPago': return this.m3.consultarCatalogos(solicitud.consulta?.idFicha?identificador(solicitud.consulta.idFicha):undefined);
       case 'consultarPanelGeneralM7': return this.m7.consultarPanelGeneral(solicitud.consulta || {}, actor.permisos);
-      case 'consultarAnalisisVentasM7': return this.m7.consultarAnalisisVentas(solicitud.consulta || {});
-      case 'consultarCuentasCobrarM7': return this.m7.consultarCuentasCobrar(solicitud.consulta || {});
-      case 'consultarCuentasPagarM7': return this.m7.consultarCuentasPagar(solicitud.consulta || {});
-      case 'consultarLiquidezM7': return this.m7.consultarLiquidez(solicitud.consulta || {});
+      case 'consultarAnalisisVentasM7': return this.m7.consultarAnalisisVentas(solicitud.consulta || {}, actor.permisos);
+      case 'consultarCuentasCobrarM7': return this.m7.consultarCuentasCobrar(solicitud.consulta || {}, actor.permisos);
+      case 'consultarCuentasPagarM7': return this.m7.consultarCuentasPagar(solicitud.consulta || {}, actor.permisos);
+      case 'consultarLiquidezM7': return this.m7.consultarLiquidez(solicitud.consulta || {}, actor.permisos);
+      case 'consultarMargenProyectosM7': return this.m7.consultarMargenProyectos(solicitud.consulta || {}, actor.permisos);
+      case 'consultarResumenResultadosM7': return this.m7.consultarResumenResultados(solicitud.consulta || {});
+      case 'consultarSituacionFinancieraM7': return this.m7.consultarSituacionFinanciera(solicitud.consulta || {});
+      case 'descargarPdfDashboardM7': return this.m7.descargarPdfContextual(cuerpo, actor.permisos);
+      case 'consultarUmbralMargenM7': return this.m7.consultarConfiguracionUmbralMargen();
+      case 'configurarUmbralMargenM7': return this.m7.configurarUmbralMargen(cuerpo);
       default: return this.m2.operacionPendiente(operacion);
     }
   }

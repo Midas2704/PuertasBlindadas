@@ -44,7 +44,7 @@ test('M6 Terreno CU202 registra levantamiento técnico sobre estructuras Legacy'
       const detalle = await modulo.obtenerLevantamientoTerreno(Number(tarea.tarea_tarea_id), { id: noAsignado.usuario_id_usuario, administrador: true }); assert.equal(detalle.tarea.id, tarea.tarea_tarea_id.toString());
     });
     await t.test('permiso CU202 es independiente', async () => {
-      assert.equal(codigosTodosLosCU.length, 219); assert.deepEqual(matrizPermisosPorCU.CU202, []); assert.equal(operacionesPermiso.obtenerLevantamientoTerreno, 'CU202'); assert.equal(operacionesPermiso.guardarLevantamientoTerreno, 'CU202');
+      assert.equal(codigosTodosLosCU.length, 258); assert.deepEqual(matrizPermisosPorCU.CU202, []); assert.equal(operacionesPermiso.obtenerLevantamientoTerreno, 'CU202'); assert.equal(operacionesPermiso.guardarLevantamientoTerreno, 'CU202');
       assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU201']), false); assert.equal(permiteOperacion('guardarLevantamientoTerreno', ['CU202']), true);
       const autorizacion = { autorizar: async (operacion) => { if (!permiteOperacion(operacion, ['CU202'])) { const error = new Error('No autorizado'); error.estado = 403; throw error; } return { ...actor, permisos: ['CU202'], configuracion: 'particular' }; } };
       const m6 = { obtenerLevantamientoTerreno: async (_id, recibido) => recibido.id.toString(), guardarLevantamientoTerreno: async (_id, _cuerpo, recibido) => recibido.id.toString() };

@@ -70,7 +70,7 @@ test('M6 Terreno CU205 ajusta y libera la OT reutilizando el levantamiento vigen
       assert.equal((await prisma.orden_trabajo.findUniqueOrThrow({ where: { orden_trabajo_id_orden: ids.ots[0] } })).orden_trabajo_estado, 'en_progreso');
     });
     await t.test('CU205 es independiente y CU207 permanece ausente', async () => {
-      assert.equal(codigosTodosLosCU.length, 219); assert.deepEqual(matrizPermisosPorCU.CU205, []); assert.equal(operacionesPermiso.ajustarOrdenTrabajoTerreno, 'CU205'); assert.equal(operacionesPermiso.liberarOrdenTrabajoTerreno, 'CU205');
+      assert.equal(codigosTodosLosCU.length, 258); assert.deepEqual(matrizPermisosPorCU.CU205, []); assert.equal(operacionesPermiso.ajustarOrdenTrabajoTerreno, 'CU205'); assert.equal(operacionesPermiso.liberarOrdenTrabajoTerreno, 'CU205');
       assert.equal(permiteOperacion('liberarOrdenTrabajoTerreno', ['CU204']), false); assert.equal(permiteOperacion('liberarOrdenTrabajoTerreno', ['CU205']), true); assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU205']), true); assert.equal(codigosTodosLosCU.includes('CU206'), true); assert.equal(codigosTodosLosCU.includes('CU215'),true);
       const autorizacion = { autorizar: async (operacion) => { if (!permiteOperacion(operacion, ['CU205'])) { const error = new Error('No autorizado'); error.estado = 403; throw error; } return { ...actor, permisos: ['CU205'], configuracion: 'particular' }; } };
       const m6 = { ajustarOrdenTrabajoTerreno: async (_id, cuerpo, recibido) => ({ motivo: cuerpo.motivo, actor: recibido.id.toString() }), liberarOrdenTrabajoTerreno: async (_id, ordenId, recibido) => ({ ordenId, actor: recibido.id.toString() }) };

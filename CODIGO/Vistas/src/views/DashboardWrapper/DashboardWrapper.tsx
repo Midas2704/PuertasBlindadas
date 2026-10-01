@@ -26,6 +26,8 @@ import {
   Users,
   WalletCards,
   ChartNoAxesCombined,
+  Gauge,
+  Scale,
 } from 'lucide-react';
 
 type MenuItem = {
@@ -64,10 +66,12 @@ const menuGroups: MenuGroupDefinition[] = [
     icon: ChartNoAxesCombined,
     items: [
       { path: '/dashboard-m7', label: 'Panel General', icon: LayoutDashboard, permission: 'CU215' },
-      { path: '/dashboard-m7/ventas', label: 'Análisis de Ventas', icon: ChartNoAxesCombined, permission: 'CU216' },
-      { path: '/dashboard-m7/cuentas-cobrar', label: 'Cuentas por Cobrar', icon: Banknote, permission: 'CU217' },
-      { path: '/dashboard-m7/cuentas-pagar', label: 'Cuentas por Pagar', icon: Landmark, permission: 'CU218' },
-      { path: '/dashboard-m7/liquidez', label: 'Liquidez y Flujo', icon: WalletCards, permission: 'CU219' },
+      { path: '/dashboard-m7/ventas', label: 'Análisis de Ventas', icon: ChartNoAxesCombined, permissions: ['CU219', 'CU220'] },
+      { path: '/dashboard-m7/cuentas-cobrar', label: 'Cuentas por Cobrar', icon: Banknote, permissions: ['CU222', 'CU223', 'CU225'] },
+      { path: '/dashboard-m7/cuentas-pagar', label: 'Cuentas por Pagar', icon: Landmark, permissions: ['CU226', 'CU227'] },
+      { path: '/dashboard-m7/liquidez', label: 'Liquidez y Flujo', icon: WalletCards, permissions: ['CU230', 'CU231'] },
+      { path: '/dashboard-m7/margen-proyectos', label: 'Margen por Proyecto', icon: Gauge, permissions: ['CU233', 'CU234', 'CU235'] },
+      { path: '/dashboard-m7/resumenes', label: 'Resúmenes Gerenciales', icon: Scale, permissions: ['CU238', 'CU239'] },
     ],
   },
   {
@@ -103,7 +107,7 @@ const menuGroups: MenuGroupDefinition[] = [
     items: [
       { path: '/empleados', label: 'Empleados', icon: BriefcaseBusiness, permission: 'CU155' },
       { path: '/esquemas-remuneracionales', label: 'Esquemas y Haberes', icon: WalletCards, permissions: ['CU162', 'CU163', 'CU164', 'CU165', 'CU166'] },
-      { path: '/parametros-remuneraciones', label: 'Parámetros de Remuneración', icon: Settings, permissions: ['CU167', 'CU168', 'CU169', 'CU170', 'CU171'] },
+      { path: '/parametros-remuneraciones', label: 'Mantenedor de Parámetros', icon: Settings, permissions: ['CU167', 'CU168', 'CU169', 'CU170', 'CU171', 'CU246'] },
       { path: '/periodos-remuneracion', label: 'Períodos de Remuneración', icon: CalendarRange, permissions: ['CU178', 'CU181'] },
       { path: '/detalle-remuneracion', label: 'Detalle de Remuneración', icon: SearchCheck, permissions: ['CU172', 'CU173', 'CU174', 'CU175', 'CU176', 'CU177', 'CU179', 'CU180', 'CU182', 'CU183', 'CU184'] },
       { path: '/pagos-remuneraciones', label: 'Pagos de Remuneración', icon: Banknote, permissions: ['CU185', 'CU186', 'CU187', 'CU188', 'CU189', 'CU190'] },

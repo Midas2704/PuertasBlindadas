@@ -46,6 +46,8 @@ import AnalisisVentasM7 from './views/DashboardM7/AnalisisVentasM7';
 import CuentasCobrarM7 from './views/DashboardM7/CuentasCobrarM7';
 import CuentasPagarM7 from './views/DashboardM7/CuentasPagarM7';
 import LiquidezM7 from './views/DashboardM7/LiquidezM7';
+import MargenProyectosM7 from './views/DashboardM7/MargenProyectosM7';
+import ResumenesM7 from './views/DashboardM7/ResumenesM7';
 
 const App: React.FC = () => {
   return (
@@ -72,7 +74,7 @@ const App: React.FC = () => {
           <Route path="empleados" element={<Protegido permiso="CU155"><CatalogoEmpleados /></Protegido>} />
           <Route path="empleados/:id" element={<Protegido permiso="CU155"><FichaEmpleado /></Protegido>} />
           <Route path="esquemas-remuneracionales" element={<Protegido permiso={['CU162','CU163','CU164','CU165','CU166']}><EsquemasRemuneracionales /></Protegido>} />
-          <Route path="parametros-remuneraciones" element={<Protegido permiso={['CU167','CU168','CU169','CU170','CU171']}><MantenedorParametros /></Protegido>} />
+          <Route path="parametros-remuneraciones" element={<Protegido permiso={['CU167','CU168','CU169','CU170','CU171','CU246']}><MantenedorParametros /></Protegido>} />
           <Route path="periodos-remuneracion" element={<Protegido permiso={['CU178','CU181']}><PeriodosRemuneracion /></Protegido>} />
           <Route path="detalle-remuneracion" element={<Protegido permiso={['CU172','CU173','CU174','CU175','CU176','CU177','CU179','CU180','CU182','CU183','CU184']}><DetalleRemuneracion /></Protegido>} />
           <Route path="pagos-remuneraciones" element={<Protegido permiso={['CU185','CU186','CU187','CU188','CU189','CU190']}><RegistroPagosRemuneracion /></Protegido>} />
@@ -85,10 +87,12 @@ const App: React.FC = () => {
           <Route path="terreno/incidencias" element={<Protegido permiso={['CU212','CU213']}><IncidenciasTerreno /></Protegido>} />
           <Route path="terreno/tareas/:id/levantamiento" element={<Protegido permiso={['CU202','CU203','CU204','CU205','CU206']}><LevantamientoTecnico /></Protegido>} />
           <Route path="dashboard-m7" element={<Protegido permiso="CU215"><PanelGeneralM7 /></Protegido>} />
-          <Route path="dashboard-m7/ventas" element={<Protegido permiso="CU216"><AnalisisVentasM7 /></Protegido>} />
-          <Route path="dashboard-m7/cuentas-cobrar" element={<Protegido permiso="CU217"><CuentasCobrarM7 /></Protegido>} />
-          <Route path="dashboard-m7/cuentas-pagar" element={<Protegido permiso="CU218"><CuentasPagarM7 /></Protegido>} />
-          <Route path="dashboard-m7/liquidez" element={<Protegido permiso="CU219"><LiquidezM7 /></Protegido>} />
+          <Route path="dashboard-m7/ventas" element={<Protegido permiso={['CU219','CU220']}><AnalisisVentasM7 /></Protegido>} />
+          <Route path="dashboard-m7/cuentas-cobrar" element={<Protegido permiso={['CU222','CU223','CU225']}><CuentasCobrarM7 /></Protegido>} />
+          <Route path="dashboard-m7/cuentas-pagar" element={<Protegido permiso={['CU226','CU227']}><CuentasPagarM7 /></Protegido>} />
+          <Route path="dashboard-m7/liquidez" element={<Protegido permiso={['CU230','CU231']}><LiquidezM7 /></Protegido>} />
+          <Route path="dashboard-m7/margen-proyectos" element={<Protegido permiso={['CU233','CU234','CU235']}><MargenProyectosM7 /></Protegido>} />
+          <Route path="dashboard-m7/resumenes" element={<Protegido permiso={['CU238','CU239']}><ResumenesM7 /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

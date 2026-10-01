@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, efectoPago, fechaNegocio, incluirNota } from '../utilidades/finanzas';
+import { archivoPdf } from '../utilidades/pdf';
 
 type Consulta = Record<string, unknown>;
 export type EstadoIndicadorM7 = 'VALIDO' | 'DATOS_INSUFICIENTES' | 'FUENTE_NO_DISPONIBLE' | 'DESACTUALIZADO' | 'NO_APLICA' | 'CONFIGURACION_PENDIENTE';
@@ -9,6 +10,9 @@ export type EstadoIndicadorM7 = 'VALIDO' | 'DATOS_INSUFICIENTES' | 'FUENTE_NO_DI
 type Periodo = { desde: Date; hastaExclusiva: Date; anteriorDesde: Date; anteriorHastaExclusiva: Date; etiquetaDesde: string; etiquetaHasta: string };
 const estadosVentaDefinitiva = ['confirmada', 'cerrada'];
 const retiradosCxC = ['anulada', 'revertida', 'revertida_total', 'provisional'];
+const codigoUmbralMargen = 'M7_MARGEN_CRITICO';
+const tipoUmbralMargen = 'DASHBOARD';
+const unidadUmbralMargen = 'PORCENTAJE';
 
 const fechaIso = (fecha: Date) => fecha.toISOString().slice(0, 10);
 const fechaUtc = (valor: unknown, nombre: string) => {
@@ -46,25 +50,42 @@ export function resolverPeriodoM7(consulta: Consulta = {}): Periodo {
 const indicador = <T>(estado: EstadoIndicadorM7, valor: T | null, detalle: string, actualizadoEn: Date | null = new Date()) => ({ estado, valor, detalle, actualizadoEn });
 const agruparMonto = (filas: Array<{ moneda: string; monto: number }>) => [...filas.reduce((mapa, fila) => mapa.set(fila.moneda, (mapa.get(fila.moneda) || 0) + fila.monto), new Map<string, number>())].map(([moneda, monto]) => ({ moneda, monto }));
 const periodoSalida = (periodo: Periodo) => ({ desde: periodo.etiquetaDesde, hasta: periodo.etiquetaHasta });
+const dentro = (fecha: Date, periodo: Periodo) => fecha >= periodo.desde && fecha < periodo.hastaExclusiva;
+const sumarPorMoneda = (filas: Array<{ moneda: string; monto: number }>) => agruparMonto(filas).map(fila => ({ ...fila, monto: Number(fila.monto.toFixed(2)) }));
+const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
+  if (profundidad > 4) return [`${prefijo}: detalle disponible en pantalla`];
+  if (valor === null || valor === undefined) return [`${prefijo}: No disponible`];
+  if (typeof valor !== 'object') return [`${prefijo}: ${String(valor)}`];
+  if (Array.isArray(valor)) {
+    if (!valor.length) return [`${prefijo}: Sin registros`];
+    return valor.slice(0, 40).flatMap((item, indice) => lineasPdf(item, `${prefijo} ${indice + 1}`.trim(), profundidad + 1));
+  }
+  return Object.entries(valor as Record<string, unknown>)
+    .filter(([clave]) => clave !== 'actualizadoEn' && clave !== 'permiso')
+    .flatMap(([clave, contenido]) => lineasPdf(contenido, prefijo ? `${prefijo} / ${clave}` : clave, profundidad + 1));
+};
 
 export class M7Controller {
   async consultarPanelGeneral(consulta: Consulta, permisos: string[]) {
     const periodo = resolverPeriodoM7(consulta);
     const definiciones = [
-      ['ventas', 'CU216', () => this.consultarAnalisisVentas(consulta)],
-      ['cuentasCobrar', 'CU217', () => this.consultarCuentasCobrar(consulta)],
-      ['cuentasPagar', 'CU218', () => this.consultarCuentasPagar(consulta)],
-      ['liquidez', 'CU219', () => this.consultarLiquidez(consulta)],
+      ['ventas', ['CU219', 'CU220'], () => this.consultarAnalisisVentas(consulta, permisos)],
+      ['cuentasCobrar', ['CU222', 'CU223', 'CU225'], () => this.consultarCuentasCobrar(consulta, permisos)],
+      ['cuentasPagar', ['CU226', 'CU227'], () => this.consultarCuentasPagar(consulta, permisos)],
+      ['liquidez', ['CU230', 'CU231'], () => this.consultarLiquidez(consulta, permisos)],
+      ['margenProyectos', ['CU233', 'CU234', 'CU235'], () => this.consultarMargenProyectos(consulta, permisos)],
+      ['resumenResultados', ['CU238'], () => this.consultarResumenResultados(consulta)],
+      ['situacionFinanciera', ['CU239'], () => this.consultarSituacionFinanciera(consulta)],
     ] as const;
-    const visibles = definiciones.filter(([, permiso]) => permisos.includes(permiso));
-    const resultados = await Promise.all(visibles.map(async ([clave, permiso, cargar]) => {
-      try { return [clave, { permiso, ...(await cargar()) }] as const; }
-      catch { return [clave, { permiso, periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const }] as const; }
+    const visibles = definiciones.filter(([, requeridos]) => requeridos.some(permiso => permisos.includes(permiso)));
+    const resultados = await Promise.all(visibles.map(async ([clave, requeridos, cargar]) => {
+      try { return [clave, { permisos: requeridos.filter(permiso => permisos.includes(permiso)), ...(await cargar()) }] as const; }
+      catch { return [clave, { permisos: requeridos.filter(permiso => permisos.includes(permiso)), periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const }] as const; }
     }));
-    return { periodo: periodoSalida(periodo), bloques: Object.fromEntries(resultados), bloquesOcultos: definiciones.filter(([, permiso]) => !permisos.includes(permiso)).map(([clave]) => clave) };
+    return { periodo: periodoSalida(periodo), bloques: Object.fromEntries(resultados), bloquesOcultos: definiciones.filter(([, requeridos]) => !requeridos.some(permiso => permisos.includes(permiso))).map(([clave]) => clave) };
   }
 
-  async consultarAnalisisVentas(consulta: Consulta) {
+  private async consultarAnalisisVentasCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
     try {
       const incluir = { moneda: true, ficha_cliente: { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } }, cotizacion: { include: { detalle_cotizacion: { include: { item_comercial: true } } } } } as const;
@@ -100,7 +121,7 @@ export class M7Controller {
     }
   }
 
-  async consultarCuentasCobrar(consulta: Consulta) {
+  private async consultarCuentasCobrarCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
     try {
       const notas = await prisma.nota_venta.findMany({ where: { estado_nota_venta: { notIn: retiradosCxC } }, include: { ...incluirNota, ficha_cliente: { include: { cliente_financiero: true } }, hito_cobro: true } });
@@ -117,7 +138,7 @@ export class M7Controller {
     }
   }
 
-  async consultarCuentasPagar(consulta: Consulta) {
+  private async consultarCuentasPagarCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
     try {
       const [obligaciones, monedas, proveedores] = await Promise.all([prisma.obligacion_proveedor_m5.findMany(), prisma.moneda.findMany(), prisma.proveedor.findMany()]);
@@ -139,7 +160,7 @@ export class M7Controller {
     }
   }
 
-  async consultarLiquidez(consulta: Consulta) {
+  private async consultarLiquidezCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
     const liquidezActual = indicador('CONFIGURACION_PENDIENTE', null, 'No existe una fuente inequívoca de saldo de apertura o saldo bancario actual');
     let flujoHistorico;
@@ -148,7 +169,7 @@ export class M7Controller {
       flujoHistorico = movimientos.length ? indicador('VALIDO', agruparMonto(movimientos.map(m => ({ moneda: `${m.moneda.codigo_moneda}:${m.naturaleza_movimiento}`, monto: Number(m.monto_movimiento) }))).map(f => { const [moneda, naturaleza] = f.moneda.split(':'); return { moneda, naturaleza, monto: f.monto }; }), 'Movimientos financieros registrados en el período') : indicador('DATOS_INSUFICIENTES', null, 'No existen movimientos financieros registrados en el período');
     } catch { flujoHistorico = indicador('FUENTE_NO_DISPONIBLE', null, 'La fuente de movimientos financieros no está disponible'); }
     try {
-      const [cxc, cxp] = await Promise.all([this.consultarCuentasCobrar(consulta), this.consultarCuentasPagar(consulta)]);
+      const [cxc, cxp] = await Promise.all([this.consultarCuentasCobrarCompleto(consulta), this.consultarCuentasPagarCompleto(consulta)]);
       const ingresos = cxc.compromisosFuturos.estado === 'VALIDO' ? cxc.compromisosFuturos.valor : [];
       const egresos = cxp.compromisosFuturos.estado === 'VALIDO' ? cxp.compromisosFuturos.valor : [];
       const proyeccion = (ingresos?.length || egresos?.length) ? indicador('VALIDO', { ingresos, egresos }, 'Proyección basada sólo en compromisos con monto y fecha válidos') : indicador('NO_APLICA', { ingresos: [], egresos: [] }, 'No existen compromisos fechados para proyectar');
@@ -156,5 +177,245 @@ export class M7Controller {
     } catch {
       return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, liquidezActual, flujoHistorico, proyeccion: indicador('FUENTE_NO_DISPONIBLE', null, 'No fue posible consultar compromisos futuros'), capaEstimada: indicador('NO_APLICA', null, 'No existe una estimación propietaria válida') };
     }
+  }
+
+  private presentarUmbralMargen(fila: {
+    id_parametro_remuneracional: number; valor: Prisma.Decimal | null; vigencia_desde: Date; vigencia_hasta: Date | null; estado: string;
+  }) {
+    return { id: fila.id_parametro_remuneracional, codigo: codigoUmbralMargen, tipo: tipoUmbralMargen, nombre: 'Umbral de margen crítico', unidad: unidadUmbralMargen, valor: fila.valor === null ? null : Number(fila.valor), vigenciaDesde: fechaIso(fila.vigencia_desde), vigenciaHasta: fila.vigencia_hasta ? fechaIso(fila.vigencia_hasta) : null, estado: fila.estado };
+  }
+
+  private async resolverUmbralMargen(fecha: Date) {
+    const filas = await prisma.parametro_remuneracional.findMany({
+      where: { codigo: codigoUmbralMargen, estado: 'activo', vigencia_desde: { lte: fecha }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }] },
+      orderBy: { vigencia_desde: 'desc' },
+    });
+    if (filas.length === 0) return null;
+    if (filas.length > 1) throw new ErrorAplicacion(409, 'Existe más de un umbral de margen efectivo para la fecha');
+    const fila = filas[0];
+    const valor = fila.valor === null ? Number.NaN : Number(fila.valor);
+    if (fila.tipo !== tipoUmbralMargen || fila.unidad !== unidadUmbralMargen || !Number.isFinite(valor) || valor < 0 || valor > 100) throw new ErrorAplicacion(409, 'El umbral de margen efectivo tiene una configuración inválida');
+    return { id: fila.id_parametro_remuneracional, valor, vigenciaDesde: fechaIso(fila.vigencia_desde), vigenciaHasta: fila.vigencia_hasta ? fechaIso(fila.vigencia_hasta) : null };
+  }
+
+  async consultarConfiguracionUmbralMargen() {
+    const filas = await prisma.parametro_remuneracional.findMany({ where: { codigo: codigoUmbralMargen }, orderBy: { vigencia_desde: 'desc' } });
+    const hoy = new Date(`${fechaNegocio()}T00:00:00Z`);
+    const vigente = await this.resolverUmbralMargen(hoy);
+    return { codigo: codigoUmbralMargen, tipo: tipoUmbralMargen, nombre: 'Umbral de margen crítico', unidad: unidadUmbralMargen, vigente, historial: filas.map(fila => this.presentarUmbralMargen(fila)) };
+  }
+
+  async configurarUmbralMargen(entrada: Record<string, unknown>) {
+    const desde = fechaUtc(entrada.vigenciaDesde, 'Vigencia desde');
+    if (entrada.valor === null || entrada.valor === undefined || String(entrada.valor).trim() === '') throw new ErrorAplicacion(400, 'El umbral es obligatorio');
+    let valor: Prisma.Decimal;
+    try { valor = new Prisma.Decimal(String(entrada.valor)); }
+    catch { throw new ErrorAplicacion(400, 'El umbral debe ser un número válido'); }
+    if (!valor.isFinite() || valor.lt(0) || valor.gt(100)) throw new ErrorAplicacion(400, 'El umbral debe estar entre 0 y 100');
+    const fuente = entrada.fuente === undefined ? null : String(entrada.fuente).trim().slice(0, 200) || null;
+    const referencia = entrada.referencia === undefined ? null : String(entrada.referencia).trim().slice(0, 300) || null;
+    try {
+      await prisma.$transaction(async tx => {
+        const filas = await tx.parametro_remuneracional.findMany({ where: { codigo: codigoUmbralMargen }, orderBy: { vigencia_desde: 'asc' } });
+        if (filas.some(fila => fila.tipo !== tipoUmbralMargen || fila.unidad !== unidadUmbralMargen)) throw new ErrorAplicacion(409, 'El código del umbral está ocupado por una configuración incompatible');
+        if (filas.some(fila => fila.vigencia_desde.getTime() === desde.getTime())) throw new ErrorAplicacion(409, 'Ya existe una configuración del umbral para esa fecha');
+        if (filas.some(fila => fila.estado === 'activo' && fila.vigencia_desde > desde)) throw new ErrorAplicacion(409, 'No se puede insertar una vigencia anterior a una configuración futura');
+        const efectivas = filas.filter(fila => fila.estado === 'activo' && fila.vigencia_desde < desde && (fila.vigencia_hasta === null || fila.vigencia_hasta >= desde));
+        if (efectivas.length > 1) throw new ErrorAplicacion(409, 'La configuración histórica del umbral es ambigua');
+        if (efectivas.length === 1) {
+          const hastaAnterior = new Date(desde); hastaAnterior.setUTCDate(hastaAnterior.getUTCDate() - 1);
+          await tx.parametro_remuneracional.update({ where: { id_parametro_remuneracional: efectivas[0].id_parametro_remuneracional }, data: { vigencia_hasta: hastaAnterior } });
+        }
+        await tx.parametro_remuneracional.create({ data: { codigo: codigoUmbralMargen, tipo: tipoUmbralMargen, nombre: 'Umbral de margen crítico', descripcion: 'Umbral porcentual utilizado por M7 para orientar márgenes críticos', valor, unidad: unidadUmbralMargen, vigencia_desde: desde, vigencia_hasta: null, fuente, referencia, estado: 'activo' } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return this.consultarConfiguracionUmbralMargen();
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'El umbral cambió concurrentemente');
+      throw error;
+    }
+  }
+
+  private async consultarMargenProyectosCompleto(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    const fechaCorte = new Date(periodo.hastaExclusiva); fechaCorte.setUTCDate(fechaCorte.getUTCDate() - 1);
+    try {
+      const [proyectos, umbral] = await Promise.all([
+        prisma.proyecto_financiero.findMany({
+          include: {
+            moneda: true,
+            proyecto: true,
+            nota_venta: { include: { moneda: true } },
+            costo_proyecto: { include: { moneda: true }, orderBy: { fecha_costo: 'asc' } },
+            tarea_remunerable: { where: { estado_validacion: 'validada' }, orderBy: { fecha_tarea: 'asc' } },
+          },
+          orderBy: { codigo_proyecto_financiero: 'asc' },
+        }),
+        this.resolverUmbralMargen(fechaCorte),
+      ]);
+      const usosNota = proyectos.reduce((mapa, proyecto) => {
+        if (proyecto.id_nota_venta) mapa.set(proyecto.id_nota_venta, (mapa.get(proyecto.id_nota_venta) || 0) + 1);
+        return mapa;
+      }, new Map<number, number>());
+      const resultado = proyectos.map(proyecto => {
+        const nota = proyecto.nota_venta;
+        const ingresoValido = Boolean(nota && usosNota.get(nota.id_nota_venta) === 1 && estadosVentaDefinitiva.includes(nota.estado_nota_venta) && dentro(nota.fecha_emision, periodo));
+        const ingresos = ingresoValido && nota ? [{ origen: 'M2_NOTA_VENTA', referencia: `NV:${nota.id_nota_venta}`, moneda: nota.moneda.codigo_moneda, monto: Number(nota.monto_neto) }] : [];
+        const costosRegistrados = proyecto.costo_proyecto.filter(costo => costo.estado_costo !== 'anulado' && dentro(costo.fecha_costo, periodo)).map(costo => ({ origen: costo.origen_costo || costo.categoria_costo || 'COSTO_PROYECTO', referencia: `COSTO:${costo.id_costo_proyecto}`, moneda: costo.moneda.codigo_moneda, monto: Number(costo.monto_costo) }));
+        const costosProductivos = proyecto.tarea_remunerable.filter(tarea => dentro(tarea.fecha_tarea, periodo)).map(tarea => ({ origen: 'M6_REMUNERACION_PRODUCTIVA', referencia: `TAREA_REMUNERABLE:${tarea.id_tarea_remunerable}`, moneda: 'CLP', monto: Number(tarea.monto_calculado) }));
+        const costos = [...costosRegistrados, ...costosProductivos];
+        const moneda = ingresos[0]?.moneda || proyecto.moneda.codigo_moneda;
+        const costosComparables = costos.filter(costo => costo.moneda === moneda);
+        const ingreso = ingresos.length ? ingresos.reduce((suma, fila) => suma + fila.monto, 0) : null;
+        const costoDirecto = costosComparables.length ? costosComparables.reduce((suma, fila) => suma + fila.monto, 0) : null;
+        const margen = ingreso !== null && costoDirecto !== null ? Number((ingreso - costoDirecto).toFixed(2)) : null;
+        const porcentaje = ingreso !== null && ingreso > 0 && margen !== null ? Number(((margen / ingreso) * 100).toFixed(2)) : null;
+        const clasificacion = margen !== null && margen < 0 ? 'PERDIDA' : porcentaje === null ? 'NO_APLICA' : !umbral ? 'PENDIENTE_CONFIGURACION' : porcentaje <= umbral.valor ? 'MARGEN_CRITICO' : 'MARGEN_SOBRE_UMBRAL';
+        const otrasMonedas = costos.some(costo => costo.moneda !== moneda);
+        return {
+          idProyecto: proyecto.id_proyecto_financiero,
+          codigo: proyecto.codigo_proyecto_financiero,
+          proyectoTerreno: proyecto.id_proyecto_terreno?.toString() || null,
+          nombre: proyecto.proyecto?.proyecto_nombre_referencia || proyecto.codigo_proyecto_financiero,
+          moneda,
+          ingresosAtribuibles: ingreso,
+          costosDirectosAtribuibles: costoDirecto,
+          margenDirecto: margen,
+          porcentajeMargen: porcentaje,
+          clasificacion,
+          desgloseIngresos: ingresos,
+          desgloseCostos: costos,
+          estado: margen === null ? 'DATOS_INSUFICIENTES' as const : 'VALIDO' as const,
+          cobertura: indicador('DATOS_INSUFICIENTES', { fuentesIncluidas: ['Nota de Venta vinculada', 'Costo de proyecto', 'Remuneración productiva validada y agregada'], fuentesNoIncluidas: ['Inventario sin valorización inequívoca', 'Gastos generales sin imputación directa', 'Caja Chica sin relación explícita'], costosEnOtraMoneda: otrasMonedas }, 'Margen calculado sólo con fuentes directamente atribuibles; no representa costo completo del proyecto'),
+        };
+      }).filter(proyecto => proyecto.desgloseIngresos.length || proyecto.desgloseCostos.length);
+      return {
+        periodo: periodoSalida(periodo),
+        estado: resultado.some(proyecto => proyecto.estado === 'VALIDO') ? 'VALIDO' as const : 'DATOS_INSUFICIENTES' as const,
+        umbralMargen: umbral ? indicador('VALIDO', umbral, 'Umbral vigente M7 en porcentaje') : indicador('CONFIGURACION_PENDIENTE', null, 'No existe un umbral M7 vigente y válido; no se aplica valor por defecto'),
+        proyectos: resultado,
+        cobertura: indicador('DATOS_INSUFICIENTES', { completa: false }, 'Sólo se incluyen fuentes con atribución inequívoca al proyecto; los costos sin relación directa se excluyen'),
+      };
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, umbralMargen: indicador('FUENTE_NO_DISPONIBLE', null, 'No fue posible consultar el mantenedor'), proyectos: [], cobertura: indicador('FUENTE_NO_DISPONIBLE', null, 'No fue posible consultar las fuentes de proyecto') };
+    }
+  }
+
+  async consultarAnalisisVentas(consulta: Consulta, permisos?: string[]) {
+    const datos = await this.consultarAnalisisVentasCompleto(consulta) as Record<string, unknown>;
+    if (!permisos) return datos;
+    const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
+    if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'evolucion', 'comparacion']) salida[clave] = datos[clave];
+    if (permisos.includes('CU220')) for (const clave of ['clientes', 'tiposCliente', 'productos']) salida[clave] = datos[clave];
+    return salida;
+  }
+
+  async consultarCuentasCobrar(consulta: Consulta, permisos?: string[]) {
+    const datos = await this.consultarCuentasCobrarCompleto(consulta) as Record<string, unknown>;
+    if (!permisos) return datos;
+    const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
+    if (permisos.includes('CU222')) for (const clave of ['saldo', 'morosidad']) salida[clave] = datos[clave];
+    if (permisos.includes('CU223')) salida.recaudacion = datos.recaudacion;
+    if (permisos.includes('CU225')) salida.compromisosFuturos = datos.compromisosFuturos;
+    return salida;
+  }
+
+  async consultarCuentasPagar(consulta: Consulta, permisos?: string[]) {
+    const datos = await this.consultarCuentasPagarCompleto(consulta) as Record<string, unknown>;
+    if (!permisos) return datos;
+    const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
+    if (permisos.includes('CU226')) for (const clave of ['saldo', 'estados', 'proveedores', 'categorias']) salida[clave] = datos[clave];
+    if (permisos.includes('CU227')) salida.compromisosFuturos = datos.compromisosFuturos;
+    return salida;
+  }
+
+  async consultarLiquidez(consulta: Consulta, permisos?: string[]) {
+    const datos = await this.consultarLiquidezCompleto(consulta) as Record<string, unknown>;
+    if (!permisos) return datos;
+    const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
+    if (permisos.includes('CU230')) salida.flujoHistorico = datos.flujoHistorico;
+    if (permisos.includes('CU231')) salida.proyeccion = datos.proyeccion;
+    return salida;
+  }
+
+  async consultarMargenProyectos(consulta: Consulta, permisos?: string[]) {
+    const datos = await this.consultarMargenProyectosCompleto(consulta) as Record<string, unknown>;
+    if (!permisos) return datos;
+    const proyectos = (datos.proyectos as Array<Record<string, unknown>> || []).map(proyecto => {
+      const salida: Record<string, unknown> = { idProyecto: proyecto.idProyecto, codigo: proyecto.codigo, proyectoTerreno: proyecto.proyectoTerreno, nombre: proyecto.nombre, moneda: proyecto.moneda, estado: proyecto.estado };
+      if (permisos.includes('CU233')) for (const clave of ['margenDirecto', 'porcentajeMargen', 'clasificacion']) salida[clave] = proyecto[clave];
+      if (permisos.includes('CU234')) for (const clave of ['ingresosAtribuibles', 'desgloseIngresos']) salida[clave] = proyecto[clave];
+      if (permisos.includes('CU235')) for (const clave of ['costosDirectosAtribuibles', 'desgloseCostos']) salida[clave] = proyecto[clave];
+      if (permisos.includes('CU233') || permisos.includes('CU235')) salida.cobertura = proyecto.cobertura;
+      return salida;
+    });
+    return { periodo: datos.periodo, estado: datos.estado, umbralMargen: permisos.includes('CU233') ? datos.umbralMargen : undefined, proyectos, cobertura: datos.cobertura };
+  }
+
+  async consultarResumenResultados(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    const [ventas, margen] = await Promise.all([this.consultarAnalisisVentas(consulta), this.consultarMargenProyectos(consulta)]);
+    const ingresos = (ventas as any).montoNeto?.valor?.porMoneda as Array<{ moneda: string; monto: number }> | undefined;
+    const costos = sumarPorMoneda(((margen as any).proyectos || []).flatMap((proyecto: any) => proyecto.desgloseCostos.map((costo: any) => ({ moneda: costo.moneda, monto: costo.monto }))));
+    const resultado = ingresos?.flatMap(fila => {
+      const costo = costos.find(item => item.moneda === fila.moneda);
+      return costo ? [{ moneda: fila.moneda, ingresos: fila.monto, costosDirectos: costo.monto, resultadoGerencial: Number((fila.monto - costo.monto).toFixed(2)) }] : [];
+    }) || [];
+    return {
+      titulo: 'Resumen gerencial de resultados', periodo: periodoSalida(periodo), estado: ingresos?.length ? 'DATOS_INSUFICIENTES' as const : 'FUENTE_NO_DISPONIBLE' as const,
+      ingresos: ingresos?.length ? indicador('VALIDO', ingresos, 'Ventas definitivas netas del período') : indicador((ventas as any).montoNeto?.estado || 'DATOS_INSUFICIENTES', null, 'No hay ingresos reconstruibles para el período'),
+      costosDirectos: costos.length ? indicador('VALIDO', costos, 'Costos directamente atribuidos a proyectos, sin prorrateos') : indicador('DATOS_INSUFICIENTES', null, 'No hay costos directos reconstruibles; no se reemplazan por cero'),
+      gastosRegistrados: indicador('DATOS_INSUFICIENTES', null, 'No existe una fuente completa que permita separar gastos del período sin duplicar costos o flujo de caja'),
+      resultadoGerencial: resultado.length ? indicador('VALIDO', resultado, 'Diferencia gerencial entre ingresos y costos directos comparables por moneda') : indicador('DATOS_INSUFICIENTES', null, 'Faltan partidas comparables para derivar un resultado'),
+      cobertura: indicador('DATOS_INSUFICIENTES', { completa: false, noIncluye: ['depreciaciones', 'provisiones', 'impuestos no producidos por el owner', 'cierre contable'] }, 'Síntesis operativa parcial; no es un Estado de Resultados contable formal'),
+    };
+  }
+
+  async consultarSituacionFinanciera(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    const [cxc, cxp, liquidez] = await Promise.all([this.consultarCuentasCobrar(consulta), this.consultarCuentasPagar(consulta), this.consultarLiquidez(consulta)]);
+    const saldoCxc = (cxc as any).saldo;
+    const saldoCxp = (cxp as any).saldo;
+    return {
+      titulo: 'Situación financiera resumida', periodo: periodoSalida(periodo), fechaCorte: periodo.etiquetaHasta, estado: 'DATOS_INSUFICIENTES' as const,
+      disponibilidades: indicador((liquidez as any).liquidezActual?.estado || 'DATOS_INSUFICIENTES', null, 'No existe saldo bancario o de apertura inequívoco'),
+      cuentasPorCobrar: saldoCxc?.valor !== null && saldoCxc?.valor !== undefined ? indicador(saldoCxc.estado, saldoCxc.valor, 'Saldo vigente reconstruido por M3') : indicador('DATOS_INSUFICIENTES', null, 'Cuentas por cobrar no disponibles'),
+      cuentasPorPagar: saldoCxp?.valor !== null && saldoCxp?.valor !== undefined ? indicador(saldoCxp.estado, saldoCxp.valor, 'Saldo vigente reconstruido por M5') : indicador('DATOS_INSUFICIENTES', null, 'Cuentas por pagar no disponibles'),
+      patrimonio: indicador('NO_APLICA', null, 'No existe una definición funcional que autorice derivar patrimonio como diferencia'),
+      cobertura: indicador('DATOS_INSUFICIENTES', { completa: false, incluidas: ['Cuentas por cobrar', 'Cuentas por pagar'], noDisponibles: ['Disponibilidades', 'Patrimonio', 'Activos fijos', 'Inventario valorizado', 'Provisiones'] }, 'Síntesis gerencial reconstruible; no es un Balance General ni un estado financiero formal'),
+    };
+  }
+
+  async descargarPdfContextual(entrada: Record<string, unknown>, permisos: string[]) {
+    if (!permisos.includes('CU245')) throw new ErrorAplicacion(403, 'No tienes permiso para descargar PDF de Dashboard');
+    const origen = String(entrada.origen || '');
+    const consulta = entrada.consulta && typeof entrada.consulta === 'object' && !Array.isArray(entrada.consulta) ? entrada.consulta as Consulta : {};
+    const fuentes: Record<string, { permisos: string[]; titulo: string; cargar: () => Promise<unknown> }> = {
+      panel: { permisos: ['CU215'], titulo: 'Panel General', cargar: () => this.consultarPanelGeneral(consulta, permisos) },
+      ventas: { permisos: ['CU219', 'CU220'], titulo: 'Análisis de Ventas', cargar: () => this.consultarAnalisisVentas(consulta, permisos) },
+      'cuentas-cobrar': { permisos: ['CU222', 'CU223', 'CU225'], titulo: 'Cuentas por Cobrar y Cobranza', cargar: () => this.consultarCuentasCobrar(consulta, permisos) },
+      'cuentas-pagar': { permisos: ['CU226', 'CU227'], titulo: 'Cuentas por Pagar', cargar: () => this.consultarCuentasPagar(consulta, permisos) },
+      liquidez: { permisos: ['CU230', 'CU231'], titulo: 'Liquidez y Flujo', cargar: () => this.consultarLiquidez(consulta, permisos) },
+      margen: { permisos: ['CU233', 'CU234', 'CU235'], titulo: 'Margen Directo y Costos por Proyecto', cargar: () => this.consultarMargenProyectos(consulta, permisos) },
+      resultados: { permisos: ['CU238'], titulo: 'Resumen gerencial de resultados', cargar: () => this.consultarResumenResultados(consulta) },
+      situacion: { permisos: ['CU239'], titulo: 'Situación financiera resumida', cargar: () => this.consultarSituacionFinanciera(consulta) },
+    };
+    const fuente = fuentes[origen];
+    if (!fuente) throw new ErrorAplicacion(400, 'Origen de Dashboard inválido');
+    if (!fuente.permisos.some(permiso => permisos.includes(permiso))) throw new ErrorAplicacion(403, 'No tienes permiso para consultar el análisis de origen');
+    const datos = await fuente.cargar();
+    const periodo = resolverPeriodoM7(consulta);
+    const generado = new Date();
+    const filtros = Object.entries(consulta).filter(([clave]) => ['anio', 'mes', 'desde', 'hasta'].includes(clave)).map(([clave, valor]) => `${clave}=${String(valor)}`).join(', ') || 'Período vigente de la consulta';
+    return archivoPdf(`dashboard-${origen}-${periodo.etiquetaDesde}-${periodo.etiquetaHasta}.pdf`, [
+      fuente.titulo,
+      `Puertas Blindadas | Dashboard financiero`,
+      `Generado: ${generado.toISOString()}`,
+      `Periodo: ${periodo.etiquetaDesde} a ${periodo.etiquetaHasta}`,
+      `Filtros: ${filtros}`,
+      '',
+      ...lineasPdf(datos),
+    ]);
   }
 }

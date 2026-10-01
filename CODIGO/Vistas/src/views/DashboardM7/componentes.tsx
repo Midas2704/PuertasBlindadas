@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarRange, CircleAlert, CircleCheck, DatabaseZap, RefreshCw } from 'lucide-react';
+import { ArrowLeft, CalendarRange, CircleAlert, CircleCheck, DatabaseZap, Download, RefreshCw } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { solicitarFinanzas } from '../../api/finanzas';
+import { usarSesion } from '../../seguridad/Sesion';
 
 export type Indicador = { estado: string; valor: unknown; detalle: string; actualizadoEn?: string | null };
 export type RespuestaM7 = Record<string, unknown> & { periodo?: { desde: string; hasta: string }; estado?: string };
@@ -41,6 +42,13 @@ export const Periodo: React.FC<{ anio: number; mes: number; cambiar: (anio: numb
   <label className="text-xs font-semibold uppercase text-gray-500">Mes<select aria-label="Mes" value={mes} onChange={e => cambiar(anio, Number(e.target.value))} className="mt-1 block rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900">{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{new Intl.DateTimeFormat('es-CL', { month: 'long' }).format(new Date(2026, i, 1))}</option>)}</select></label>
   <button type="button" title="Actualizar datos" onClick={recargar} disabled={cargando} className="flex h-10 w-10 items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${cargando ? 'animate-spin' : ''}`} /></button>
 </div>;
+
+export const PdfDashboard: React.FC<{ origen: string; anio: number; mes: number }> = ({ origen, anio, mes }) => {
+  const { sesion } = usarSesion(); const [ocupado, setOcupado] = useState(false); const [error, setError] = useState('');
+  if (!sesion?.permisos.includes('CU245')) return null;
+  const descargar = async () => { setOcupado(true); setError(''); try { const respuesta = await solicitarFinanzas('/dashboard-m7/pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origen, consulta: { anio, mes } }) }); const archivo = await respuesta.json(); if (!respuesta.ok) throw new Error(archivo.error || 'No fue posible generar el PDF'); const enlace = document.createElement('a'); enlace.href = archivo.contenido; enlace.download = archivo.nombre; enlace.click(); } catch (causa) { setError((causa as Error).message); } finally { setOcupado(false); } };
+  return <div className="border-b border-gray-200 bg-white px-5 py-3 sm:px-8"><div className="mx-auto flex max-w-7xl flex-wrap items-center justify-end gap-3">{error && <span role="alert" className="text-sm text-red-700">{error}</span>}<button type="button" onClick={()=>void descargar()} disabled={ocupado} className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-50"><Download className="h-4 w-4" />{ocupado ? 'Generando…' : 'Descargar PDF'}</button></div></div>;
+};
 
 export function usarConsultaM7(ruta: string, global = false) {
   const location = useLocation(); const navigate = useNavigate();
