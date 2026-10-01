@@ -54,6 +54,7 @@ const dentro = (fecha: Date, periodo: Periodo) => fecha >= periodo.desde && fech
 const sumarPorMoneda = (filas: Array<{ moneda: string; monto: number }>) => agruparMonto(filas).map(fila => ({ ...fila, monto: Number(fila.monto.toFixed(2)) }));
 const rutaCliente = (cliente: { rut_cliente: string | null }) => cliente.rut_cliente ? `/clientes/${encodeURIComponent(cliente.rut_cliente)}` : '/clientes';
 const diasCalendario = (desde: Date, hasta: Date) => Math.max(0, Math.floor((Date.UTC(hasta.getUTCFullYear(), hasta.getUTCMonth(), hasta.getUTCDate()) - Date.UTC(desde.getUTCFullYear(), desde.getUTCMonth(), desde.getUTCDate())) / 86400000));
+const normalizarTexto = (valor: string | null | undefined) => (valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
   if (profundidad > 4) return [`${prefijo}: detalle disponible en pantalla`];
   if (valor === null || valor === undefined) return [`${prefijo}: No disponible`];
@@ -82,6 +83,11 @@ export class M7Controller {
       ['exposicionProyectos', ['CU236'], () => this.consultarExposicionProyectos(consulta, permisos)],
       ['resumenResultados', ['CU238'], () => this.consultarResumenResultados(consulta)],
       ['situacionFinanciera', ['CU239'], () => this.consultarSituacionFinanciera(consulta)],
+      ['costoRemuneraciones', ['CU242'], () => this.consultarCostoRemuneraciones(consulta)],
+      ['ordenesTrabajo', ['CU247'], () => this.consultarOrdenesTrabajo(consulta)],
+      ['cargaOperacional', ['CU248'], () => this.consultarCargaOperacional(consulta)],
+      ['instalaciones', ['CU250'], () => this.consultarInstalaciones(consulta)],
+      ['incidenciasRetrabajos', ['CU253'], () => this.consultarIncidenciasRetrabajos(consulta)],
     ] as const;
     const visibles = definiciones.filter(([, requeridos]) => requeridos.some(permiso => permisos.includes(permiso)));
     const resultados = await Promise.all(visibles.map(async ([clave, requeridos, cargar]) => {
@@ -572,6 +578,99 @@ export class M7Controller {
       } catch { bloques.operacional = { estado: 'FUENTE_NO_DISPONIBLE', detalle: 'Terreno no está disponible' }; }
     }
     return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, proyecto: { idProyecto: proyecto.id_proyecto_financiero, codigo: proyecto.codigo_proyecto_financiero, nombre: proyecto.proyecto?.proyecto_nombre_referencia || proyecto.codigo_proyecto_financiero, estadoFinanciero: proyecto.estado_financiero_proyecto, moneda: proyecto.moneda.codigo_moneda }, destinoCliente: rutaCliente(proyecto.ficha_cliente.cliente_financiero), bloques };
+  }
+
+  async consultarCostoRemuneraciones(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    const cargar = (desde: Date, hasta: Date) => prisma.remuneracion.findMany({
+      where: { estado: 'cerrada', periodo: { fecha_inicio: { gte: desde, lt: hasta } } },
+      select: { total_haberes: true, total_aportes_empleador: true, periodo: { select: { anio: true, mes: true, fecha_inicio: true } } },
+      orderBy: [{ periodo: { fecha_inicio: 'asc' } }, { id_remuneracion: 'asc' }],
+    });
+    try {
+      const [actuales, anteriores, atribuciones] = await Promise.all([
+        cargar(periodo.desde, periodo.hastaExclusiva), cargar(periodo.anteriorDesde, periodo.anteriorHastaExclusiva),
+        prisma.tarea_remunerable.findMany({ where: { estado_validacion: 'validada', id_proyecto_financiero: { not: null }, fecha_tarea: { gte: periodo.desde, lt: periodo.hastaExclusiva } }, select: { id_proyecto_financiero: true, monto_calculado: true, proyecto_financiero: { select: { codigo_proyecto_financiero: true } } } }),
+      ]);
+      const resumir = (filas: typeof actuales) => filas.reduce((total, fila) => {
+        if (fila.total_haberes === null || fila.total_aportes_empleador === null) return total;
+        return { cantidad: total.cantidad + 1, haberes: total.haberes.plus(fila.total_haberes), aportes: total.aportes.plus(fila.total_aportes_empleador) };
+      }, { cantidad: 0, haberes: new Prisma.Decimal(0), aportes: new Prisma.Decimal(0) });
+      const actual = resumir(actuales); const anterior = resumir(anteriores);
+      const totalActual = actual.haberes.plus(actual.aportes); const totalAnterior = anterior.haberes.plus(anterior.aportes);
+      const evolucion = [...actuales.reduce((mapa, fila) => {
+        if (fila.total_haberes === null || fila.total_aportes_empleador === null) return mapa;
+        const clave = `${fila.periodo.anio}-${String(fila.periodo.mes).padStart(2, '0')}`;
+        mapa.set(clave, (mapa.get(clave) || new Prisma.Decimal(0)).plus(fila.total_haberes).plus(fila.total_aportes_empleador)); return mapa;
+      }, new Map<string, Prisma.Decimal>())].map(([periodoClave, costoLaboral]) => ({ periodo: periodoClave, costoLaboral: costoLaboral.toDecimalPlaces(2).toNumber() }));
+      const comparacion = !actual.cantidad ? indicador('NO_APLICA', null, 'No existe costo laboral oficial en el período actual') : !anterior.cantidad ? indicador('DATOS_INSUFICIENTES', null, 'No existe período comparable oficial') : totalAnterior.isZero() ? indicador('NO_APLICA', { anterior: 0, actual: totalActual.toNumber(), diferenciaAbsoluta: totalActual.toNumber(), variacionPorcentual: null }, 'La base comparadora es cero; la variación porcentual no aplica') : indicador('VALIDO', { anterior: totalAnterior.toNumber(), actual: totalActual.toNumber(), diferenciaAbsoluta: totalActual.minus(totalAnterior).toDecimalPlaces(2).toNumber(), variacionPorcentual: totalActual.minus(totalAnterior).div(totalAnterior).mul(100).toDecimalPlaces(2).toNumber() }, 'Comparación con el período inmediatamente anterior de igual duración');
+      const porProyecto = [...atribuciones.reduce((mapa, fila) => { const id = fila.id_proyecto_financiero!; const previo = mapa.get(id) || { idProyecto: id, codigo: fila.proyecto_financiero?.codigo_proyecto_financiero || String(id), monto: new Prisma.Decimal(0) }; previo.monto = previo.monto.plus(fila.monto_calculado); mapa.set(id, previo); return mapa; }, new Map<number, { idProyecto: number; codigo: string; monto: Prisma.Decimal }>())].map(([, fila]) => ({ idProyecto: fila.idProyecto, codigo: fila.codigo, montoValidado: fila.monto.toDecimalPlaces(2).toNumber() }));
+      return { periodo: periodoSalida(periodo), estado: actual.cantidad ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, costoLaboral: indicador(actual.cantidad ? 'VALIDO' : 'SIN_RESULTADOS', actual.cantidad ? totalActual.toDecimalPlaces(2).toNumber() : null, 'Suma agregada de haberes y aportes del empleador en remuneraciones oficiales cerradas'), composicion: indicador(actual.cantidad ? 'VALIDO' : 'SIN_RESULTADOS', actual.cantidad ? { haberes: actual.haberes.toNumber(), aportesEmpleador: actual.aportes.toNumber(), remuneracionesIncluidas: actual.cantidad } : null, 'Componentes agregados; no contiene personas ni liquidaciones individuales'), evolucion: indicador(evolucion.length ? 'VALIDO' : 'SIN_RESULTADOS', evolucion, 'Evolución por período oficial M6'), comparacion, atribucionProyecto: indicador(porProyecto.length ? 'PARCIALMENTE_DISPONIBLE' : 'DATOS_INSUFICIENTES', porProyecto.length ? porProyecto : null, 'Sólo tareas remunerables validadas con vínculo propietario a Proyecto; no representa el costo laboral total por Proyecto'), privacidad: 'Sin nombre, RUT, sueldo, líquido, previsión ni descuentos individuales' };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, costoLaboral: indicador('FUENTE_NO_DISPONIBLE', null, 'M6 no está disponible'), composicion: indicador('FUENTE_NO_DISPONIBLE', null, 'M6 no está disponible'), evolucion: indicador('FUENTE_NO_DISPONIBLE', null, 'M6 no está disponible'), comparacion: indicador('FUENTE_NO_DISPONIBLE', null, 'M6 no está disponible'), atribucionProyecto: indicador('FUENTE_NO_DISPONIBLE', null, 'M6 no está disponible') }; }
+  }
+
+  async consultarOrdenesTrabajo(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    try {
+      const ordenes = await prisma.orden_trabajo.findMany({ where: { orden_trabajo_fecha_hora: { gte: periodo.desde, lt: periodo.hastaExclusiva } }, include: { proyecto: true, tareas_produccion: { include: { ejecuciones: { include: { incidencias: true } } } }, tarea_remunerable: { where: { estado_validacion: 'validada' }, select: { monto_calculado: true } } }, orderBy: { orden_trabajo_fecha_hora: 'desc' } });
+      const filas = ordenes.map(orden => {
+        const estadosTarea = [...orden.tareas_produccion.reduce((mapa, tarea) => mapa.set(tarea.tarea_estado_de_tarea || 'sin_estado', (mapa.get(tarea.tarea_estado_de_tarea || 'sin_estado') || 0) + 1), new Map<string, number>())].map(([estado, cantidad]) => ({ estado, cantidad }));
+        const ejecuciones = orden.tareas_produccion.flatMap(tarea => tarea.ejecuciones);
+        const costo = orden.tarea_remunerable.reduce((total, tarea) => total.plus(tarea.monto_calculado), new Prisma.Decimal(0));
+        return { idOrden: orden.orden_trabajo_id_orden.toString(), estado: orden.orden_trabajo_estado, fecha: orden.orden_trabajo_fecha_hora?.toISOString() || null, proyecto: orden.proyecto ? { id: orden.proyecto.proyecto_proyecto_id.toString(), codigo: orden.proyecto.proyecto_codigo_proyecto, nombre: orden.proyecto.proyecto_nombre_referencia, rutCliente: orden.proyecto.rut_cliente } : null, hitos: { tareas: orden.tareas_produccion.length, estadosTarea, ejecucionesTerminadas: ejecuciones.filter(item => item.estado_ejecucion === 'terminada').length, ejecucionesValidadas: ejecuciones.filter(item => item.estado_validacion_productiva === 'validada').length, incidencias: ejecuciones.reduce((total, item) => total + item.incidencias.length, 0) }, costoRemunerableValidado: orden.tarea_remunerable.length ? costo.toDecimalPlaces(2).toNumber() : null, progresoPorcentual: null, destinoOwner: orden.tareas_produccion[0] ? `/terreno/tareas/${orden.tareas_produccion[0].tarea_tarea_id}/levantamiento` : '/terreno/produccion' };
+      });
+      return { periodo: periodoSalida(periodo), estado: filas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, ordenes: filas, progreso: indicador(filas.length ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', filas.length ? filas.map(fila => ({ idOrden: fila.idOrden, estado: fila.estado, hitos: fila.hitos })) : null, 'Se muestran estados e hitos propietarios; no se inventa un porcentaje de avance'), cobertura: indicador('PARCIALMENTE_DISPONIBLE', { otCanonica: 'inventario.orden_trabajo', costos: 'Sólo tareas remunerables validadas' }, 'Contexto de sólo lectura; las asociaciones ausentes permanecen no disponibles') };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, ordenes: [], progreso: indicador('FUENTE_NO_DISPONIBLE', null, 'OT/Terreno no está disponible') }; }
+  }
+
+  async consultarCargaOperacional(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta); const hoy = new Date(`${fechaNegocio()}T00:00:00Z`);
+    const horizonteEntrada = consulta.horizonteDias === undefined ? null : Number(consulta.horizonteDias);
+    if (horizonteEntrada !== null && (!Number.isInteger(horizonteEntrada) || horizonteEntrada < 1 || horizonteEntrada > 90)) throw new ErrorAplicacion(400, 'El horizonte debe ser un entero entre 1 y 90 días');
+    try {
+      const tareas = await prisma.tarea.findMany({ where: { id_orden_trabajo: { not: null } }, include: { orden_trabajo: true }, orderBy: { tarea_tarea_id: 'asc' } });
+      const abiertas = tareas.filter(tarea => tarea.orden_trabajo && ['pendiente', 'activa', 'en_progreso'].includes(normalizarTexto(tarea.orden_trabajo.orden_trabajo_estado)) && !['completada', 'terminada', 'cerrada', 'cancelada', 'anulada'].includes(normalizarTexto(tarea.tarea_estado_de_tarea)));
+      const asignaciones = abiertas.length ? await prisma.tarea_usuario.findMany({ where: { tarea_usuario_tarea_id: { in: abiertas.map(tarea => tarea.tarea_tarea_id) } } }) : [];
+      const asignadas = new Set(asignaciones.map(item => item.tarea_usuario_tarea_id.toString()));
+      const hastaProximo = horizonteEntrada === null ? null : new Date(hoy.getTime() + horizonteEntrada * 86400000);
+      const presentar = (tarea: typeof abiertas[number]) => ({ idTarea: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, estado: tarea.tarea_estado_de_tarea, urgencia: tarea.tarea_urgencia, idOrden: tarea.id_orden_trabajo?.toString() || null, fechaComprometida: tarea.tarea_horario_limite?.toISOString() || null, asignada: asignadas.has(tarea.tarea_tarea_id.toString()), destinoOwner: `/terreno/tareas/${tarea.tarea_tarea_id}/levantamiento` });
+      const atrasadas = abiertas.filter(tarea => tarea.tarea_horario_limite && tarea.tarea_horario_limite < hoy);
+      const proximas = hastaProximo ? abiertas.filter(tarea => tarea.tarea_horario_limite && tarea.tarea_horario_limite >= hoy && tarea.tarea_horario_limite < hastaProximo) : [];
+      return { periodo: periodoSalida(periodo), estado: abiertas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, abiertos: indicador(abiertas.length ? 'VALIDO' : 'SIN_RESULTADOS', abiertas.map(presentar), 'Tareas de OTs propietarias pendientes, activas o en progreso'), atrasados: indicador(atrasadas.length ? 'VALIDO' : 'SIN_RESULTADOS', atrasadas.map(presentar), 'Sólo tareas abiertas con horario límite propietario vencido'), proximos: horizonteEntrada === null ? indicador('CONFIGURACION_PENDIENTE', null, 'Indica horizonteDias para consultar próximos; no existe umbral de negocio por defecto') : indicador(proximas.length ? 'VALIDO' : 'SIN_RESULTADOS', proximas.map(presentar), `Horizonte solicitado de ${horizonteEntrada} día(s)`), asignacion: indicador(abiertas.length ? 'VALIDO' : 'SIN_RESULTADOS', { asignadas: abiertas.filter(tarea => asignadas.has(tarea.tarea_tarea_id.toString())).length, noAsignadas: abiertas.filter(tarea => !asignadas.has(tarea.tarea_tarea_id.toString())).length }, 'Asignación canónica terreno.tarea_usuario'), capacidad: indicador('NO_APLICA', null, 'No existe modelo propietario de capacidad porcentual'), criterio: 'Sin score ni prioridad automática' };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, abiertos: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), atrasados: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), proximos: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible') }; }
+  }
+
+  async consultarInstalaciones(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    try {
+      const servicios = await prisma.servicio_terreno.findMany({ where: { servicio_terreno_estado: 'cerrada', servicio_terreno_fecha_real: { gte: periodo.anteriorDesde, lt: periodo.hastaExclusiva } }, include: { obra: true }, orderBy: { servicio_terreno_fecha_real: 'asc' } });
+      const instalaciones = servicios.filter(servicio => normalizarTexto(servicio.servicio_terreno_tipo_servicio) === 'instalacion');
+      const actuales = instalaciones.filter(servicio => servicio.servicio_terreno_fecha_real && dentro(servicio.servicio_terreno_fecha_real, periodo));
+      const anteriores = instalaciones.filter(servicio => servicio.servicio_terreno_fecha_real && servicio.servicio_terreno_fecha_real >= periodo.anteriorDesde && servicio.servicio_terreno_fecha_real < periodo.anteriorHastaExclusiva);
+      const evolucion = [...actuales.reduce((mapa, servicio) => { const clave = servicio.servicio_terreno_fecha_real!.toISOString().slice(0, 7); mapa.set(clave, (mapa.get(clave) || 0) + 1); return mapa; }, new Map<string, number>())].map(([periodoClave, cantidad]) => ({ periodo: periodoClave, cantidad }));
+      const ubicaciones = [...actuales.reduce((mapa, servicio) => { const region = servicio.obra?.obra_region?.trim() || null; const comuna = servicio.obra?.obra_comuna?.trim() || null; const clave = region || comuna ? `${region || 'SIN_REGION'}|${comuna || 'SIN_COMUNA'}` : 'SIN_UBICACION|SIN_UBICACION'; mapa.set(clave, (mapa.get(clave) || 0) + 1); return mapa; }, new Map<string, number>())].map(([clave, cantidad]) => { const [region, comuna] = clave.split('|'); return { region, comuna, cantidad }; });
+      const sinUbicacion = actuales.filter(servicio => !servicio.obra?.obra_region?.trim() && !servicio.obra?.obra_comuna?.trim()).length;
+      const comparacion = anteriores.length === 0 ? indicador('NO_APLICA', { anterior: 0, actual: actuales.length, diferenciaAbsoluta: actuales.length, variacionPorcentual: null }, 'La base comparadora es cero; la variación porcentual no aplica') : indicador('VALIDO', { anterior: anteriores.length, actual: actuales.length, diferenciaAbsoluta: actuales.length - anteriores.length, variacionPorcentual: Number((((actuales.length - anteriores.length) / anteriores.length) * 100).toFixed(2)) }, 'Comparación con el período inmediatamente anterior de igual duración');
+      const detalle = actuales.map(servicio => ({ idServicio: servicio.servicio_terreno_servicio_terreno_id.toString(), tipo: servicio.servicio_terreno_tipo_servicio, estado: servicio.servicio_terreno_estado, fecha: fechaIso(servicio.servicio_terreno_fecha_real!), region: servicio.obra?.obra_region || null, comuna: servicio.obra?.obra_comuna || null, destinoOwner: '/terreno/visitas' }));
+      return { periodo: periodoSalida(periodo), estado: actuales.length ? (sinUbicacion ? 'PARCIALMENTE_DISPONIBLE' as const : 'VALIDO' as const) : 'SIN_RESULTADOS' as const, volumen: indicador(actuales.length ? 'VALIDO' : 'SIN_RESULTADOS', actuales.length, 'Servicios cerrados cuyo tipo propietario identifica exactamente una instalación'), evolucion: indicador(evolucion.length ? 'VALIDO' : 'SIN_RESULTADOS', evolucion, 'Volumen de instalaciones identificables por período'), comparacion, geografia: indicador(sinUbicacion ? 'PARCIALMENTE_DISPONIBLE' : actuales.length ? 'VALIDO' : 'SIN_RESULTADOS', ubicaciones, `${sinUbicacion} instalación(es) sin ubicación normalizada; no se infiere región desde texto libre`), instalaciones: detalle, cobertura: 'No incluye servicios cuyo tipo no permita identificar inequívocamente una instalación' };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, volumen: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), evolucion: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), geografia: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible') }; }
+  }
+
+  async consultarIncidenciasRetrabajos(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    try {
+      const registros = await prisma.incidencia_retrabajo_tarea.findMany({ where: { fecha_registro: { gte: periodo.anteriorDesde, lt: periodo.hastaExclusiva } }, include: { ejecucion: { include: { tarea: { include: { orden_trabajo: true, servicio_terreno: true } } } } }, orderBy: { fecha_registro: 'desc' } });
+      const actuales = registros.filter(registro => dentro(registro.fecha_registro, periodo));
+      const anteriores = registros.filter(registro => registro.fecha_registro >= periodo.anteriorDesde && registro.fecha_registro < periodo.anteriorHastaExclusiva);
+      const estados = [...actuales.reduce((mapa, registro) => mapa.set(registro.estado, (mapa.get(registro.estado) || 0) + 1), new Map<string, number>())].map(([estado, cantidad]) => ({ estado, cantidad }));
+      const detalle = actuales.map(registro => ({ id: registro.id_incidencia_retrabajo.toString(), estado: registro.estado, descripcion: registro.descripcion, causaReferencia: registro.causa_referencia, fecha: registro.fecha_registro.toISOString(), idTarea: registro.ejecucion.id_tarea.toString(), idOrden: registro.ejecucion.tarea?.id_orden_trabajo?.toString() || null, idServicio: registro.ejecucion.tarea?.id_servicio_terreno?.toString() || null, destinoOwner: registro.ejecucion.tarea?.id_servicio_terreno ? '/terreno/incidencias' : registro.ejecucion.tarea?.id_orden_trabajo ? '/terreno/produccion' : null }));
+      const vinculados = detalle.filter(item => item.idOrden || item.idServicio).length;
+      const evolucion = [
+        { periodo: `${periodo.anteriorDesde.toISOString().slice(0, 10)}..${new Date(periodo.anteriorHastaExclusiva.getTime() - 86400000).toISOString().slice(0, 10)}`, cantidad: anteriores.length },
+        { periodo: `${periodo.etiquetaDesde}..${periodo.etiquetaHasta}`, cantidad: actuales.length },
+      ];
+      return { periodo: periodoSalida(periodo), estado: actuales.length ? (vinculados === actuales.length ? 'VALIDO' as const : 'PARCIALMENTE_DISPONIBLE' as const) : 'SIN_RESULTADOS' as const, cantidad: indicador(actuales.length ? 'VALIDO' : 'SIN_RESULTADOS', actuales.length, 'Registros del productor canónico terreno.incidencia_retrabajo_tarea'), estados: indicador(estados.length ? 'VALIDO' : 'SIN_RESULTADOS', estados, 'Estados propietarios; pendiente/corregida/cerrada no se reinterpretan'), evolucion: indicador('VALIDO', evolucion, 'Comparación temporal de registros de incidencia/retrabajo'), registros: detalle, retrabajos: indicador(actuales.length ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', actuales.length ? detalle.map(item => ({ referencia: item.id, idOrden: item.idOrden, idServicio: item.idServicio })) : [], 'El productor reúne incidencia y retrabajo en una misma entidad; no se inventa una clasificación separada'), cobertura: indicador(vinculados === actuales.length ? 'VALIDO' : 'PARCIALMENTE_DISPONIBLE', { vinculados, sinVinculoOperacional: actuales.length - vinculados }, 'Vínculo únicamente por ejecución → tarea → OT/servicio'), privacidad: 'Sin ranking ni identificación del trabajador' };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, cantidad: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), estados: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), registros: [] }; }
   }
 
   async consultarResumenResultados(consulta: Consulta) {
