@@ -1,5 +1,5 @@
 import React from 'react';
-import { BanknoteArrowDown, BanknoteArrowUp, BellRing, ChartNoAxesCombined, FileClock, Gauge, Scale, Wallet } from 'lucide-react';
+import { BanknoteArrowDown, BanknoteArrowUp, BellRing, ChartNoAxesCombined, CircleAlert, FileClock, Gauge, Scale, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { EncabezadoM7, PdfDashboard, Periodo, usarConsultaM7 } from './componentes';
 import type { RespuestaM7 } from './componentes';
@@ -7,6 +7,7 @@ import type { RespuestaM7 } from './componentes';
 const destinos: Record<string, { titulo: string; ruta: string; icono: React.ComponentType<{ className?: string }> }> = {
   centroAtencion: { titulo: 'Centro de Atención', ruta: '/dashboard-m7/centro-atencion', icono: BellRing }, cotizacionesPendientes: { titulo: 'Cotizaciones pendientes', ruta: '/dashboard-m7/cotizaciones-pendientes', icono: FileClock },
   ventas: { titulo: 'Ventas', ruta: '/dashboard-m7/ventas', icono: ChartNoAxesCombined }, cuentasCobrar: { titulo: 'Cuentas por cobrar', ruta: '/dashboard-m7/cuentas-cobrar', icono: BanknoteArrowUp }, cuentasPagar: { titulo: 'Cuentas por pagar', ruta: '/dashboard-m7/cuentas-pagar', icono: BanknoteArrowDown }, liquidez: { titulo: 'Liquidez y flujo', ruta: '/dashboard-m7/liquidez', icono: Wallet },
+  riesgoDeficit: { titulo: 'Riesgo de déficit', ruta: '/dashboard-m7/riesgo-deficit', icono: CircleAlert }, exposicionProyectos: { titulo: 'Exposición de Proyectos', ruta: '/dashboard-m7/proyectos/exposicion', icono: Gauge },
   margenProyectos: { titulo: 'Margen por proyecto', ruta: '/dashboard-m7/margen-proyectos', icono: Gauge }, resumenResultados: { titulo: 'Resumen de resultados', ruta: '/dashboard-m7/resumenes', icono: ChartNoAxesCombined }, situacionFinanciera: { titulo: 'Situación financiera', ruta: '/dashboard-m7/resumenes', icono: Scale },
 };
 const estadoBloque = (bloque: RespuestaM7) => String(bloque.estado || 'DATOS_INSUFICIENTES').replaceAll('_', ' ');

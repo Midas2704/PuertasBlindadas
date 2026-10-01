@@ -53,6 +53,7 @@ const periodoSalida = (periodo: Periodo) => ({ desde: periodo.etiquetaDesde, has
 const dentro = (fecha: Date, periodo: Periodo) => fecha >= periodo.desde && fecha < periodo.hastaExclusiva;
 const sumarPorMoneda = (filas: Array<{ moneda: string; monto: number }>) => agruparMonto(filas).map(fila => ({ ...fila, monto: Number(fila.monto.toFixed(2)) }));
 const rutaCliente = (cliente: { rut_cliente: string | null }) => cliente.rut_cliente ? `/clientes/${encodeURIComponent(cliente.rut_cliente)}` : '/clientes';
+const diasCalendario = (desde: Date, hasta: Date) => Math.max(0, Math.floor((Date.UTC(hasta.getUTCFullYear(), hasta.getUTCMonth(), hasta.getUTCDate()) - Date.UTC(desde.getUTCFullYear(), desde.getUTCMonth(), desde.getUTCDate())) / 86400000));
 const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
   if (profundidad > 4) return [`${prefijo}: detalle disponible en pantalla`];
   if (valor === null || valor === undefined) return [`${prefijo}: No disponible`];
@@ -76,7 +77,9 @@ export class M7Controller {
       ['cuentasCobrar', ['CU222', 'CU223', 'CU225'], () => this.consultarCuentasCobrar(consulta, permisos)],
       ['cuentasPagar', ['CU226', 'CU227'], () => this.consultarCuentasPagar(consulta, permisos)],
       ['liquidez', ['CU230', 'CU231'], () => this.consultarLiquidez(consulta, permisos)],
+      ['riesgoDeficit', ['CU232'], () => this.consultarRiesgoDeficit(consulta, permisos)],
       ['margenProyectos', ['CU233', 'CU234', 'CU235'], () => this.consultarMargenProyectos(consulta, permisos)],
+      ['exposicionProyectos', ['CU236'], () => this.consultarExposicionProyectos(consulta, permisos)],
       ['resumenResultados', ['CU238'], () => this.consultarResumenResultados(consulta)],
       ['situacionFinanciera', ['CU239'], () => this.consultarSituacionFinanciera(consulta)],
     ] as const;
@@ -208,18 +211,30 @@ export class M7Controller {
 
   private async consultarCuentasCobrarCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
+    const fechaReferencia = new Date(`${fechaNegocio()}T00:00:00Z`);
     try {
       const notas = await prisma.nota_venta.findMany({ where: { estado_nota_venta: { notIn: retiradosCxC } }, include: { ...incluirNota, ficha_cliente: { include: { cliente_financiero: true } }, hito_cobro: true } });
-      if (!notas.length) return { periodo: periodoSalida(periodo), estado: 'DATOS_INSUFICIENTES' as const, saldo: indicador('DATOS_INSUFICIENTES', null, 'No existen cuentas por cobrar vigentes'), morosidad: indicador('DATOS_INSUFICIENTES', null, 'Sin base de obligaciones'), recaudacion: indicador('DATOS_INSUFICIENTES', null, 'Sin pagos asociados'), compromisosFuturos: indicador('NO_APLICA', [], 'No existen compromisos futuros') };
+      if (!notas.length) return { periodo: periodoSalida(periodo), estado: 'SIN_RESULTADOS' as const, saldo: indicador('SIN_RESULTADOS', null, 'No existen cuentas por cobrar vigentes'), morosidad: indicador('SIN_RESULTADOS', null, 'No existen obligaciones con saldo'), cartera: indicador('SIN_RESULTADOS', [], 'No existen obligaciones con saldo'), aging: indicador('NO_APLICA', null, 'No existe cartera para calcular antigüedad'), recaudacion: indicador('SIN_RESULTADOS', null, 'No existen pagos asociados'), detalleCobranza: indicador('SIN_RESULTADOS', { cantidadPagos: 0, pagos: [] }, 'No existen pagos asociados'), cumplimiento: indicador('DATOS_INSUFICIENTES', null, 'No existe base exigible reconstruible'), recuperacionMoraPrevia: indicador('DATOS_INSUFICIENTES', null, 'No existe histórico suficiente'), compromisosFuturos: indicador('NO_APLICA', [], 'No existen compromisos futuros') };
       const calculadas = notas.map(nota => ({ nota, calculo: calcularNota(nota) }));
-      const saldos = agruparMonto(calculadas.filter(x => x.calculo.saldoPendiente > 0).map(x => ({ moneda: x.nota.moneda.codigo_moneda, monto: x.calculo.saldoPendiente })));
-      const morosas = calculadas.filter(x => x.calculo.esMorosa && x.calculo.saldoPendiente > 0);
-      const pagos = new Map<number, { moneda: string; monto: number }>();
-      for (const { nota } of calculadas) for (const asignacion of nota.asignacion_pago_cliente) { const pago = asignacion.pago_cliente; if (pago.fecha_pago >= periodo.desde && pago.fecha_pago < periodo.hastaExclusiva) pagos.set(pago.id_pago_cliente, { moneda: pago.moneda.codigo_moneda, monto: efectoPago(pago).toNumber() }); }
+      const pendientes = calculadas.filter(x => x.calculo.saldoPendiente > 0);
+      const carteraCompleta = pendientes.map(({ nota, calculo }) => {
+        const vencimiento = nota.fecha_vencimiento;
+        const diasAtraso = vencimiento && vencimiento < fechaReferencia ? diasCalendario(vencimiento, fechaReferencia) : vencimiento ? 0 : null;
+        const condicion = !vencimiento ? 'SIN_FECHA' : vencimiento < fechaReferencia ? 'VENCIDA' : vencimiento >= periodo.hastaExclusiva ? 'FUTURA' : 'VIGENTE';
+        return { idNota: nota.id_nota_venta, numeroNota: nota.numero_nota_venta, idCliente: nota.ficha_cliente.cliente_financiero.id_cliente_financiero, cliente: nota.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, moneda: nota.moneda.codigo_moneda, saldo: calculo.saldoPendiente, fechaVencimiento: vencimiento ? fechaIso(vencimiento) : null, diasAtraso, condicion, estadoOwner: nota.estado_pago, destinoCliente: rutaCliente(nota.ficha_cliente.cliente_financiero) };
+      });
+      const numero = (valor: unknown) => valor === undefined ? null : Number(valor);
+      const idCliente = numero(consulta.idCliente); const saldoMin = numero(consulta.saldoMin); const saldoMax = numero(consulta.saldoMax); const condicion = String(consulta.condicion || '').trim().toUpperCase(); const estadoOwner = String(consulta.estadoOwner || '').trim().toLowerCase();
+      const cartera = carteraCompleta.filter(fila => (idCliente === null || fila.idCliente === idCliente) && (saldoMin === null || fila.saldo >= saldoMin) && (saldoMax === null || fila.saldo <= saldoMax) && (!condicion || fila.condicion === condicion) && (!estadoOwner || fila.estadoOwner.toLowerCase() === estadoOwner));
+      const saldos = agruparMonto(carteraCompleta.map(x => ({ moneda: x.moneda, monto: x.saldo })));
+      const morosas = carteraCompleta.filter(x => x.condicion === 'VENCIDA');
+      const pagos = new Map<number, { idPago: number; idNota: number; idCliente: number; cliente: string; fecha: string; moneda: string; monto: number; destinoCliente: string }>();
+      for (const { nota } of calculadas) for (const asignacion of nota.asignacion_pago_cliente) { const pago = asignacion.pago_cliente; const monto = efectoPago(pago).toNumber(); if (monto > 0 && pago.fecha_pago >= periodo.desde && pago.fecha_pago < periodo.hastaExclusiva) pagos.set(pago.id_pago_cliente, { idPago: pago.id_pago_cliente, idNota: nota.id_nota_venta, idCliente: nota.ficha_cliente.cliente_financiero.id_cliente_financiero, cliente: nota.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, fecha: fechaIso(pago.fecha_pago), moneda: pago.moneda.codigo_moneda, monto, destinoCliente: rutaCliente(nota.ficha_cliente.cliente_financiero) }); }
       const compromisos = calculadas.filter(x => x.calculo.saldoPendiente > 0 && x.nota.fecha_vencimiento && x.nota.fecha_vencimiento >= periodo.hastaExclusiva).map(x => ({ idNota: x.nota.id_nota_venta, cliente: x.nota.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, fecha: fechaIso(x.nota.fecha_vencimiento!), moneda: x.nota.moneda.codigo_moneda, monto: x.calculo.saldoPendiente }));
-      return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, saldo: indicador('VALIDO', saldos, 'Saldo vigente calculado con la fórmula propietaria M3'), morosidad: indicador('VALIDO', { cantidad: morosas.length, porMoneda: agruparMonto(morosas.map(x => ({ moneda: x.nota.moneda.codigo_moneda, monto: x.calculo.saldoPendiente }))) }, 'Obligaciones vencidas con saldo'), recaudacion: pagos.size ? indicador('VALIDO', agruparMonto([...pagos.values()]), 'Pagos efectivos recibidos en el período') : indicador('DATOS_INSUFICIENTES', null, 'No existen pagos efectivos en el período'), compromisosFuturos: compromisos.length ? indicador('VALIDO', compromisos, 'Saldos con vencimiento posterior al período') : indicador('NO_APLICA', [], 'No existen compromisos futuros con fecha válida') };
+      const pagosLista = [...pagos.values()];
+      return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, fechaReferencia: fechaIso(fechaReferencia), saldo: indicador('VALIDO', saldos, 'Saldo vigente calculado con la fórmula propietaria M3'), morosidad: indicador('VALIDO', { cantidad: morosas.length, porMoneda: agruparMonto(morosas.map(x => ({ moneda: x.moneda, monto: x.saldo }))), obligaciones: morosas }, 'Obligaciones vencidas con saldo y días calendario exactos'), cartera: indicador('VALIDO', cartera, 'Cartera filtrada con criterios objetivos; SIN_FECHA no se convierte en cero días'), aging: indicador('PARCIALMENTE_DISPONIBLE', { obligaciones: cartera, rangos: null }, 'Se informan días exactos; no existen rangos oficiales confirmados para agrupar aging'), recaudacion: pagosLista.length ? indicador('VALIDO', agruparMonto(pagosLista), 'Pagos con efecto M3 vigente recibidos en el período') : indicador('SIN_RESULTADOS', null, 'No existen pagos efectivos en el período'), detalleCobranza: indicador(pagosLista.length ? 'VALIDO' : 'SIN_RESULTADOS', { cantidadPagos: pagosLista.length, pagos: pagosLista }, 'Detalle de pagos con efecto M3 vigente y vínculo a Cliente'), cumplimiento: indicador('DATOS_INSUFICIENTES', null, 'No existe una base histórica inequívoca de obligaciones exigibles al inicio del período; no se calcula una tasa genérica'), recuperacionMoraPrevia: indicador('DATOS_INSUFICIENTES', null, 'La fuente actual no reconstruye inequívocamente el saldo vencido al inicio del período'), compromisosFuturos: compromisos.length ? indicador('VALIDO', compromisos, 'Saldos con vencimiento posterior al período') : indicador('NO_APLICA', [], 'No existen compromisos futuros con fecha válida') };
     } catch {
-      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, saldo: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), morosidad: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), recaudacion: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), compromisosFuturos: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible') };
+      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, saldo: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), morosidad: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), cartera: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), aging: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), recaudacion: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), detalleCobranza: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), cumplimiento: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), recuperacionMoraPrevia: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), compromisosFuturos: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible') };
     }
   }
 
@@ -445,8 +460,8 @@ export class M7Controller {
     const datos = await this.consultarCuentasCobrarCompleto(consulta) as Record<string, unknown>;
     if (!permisos) return datos;
     const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
-    if (permisos.includes('CU222')) for (const clave of ['saldo', 'morosidad']) salida[clave] = datos[clave];
-    if (permisos.includes('CU223')) salida.recaudacion = datos.recaudacion;
+    if (permisos.includes('CU222')) for (const clave of ['fechaReferencia', 'saldo', 'morosidad', 'cartera', 'aging']) salida[clave] = datos[clave];
+    if (permisos.includes('CU223')) for (const clave of ['recaudacion', 'detalleCobranza', 'cumplimiento', 'recuperacionMoraPrevia']) salida[clave] = datos[clave];
     if (permisos.includes('CU225')) salida.compromisosFuturos = datos.compromisosFuturos;
     return salida;
   }
@@ -469,6 +484,29 @@ export class M7Controller {
     return salida;
   }
 
+  async consultarRiesgoDeficit(consulta: Consulta, permisos: string[]) {
+    const datos = await this.consultarLiquidezCompleto(consulta);
+    const proyeccion = datos.proyeccion;
+    const valor = proyeccion.valor as { serie?: Array<{ fecha: string; moneda: string; saldo: number }>; ingresos?: Array<Record<string, unknown>>; egresos?: Array<Record<string, unknown>> } | null;
+    const serie = valor?.serie?.filter(punto => /^\d{4}-\d{2}-\d{2}$/.test(punto.fecha) && typeof punto.moneda === 'string' && Number.isFinite(Number(punto.saldo))) || [];
+    let primerDeficit; let minimoProyectado;
+    if (proyeccion.estado !== 'VALIDO' || !serie.length) {
+      primerDeficit = indicador('DATOS_INSUFICIENTES', null, 'CU231 no entrega una serie válida con saldo inicial y saldo proyectado');
+      minimoProyectado = indicador('DATOS_INSUFICIENTES', null, 'No existe una serie válida para identificar el mínimo del horizonte');
+    } else {
+      const monedas = [...new Set(serie.map(punto => punto.moneda))];
+      const primeros = monedas.map(moneda => serie.filter(punto => punto.moneda === moneda && Number(punto.saldo) < 0).sort((a, b) => a.fecha.localeCompare(b.fecha))[0]).filter(Boolean);
+      const minimos = monedas.map(moneda => serie.filter(punto => punto.moneda === moneda).sort((a, b) => Number(a.saldo) - Number(b.saldo) || a.fecha.localeCompare(b.fecha))[0]);
+      primerDeficit = primeros.length ? indicador('VALIDO', primeros, 'Primer saldo negativo por moneda dentro del horizonte válido de CU231') : indicador('SIN_RESULTADOS', [], 'Sin déficit dentro del horizonte');
+      minimoProyectado = indicador('VALIDO', minimos, 'Menor saldo proyectado por moneda dentro del horizonte');
+    }
+    const factores: Array<Record<string, unknown>> = [];
+    if (permisos.includes('CU225')) for (const fila of valor?.ingresos || []) factores.push({ ...fila, naturaleza: 'COBRO_M3', origen: 'M3' });
+    if (permisos.includes('CU227')) for (const fila of valor?.egresos || []) factores.push({ ...fila, naturaleza: 'PAGO_M5', origen: 'M5' });
+    const hayPermisoFactores = permisos.includes('CU225') || permisos.includes('CU227');
+    return { periodo: datos.periodo, estado: primerDeficit.estado === 'DATOS_INSUFICIENTES' ? 'DATOS_INSUFICIENTES' as const : 'VALIDO' as const, primerDeficit, minimoProyectado, factores: hayPermisoFactores ? indicador(factores.length ? 'VALIDO' : 'SIN_RESULTADOS', factores, 'Compromisos reales visibles según permisos de sus fuentes; no representan causalidad automática') : indicador('SIN_PERMISO', null, 'CU232 no concede acceso al detalle de cobros o pagos subyacentes'), criterio: 'Sin score, ranking ni recomendación automática' };
+  }
+
   async consultarMargenProyectos(consulta: Consulta, permisos?: string[]) {
     const datos = await this.consultarMargenProyectosCompleto(consulta) as Record<string, unknown>;
     if (!permisos) return datos;
@@ -481,6 +519,59 @@ export class M7Controller {
       return salida;
     });
     return { periodo: datos.periodo, estado: datos.estado, umbralMargen: permisos.includes('CU233') ? datos.umbralMargen : undefined, proyectos, cobertura: datos.cobertura };
+  }
+
+  async consultarExposicionProyectos(consulta: Consulta, permisos: string[]) {
+    const periodo = resolverPeriodoM7(consulta);
+    try {
+      const [margen, proyectos] = await Promise.all([
+        this.consultarMargenProyectosCompleto(consulta),
+        prisma.proyecto_financiero.findMany({ include: { moneda: true, proyecto: true, ficha_cliente: { include: { cliente_financiero: true } }, nota_venta: { include: incluirNota } }, orderBy: { codigo_proyecto_financiero: 'asc' } }),
+      ]);
+      const abiertos = proyectos.filter(proyecto => ['activo', 'abierto'].includes(proyecto.estado_financiero_proyecto.toLowerCase()));
+      const usosNota = proyectos.reduce((mapa, proyecto) => { if (proyecto.id_nota_venta) mapa.set(proyecto.id_nota_venta, (mapa.get(proyecto.id_nota_venta) || 0) + 1); return mapa; }, new Map<number, number>());
+      const margenPorProyecto = new Map(margen.proyectos.map(proyecto => [proyecto.idProyecto, proyecto]));
+      const filas = abiertos.map(proyecto => {
+        const atribucion = margenPorProyecto.get(proyecto.id_proyecto_financiero);
+        const nota = proyecto.nota_venta;
+        const notaInequivoca = Boolean(nota && usosNota.get(nota.id_nota_venta) === 1 && !retiradosCxC.includes(nota.estado_nota_venta));
+        const calculo = notaInequivoca && nota ? calcularNota(nota) : null;
+        const fuentesNoDisponibles = ['Inventario sin valorización inequívoca', 'Gastos generales sin imputación directa'];
+        if (!notaInequivoca) fuentesNoDisponibles.push('CxC asociada no disponible con las fuentes actuales');
+        const fila: Record<string, unknown> = { idProyecto: proyecto.id_proyecto_financiero, codigo: proyecto.codigo_proyecto_financiero, nombre: proyecto.proyecto?.proyecto_nombre_referencia || proyecto.codigo_proyecto_financiero, estadoFinanciero: proyecto.estado_financiero_proyecto, estadoOperacional: proyecto.proyecto?.proyecto_estado_operacional || null, moneda: atribucion?.moneda || proyecto.moneda.codigo_moneda, ingresosAtribuibles: atribucion?.ingresosAtribuibles ?? null, costosDirectosAtribuibles: atribucion?.costosDirectosAtribuibles ?? null, cobrado: calculo?.pagosEfectivos ?? null, pendienteCobrar: calculo?.saldoPendiente ?? null, destinoContexto: `/dashboard-m7/proyectos/${proyecto.id_proyecto_financiero}?anio=${periodo.desde.getUTCFullYear()}&mes=${periodo.desde.getUTCMonth() + 1}`, destinoCliente: rutaCliente(proyecto.ficha_cliente.cliente_financiero), cobertura: indicador('PARCIALMENTE_DISPONIBLE', { fuentesIncluidas: ['Proyecto financiero', ...(atribucion ? ['Atribuciones válidas de CU233-CU235'] : []), ...(notaInequivoca ? ['CxC M3 vinculada directamente'] : [])], fuentesNoDisponibles }, 'La exposición sólo incorpora relaciones inequívocas y no representa costo total del Proyecto') };
+        if (permisos.includes('CU234')) fila.desgloseIngresos = atribucion?.desgloseIngresos || [];
+        if (permisos.includes('CU235')) fila.desgloseCostos = atribucion?.desgloseCostos || [];
+        return fila;
+      });
+      return { periodo: periodoSalida(periodo), estado: filas.length ? 'PARCIALMENTE_DISPONIBLE' as const : 'SIN_RESULTADOS' as const, proyectos: filas, criterio: 'Sólo Proyectos financieros con estado propietario activo o abierto; sin score ni prioridad automática' };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, proyectos: [], criterio: 'No fue posible consultar las fuentes de Proyecto' }; }
+  }
+
+  async consultarContextoProyecto(idProyecto: number, consulta: Consulta, permisos: string[]) {
+    if (!Number.isInteger(idProyecto) || idProyecto <= 0) throw new ErrorAplicacion(400, 'Proyecto inválido');
+    const periodo = resolverPeriodoM7(consulta);
+    const proyecto = await prisma.proyecto_financiero.findUnique({ where: { id_proyecto_financiero: idProyecto }, include: { moneda: true, proyecto: true, ficha_cliente: { include: { cliente_financiero: true } } } });
+    if (!proyecto) throw new ErrorAplicacion(404, 'Proyecto no encontrado');
+    const bloques: Record<string, unknown> = {};
+    if (['CU233', 'CU234', 'CU235', 'CU236'].some(permiso => permisos.includes(permiso))) {
+      try {
+        const exposicion = await this.consultarExposicionProyectos(consulta, permisos);
+        const fila = exposicion.proyectos.find(item => item.idProyecto === idProyecto);
+        bloques.financiero = fila ? { estado: exposicion.estado, ...fila, destino: '/dashboard-m7/margen-proyectos' } : { estado: 'DATOS_INSUFICIENTES', detalle: 'El Proyecto no tiene exposición abierta disponible en el período' };
+      } catch { bloques.financiero = { estado: 'FUENTE_NO_DISPONIBLE', detalle: 'La fuente financiera no está disponible' }; }
+    }
+    if (proyecto.id_proyecto_terreno && (permisos.includes('CU199') || permisos.includes('CU204'))) {
+      try {
+        const terreno = await prisma.proyecto.findUnique({ where: { proyecto_proyecto_id: proyecto.id_proyecto_terreno }, include: { orden_trabajo: { include: { tareas_produccion: { select: { tarea_tarea_id: true, tarea_estado_de_tarea: true } } }, orderBy: { orden_trabajo_fecha_hora: 'desc' } } } });
+        if (terreno) {
+          const operacional: Record<string, unknown> = { estado: 'VALIDO', proyectoTerreno: terreno.proyecto_proyecto_id.toString(), codigo: terreno.proyecto_codigo_proyecto, nombre: terreno.proyecto_nombre_referencia, destinoTerreno: '/terreno/visitas' };
+          if (permisos.includes('CU199')) { operacional.estadoOperacional = terreno.proyecto_estado_operacional; operacional.estadoProduccion = terreno.proyecto_estado_produccion; }
+          if (permisos.includes('CU204')) operacional.ordenesTrabajo = terreno.orden_trabajo.map(orden => ({ idOrden: orden.orden_trabajo_id_orden.toString(), estado: orden.orden_trabajo_estado, fecha: orden.orden_trabajo_fecha_hora?.toISOString() || null, tareas: orden.tareas_produccion.length, destino: orden.tareas_produccion[0] ? `/terreno/tareas/${orden.tareas_produccion[0].tarea_tarea_id}/levantamiento` : '/terreno/visitas' }));
+          bloques.operacional = operacional;
+        }
+      } catch { bloques.operacional = { estado: 'FUENTE_NO_DISPONIBLE', detalle: 'Terreno no está disponible' }; }
+    }
+    return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, proyecto: { idProyecto: proyecto.id_proyecto_financiero, codigo: proyecto.codigo_proyecto_financiero, nombre: proyecto.proyecto?.proyecto_nombre_referencia || proyecto.codigo_proyecto_financiero, estadoFinanciero: proyecto.estado_financiero_proyecto, moneda: proyecto.moneda.codigo_moneda }, destinoCliente: rutaCliente(proyecto.ficha_cliente.cliente_financiero), bloques };
   }
 
   async consultarResumenResultados(consulta: Consulta) {

@@ -77,7 +77,7 @@ export const operacionesPermiso: Record<string, string> = {
  registrarIncidenciaRetrabajo:'CU212',
  listarIncidenciasOperativas:'CU213', actualizarIncidenciaOperativa:'CU213',
  catalogoDeduccionesEmpleado:'CU214', listarDeduccionesEmpleado:'CU214', asignarDeduccionEmpleado:'CU214', finalizarDeduccionEmpleado:'CU214',
- consultarPanelGeneralM7:'CU215', consultarCentroAtencionM7:'CU216', consultarCotizacionesPendientesM7:'CU217', consultarContextoClienteM7:'CU221', consultarAnalisisVentasM7:'CU219', consultarCuentasCobrarM7:'CU222', consultarCuentasPagarM7:'CU226', consultarLiquidezM7:'CU230',
+ consultarPanelGeneralM7:'CU215', consultarCentroAtencionM7:'CU216', consultarCotizacionesPendientesM7:'CU217', consultarContextoClienteM7:'CU221', consultarAnalisisVentasM7:'CU219', consultarCuentasCobrarM7:'CU222', consultarCuentasPagarM7:'CU226', consultarLiquidezM7:'CU230', consultarRiesgoDeficitM7:'CU232', consultarExposicionProyectosM7:'CU236', consultarContextoProyectoM7:'CU237',
  consultarMargenProyectosM7:'CU233', consultarResumenResultadosM7:'CU238', consultarSituacionFinancieraM7:'CU239', descargarPdfDashboardM7:'CU245', consultarUmbralMargenM7:'CU246', configurarUmbralMargenM7:'CU246',
 };
 

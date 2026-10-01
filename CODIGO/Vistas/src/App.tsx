@@ -51,6 +51,9 @@ import ResumenesM7 from './views/DashboardM7/ResumenesM7';
 import CentroAtencionM7 from './views/DashboardM7/CentroAtencionM7';
 import CotizacionesPendientesM7 from './views/DashboardM7/CotizacionesPendientesM7';
 import ContextoClienteM7 from './views/DashboardM7/ContextoClienteM7';
+import RiesgoDeficitM7 from './views/DashboardM7/RiesgoDeficitM7';
+import ExposicionProyectosM7 from './views/DashboardM7/ExposicionProyectosM7';
+import ContextoProyectoM7 from './views/DashboardM7/ContextoProyectoM7';
 
 const App: React.FC = () => {
   return (
@@ -97,7 +100,10 @@ const App: React.FC = () => {
           <Route path="dashboard-m7/cuentas-cobrar" element={<Protegido permiso={['CU222','CU223','CU225']}><CuentasCobrarM7 /></Protegido>} />
           <Route path="dashboard-m7/cuentas-pagar" element={<Protegido permiso={['CU226','CU227']}><CuentasPagarM7 /></Protegido>} />
           <Route path="dashboard-m7/liquidez" element={<Protegido permiso={['CU230','CU231']}><LiquidezM7 /></Protegido>} />
+          <Route path="dashboard-m7/riesgo-deficit" element={<Protegido permiso="CU232"><RiesgoDeficitM7 /></Protegido>} />
           <Route path="dashboard-m7/margen-proyectos" element={<Protegido permiso={['CU233','CU234','CU235']}><MargenProyectosM7 /></Protegido>} />
+          <Route path="dashboard-m7/proyectos/exposicion" element={<Protegido permiso="CU236"><ExposicionProyectosM7 /></Protegido>} />
+          <Route path="dashboard-m7/proyectos/:id" element={<Protegido permiso="CU237"><ContextoProyectoM7 /></Protegido>} />
           <Route path="dashboard-m7/resumenes" element={<Protegido permiso={['CU238','CU239']}><ResumenesM7 /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />

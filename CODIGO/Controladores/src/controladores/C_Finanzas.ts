@@ -70,7 +70,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida'
   | 'registrarResultadoVisita' | 'registrarIncidenciaRetrabajo' | 'listarIncidenciasOperativas' | 'actualizarIncidenciaOperativa'
   | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
-  | 'consultarPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7'
+  | 'consultarPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
   | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'descargarPdfDashboardM7'
   | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7';
 
@@ -446,6 +446,9 @@ export class C_Finanzas {
       case 'consultarCuentasCobrarM7': return this.m7.consultarCuentasCobrar(solicitud.consulta || {}, actor.permisos);
       case 'consultarCuentasPagarM7': return this.m7.consultarCuentasPagar(solicitud.consulta || {}, actor.permisos);
       case 'consultarLiquidezM7': return this.m7.consultarLiquidez(solicitud.consulta || {}, actor.permisos);
+      case 'consultarRiesgoDeficitM7': return this.m7.consultarRiesgoDeficit(solicitud.consulta || {}, actor.permisos);
+      case 'consultarExposicionProyectosM7': return this.m7.consultarExposicionProyectos(solicitud.consulta || {}, actor.permisos);
+      case 'consultarContextoProyectoM7': return this.m7.consultarContextoProyecto(identificador(parametros.id), solicitud.consulta || {}, actor.permisos);
       case 'consultarMargenProyectosM7': return this.m7.consultarMargenProyectos(solicitud.consulta || {}, actor.permisos);
       case 'consultarResumenResultadosM7': return this.m7.consultarResumenResultados(solicitud.consulta || {});
       case 'consultarSituacionFinancieraM7': return this.m7.consultarSituacionFinanciera(solicitud.consulta || {});

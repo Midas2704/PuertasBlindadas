@@ -30,6 +30,7 @@ import {
   Scale,
   BellRing,
   FileClock,
+  CircleAlert,
 } from 'lucide-react';
 
 type MenuItem = {
@@ -74,7 +75,9 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/dashboard-m7/cuentas-cobrar', label: 'Cuentas por Cobrar', icon: Banknote, permissions: ['CU222', 'CU223', 'CU225'] },
       { path: '/dashboard-m7/cuentas-pagar', label: 'Cuentas por Pagar', icon: Landmark, permissions: ['CU226', 'CU227'] },
       { path: '/dashboard-m7/liquidez', label: 'Liquidez y Flujo', icon: WalletCards, permissions: ['CU230', 'CU231'] },
+      { path: '/dashboard-m7/riesgo-deficit', label: 'Riesgo de Déficit', icon: CircleAlert, permission: 'CU232' },
       { path: '/dashboard-m7/margen-proyectos', label: 'Margen por Proyecto', icon: Gauge, permissions: ['CU233', 'CU234', 'CU235'] },
+      { path: '/dashboard-m7/proyectos/exposicion', label: 'Exposición de Proyectos', icon: Gauge, permission: 'CU236' },
       { path: '/dashboard-m7/resumenes', label: 'Resúmenes Gerenciales', icon: Scale, permissions: ['CU238', 'CU239'] },
     ],
   },
