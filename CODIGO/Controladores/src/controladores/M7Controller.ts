@@ -5,7 +5,7 @@ import { calcularNota, efectoPago, fechaNegocio, incluirNota } from '../utilidad
 import { archivoPdf } from '../utilidades/pdf';
 
 type Consulta = Record<string, unknown>;
-export type EstadoIndicadorM7 = 'VALIDO' | 'DATOS_INSUFICIENTES' | 'FUENTE_NO_DISPONIBLE' | 'DESACTUALIZADO' | 'NO_APLICA' | 'CONFIGURACION_PENDIENTE';
+export type EstadoIndicadorM7 = 'VALIDO' | 'SIN_RESULTADOS' | 'DATOS_INSUFICIENTES' | 'FUENTE_NO_DISPONIBLE' | 'DESACTUALIZADO' | 'PARCIALMENTE_DISPONIBLE' | 'SIN_PERMISO' | 'ERROR_CALCULO' | 'NO_APLICA' | 'CONFIGURACION_PENDIENTE';
 
 type Periodo = { desde: Date; hastaExclusiva: Date; anteriorDesde: Date; anteriorHastaExclusiva: Date; etiquetaDesde: string; etiquetaHasta: string };
 const estadosVentaDefinitiva = ['confirmada', 'cerrada'];
@@ -52,6 +52,7 @@ const agruparMonto = (filas: Array<{ moneda: string; monto: number }>) => [...fi
 const periodoSalida = (periodo: Periodo) => ({ desde: periodo.etiquetaDesde, hasta: periodo.etiquetaHasta });
 const dentro = (fecha: Date, periodo: Periodo) => fecha >= periodo.desde && fecha < periodo.hastaExclusiva;
 const sumarPorMoneda = (filas: Array<{ moneda: string; monto: number }>) => agruparMonto(filas).map(fila => ({ ...fila, monto: Number(fila.monto.toFixed(2)) }));
+const rutaCliente = (cliente: { rut_cliente: string | null }) => cliente.rut_cliente ? `/clientes/${encodeURIComponent(cliente.rut_cliente)}` : '/clientes';
 const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
   if (profundidad > 4) return [`${prefijo}: detalle disponible en pantalla`];
   if (valor === null || valor === undefined) return [`${prefijo}: No disponible`];
@@ -69,6 +70,8 @@ export class M7Controller {
   async consultarPanelGeneral(consulta: Consulta, permisos: string[]) {
     const periodo = resolverPeriodoM7(consulta);
     const definiciones = [
+      ['centroAtencion', ['CU216'], () => this.consultarCentroAtencion(consulta, permisos)],
+      ['cotizacionesPendientes', ['CU217'], () => this.consultarCotizacionesPendientes(consulta)],
       ['ventas', ['CU219', 'CU220'], () => this.consultarAnalisisVentas(consulta, permisos)],
       ['cuentasCobrar', ['CU222', 'CU223', 'CU225'], () => this.consultarCuentasCobrar(consulta, permisos)],
       ['cuentasPagar', ['CU226', 'CU227'], () => this.consultarCuentasPagar(consulta, permisos)],
@@ -85,6 +88,66 @@ export class M7Controller {
     return { periodo: periodoSalida(periodo), bloques: Object.fromEntries(resultados), bloquesOcultos: definiciones.filter(([, requeridos]) => !requeridos.some(permiso => permisos.includes(permiso))).map(([clave]) => clave) };
   }
 
+  async consultarCentroAtencion(consulta: Consulta, permisos: string[]) {
+    const periodo = resolverPeriodoM7(consulta);
+    const excepciones: Array<Record<string, unknown>> = [];
+    const cobertura: Array<{ familia: string; estado: EstadoIndicadorM7; detalle: string }> = [];
+    const familias: Array<{ familia: string; permiso: string; cargar: () => Promise<void> }> = [
+      {
+        familia: 'CUENTAS_POR_COBRAR', permiso: 'CU222', cargar: async () => {
+          const datos = await this.consultarCuentasCobrarCompleto(consulta);
+          if (datos.morosidad.estado === 'FUENTE_NO_DISPONIBLE') throw new Error('CxC no disponible');
+          const valor = datos.morosidad.valor as { cantidad: number; porMoneda: Array<{ moneda: string; monto: number }> } | null;
+          if (valor?.cantidad) excepciones.push({ familia: 'CUENTAS_POR_COBRAR', ocurrio: 'Existen cuentas por cobrar vencidas con saldo', magnitud: valor, calidad: datos.morosidad.estado, destino: `/dashboard-m7/cuentas-cobrar?anio=${periodo.desde.getUTCFullYear()}&mes=${periodo.desde.getUTCMonth() + 1}`, origen: 'M3' });
+          cobertura.push({ familia: 'CUENTAS_POR_COBRAR', estado: datos.morosidad.estado, detalle: datos.morosidad.detalle });
+        },
+      },
+      {
+        familia: 'CUENTAS_POR_PAGAR', permiso: 'CU226', cargar: async () => {
+          const datos = await this.consultarCuentasPagarCompleto(consulta);
+          if (datos.estados.estado === 'FUENTE_NO_DISPONIBLE') throw new Error('CxP no disponible');
+          const estados = (datos.estados.valor || []) as Array<{ estado: string; cantidad: number }>;
+          const vencidas = estados.filter(fila => /vencid/i.test(fila.estado)).reduce((total, fila) => total + fila.cantidad, 0);
+          if (vencidas) excepciones.push({ familia: 'CUENTAS_POR_PAGAR', ocurrio: 'Existen obligaciones de proveedor vencidas', magnitud: { cantidad: vencidas }, calidad: datos.estados.estado, destino: `/dashboard-m7/cuentas-pagar?anio=${periodo.desde.getUTCFullYear()}&mes=${periodo.desde.getUTCMonth() + 1}`, origen: 'M5' });
+          cobertura.push({ familia: 'CUENTAS_POR_PAGAR', estado: datos.estados.estado, detalle: datos.estados.detalle });
+        },
+      },
+      {
+        familia: 'MARGEN_PROYECTO', permiso: 'CU233', cargar: async () => {
+          const datos = await this.consultarMargenProyectosCompleto(consulta);
+          if (datos.estado === 'FUENTE_NO_DISPONIBLE') throw new Error('Margen no disponible');
+          for (const proyecto of datos.proyectos.filter(fila => ['PERDIDA', 'MARGEN_CRITICO'].includes(fila.clasificacion))) excepciones.push({ familia: 'MARGEN_PROYECTO', ocurrio: proyecto.clasificacion === 'PERDIDA' ? 'Proyecto con margen directo negativo' : 'Proyecto bajo el umbral de margen configurado', magnitud: { idProyecto: proyecto.idProyecto, codigo: proyecto.codigo, moneda: proyecto.moneda, margenDirecto: proyecto.margenDirecto, porcentajeMargen: proyecto.porcentajeMargen }, calidad: proyecto.estado, destino: `/dashboard-m7/margen-proyectos?anio=${periodo.desde.getUTCFullYear()}&mes=${periodo.desde.getUTCMonth() + 1}`, origen: 'M2/M5/M6' });
+          cobertura.push({ familia: 'MARGEN_PROYECTO', estado: datos.estado, detalle: datos.cobertura.detalle });
+        },
+      },
+    ];
+    const autorizadas = familias.filter(familia => permisos.includes(familia.permiso));
+    for (const familia of autorizadas) {
+      try { await familia.cargar(); }
+      catch { cobertura.push({ familia: familia.familia, estado: 'FUENTE_NO_DISPONIBLE', detalle: 'La fuente de esta familia no está disponible' }); }
+    }
+    const fuentesCaidas = cobertura.some(familia => familia.estado === 'FUENTE_NO_DISPONIBLE');
+    return { periodo: periodoSalida(periodo), estado: fuentesCaidas ? 'PARCIALMENTE_DISPONIBLE' as const : excepciones.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, excepciones, cobertura, criterioOrden: 'Familia y magnitud objetiva; no existe score ni recomendación automática' };
+  }
+
+  async consultarCotizacionesPendientes(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    const hoy = new Date(`${fechaNegocio()}T00:00:00Z`);
+    try {
+      const cotizaciones = await prisma.cotizacion.findMany({
+        where: { estado_cotizacion: 'emitida', fecha_vigencia: { gte: hoy }, fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, nota_venta: null },
+        include: { moneda: true, ficha_cliente: { include: { cliente_financiero: true } } },
+        orderBy: [{ fecha_vigencia: 'asc' }, { id_cotizacion: 'asc' }],
+      });
+      const filas = cotizaciones.map(cotizacion => ({ idCotizacion: cotizacion.id_cotizacion, idCliente: cotizacion.ficha_cliente.cliente_financiero.id_cliente_financiero, cliente: cotizacion.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, moneda: cotizacion.moneda.codigo_moneda, montoPotencial: cotizacion.monto_neto?.gt(0) ? Number(cotizacion.monto_neto) : null, fechaEmision: fechaIso(cotizacion.fecha_emision), fechaVigencia: cotizacion.fecha_vigencia ? fechaIso(cotizacion.fecha_vigencia) : null, destinoCotizacion: `/cotizacion/nueva?borrador=${cotizacion.id_cotizacion}`, destinoCliente: rutaCliente(cotizacion.ficha_cliente.cliente_financiero) }));
+      const conMonto = filas.filter(fila => fila.montoPotencial !== null) as Array<typeof filas[number] & { montoPotencial: number }>;
+      const montos = conMonto.map(fila => ({ moneda: fila.moneda, monto: fila.montoPotencial }));
+      return { periodo: periodoSalida(periodo), estado: filas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, cantidad: indicador(filas.length ? 'VALIDO' : 'SIN_RESULTADOS', filas.length, 'Cotizaciones emitidas, vigentes y aún no formalizadas como Venta'), montoPotencial: conMonto.length ? indicador(conMonto.length === filas.length ? 'VALIDO' : 'PARCIALMENTE_DISPONIBLE', agruparMonto(montos), `MONTO POTENCIAL; ${filas.length - conMonto.length} cotización(es) sin monto neto válido fueron excluidas del agregado`) : indicador('DATOS_INSUFICIENTES', null, 'MONTO POTENCIAL no disponible: las cotizaciones no tienen monto neto válido'), cotizaciones: filas, naturaleza: 'MONTO POTENCIAL; no representa Venta, ingreso, cobro, caja futura, forecast ni probabilidad de cierre' };
+    } catch {
+      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, cantidad: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), montoPotencial: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), cotizaciones: [], naturaleza: 'MONTO POTENCIAL' };
+    }
+  }
+
   private async consultarAnalisisVentasCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
     try {
@@ -93,7 +156,7 @@ export class M7Controller {
         prisma.nota_venta.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_nota_venta: { in: estadosVentaDefinitiva } }, include: incluir, orderBy: { fecha_emision: 'asc' } }),
         prisma.nota_venta.findMany({ where: { fecha_emision: { gte: periodo.anteriorDesde, lt: periodo.anteriorHastaExclusiva }, estado_nota_venta: { in: estadosVentaDefinitiva } }, include: incluir }),
       ]);
-      if (!actuales.length) return { periodo: periodoSalida(periodo), estado: 'DATOS_INSUFICIENTES' as const, montoNeto: indicador('DATOS_INSUFICIENTES', null, 'No existen ventas definitivas en el período'), cantidad: indicador('DATOS_INSUFICIENTES', null, 'Sin base para contar ventas'), evolucion: [], clientes: [], tiposCliente: [], productos: indicador('DATOS_INSUFICIENTES', null, 'Sin detalle comercial fiable'), comparacion: indicador('NO_APLICA', null, 'No existe base actual para comparar') };
+      if (!actuales.length) return { periodo: periodoSalida(periodo), estado: 'SIN_RESULTADOS' as const, montoNeto: indicador('SIN_RESULTADOS', null, 'No existen ventas definitivas en el período'), cantidad: indicador('SIN_RESULTADOS', 0, 'No existen ventas definitivas en el período'), ticketMedio: indicador('NO_APLICA', null, 'No hay Ventas válidas para calcular ticket medio'), evolucion: [], clientes: [], tiposCliente: [], concentracionClientes: indicador('NO_APLICA', null, 'No hay Ventas válidas para calcular participación'), productos: indicador('DATOS_INSUFICIENTES', null, 'Sin detalle comercial fiable'), comparacion: indicador('NO_APLICA', null, 'No existe base actual para comparar') };
       const filas = actuales.map(nota => ({ moneda: nota.moneda.codigo_moneda, monto: Number(nota.monto_neto), nota }));
       const porMoneda = agruparMonto(filas);
       const convertir = (nota: typeof actuales[number]) => nota.moneda.codigo_moneda === 'CLP' ? nota.monto_neto : nota.tipo_cambio_usado?.gt(0) ? nota.monto_neto.mul(nota.tipo_cambio_usado) : null;
@@ -103,21 +166,43 @@ export class M7Controller {
       const totalAnterior = anteriores.map(convertir as (nota: typeof anteriores[number]) => Prisma.Decimal | null);
       let anteriorClp: number | null = 0;
       for (const monto of totalAnterior) anteriorClp = monto && anteriorClp !== null ? new Prisma.Decimal(anteriorClp).plus(monto).toDecimalPlaces(2).toNumber() : null;
-      const comparacion = anteriorClp === 0 ? indicador('NO_APLICA', null, 'El período anterior tiene base cero') : totalClp === null || anteriorClp === null ? indicador('DATOS_INSUFICIENTES', null, 'Falta conversión histórica para comparar monedas') : indicador('VALIDO', { anteriorClp, actualClp: totalClp, variacionPorcentual: Number((((totalClp - anteriorClp) / anteriorClp) * 100).toFixed(2)) }, 'Comparación contra un período inmediatamente anterior de igual duración');
-      const agrupar = (clave: (nota: typeof actuales[number]) => string) => [...actuales.reduce((mapa, nota) => { const llave = clave(nota); mapa.set(llave, (mapa.get(llave) || 0) + Number(nota.monto_neto)); return mapa; }, new Map<string, number>())].map(([nombre, montoNeto]) => ({ nombre, montoNeto }));
+      const comparacion = anteriorClp === 0 ? indicador('NO_APLICA', { anteriorClp: 0, actualClp: totalClp, diferenciaAbsolutaClp: totalClp }, 'El período anterior tiene base cero; la variación porcentual no aplica') : totalClp === null || anteriorClp === null ? indicador('DATOS_INSUFICIENTES', null, 'Falta conversión histórica para comparar monedas') : indicador('VALIDO', { anteriorClp, actualClp: totalClp, diferenciaAbsolutaClp: Number((totalClp - anteriorClp).toFixed(2)), variacionPorcentual: Number((((totalClp - anteriorClp) / anteriorClp) * 100).toFixed(2)) }, 'Comparación contra un período inmediatamente anterior de igual duración');
+      const agrupar = (clave: (nota: typeof actuales[number]) => string) => [...actuales.reduce((mapa, nota) => { const llave = `${clave(nota)}|${nota.moneda.codigo_moneda}`; mapa.set(llave, (mapa.get(llave) || 0) + Number(nota.monto_neto)); return mapa; }, new Map<string, number>())].map(([llave, montoNeto]) => { const separador = llave.lastIndexOf('|'); return { nombre: llave.slice(0, separador), moneda: llave.slice(separador + 1), montoNeto: Number(montoNeto.toFixed(2)) }; });
+      const clientesAgrupados = [...actuales.reduce((mapa, nota) => {
+        const cliente = nota.ficha_cliente.cliente_financiero;
+        const moneda = nota.moneda.codigo_moneda;
+        const llave = `${cliente.id_cliente_financiero}|${moneda}`;
+        const existente = mapa.get(llave);
+        mapa.set(llave, {
+          idCliente: cliente.id_cliente_financiero,
+          nombre: cliente.nombre_razon_social_referencia,
+          moneda,
+          montoNeto: Number(((existente?.montoNeto || 0) + Number(nota.monto_neto)).toFixed(2)),
+        });
+        return mapa;
+      }, new Map<string, { idCliente: number; nombre: string; moneda: string; montoNeto: number }>()).values()];
+      const clientes = clientesAgrupados.map(({ idCliente, ...fila }) => ({ ...fila, destinoCliente: rutaCliente(actuales.find(nota => nota.ficha_cliente.cliente_financiero.id_cliente_financiero === idCliente)!.ficha_cliente.cliente_financiero) }));
+      const concentracion = clientesAgrupados.map(fila => ({ idCliente: fila.idCliente, cliente: fila.nombre, moneda: fila.moneda, montoNeto: fila.montoNeto }))
+        .sort((a, b) => a.moneda.localeCompare(b.moneda) || b.montoNeto - a.montoNeto || a.cliente.localeCompare(b.cliente));
+      const totalesMoneda = new Map(porMoneda.map(fila => [fila.moneda, fila.monto]));
+      const posiciones = new Map<string, number>();
+      const concentracionClientes = concentracion.map(fila => { const posicion = (posiciones.get(fila.moneda) || 0) + 1; posiciones.set(fila.moneda, posicion); const total = totalesMoneda.get(fila.moneda) || 0; return { ...fila, participacionPorcentual: total > 0 ? Number((fila.montoNeto / total * 100).toFixed(2)) : null, posicion, destinoCliente: rutaCliente(actuales.find(nota => nota.ficha_cliente.cliente_financiero.id_cliente_financiero === fila.idCliente)!.ficha_cliente.cliente_financiero) }; });
+      const ticketPorMoneda = porMoneda.map(fila => ({ moneda: fila.moneda, monto: Number((fila.monto / actuales.filter(nota => nota.moneda.codigo_moneda === fila.moneda).length).toFixed(2)) }));
       const detalles = actuales.flatMap(nota => nota.cotizacion?.detalle_cotizacion.map(detalle => ({ nombre: detalle.item_comercial.nombre_item, tipo: detalle.item_comercial.tipo_item || 'Sin tipo', monto: Number(detalle.subtotal_item_estimado) })) || []);
       return {
         periodo: periodoSalida(periodo), estado: 'VALIDO' as const,
         montoNeto: totalClp === null ? indicador('DATOS_INSUFICIENTES', { porMoneda, totalClp: null }, 'Montos por moneda disponibles; falta conversión histórica para consolidar CLP') : indicador('VALIDO', { porMoneda, totalClp }, 'Monto neto de ventas confirmadas o cerradas'),
         cantidad: indicador('VALIDO', actuales.length, 'Ventas definitivas del período'),
+        ticketMedio: indicador('VALIDO', { porMoneda: ticketPorMoneda, totalClp: totalClp === null ? null : Number((totalClp / actuales.length).toFixed(2)) }, 'Monto neto de Ventas válidas dividido por su cantidad; no usa cotizaciones, cobros ni facturación documental'),
         evolucion: agrupar(nota => fechaIso(nota.fecha_emision)),
-        clientes: agrupar(nota => nota.ficha_cliente.cliente_financiero.nombre_razon_social_referencia),
+        clientes,
         tiposCliente: agrupar(nota => nota.ficha_cliente.cliente_financiero.tipo_cliente_financiero.nombre_tipo_cliente_financiero),
+        concentracionClientes: indicador(porMoneda.some(fila => fila.monto > 0) ? 'VALIDO' : 'NO_APLICA', concentracionClientes, porMoneda.some(fila => fila.monto > 0) ? 'Participación objetiva por Cliente dentro de cada moneda, ordenada por monto neto' : 'El total neto es cero; la participación porcentual no aplica'),
         productos: detalles.length ? indicador('VALIDO', agruparMonto(detalles.map(d => ({ moneda: d.tipo, monto: d.monto }))).map(d => ({ tipo: d.moneda, montoNeto: d.monto })), 'Sólo detalle estructurado de cotizaciones') : indicador('DATOS_INSUFICIENTES', null, 'Las ventas del período no tienen detalle estructurado fiable'),
         comparacion,
       };
     } catch {
-      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, montoNeto: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), cantidad: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), evolucion: [], clientes: [], tiposCliente: [], productos: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), comparacion: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible') };
+      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, montoNeto: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), cantidad: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), ticketMedio: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), evolucion: [], clientes: [], tiposCliente: [], concentracionClientes: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), productos: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), comparacion: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible') };
     }
   }
 
@@ -306,9 +391,54 @@ export class M7Controller {
     const datos = await this.consultarAnalisisVentasCompleto(consulta) as Record<string, unknown>;
     if (!permisos) return datos;
     const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
-    if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'evolucion', 'comparacion']) salida[clave] = datos[clave];
-    if (permisos.includes('CU220')) for (const clave of ['clientes', 'tiposCliente', 'productos']) salida[clave] = datos[clave];
+    if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'evolucion', 'comparacion']) salida[clave] = datos[clave];
+    if (permisos.includes('CU220')) for (const clave of ['clientes', 'tiposCliente', 'concentracionClientes', 'productos']) salida[clave] = datos[clave];
     return salida;
+  }
+
+  async consultarContextoCliente(idCliente: number, consulta: Consulta, permisos: string[]) {
+    if (!Number.isInteger(idCliente) || idCliente <= 0) throw new ErrorAplicacion(400, 'Cliente inválido');
+    const periodo = resolverPeriodoM7(consulta);
+    const cliente = await prisma.cliente_financiero.findUnique({ where: { id_cliente_financiero: idCliente }, include: { tipo_cliente_financiero: true, ficha_cliente: true } });
+    if (!cliente || !cliente.ficha_cliente) throw new ErrorAplicacion(404, 'Cliente no encontrado');
+    const bloques: Record<string, unknown> = {};
+    if (permisos.includes('CU219') || permisos.includes('CU220')) {
+      try {
+        const notas = await prisma.nota_venta.findMany({ where: { id_ficha_cliente: cliente.ficha_cliente.id_ficha_cliente, fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_nota_venta: { in: estadosVentaDefinitiva } }, include: { moneda: true, cotizacion: { include: { detalle_cotizacion: { include: { item_comercial: true } } } } } });
+        const ventas: Record<string, unknown> = { estado: notas.length ? 'VALIDO' : 'SIN_RESULTADOS' };
+        if (permisos.includes('CU219')) {
+          ventas.cantidad = notas.length;
+          ventas.montoNeto = notas.length ? agruparMonto(notas.map(nota => ({ moneda: nota.moneda.codigo_moneda, monto: Number(nota.monto_neto) }))) : [];
+        }
+        if (permisos.includes('CU220')) {
+          const detalles = notas.flatMap(nota => nota.cotizacion?.detalle_cotizacion.map(detalle => ({ tipo: detalle.item_comercial.tipo_item, monto: Number(detalle.subtotal_item_estimado) })) || []).filter(detalle => detalle.tipo);
+          ventas.productosFamilias = detalles.length ? agruparMonto(detalles.map(detalle => ({ moneda: detalle.tipo!, monto: detalle.monto }))).map(fila => ({ tipo: fila.moneda, montoNeto: fila.monto })) : indicador('DATOS_INSUFICIENTES', null, 'No existe clasificación propietaria estructurada para estas Ventas');
+        }
+        ventas.destino = `/dashboard-m7/ventas?anio=${periodo.desde.getUTCFullYear()}&mes=${periodo.desde.getUTCMonth() + 1}`;
+        bloques.ventas = ventas;
+      } catch { bloques.ventas = { estado: 'FUENTE_NO_DISPONIBLE', detalle: 'M2 no está disponible' }; }
+    }
+    if (permisos.includes('CU222') || permisos.includes('CU223')) {
+      try {
+        const notas = await prisma.nota_venta.findMany({ where: { id_ficha_cliente: cliente.ficha_cliente.id_ficha_cliente, estado_nota_venta: { notIn: retiradosCxC } }, include: incluirNota });
+        const calculadas = notas.map(nota => ({ nota, calculo: calcularNota(nota) }));
+        const cxc: Record<string, unknown> = { estado: notas.length ? 'VALIDO' : 'SIN_RESULTADOS' };
+        if (permisos.includes('CU222')) {
+          const pendientes = calculadas.filter(fila => fila.calculo.saldoPendiente > 0);
+          cxc.saldo = agruparMonto(pendientes.map(fila => ({ moneda: fila.nota.moneda.codigo_moneda, monto: fila.calculo.saldoPendiente })));
+          const morosas = pendientes.filter(fila => fila.calculo.esMorosa);
+          cxc.morosidad = { cantidad: morosas.length, porMoneda: agruparMonto(morosas.map(fila => ({ moneda: fila.nota.moneda.codigo_moneda, monto: fila.calculo.saldoPendiente }))) };
+        }
+        if (permisos.includes('CU223')) {
+          const pagos = new Map<number, { moneda: string; monto: number }>();
+          for (const { nota } of calculadas) for (const asignacion of nota.asignacion_pago_cliente) if (asignacion.pago_cliente.fecha_pago >= periodo.desde && asignacion.pago_cliente.fecha_pago < periodo.hastaExclusiva) pagos.set(asignacion.id_pago_cliente, { moneda: asignacion.pago_cliente.moneda.codigo_moneda, monto: efectoPago(asignacion.pago_cliente).toNumber() });
+          cxc.recaudacion = agruparMonto([...pagos.values()]);
+        }
+        cxc.destino = `/dashboard-m7/cuentas-cobrar?anio=${periodo.desde.getUTCFullYear()}&mes=${periodo.desde.getUTCMonth() + 1}`;
+        bloques.cuentasCobrar = cxc;
+      } catch { bloques.cuentasCobrar = { estado: 'FUENTE_NO_DISPONIBLE', detalle: 'M3 no está disponible' }; }
+    }
+    return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, cliente: { idCliente: cliente.id_cliente_financiero, nombre: cliente.nombre_razon_social_referencia, identificador: cliente.rut_cliente, tipoCliente: cliente.tipo_cliente_financiero.nombre_tipo_cliente_financiero, estado: cliente.estado_financiero }, destinoCliente: rutaCliente(cliente), bloques };
   }
 
   async consultarCuentasCobrar(consulta: Consulta, permisos?: string[]) {

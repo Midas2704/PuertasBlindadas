@@ -28,6 +28,8 @@ import {
   ChartNoAxesCombined,
   Gauge,
   Scale,
+  BellRing,
+  FileClock,
 } from 'lucide-react';
 
 type MenuItem = {
@@ -66,6 +68,8 @@ const menuGroups: MenuGroupDefinition[] = [
     icon: ChartNoAxesCombined,
     items: [
       { path: '/dashboard-m7', label: 'Panel General', icon: LayoutDashboard, permission: 'CU215' },
+      { path: '/dashboard-m7/centro-atencion', label: 'Centro de Atención', icon: BellRing, permission: 'CU216' },
+      { path: '/dashboard-m7/cotizaciones-pendientes', label: 'Cotizaciones Pendientes', icon: FileClock, permission: 'CU217' },
       { path: '/dashboard-m7/ventas', label: 'Análisis de Ventas', icon: ChartNoAxesCombined, permissions: ['CU219', 'CU220'] },
       { path: '/dashboard-m7/cuentas-cobrar', label: 'Cuentas por Cobrar', icon: Banknote, permissions: ['CU222', 'CU223', 'CU225'] },
       { path: '/dashboard-m7/cuentas-pagar', label: 'Cuentas por Pagar', icon: Landmark, permissions: ['CU226', 'CU227'] },

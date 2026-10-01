@@ -45,7 +45,7 @@ test('M7 capacidades financieras existentes con numeración definitiva', async t
   await preparar(); const consulta = { anio: 2040, mes: 5 };
   await t.test('01 período mensual tiene límites estables', () => { const p = resolverPeriodoM7(consulta); assert.equal(p.etiquetaDesde, '2040-05-01'); assert.equal(p.etiquetaHasta, '2040-05-31'); });
   await t.test('02 período inválido se rechaza', () => assert.throws(() => resolverPeriodoM7({ anio: 2040, mes: 13 }), e => e.estado === 400));
-  await t.test('03 dataset vacío no se informa como cero', async () => { const r = await modulo.consultarAnalisisVentas({ anio: 2199, mes: 1 }); assert.equal(r.montoNeto.estado, 'DATOS_INSUFICIENTES'); assert.equal(r.montoNeto.valor, null); });
+  await t.test('03 dataset vacío no se informa como cero', async () => { const r = await modulo.consultarAnalisisVentas({ anio: 2199, mes: 1 }); assert.equal(r.montoNeto.estado, 'SIN_RESULTADOS'); assert.equal(r.montoNeto.valor, null); });
   const ventas = await modulo.consultarAnalisisVentas(consulta);
   await t.test('04 ventas usa monto neto', () => assert.equal(ventas.montoNeto.valor.porMoneda.find(x => x.moneda === 'CLP').monto, 150));
   await t.test('05 venta emitida no es definitiva', () => assert.equal(ventas.cantidad.valor, 2));

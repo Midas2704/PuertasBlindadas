@@ -48,6 +48,9 @@ import CuentasPagarM7 from './views/DashboardM7/CuentasPagarM7';
 import LiquidezM7 from './views/DashboardM7/LiquidezM7';
 import MargenProyectosM7 from './views/DashboardM7/MargenProyectosM7';
 import ResumenesM7 from './views/DashboardM7/ResumenesM7';
+import CentroAtencionM7 from './views/DashboardM7/CentroAtencionM7';
+import CotizacionesPendientesM7 from './views/DashboardM7/CotizacionesPendientesM7';
+import ContextoClienteM7 from './views/DashboardM7/ContextoClienteM7';
 
 const App: React.FC = () => {
   return (
@@ -87,6 +90,9 @@ const App: React.FC = () => {
           <Route path="terreno/incidencias" element={<Protegido permiso={['CU212','CU213']}><IncidenciasTerreno /></Protegido>} />
           <Route path="terreno/tareas/:id/levantamiento" element={<Protegido permiso={['CU202','CU203','CU204','CU205','CU206']}><LevantamientoTecnico /></Protegido>} />
           <Route path="dashboard-m7" element={<Protegido permiso="CU215"><PanelGeneralM7 /></Protegido>} />
+          <Route path="dashboard-m7/centro-atencion" element={<Protegido permiso="CU216"><CentroAtencionM7 /></Protegido>} />
+          <Route path="dashboard-m7/cotizaciones-pendientes" element={<Protegido permiso="CU217"><CotizacionesPendientesM7 /></Protegido>} />
+          <Route path="dashboard-m7/clientes/:id" element={<Protegido permiso="CU221"><ContextoClienteM7 /></Protegido>} />
           <Route path="dashboard-m7/ventas" element={<Protegido permiso={['CU219','CU220']}><AnalisisVentasM7 /></Protegido>} />
           <Route path="dashboard-m7/cuentas-cobrar" element={<Protegido permiso={['CU222','CU223','CU225']}><CuentasCobrarM7 /></Protegido>} />
           <Route path="dashboard-m7/cuentas-pagar" element={<Protegido permiso={['CU226','CU227']}><CuentasPagarM7 /></Protegido>} />

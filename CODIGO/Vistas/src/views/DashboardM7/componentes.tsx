@@ -8,7 +8,7 @@ export type Indicador = { estado: string; valor: unknown; detalle: string; actua
 export type RespuestaM7 = Record<string, unknown> & { periodo?: { desde: string; hasta: string }; estado?: string };
 
 const etiquetas: Record<string, string> = {
-  montoNeto: 'Monto neto', cantidad: 'Cantidad de ventas', evolucion: 'Evolución', clientes: 'Clientes', tiposCliente: 'Tipos de cliente', productos: 'Productos / familias', comparacion: 'Comparación',
+  montoNeto: 'Monto neto', cantidad: 'Cantidad de ventas', ticketMedio: 'Ticket medio', evolucion: 'Evolución', clientes: 'Clientes', tiposCliente: 'Tipos de cliente', concentracionClientes: 'Concentración por Cliente', productos: 'Productos / familias', comparacion: 'Comparación',
   saldo: 'Saldo pendiente', morosidad: 'Morosidad', recaudacion: 'Recaudación recibida', compromisosFuturos: 'Compromisos futuros', estados: 'Estados', proveedores: 'Proveedores', categorias: 'Categorías',
   liquidezActual: 'Liquidez actual', flujoHistorico: 'Flujo histórico', proyeccion: 'Proyección', capaEstimada: 'Capa estimada',
 };

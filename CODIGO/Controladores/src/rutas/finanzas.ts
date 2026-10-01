@@ -23,6 +23,9 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   // los dejamos juntos para que nadie los confunda con rutas nuevas
   rutas.get('/salud', derivar('salud'));
   rutas.get('/dashboard-m7', derivar('consultarPanelGeneralM7'));
+  rutas.get('/dashboard-m7/centro-atencion', derivar('consultarCentroAtencionM7'));
+  rutas.get('/dashboard-m7/cotizaciones-pendientes', derivar('consultarCotizacionesPendientesM7'));
+  rutas.get('/dashboard-m7/clientes/:id', derivar('consultarContextoClienteM7'));
   rutas.get('/dashboard-m7/ventas', derivar('consultarAnalisisVentasM7'));
   rutas.get('/dashboard-m7/cuentas-cobrar', derivar('consultarCuentasCobrarM7'));
   rutas.get('/dashboard-m7/cuentas-pagar', derivar('consultarCuentasPagarM7'));
