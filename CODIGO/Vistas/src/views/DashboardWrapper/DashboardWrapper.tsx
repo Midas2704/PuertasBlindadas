@@ -79,7 +79,7 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/dashboard-m7/margen-proyectos', label: 'Margen por Proyecto', icon: Gauge, permissions: ['CU233', 'CU234', 'CU235'] },
       { path: '/dashboard-m7/proyectos/exposicion', label: 'Exposición de Proyectos', icon: Gauge, permission: 'CU236' },
       { path: '/dashboard-m7/resumenes', label: 'Resúmenes Gerenciales', icon: Scale, permissions: ['CU238', 'CU239'] },
-      { path: '/dashboard-m7/operacion', label: 'Operación y Costos', icon: ClipboardList, permissions: ['CU242', 'CU247', 'CU248', 'CU250', 'CU253'] },
+      { path: '/dashboard-m7/operacion', label: 'Operación y Costos', icon: ClipboardList, permissions: ['CU242', 'CU247', 'CU248', 'CU250', 'CU252', 'CU253'] },
     ],
   },
   {

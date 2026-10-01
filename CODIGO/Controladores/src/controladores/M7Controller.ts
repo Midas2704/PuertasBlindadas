@@ -55,6 +55,7 @@ const sumarPorMoneda = (filas: Array<{ moneda: string; monto: number }>) => agru
 const rutaCliente = (cliente: { rut_cliente: string | null }) => cliente.rut_cliente ? `/clientes/${encodeURIComponent(cliente.rut_cliente)}` : '/clientes';
 const diasCalendario = (desde: Date, hasta: Date) => Math.max(0, Math.floor((Date.UTC(hasta.getUTCFullYear(), hasta.getUTCMonth(), hasta.getUTCDate()) - Date.UTC(desde.getUTCFullYear(), desde.getUTCMonth(), desde.getUTCDate())) / 86400000));
 const normalizarTexto = (valor: string | null | undefined) => (valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+const esServicioInstalacion = (tipo: string | null | undefined) => normalizarTexto(tipo) === 'instalacion';
 const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
   if (profundidad > 4) return [`${prefijo}: detalle disponible en pantalla`];
   if (valor === null || valor === undefined) return [`${prefijo}: No disponible`];
@@ -87,6 +88,7 @@ export class M7Controller {
       ['ordenesTrabajo', ['CU247'], () => this.consultarOrdenesTrabajo(consulta)],
       ['cargaOperacional', ['CU248'], () => this.consultarCargaOperacional(consulta)],
       ['instalaciones', ['CU250'], () => this.consultarInstalaciones(consulta)],
+      ['atrasosInstalaciones', ['CU252'], () => this.consultarAtrasosInstalaciones(consulta)],
       ['incidenciasRetrabajos', ['CU253'], () => this.consultarIncidenciasRetrabajos(consulta)],
     ] as const;
     const visibles = definiciones.filter(([, requeridos]) => requeridos.some(permiso => permisos.includes(permiso)));
@@ -127,6 +129,15 @@ export class M7Controller {
           if (datos.estado === 'FUENTE_NO_DISPONIBLE') throw new Error('Margen no disponible');
           for (const proyecto of datos.proyectos.filter(fila => ['PERDIDA', 'MARGEN_CRITICO'].includes(fila.clasificacion))) excepciones.push({ familia: 'MARGEN_PROYECTO', ocurrio: proyecto.clasificacion === 'PERDIDA' ? 'Proyecto con margen directo negativo' : 'Proyecto bajo el umbral de margen configurado', magnitud: { idProyecto: proyecto.idProyecto, codigo: proyecto.codigo, moneda: proyecto.moneda, margenDirecto: proyecto.margenDirecto, porcentajeMargen: proyecto.porcentajeMargen }, calidad: proyecto.estado, destino: `/dashboard-m7/margen-proyectos?anio=${periodo.desde.getUTCFullYear()}&mes=${periodo.desde.getUTCMonth() + 1}`, origen: 'M2/M5/M6' });
           cobertura.push({ familia: 'MARGEN_PROYECTO', estado: datos.estado, detalle: datos.cobertura.detalle });
+        },
+      },
+      {
+        familia: 'INSTALACIONES_ATRASADAS', permiso: 'CU252', cargar: async () => {
+          const datos = await this.consultarAtrasosInstalaciones(consulta);
+          if (datos.estado === 'FUENTE_NO_DISPONIBLE') throw new Error('Atrasos de instalaciones no disponibles');
+          const atrasos = datos.atrasos.valor || [];
+          if (atrasos.length) excepciones.push({ familia: 'INSTALACIONES_ATRASADAS', ocurrio: 'Existen instalaciones o tareas con fecha límite vencida', magnitud: { cantidad: atrasos.length, tareas: atrasos }, calidad: datos.atrasos.estado, destino: `/dashboard-m7/operacion?anio=${periodo.desde.getUTCFullYear()}&mes=${periodo.desde.getUTCMonth() + 1}`, origen: 'Terreno' });
+          cobertura.push({ familia: 'INSTALACIONES_ATRASADAS', estado: datos.cobertura.estado, detalle: datos.cobertura.detalle });
         },
       },
     ];
@@ -644,7 +655,7 @@ export class M7Controller {
     const periodo = resolverPeriodoM7(consulta);
     try {
       const servicios = await prisma.servicio_terreno.findMany({ where: { servicio_terreno_estado: 'cerrada', servicio_terreno_fecha_real: { gte: periodo.anteriorDesde, lt: periodo.hastaExclusiva } }, include: { obra: true }, orderBy: { servicio_terreno_fecha_real: 'asc' } });
-      const instalaciones = servicios.filter(servicio => normalizarTexto(servicio.servicio_terreno_tipo_servicio) === 'instalacion');
+      const instalaciones = servicios.filter(servicio => esServicioInstalacion(servicio.servicio_terreno_tipo_servicio));
       const actuales = instalaciones.filter(servicio => servicio.servicio_terreno_fecha_real && dentro(servicio.servicio_terreno_fecha_real, periodo));
       const anteriores = instalaciones.filter(servicio => servicio.servicio_terreno_fecha_real && servicio.servicio_terreno_fecha_real >= periodo.anteriorDesde && servicio.servicio_terreno_fecha_real < periodo.anteriorHastaExclusiva);
       const evolucion = [...actuales.reduce((mapa, servicio) => { const clave = servicio.servicio_terreno_fecha_real!.toISOString().slice(0, 7); mapa.set(clave, (mapa.get(clave) || 0) + 1); return mapa; }, new Map<string, number>())].map(([periodoClave, cantidad]) => ({ periodo: periodoClave, cantidad }));
@@ -654,6 +665,49 @@ export class M7Controller {
       const detalle = actuales.map(servicio => ({ idServicio: servicio.servicio_terreno_servicio_terreno_id.toString(), tipo: servicio.servicio_terreno_tipo_servicio, estado: servicio.servicio_terreno_estado, fecha: fechaIso(servicio.servicio_terreno_fecha_real!), region: servicio.obra?.obra_region || null, comuna: servicio.obra?.obra_comuna || null, destinoOwner: '/terreno/visitas' }));
       return { periodo: periodoSalida(periodo), estado: actuales.length ? (sinUbicacion ? 'PARCIALMENTE_DISPONIBLE' as const : 'VALIDO' as const) : 'SIN_RESULTADOS' as const, volumen: indicador(actuales.length ? 'VALIDO' : 'SIN_RESULTADOS', actuales.length, 'Servicios cerrados cuyo tipo propietario identifica exactamente una instalación'), evolucion: indicador(evolucion.length ? 'VALIDO' : 'SIN_RESULTADOS', evolucion, 'Volumen de instalaciones identificables por período'), comparacion, geografia: indicador(sinUbicacion ? 'PARCIALMENTE_DISPONIBLE' : actuales.length ? 'VALIDO' : 'SIN_RESULTADOS', ubicaciones, `${sinUbicacion} instalación(es) sin ubicación normalizada; no se infiere región desde texto libre`), instalaciones: detalle, cobertura: 'No incluye servicios cuyo tipo no permita identificar inequívocamente una instalación' };
     } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, volumen: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), evolucion: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), geografia: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible') }; }
+  }
+
+  async consultarAtrasosInstalaciones(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    const fechaReferencia = consulta.fechaReferencia ? fechaUtc(consulta.fechaReferencia, 'Fecha de referencia') : new Date(`${fechaNegocio()}T00:00:00Z`);
+    const estadosTerminales = new Set(['completada', 'completado', 'terminada', 'terminado', 'cerrada', 'cerrado', 'cancelada', 'cancelado', 'anulada', 'anulado']);
+    try {
+      const tareas = await prisma.tarea.findMany({
+        include: { servicio_terreno: true, orden_trabajo: { include: { proyecto: true } } },
+        orderBy: { tarea_tarea_id: 'asc' },
+      });
+      const confirmadas = tareas.filter(tarea => tarea.servicio_terreno && esServicioInstalacion(tarea.servicio_terreno.servicio_terreno_tipo_servicio));
+      const relacionNoConfirmada = tareas.length - confirmadas.length;
+      const conEfecto = confirmadas.filter(tarea => !estadosTerminales.has(normalizarTexto(tarea.tarea_estado_de_tarea)) && !estadosTerminales.has(normalizarTexto(tarea.servicio_terreno?.servicio_terreno_estado)) && !estadosTerminales.has(normalizarTexto(tarea.orden_trabajo?.orden_trabajo_estado)));
+      const finalizadasExcluidas = confirmadas.length - conEfecto.length;
+      const calculables = conEfecto.filter(tarea => tarea.tarea_horario_limite instanceof Date && Number.isFinite(tarea.tarea_horario_limite.getTime()));
+      const sinFecha = conEfecto.filter(tarea => !tarea.tarea_horario_limite || !Number.isFinite(tarea.tarea_horario_limite.getTime()));
+      const presentar = (tarea: typeof calculables[number], atrasada: boolean) => ({
+        idTarea: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, clasificacionTemporal: atrasada ? 'ATRASO_DERIVADO' : 'EN_PLAZO_DERIVADO',
+        fechaLimite: tarea.tarea_horario_limite!.toISOString(), diasAtraso: atrasada ? diasCalendario(tarea.tarea_horario_limite!, fechaReferencia) : 0,
+        estadoTarea: tarea.tarea_estado_de_tarea, idServicio: tarea.id_servicio_terreno?.toString() || null, estadoServicio: tarea.servicio_terreno?.servicio_terreno_estado || null,
+        idOrden: tarea.id_orden_trabajo?.toString() || null, estadoOrden: tarea.orden_trabajo?.orden_trabajo_estado || null,
+        idProyecto: tarea.orden_trabajo?.proyecto_id_proyecto?.toString() || null,
+      });
+      const atrasadas = calculables.filter(tarea => tarea.tarea_horario_limite! < fechaReferencia).map(tarea => presentar(tarea, true));
+      const enPlazo = calculables.filter(tarea => tarea.tarea_horario_limite! >= fechaReferencia).map(tarea => presentar(tarea, false));
+      const sinInformacion = sinFecha.map(tarea => ({ idTarea: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, estadoTarea: tarea.tarea_estado_de_tarea, idServicio: tarea.id_servicio_terreno?.toString() || null, idOrden: tarea.id_orden_trabajo?.toString() || null, diasAtraso: null }));
+      const resumen = { coberturaTemporalValida: calculables.length, atrasadas: atrasadas.length, enPlazo: enPlazo.length, sinFechaSuficiente: sinFecha.length, relacionInstalacionNoConfirmada: relacionNoConfirmada, finalizadasOAnuladasExcluidas: finalizadasExcluidas };
+      return {
+        periodo: periodoSalida(periodo), fechaReferencia: fechaIso(fechaReferencia), estado: 'PARCIALMENTE_DISPONIBLE' as const,
+        resumen: indicador('PARCIALMENTE_DISPONIBLE', resumen, 'Cobertura parcial: sólo tareas vinculadas directamente a servicios cuyo tipo propietario identifica una instalación'),
+        atrasos: indicador(atrasadas.length ? 'VALIDO' : 'SIN_RESULTADOS', atrasadas, 'Clasificación derivada de tarea_horario_limite vencido y estados propietarios no terminales; días calendario'),
+        enPlazo: indicador(enPlazo.length ? 'VALIDO' : 'SIN_RESULTADOS', enPlazo, 'Tareas con fecha límite válida aún no vencida; no incluye tareas sin fecha'),
+        sinInformacionTemporal: indicador(sinFecha.length ? 'DATOS_INSUFICIENTES' : 'SIN_RESULTADOS', sinInformacion, 'La ausencia de tarea_horario_limite no se interpreta como cero ni como trabajo en plazo'),
+        relacionInstalacionNoConfirmada: indicador(relacionNoConfirmada ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', { cantidad: relacionNoConfirmada }, 'Tareas excluidas porque no tienen relación directa con un servicio identificado exactamente como instalación'),
+        duracion: indicador('DATOS_INSUFICIENTES', null, 'NO CALCULABLE: no existe una pareja propietaria de inicio real y término real'),
+        tiempoCiclo: indicador('DATOS_INSUFICIENTES', null, 'NO CALCULABLE: el owner no define inequívocamente los eventos inicial y final del ciclo'),
+        cobertura: indicador('PARCIALMENTE_DISPONIBLE', resumen, 'CU252 parcial; no usa creación, actualización, OT ni ejecución como sustitutos de inicio o término'),
+        criterio: 'Sin score, prioridad, causalidad de incidencias ni escritura en Terreno/OT',
+      };
+    } catch {
+      return { periodo: periodoSalida(periodo), fechaReferencia: fechaIso(fechaReferencia), estado: 'FUENTE_NO_DISPONIBLE' as const, resumen: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), atrasos: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), enPlazo: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), sinInformacionTemporal: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), duracion: indicador('DATOS_INSUFICIENTES', null, 'NO CALCULABLE'), tiempoCiclo: indicador('DATOS_INSUFICIENTES', null, 'NO CALCULABLE'), cobertura: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible') };
+    }
   }
 
   async consultarIncidenciasRetrabajos(consulta: Consulta) {

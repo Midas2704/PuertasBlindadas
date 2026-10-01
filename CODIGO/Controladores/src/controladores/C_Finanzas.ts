@@ -72,7 +72,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
   | 'consultarPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
   | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'consultarCostoRemuneracionesM7' | 'descargarPdfDashboardM7'
-  | 'consultarOrdenesTrabajoM7' | 'consultarCargaOperacionalM7' | 'consultarInstalacionesM7' | 'consultarIncidenciasRetrabajosM7'
+  | 'consultarOrdenesTrabajoM7' | 'consultarCargaOperacionalM7' | 'consultarInstalacionesM7' | 'consultarAtrasosInstalacionesM7' | 'consultarIncidenciasRetrabajosM7'
   | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7';
 
 export interface SolicitudFinanzas {
@@ -457,6 +457,7 @@ export class C_Finanzas {
       case 'consultarOrdenesTrabajoM7': return this.m7.consultarOrdenesTrabajo(solicitud.consulta || {});
       case 'consultarCargaOperacionalM7': return this.m7.consultarCargaOperacional(solicitud.consulta || {});
       case 'consultarInstalacionesM7': return this.m7.consultarInstalaciones(solicitud.consulta || {});
+      case 'consultarAtrasosInstalacionesM7': return this.m7.consultarAtrasosInstalaciones(solicitud.consulta || {});
       case 'consultarIncidenciasRetrabajosM7': return this.m7.consultarIncidenciasRetrabajos(solicitud.consulta || {});
       case 'descargarPdfDashboardM7': return this.m7.descargarPdfContextual(cuerpo, actor.permisos);
       case 'consultarUmbralMargenM7': return this.m7.consultarConfiguracionUmbralMargen();

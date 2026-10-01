@@ -40,6 +40,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/dashboard-m7/operacion/ordenes-trabajo', derivar('consultarOrdenesTrabajoM7'));
   rutas.get('/dashboard-m7/operacion/carga', derivar('consultarCargaOperacionalM7'));
   rutas.get('/dashboard-m7/operacion/instalaciones', derivar('consultarInstalacionesM7'));
+  rutas.get('/dashboard-m7/operacion/instalaciones/atrasos', derivar('consultarAtrasosInstalacionesM7'));
   rutas.get('/dashboard-m7/operacion/incidencias', derivar('consultarIncidenciasRetrabajosM7'));
   rutas.post('/dashboard-m7/pdf', derivar('descargarPdfDashboardM7'));
   rutas.get('/dashboard-m7/configuracion/margen-critico', derivar('consultarUmbralMargenM7'));

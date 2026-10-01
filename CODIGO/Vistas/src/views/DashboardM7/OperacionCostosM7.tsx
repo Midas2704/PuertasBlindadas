@@ -22,6 +22,7 @@ export default function OperacionCostosM7() {
     {tiene('CU247')&&<Seccion titulo="Estado de Órdenes de Trabajo" ruta="/dashboard-m7/operacion/ordenes-trabajo"/>}
     {tiene('CU248')&&<CargaOperacional/>}
     {tiene('CU250')&&<Seccion titulo="Instalaciones" ruta="/dashboard-m7/operacion/instalaciones"/>}
+    {tiene('CU252')&&<Seccion titulo="Atrasos de instalaciones" ruta="/dashboard-m7/operacion/instalaciones/atrasos"/>}
     {tiene('CU253')&&<Seccion titulo="Incidencias y retrabajos" ruta="/dashboard-m7/operacion/incidencias"/>}
   </div>;
 }
