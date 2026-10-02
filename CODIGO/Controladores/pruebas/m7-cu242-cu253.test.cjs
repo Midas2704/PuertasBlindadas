@@ -52,7 +52,7 @@ test('M7 operación y costos CU242 CU247 CU248 CU250 CU253',async t=>{const m=ne
     await t.test('28 retrabajo vinculado aparece',()=>assert.ok(incidencias.retrabajos.valor.some(x=>x.referencia===inc.id_incidencia_retrabajo.toString()&&x.idOrden===ot.orden_trabajo_id_orden.toString())));
     await t.test('29 abierta y cerrada respetan owner',()=>{assert.ok(incidencias.estados.valor.some(x=>x.estado==='pendiente'));assert.ok(incidencias.estados.valor.some(x=>x.estado==='cerrada'))});
     await t.test('30 no crea ranking de empleados',()=>assert.ok(incidencias.registros.every(x=>!Object.hasOwn(x,'empleado')&&!Object.hasOwn(x,'idEmpleado')&&!Object.hasOwn(x,'trabajador'))));
-    await t.test('31 no permite cerrar ni modificar incidencia',()=>{const f=readFileSync(resolve('src/controladores/M7Controller.ts'),'utf8');const b=f.slice(f.indexOf('async consultarIncidenciasRetrabajos'),f.indexOf('async consultarResumenResultados'));assert.doesNotMatch(b,/\.create\(|\.update\(|\.delete\(/)});
+    await t.test('31 no permite cerrar ni modificar incidencia',()=>{const f=readFileSync(resolve('src/controladores/M7Controller.ts'),'utf8');const b=f.slice(f.indexOf('async consultarIncidenciasRetrabajos'),f.indexOf('async registrarAjusteLiquidez'));assert.doesNotMatch(b,/\.create\(|\.update\(|\.delete\(/)});
     await t.test('32 vínculo insuficiente deja cobertura parcial',()=>assert.equal(incidencias.cobertura.estado,'PARCIALMENTE_DISPONIBLE'));
     await t.test('33 CU242 no concede M6 individual',()=>assert.equal(operacionesPermiso.consultarCostoRemuneracionesM7,'CU242'));
     await t.test('34 CU247 no concede CU248',()=>{assert.equal(operacionesPermiso.consultarOrdenesTrabajoM7,'CU247');assert.equal(operacionesPermiso.consultarCargaOperacionalM7,'CU248')});

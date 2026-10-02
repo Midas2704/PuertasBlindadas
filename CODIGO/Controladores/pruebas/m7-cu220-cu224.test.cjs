@@ -85,7 +85,7 @@ test('M7 capacidades existentes remapeadas CU233-CU246', async t => {
   await t.test('28 CU246 no tiene valor default', () => assert.equal(margen.umbralMargen.valor, null));
   await t.test('29 migración 040 admite DASHBOARD y conserva tipos previos', () => { assert.match(migracionParametros, /'LEGAL'.*'PREVISIONAL'.*'TRIBUTARIO'.*'PRORRATEO'.*'DASHBOARD'/s); assert.match(migracionParametros, /DROP CONSTRAINT "chk_parametro_remuneracional_tipo"/); });
   await t.test('30 CU246 protege consulta y configuración', () => { assert.equal(operacionesPermiso.consultarUmbralMargenM7, 'CU246'); assert.equal(operacionesPermiso.configurarUmbralMargenM7, 'CU246'); });
-  await t.test('31 existe sólo la migración M7 autorizada', () => assert.deepEqual(readdirSync(resolve('prisma/migrations')).filter(nombre => /m7/i.test(nombre)), ['040_m7_parametros_dashboard']));
+  await t.test('31 existen las migraciones M7 autorizadas', () => assert.deepEqual(readdirSync(resolve('prisma/migrations')).filter(nombre => /m7/i.test(nombre)), ['040_m7_parametros_dashboard', '041_m7_delta_controlado']));
   await t.test('32 solapamiento no se elude con persistencia paralela', () => assert.doesNotMatch(schema, /model (?:parametro_m7|configuracion_dashboard|umbral_dashboard|regla_dashboard)/));
   await t.test('33 CU246 escribe sólo el mantenedor existente de forma serializable', () => { assert.match(fuenteM7, /parametro_remuneracional\.create/); assert.match(fuenteM7, /TransactionIsolationLevel\.Serializable/); });
   await t.test('34 CU233 queda listo para consumir un umbral vigente', () => assert.match(fuenteM7, /M7_MARGEN_CRITICO/));

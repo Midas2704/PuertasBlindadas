@@ -273,11 +273,22 @@ export class M2Controller {
     return { ingresosTotales: consolidadoClp.montoComercialVigente, cotizacionesPendientes, saldosPorMoneda, consolidadoClp };
   }
   async consultarBandeja(historial = false) {
-    const [cotizaciones, notas] = await Promise.all([
+    const [cotizaciones, notas, stocks, entradas] = await Promise.all([
       prisma.cotizacion.findMany({ where: { estado_cotizacion: { in: historial ? ['aprobada', 'anulada', 'rechazada', 'descartada', 'vencida'] : ['borrador', 'emitida'] } }, include: incluirCotizacion, orderBy: { fecha_emision: 'desc' } }),
       prisma.nota_venta.findMany({ where: { estado_nota_venta: { in: historial ? ['confirmada', 'anulada', 'cerrada', 'revertida_parcial', 'revertida_total'] : ['emitida'] } }, include: { ...incluirNota, ficha_cliente: { include: { cliente_financiero: true } } }, orderBy: { fecha_emision: 'desc' } }),
+      prisma.inventario_bodega.findMany(),
+      prisma.detalle_material_orden_compra_m5.findMany(),
     ]);
-    return { cotizaciones, notas_venta: notas.map(nota => { const calculo=calcularNota(nota); return { ...nota, estado_pago: calculo.estadoPago, estadoNotaVentaVisible: estadoVisibleNota(nota,calculo.estadoPago), ...calculo }; }) };
+    const disponibilidad = new Map<string, number>();
+    for (const stock of stocks) disponibilidad.set(stock.material_sku, (disponibilidad.get(stock.material_sku) || 0) + Number(stock.inventario_bodega_cantidad_fisica || 0) - Number(stock.inventario_bodega_cantidad_reservada || 0));
+    for (const entrada of entradas.filter(item => item.cantidad_recibida.lt(item.cantidad_pedida))) disponibilidad.set(entrada.material_sku, (disponibilidad.get(entrada.material_sku) || 0) + Number(entrada.cantidad_pedida.minus(entrada.cantidad_recibida)));
+    const cotizacionesConStock = cotizaciones.map(cotizacion => {
+      const requeridos = new Map<string, { material: string | null; cantidad: number }>();
+      for (const detalle of cotizacion.detalle_cotizacion) for (const costo of detalle.detalle_costo_material_cotizacion) { const sku = costo.historial_precio_material.material_sku; const actual = requeridos.get(sku) || { material: costo.historial_precio_material.material.material_nombre_material, cantidad: 0 }; actual.cantidad += Number(costo.cantidad_material_estimada); requeridos.set(sku, actual); }
+      const materialesRevisar = [...requeridos].flatMap(([sku, dato]) => (disponibilidad.get(sku) || 0) < dato.cantidad ? [{ sku, material: dato.material, requerido: dato.cantidad, disponibilidadFutura: disponibilidad.get(sku) || 0 }] : []);
+      return { ...cotizacion, advertenciaStock: materialesRevisar.length ? { etiqueta: 'Revisar stock', materiales: materialesRevisar, bloqueaAprobacion: false } : null };
+    });
+    return { cotizaciones: cotizacionesConStock, notas_venta: notas.map(nota => { const calculo=calcularNota(nota); return { ...nota, estado_pago: calculo.estadoPago, estadoNotaVentaVisible: estadoVisibleNota(nota,calculo.estadoPago), ...calculo }; }) };
   }
 
   async guardarCotizacion(entrada: Entrada) {

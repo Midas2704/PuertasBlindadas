@@ -11,6 +11,9 @@ type Periodo = { desde: Date; hastaExclusiva: Date; anteriorDesde: Date; anterio
 const estadosVentaDefinitiva = ['confirmada', 'cerrada'];
 const retiradosCxC = ['anulada', 'revertida', 'revertida_total', 'provisional'];
 const codigoUmbralMargen = 'M7_MARGEN_CRITICO';
+const prefijoUmbralLiquidez = 'M7_LIQUIDEZ_UMBRAL_';
+const prefijoCostoInstalacion = 'M7_COSTO_INSTALACION_';
+const codigoDiasStockInmovil = 'M7_DIAS_STOCK_INMOVIL';
 const tipoUmbralMargen = 'DASHBOARD';
 const unidadUmbralMargen = 'PORCENTAJE';
 
@@ -71,6 +74,17 @@ const inicioBucket = (fecha: Date, granularidad: 'dia' | 'semana' | 'mes') => {
   return fechaIso(salida);
 };
 const esServicioInstalacion = (tipo: string | null | undefined) => normalizarTexto(tipo) === 'instalacion';
+const redondear = (valor: number, decimales = 2) => Number(valor.toFixed(decimales));
+const slugParametro = (valor: unknown) => String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 22);
+
+export interface ProveedorCreditoM8 {
+  consultarExposicion(consulta: Consulta): Promise<unknown>;
+  consultarAlertas(consulta: Consulta): Promise<unknown>;
+}
+
+export interface ProveedorBloqueosOperacionales {
+  consultarBloqueos(consulta: Consulta): Promise<unknown>;
+}
 const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
   if (profundidad > 4) return [`${prefijo}: detalle disponible en pantalla`];
   if (valor === null || valor === undefined) return [`${prefijo}: No disponible`];
@@ -85,15 +99,16 @@ const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
 };
 
 export class M7Controller {
+  constructor(private readonly creditoM8?: ProveedorCreditoM8, private readonly bloqueosOwner?: ProveedorBloqueosOperacionales) {}
   async consultarPanelGeneral(consulta: Consulta, permisos: string[]) {
     const periodo = resolverPeriodoM7(consulta);
     const definiciones = [
       ['centroAtencion', ['CU216'], () => this.consultarCentroAtencion(consulta, permisos)],
       ['cotizacionesPendientes', ['CU217'], () => this.consultarCotizacionesPendientes(consulta)],
-      ['ventas', ['CU219', 'CU220'], () => this.consultarAnalisisVentas(consulta, permisos)],
-      ['cuentasCobrar', ['CU222', 'CU223', 'CU225'], () => this.consultarCuentasCobrar(consulta, permisos)],
+      ['ventas', ['CU218', 'CU219', 'CU220'], () => this.consultarAnalisisVentas(consulta, permisos)],
+      ['cuentasCobrar', ['CU222', 'CU223', 'CU224', 'CU225'], () => this.consultarCuentasCobrar(consulta, permisos)],
       ['cuentasPagar', ['CU226', 'CU227'], () => this.consultarCuentasPagar(consulta, permisos)],
-      ['liquidez', ['CU230', 'CU231'], () => this.consultarLiquidez(consulta, permisos)],
+      ['liquidez', ['CU228', 'CU229', 'CU230', 'CU231'], () => this.consultarLiquidez(consulta, permisos)],
       ['riesgoDeficit', ['CU232'], () => this.consultarRiesgoDeficit(consulta, permisos)],
       ['margenProyectos', ['CU233', 'CU234', 'CU235'], () => this.consultarMargenProyectos(consulta, permisos)],
       ['exposicionProyectos', ['CU236'], () => this.consultarExposicionProyectos(consulta, permisos)],
@@ -105,6 +120,17 @@ export class M7Controller {
       ['instalaciones', ['CU250'], () => this.consultarInstalaciones(consulta)],
       ['atrasosInstalaciones', ['CU252'], () => this.consultarAtrasosInstalaciones(consulta)],
       ['incidenciasRetrabajos', ['CU253'], () => this.consultarIncidenciasRetrabajos(consulta)],
+      ['exposicionCredito', ['CU240'], () => this.consultarExposicionCreditoM7(consulta)],
+      ['alertasCredito', ['CU241'], () => this.consultarAlertasCreditoM7(consulta)],
+      ['resumenIva', ['CU243'], () => this.consultarResumenIva(consulta)],
+      ['costosFabricacion', ['CU244'], () => this.consultarCostosFabricacion(consulta)],
+      ['bloqueosEconomicos', ['CU249'], () => this.consultarBloqueosEconomicosM7(consulta)],
+      ['margenInstalaciones', ['CU251'], () => this.consultarMargenInstalaciones(consulta)],
+      ['inventarioValorizado', ['CU254'], () => this.consultarInventarioValorizado(consulta)],
+      ['materialesProyectoOt', ['CU255'], () => this.consultarMaterialesProyectoOt(consulta)],
+      ['riesgoStock', ['CU256'], () => this.consultarRiesgoStock(consulta)],
+      ['rotacionInventario', ['CU257'], () => this.consultarRotacionInventario(consulta)],
+      ['comprasRecepciones', ['CU258'], () => this.consultarComprasRecepciones(consulta)],
     ] as const;
     const visibles = definiciones.filter(([, requeridos]) => requeridos.some(permiso => permisos.includes(permiso)));
     const resultados = await Promise.all(visibles.map(async ([clave, requeridos, cargar]) => {
@@ -187,11 +213,14 @@ export class M7Controller {
     const periodo = resolverPeriodoM7(consulta);
     try {
       const incluir = { moneda: true, ficha_cliente: { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } }, cotizacion: { include: { detalle_cotizacion: { include: { item_comercial: true } } } } } as const;
-      const [actuales, anteriores] = await Promise.all([
+      const [actuales, anteriores, cohorteCotizaciones] = await Promise.all([
         prisma.nota_venta.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_nota_venta: { in: estadosVentaDefinitiva } }, include: incluir, orderBy: { fecha_emision: 'asc' } }),
         prisma.nota_venta.findMany({ where: { fecha_emision: { gte: periodo.anteriorDesde, lt: periodo.anteriorHastaExclusiva }, estado_nota_venta: { in: estadosVentaDefinitiva } }, include: incluir }),
+        prisma.cotizacion.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva } }, include: { nota_venta: true }, orderBy: { fecha_emision: 'asc' } }),
       ]);
-      if (!actuales.length) return { periodo: periodoSalida(periodo), estado: 'SIN_RESULTADOS' as const, montoNeto: indicador('SIN_RESULTADOS', null, 'No existen ventas definitivas en el período'), cantidad: indicador('SIN_RESULTADOS', 0, 'No existen ventas definitivas en el período'), ticketMedio: indicador('NO_APLICA', null, 'No hay Ventas válidas para calcular ticket medio'), evolucion: [], clientes: [], tiposCliente: [], concentracionClientes: indicador('NO_APLICA', null, 'No hay Ventas válidas para calcular participación'), productos: indicador('DATOS_INSUFICIENTES', null, 'Sin detalle comercial fiable'), comparacion: indicador('NO_APLICA', null, 'No existe base actual para comparar') };
+      const convertidas = cohorteCotizaciones.filter(cotizacion => cotizacion.nota_venta && !['anulada', 'revertida', 'revertida_total'].includes(normalizarTexto(cotizacion.nota_venta.estado_nota_venta)));
+      const conversion = indicador(cohorteCotizaciones.length ? 'VALIDO' : 'NO_APLICA', { totalCotizaciones: cohorteCotizaciones.length, convertidas: convertidas.length, tasaPorcentual: cohorteCotizaciones.length ? redondear(convertidas.length / cohorteCotizaciones.length * 100) : null }, 'Cotización convertida cuando tiene Nota de Venta no anulada; los pagos no intervienen');
+      if (!actuales.length) return { periodo: periodoSalida(periodo), estado: 'SIN_RESULTADOS' as const, montoNeto: indicador('SIN_RESULTADOS', null, 'No existen ventas definitivas en el período'), cantidad: indicador('SIN_RESULTADOS', 0, 'No existen ventas definitivas en el período'), conversion, ticketMedio: indicador('NO_APLICA', null, 'No hay Ventas válidas para calcular ticket medio'), evolucion: [], clientes: [], tiposCliente: [], concentracionClientes: indicador('NO_APLICA', null, 'No hay Ventas válidas para calcular participación'), productos: indicador('DATOS_INSUFICIENTES', null, 'Sin detalle comercial fiable'), comparacion: indicador('NO_APLICA', null, 'No existe base actual para comparar') };
       const filas = actuales.map(nota => ({ moneda: nota.moneda.codigo_moneda, monto: Number(nota.monto_neto), nota }));
       const porMoneda = agruparMonto(filas);
       const convertir = (nota: typeof actuales[number]) => nota.moneda.codigo_moneda === 'CLP' ? nota.monto_neto : nota.tipo_cambio_usado?.gt(0) ? nota.monto_neto.mul(nota.tipo_cambio_usado) : null;
@@ -227,7 +256,7 @@ export class M7Controller {
       return {
         periodo: periodoSalida(periodo), estado: 'VALIDO' as const,
         montoNeto: totalClp === null ? indicador('DATOS_INSUFICIENTES', { porMoneda, totalClp: null }, 'Montos por moneda disponibles; falta conversión histórica para consolidar CLP') : indicador('VALIDO', { porMoneda, totalClp }, 'Monto neto de ventas confirmadas o cerradas'),
-        cantidad: indicador('VALIDO', actuales.length, 'Ventas definitivas del período'),
+        cantidad: indicador('VALIDO', actuales.length, 'Ventas definitivas del período'), conversion,
         ticketMedio: indicador('VALIDO', { porMoneda: ticketPorMoneda, totalClp: totalClp === null ? null : Number((totalClp / actuales.length).toFixed(2)) }, 'Monto neto de Ventas válidas dividido por su cantidad; no usa cotizaciones, cobros ni facturación documental'),
         evolucion: agrupar(nota => fechaIso(nota.fecha_emision)),
         clientes,
@@ -237,7 +266,7 @@ export class M7Controller {
         comparacion,
       };
     } catch {
-      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, montoNeto: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), cantidad: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), ticketMedio: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), evolucion: [], clientes: [], tiposCliente: [], concentracionClientes: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), productos: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), comparacion: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible') };
+      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, montoNeto: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), cantidad: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), conversion: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), ticketMedio: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), evolucion: [], clientes: [], tiposCliente: [], concentracionClientes: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), productos: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible'), comparacion: indicador('FUENTE_NO_DISPONIBLE', null, 'M2 no está disponible') };
     }
   }
 
@@ -266,7 +295,27 @@ export class M7Controller {
       const compromisos = cartera.filter(fila => fila.condicion === 'FUTURA').map(fila => ({ ...fila, monto: fila.saldo, naturaleza: 'COMPROMISO_FUTURO' as const }))
         .sort((a, b) => compararNullable(ordenar === 'monto' ? a.saldo : a.fechaVencimiento, ordenar === 'monto' ? b.saldo : b.fechaVencimiento, direccion) || a.idNota - b.idNota);
       const pagosLista = [...pagos.values()];
-      return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, fechaReferencia: fechaIso(fechaReferencia), saldo: indicador('VALIDO', saldos, 'Saldo vigente calculado con la fórmula propietaria M3'), morosidad: indicador('VALIDO', { cantidad: morosas.length, porMoneda: agruparMonto(morosas.map(x => ({ moneda: x.moneda, monto: x.saldo }))), obligaciones: morosas }, 'Obligaciones vencidas con saldo y días calendario exactos'), cartera: indicador('VALIDO', cartera, 'Cartera filtrada con criterios objetivos; SIN_FECHA no se convierte en cero días'), aging: indicador('PARCIALMENTE_DISPONIBLE', { obligaciones: cartera, rangos: null }, 'Se informan días exactos; no existen rangos oficiales confirmados para agrupar aging'), recaudacion: pagosLista.length ? indicador('VALIDO', agruparMonto(pagosLista), 'Pagos con efecto M3 vigente recibidos en el período') : indicador('SIN_RESULTADOS', null, 'No existen pagos efectivos en el período'), detalleCobranza: indicador(pagosLista.length ? 'VALIDO' : 'SIN_RESULTADOS', { cantidadPagos: pagosLista.length, pagos: pagosLista }, 'Detalle de pagos con efecto M3 vigente y vínculo a Cliente'), cumplimiento: indicador('DATOS_INSUFICIENTES', null, 'No existe una base histórica inequívoca de obligaciones exigibles al inicio del período; no se calcula una tasa genérica'), recuperacionMoraPrevia: indicador('DATOS_INSUFICIENTES', null, 'La fuente actual no reconstruye inequívocamente el saldo vencido al inicio del período'), compromisosFuturos: compromisos.length ? indicador('VALIDO', compromisos, 'Compromisos futuros M3 con saldo vigente; no representan cobros realizados') : indicador('NO_APLICA', [], 'No existen compromisos futuros con fecha válida') };
+      const exigibles: Array<{ moneda: string; debido: number; pagado: number }> = [];
+      const moraRecuperada: Array<{ moneda: string; monto: number; idNota: number; fechaVencimiento: string }> = [];
+      const pagadas = calculadas.filter(item => item.calculo.saldoPendiente === 0).map(({ nota }) => {
+        const pagosEfectivos = nota.asignacion_pago_cliente.filter(asignacion => efectoPago(asignacion.pago_cliente).gt(0));
+        const final = pagosEfectivos.reduce<Date | null>((mayor, asignacion) => !mayor || asignacion.pago_cliente.fecha_pago > mayor ? asignacion.pago_cliente.fecha_pago : mayor, null);
+        return { idNota: nota.id_nota_venta, numeroNota: nota.numero_nota_venta, estado: 'Pagado', fechaPagoFinal: final ? fechaIso(final) : null, fechaVencimiento: nota.fecha_vencimiento ? fechaIso(nota.fecha_vencimiento) : null, diasAtraso: final && nota.fecha_vencimiento && final > nota.fecha_vencimiento ? diasCalendario(nota.fecha_vencimiento, final) : null };
+      });
+      for (const { nota, calculo } of calculadas) {
+        const moneda = nota.moneda.codigo_moneda;
+        const hitosPeriodo = nota.hito_cobro.filter(hito => dentro(hito.fecha_programada_cobro, periodo));
+        const debido = hitosPeriodo.length ? hitosPeriodo.reduce((suma, hito) => suma + Number(hito.monto_programado), 0) : nota.fecha_vencimiento && dentro(nota.fecha_vencimiento, periodo) ? calculo.montoComercialVigente : 0;
+        const pagado = nota.asignacion_pago_cliente.filter(asignacion => dentro(asignacion.pago_cliente.fecha_pago, periodo)).reduce((suma, asignacion) => suma + Number(Prisma.Decimal.min(asignacion.monto_asignado, efectoPago(asignacion.pago_cliente))), 0);
+        if (debido > 0) exigibles.push({ moneda, debido, pagado: Math.min(debido, pagado) });
+        const fechaVencimiento = nota.fecha_vencimiento;
+        if (fechaVencimiento && fechaVencimiento < periodo.desde && pagado > 0) moraRecuperada.push({ moneda, monto: pagado, idNota: nota.id_nota_venta, fechaVencimiento: fechaIso(fechaVencimiento) });
+      }
+      const cumplimientoPorMoneda = [...exigibles.reduce((mapa, fila) => { const actual = mapa.get(fila.moneda) || { moneda: fila.moneda, debido: 0, pagado: 0 }; actual.debido += fila.debido; actual.pagado += fila.pagado; mapa.set(fila.moneda, actual); return mapa; }, new Map<string, { moneda: string; debido: number; pagado: number }>()).values()].map(fila => ({ ...fila, cumplimientoPorcentual: fila.debido > 0 ? redondear(fila.pagado / fila.debido * 100) : null }));
+      const deudaPorCliente = [...carteraCompleta.reduce((mapa, fila) => { const clave = `${fila.idCliente}|${fila.moneda}`; const actual = mapa.get(clave) || { idCliente: fila.idCliente, cliente: fila.cliente, moneda: fila.moneda, saldo: 0, destinoCliente: fila.destinoCliente }; actual.saldo += fila.saldo; mapa.set(clave, actual); return mapa; }, new Map<string, { idCliente: number; cliente: string; moneda: string; saldo: number; destinoCliente: string }>()).values()];
+      const totalDeudaMoneda = new Map(agruparMonto(deudaPorCliente.map(fila => ({ moneda: fila.moneda, monto: fila.saldo }))).map(fila => [fila.moneda, fila.monto]));
+      const concentracionDeuda = deudaPorCliente.map(fila => ({ ...fila, porcentaje: totalDeudaMoneda.get(fila.moneda) ? redondear(fila.saldo / totalDeudaMoneda.get(fila.moneda)! * 100) : null })).sort((a, b) => a.moneda.localeCompare(b.moneda) || b.saldo - a.saldo);
+      return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, fechaReferencia: fechaIso(fechaReferencia), saldo: indicador('VALIDO', saldos, 'Saldo vigente calculado con la fórmula propietaria M3'), morosidad: indicador('VALIDO', { cantidad: morosas.length, porMoneda: agruparMonto(morosas.map(x => ({ moneda: x.moneda, monto: x.saldo }))), obligaciones: morosas }, 'Obligaciones vencidas con saldo y días calendario exactos'), cartera: indicador('VALIDO', cartera, 'Cartera filtrada con criterios objetivos; SIN_FECHA no se convierte en cero días'), aging: indicador('PARCIALMENTE_DISPONIBLE', { obligaciones: cartera, rangos: null }, 'Se informan días exactos; no existen rangos oficiales confirmados para agrupar aging'), concentracionDeuda: indicador(concentracionDeuda.length ? 'VALIDO' : 'SIN_RESULTADOS', concentracionDeuda, 'Porcentaje del saldo pendiente que representa cada Cliente dentro de su moneda'), obligacionesPagadas: indicador(pagadas.length ? 'VALIDO' : 'SIN_RESULTADOS', pagadas, 'Una etiqueta de atraso sólo existe cuando el pago final fue posterior al vencimiento'), recaudacion: pagosLista.length ? indicador('VALIDO', agruparMonto(pagosLista), 'Pagos con efecto M3 vigente recibidos en el período') : indicador('SIN_RESULTADOS', null, 'No existen pagos efectivos en el período'), detalleCobranza: indicador(pagosLista.length ? 'VALIDO' : 'SIN_RESULTADOS', { cantidadPagos: pagosLista.length, pagos: pagosLista }, 'Detalle de pagos con efecto M3 vigente y vínculo a Cliente'), cumplimiento: cumplimientoPorMoneda.length ? indicador('VALIDO', cumplimientoPorMoneda, 'Monto efectivamente pagado en el período dividido por monto exigible con vencimiento en el período') : indicador('NO_APLICA', [], 'No existían montos exigibles con vencimiento en el período'), recuperacionMoraPrevia: moraRecuperada.length ? indicador('VALIDO', { porMoneda: agruparMonto(moraRecuperada), pagos: moraRecuperada }, 'Pagos del período aplicados a obligaciones vencidas antes de comenzar el período') : indicador('SIN_RESULTADOS', [], 'No se recuperó mora previa durante el período'), compromisosFuturos: compromisos.length ? indicador('VALIDO', compromisos, 'Compromisos futuros M3 con saldo vigente; no representan cobros realizados') : indicador('NO_APLICA', [], 'No existen compromisos futuros con fecha válida') };
     } catch {
       return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, saldo: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), morosidad: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), cartera: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), aging: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), recaudacion: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), detalleCobranza: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), cumplimiento: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), recuperacionMoraPrevia: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible'), compromisosFuturos: indicador('FUENTE_NO_DISPONIBLE', null, 'M3 no está disponible') };
     }
@@ -307,11 +356,11 @@ export class M7Controller {
 
   private async consultarLiquidezCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
-    const liquidezActual = indicador('CONFIGURACION_PENDIENTE', null, 'No existe una fuente inequívoca de saldo de apertura o saldo bancario actual');
+    let liquidezActual = indicador<unknown>('FUENTE_NO_DISPONIBLE', null, 'La fuente de movimientos financieros no está disponible');
     let flujoHistorico;
     try {
-      const movimientos = await prisma.movimiento_financiero.findMany({ where: { fecha_movimiento: { gte: periodo.anteriorDesde, lt: periodo.hastaExclusiva }, estado_movimiento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true, origen_movimiento_financiero: true }, orderBy: [{ fecha_movimiento: 'asc' }, { id_movimiento_financiero: 'asc' }] });
-      flujoHistorico = movimientos.length ? indicador('VALIDO', agruparMonto(movimientos.map(m => ({ moneda: `${m.moneda.codigo_moneda}:${m.naturaleza_movimiento}`, monto: Number(m.monto_movimiento) }))).map(f => { const [moneda, naturaleza] = f.moneda.split(':'); return { moneda, naturaleza, monto: f.monto }; }), 'Movimientos financieros registrados en el período') : indicador('DATOS_INSUFICIENTES', null, 'No existen movimientos financieros registrados en el período');
+      const registrados = await prisma.movimiento_financiero.findMany({ where: { fecha_movimiento: { lt: periodo.hastaExclusiva }, estado_movimiento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true, origen_movimiento_financiero: true }, orderBy: [{ fecha_movimiento: 'asc' }, { id_movimiento_financiero: 'asc' }] });
+      const movimientos = registrados.filter(m => !normalizarTexto(m.tipo_movimiento_financiero).includes('caja chica') && !m.origen_movimiento_financiero.some(o => normalizarTexto(o.entidad_origen).includes('caja chica')));
       const granularidadEntrada = normalizarTexto(String(consulta.granularidad || 'dia'));
       if (!['dia', 'semana', 'mes'].includes(granularidadEntrada)) throw new ErrorAplicacion(400, 'Granularidad inválida; use dia, semana o mes');
       const granularidad = granularidadEntrada as 'dia' | 'semana' | 'mes';
@@ -320,25 +369,31 @@ export class M7Controller {
       const actuales = filtrados.filter(m => dentro(m.fecha_movimiento, periodo));
       const anteriores = filtrados.filter(m => m.fecha_movimiento >= periodo.anteriorDesde && m.fecha_movimiento < periodo.anteriorHastaExclusiva);
       const serie = (filas: typeof filtrados) => [...filas.reduce((mapa, m) => { const clave = `${inicioBucket(m.fecha_movimiento, granularidad)}|${m.moneda.codigo_moneda}`; const actual = mapa.get(clave) || { fecha: inicioBucket(m.fecha_movimiento, granularidad), moneda: m.moneda.codigo_moneda, entradas: 0, salidas: 0, ajustes: 0 }; const monto = Number(m.monto_movimiento); if (normalizarTexto(m.naturaleza_movimiento) === 'ingreso') actual.entradas += monto; else if (normalizarTexto(m.naturaleza_movimiento) === 'egreso') actual.salidas += monto; else actual.ajustes += monto; mapa.set(clave, actual); return mapa; }, new Map<string, { fecha: string; moneda: string; entradas: number; salidas: number; ajustes: number }>()).values()].map(fila => ({ ...fila, entradas: Number(fila.entradas.toFixed(2)), salidas: Number(fila.salidas.toFixed(2)), ajustes: Number(fila.ajustes.toFixed(2)), flujoNeto: Number((fila.entradas - fila.salidas + fila.ajustes).toFixed(2)) })).sort((a, b) => a.fecha.localeCompare(b.fecha) || a.moneda.localeCompare(b.moneda));
-      const totales = (filas: typeof filtrados) => [...filas.reduce((mapa, m) => { const codigo = m.moneda.codigo_moneda; const actual = mapa.get(codigo) || { moneda: codigo, entradas: 0, salidas: 0, ajustes: 0 }; const monto = Number(m.monto_movimiento); if (normalizarTexto(m.naturaleza_movimiento) === 'ingreso') actual.entradas += monto; else if (normalizarTexto(m.naturaleza_movimiento) === 'egreso') actual.salidas += monto; else actual.ajustes += monto; mapa.set(codigo, actual); return mapa; }, new Map<string, { moneda: string; entradas: number; salidas: number; ajustes: number }>()).values()].map(fila => ({ ...fila, flujoNeto: Number((fila.entradas - fila.salidas + fila.ajustes).toFixed(2)) }));
+      const totales = (filas: typeof filtrados) => [...filas.reduce((mapa, m) => { const codigo = m.moneda.codigo_moneda; const actual = mapa.get(codigo) || { moneda: codigo, ingresosRecibidos: 0, egresosRealizados: 0, ajustesEntrada: 0, ajustesSalida: 0 }; const monto = Number(m.monto_movimiento); const ajuste = normalizarTexto(m.tipo_movimiento_financiero).replace(/_/g, ' ') === 'ajuste manual liquidez' || m.origen_movimiento_financiero.some(origen => normalizarTexto(origen.entidad_origen).replace(/_/g, ' ') === 'ajuste manual liquidez'); const ingreso = normalizarTexto(m.naturaleza_movimiento) === 'ingreso'; if (ajuste && ingreso) actual.ajustesEntrada += monto; else if (ajuste) actual.ajustesSalida += monto; else if (ingreso) actual.ingresosRecibidos += monto; else if (normalizarTexto(m.naturaleza_movimiento) === 'egreso') actual.egresosRealizados += monto; mapa.set(codigo, actual); return mapa; }, new Map<string, { moneda: string; ingresosRecibidos: number; egresosRealizados: number; ajustesEntrada: number; ajustesSalida: number }>()).values()].map(fila => ({ ...fila, liquidez: redondear(fila.ingresosRecibidos + fila.ajustesEntrada - fila.egresosRealizados - fila.ajustesSalida), flujoNeto: redondear(fila.ingresosRecibidos + fila.ajustesEntrada - fila.egresosRealizados - fila.ajustesSalida) }));
       const actualesTotales = totales(actuales); const anterioresTotales = new Map(totales(anteriores).map(f => [f.moneda, f]));
       const comparacion = actualesTotales.map(actual => { const anterior = anterioresTotales.get(actual.moneda) || { flujoNeto: 0 }; const diferenciaAbsoluta = Number((actual.flujoNeto - anterior.flujoNeto).toFixed(2)); return { moneda: actual.moneda, actual: actual.flujoNeto, anterior: anterior.flujoNeto, diferenciaAbsoluta, variacionPorcentual: anterior.flujoNeto === 0 ? null : Number((diferenciaAbsoluta / Math.abs(anterior.flujoNeto) * 100).toFixed(2)), estadoVariacion: anterior.flujoNeto === 0 ? 'NO_APLICA' : 'VALIDO' }; });
       const presentar = (m: typeof filtrados[number]) => ({ idMovimiento: m.id_movimiento_financiero, fecha: fechaIso(m.fecha_movimiento), categoria: m.tipo_movimiento_financiero || null, naturaleza: m.naturaleza_movimiento, moneda: m.moneda.codigo_moneda, monto: Number(m.monto_movimiento), origenes: m.origen_movimiento_financiero.map(o => ({ entidad: o.entidad_origen, id: o.id_registro_origen, descripcion: o.descripcion_origen })) });
-      flujoHistorico = actuales.length ? indicador('VALIDO', { granularidad, filtros: { categoria: categoria || null, origen: origen || null }, serie: serie(actuales), totales: actualesTotales, comparacion, movimientos: actuales.map(presentar) }, 'Flujo registrado, agregado en tiempo real y comparado con un período anterior de igual duración') : indicador('DATOS_INSUFICIENTES', { granularidad, filtros: { categoria: categoria || null, origen: origen || null }, serie: [], totales: [], comparacion: [], movimientos: [] }, 'No existen movimientos financieros registrados para los filtros del período');
+      const acumulado = totales(movimientos);
+      liquidezActual = indicador(acumulado.length ? 'VALIDO' : 'SIN_RESULTADOS', acumulado, 'Ingresos recibidos + ajustes de entrada - egresos realizados - ajustes de salida; Caja Chica excluida');
+      flujoHistorico = actuales.length ? indicador('VALIDO', { granularidad, filtros: { categoria: categoria || null, origen: origen || null }, serie: serie(actuales), totales: actualesTotales, comparacion, movimientos: actuales.map(presentar) }, 'Desglose de movimientos realizados; Caja Chica excluida') : indicador('SIN_RESULTADOS', { granularidad, filtros: { categoria: categoria || null, origen: origen || null }, serie: [], totales: [], comparacion: [], movimientos: [] }, 'No existen movimientos financieros para los filtros del período');
     } catch { flujoHistorico = indicador('FUENTE_NO_DISPONIBLE', null, 'La fuente de movimientos financieros no está disponible'); }
     try {
-      const [cxc, cxp] = await Promise.all([this.consultarCuentasCobrarCompleto(consulta), this.consultarCuentasPagarCompleto(consulta)]);
-      const ingresos = cxc.compromisosFuturos.estado === 'VALIDO' ? cxc.compromisosFuturos.valor : [];
-      const egresos = cxp.compromisosFuturos.estado === 'VALIDO' ? cxp.compromisosFuturos.valor : [];
+      const horizonte = Number(consulta.horizonteDias || 30);
+      if (!Number.isInteger(horizonte) || horizonte < 1 || horizonte > 366) throw new ErrorAplicacion(400, 'Horizonte inválido');
+      const inicio = new Date(`${fechaNegocio()}T00:00:00Z`); const fin = new Date(inicio); fin.setUTCDate(fin.getUTCDate() + horizonte);
+      const consultaHorizonte = { desde: fechaIso(inicio), hasta: fechaIso(new Date(fin.getTime() - 86400000)) };
+      const [cxc, cxp] = await Promise.all([this.consultarCuentasCobrarCompleto(consultaHorizonte), this.consultarCuentasPagarCompleto(consultaHorizonte)]);
+      const ingresos = (((cxc.cartera as { valor?: Array<Record<string, unknown>> }).valor) || []).filter(fila => typeof fila.fechaVencimiento === 'string' && new Date(`${fila.fechaVencimiento}T00:00:00Z`) >= inicio && new Date(`${fila.fechaVencimiento}T00:00:00Z`) < fin).map(fila => ({ ...fila, monto: fila.saldo }));
+      const egresos = (((cxp.cartera as { valor?: Array<Record<string, unknown>> } | undefined)?.valor) || []).filter(fila => typeof fila.fechaVencimiento === 'string' && new Date(`${fila.fechaVencimiento}T00:00:00Z`) >= inicio && new Date(`${fila.fechaVencimiento}T00:00:00Z`) < fin).map(fila => ({ ...fila, monto: fila.saldo }));
       const compromisos = [
         ...(ingresos || []).map((fila: Record<string, unknown>) => ({ fecha: fila.fechaVencimiento, moneda: fila.moneda, monto: fila.monto, direccion: 'ENTRADA', owner: 'M3', id: fila.idNota })),
         ...(egresos || []).map((fila: Record<string, unknown>) => ({ fecha: fila.fechaVencimiento, moneda: fila.moneda, monto: fila.monto, direccion: 'SALIDA', owner: 'M5', id: fila.id })),
       ].filter(fila => typeof fila.fecha === 'string' && typeof fila.moneda === 'string' && Number(fila.monto) > 0).sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || String(a.moneda).localeCompare(String(b.moneda)));
-      const acumulados = new Map<string, number>();
-      const serieCompromisos = compromisos.map(fila => { const moneda = String(fila.moneda); const cambio = fila.direccion === 'ENTRADA' ? Number(fila.monto) : -Number(fila.monto); acumulados.set(moneda, Number(((acumulados.get(moneda) || 0) + cambio).toFixed(2))); return { ...fila, cambio, acumuladoCompromisos: acumulados.get(moneda) }; });
-      const saldoProyectado = indicador('DATOS_INSUFICIENTES', null, 'No existe saldo de apertura válido; los compromisos no se convierten en saldo absoluto');
-      const proyeccion = compromisos.length ? indicador('PARCIALMENTE_DISPONIBLE', { ingresos, egresos, compromisos, serieCompromisos, saldoProyectado }, 'Compromisos futuros confirmados; el acumulado expresa variación, no liquidez ni saldo proyectado') : indicador('NO_APLICA', { ingresos: [], egresos: [], compromisos: [], serieCompromisos: [], saldoProyectado }, 'No existen compromisos fechados para proyectar y tampoco existe saldo de apertura');
-      return { periodo: periodoSalida(periodo), estado: flujoHistorico.estado === 'FUENTE_NO_DISPONIBLE' ? 'FUENTE_NO_DISPONIBLE' as const : 'CONFIGURACION_PENDIENTE' as const, liquidezActual, flujoHistorico, proyeccion, capaEstimada: indicador('NO_APLICA', null, 'No existe una estimación propietaria con base, fecha y monto válidos') };
+      const acumulados = new Map<string, number>(((liquidezActual.valor || []) as Array<{ moneda: string; liquidez: number }>).map(fila => [fila.moneda, fila.liquidez]));
+      const saldosIniciales = [...acumulados].map(([moneda, liquidez]) => ({ fecha: fechaIso(inicio), moneda, monto: 0, direccion: 'SALDO_INICIAL', owner: 'M7', id: null, cambio: 0, liquidezProyectada: liquidez }));
+      const serieCompromisos = compromisos.map(fila => { const moneda = String(fila.moneda); const cambio = fila.direccion === 'ENTRADA' ? Number(fila.monto) : -Number(fila.monto); acumulados.set(moneda, redondear((acumulados.get(moneda) || 0) + cambio)); return { ...fila, cambio, liquidezProyectada: acumulados.get(moneda) }; });
+      const proyeccion = liquidezActual.estado === 'VALIDO' ? indicador('VALIDO', { horizonteDias: horizonte, desde: fechaIso(inicio), hasta: fechaIso(new Date(fin.getTime() - 86400000)), ingresos, egresos, eventos: [...saldosIniciales, ...serieCompromisos], saldosFinales: [...acumulados].map(([moneda, liquidez]) => ({ moneda, liquidez })) }, 'Liquidez actual + cobros esperados - pagos esperados, aplicados únicamente en su fecha') : indicador('DATOS_INSUFICIENTES', null, 'Sin movimientos no existe una base para proyectar liquidez');
+      return { periodo: periodoSalida(periodo), estado: liquidezActual.estado === 'FUENTE_NO_DISPONIBLE' ? 'FUENTE_NO_DISPONIBLE' as const : 'VALIDO' as const, liquidezActual, flujoHistorico, proyeccion, capaEstimada: indicador('NO_APLICA', null, 'Sólo se incorporan compromisos con monto y fecha reales') };
     } catch {
       return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, liquidezActual, flujoHistorico, proyeccion: indicador('FUENTE_NO_DISPONIBLE', null, 'No fue posible consultar compromisos futuros'), capaEstimada: indicador('NO_APLICA', null, 'No existe una estimación propietaria válida') };
     }
@@ -471,6 +526,7 @@ export class M7Controller {
     const datos = await this.consultarAnalisisVentasCompleto(consulta) as Record<string, unknown>;
     if (!permisos) return datos;
     const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
+    if (permisos.includes('CU218')) salida.conversion = datos.conversion;
     if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'evolucion', 'comparacion']) salida[clave] = datos[clave];
     if (permisos.includes('CU220')) for (const clave of ['clientes', 'tiposCliente', 'concentracionClientes', 'productos']) salida[clave] = datos[clave];
     return salida;
@@ -535,6 +591,7 @@ export class M7Controller {
     const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
     if (permisos.includes('CU222')) for (const clave of ['fechaReferencia', 'saldo', 'morosidad', 'cartera', 'aging']) salida[clave] = protegerCliente(datos[clave]);
     if (permisos.includes('CU223')) for (const clave of ['recaudacion', 'detalleCobranza', 'cumplimiento', 'recuperacionMoraPrevia']) salida[clave] = protegerCliente(datos[clave]);
+    if (permisos.includes('CU224')) for (const clave of ['concentracionDeuda', 'obligacionesPagadas']) salida[clave] = protegerCliente(datos[clave]);
     if (permisos.includes('CU225')) salida.compromisosFuturos = protegerCliente(datos.compromisosFuturos);
     return salida;
   }
@@ -560,7 +617,8 @@ export class M7Controller {
     const datos = await this.consultarLiquidezCompleto(consulta) as Record<string, unknown>;
     if (!permisos) return datos;
     const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
-    if (permisos.includes('CU230')) {
+    if (permisos.includes('CU228')) salida.liquidezActual = datos.liquidezActual;
+    if (permisos.includes('CU229') || permisos.includes('CU230')) {
       const flujo = { ...(datos.flujoHistorico as Record<string, unknown>) }; const valor = flujo.valor;
       if (valor && typeof valor === 'object') { const contenido = { ...(valor as Record<string, unknown>) }; if (Array.isArray(contenido.movimientos)) contenido.movimientos = contenido.movimientos.map(filaEntrada => { const fila = filaEntrada as Record<string, unknown>; const acciones: AccionNavegacion[] = []; const origenes = Array.isArray(fila.origenes) ? fila.origenes as Array<Record<string, unknown>> : []; const visibles = origenes.map(origen => { const entidad = String(origen.entidad || ''); let permitido = false; if (entidad === 'pago_cliente' && permisos.includes('CU42')) { permitido = true; acciones.push(accion('Abrir pagos de Cliente', '/pagos')); } if (entidad === 'pago_proveedor' && permisos.includes('CU111')) { permitido = true; acciones.push(accion('Abrir pagos a Proveedores', '/pagos-proveedores')); } if (entidad === 'gasto_caja_chica' && permisos.includes('CU149')) { permitido = true; acciones.push(accion('Abrir Caja Chica', '/caja-chica')); } if (entidad === 'liquidacion_remuneracion' && permisos.includes('CU187')) { permitido = true; acciones.push(accion('Abrir pagos de remuneraciones', '/pagos-remuneraciones')); } return permitido ? origen : { entidad, descripcion: origen.descripcion ?? null, navegacionDisponible: false }; }); return { ...fila, origenes: visibles, ...(acciones.length ? { acciones: [...new Map(acciones.map(a => [a.destino, a])).values()] } : {}) }; }); flujo.valor = contenido; } salida.flujoHistorico = flujo;
     }
@@ -571,24 +629,31 @@ export class M7Controller {
   async consultarRiesgoDeficit(consulta: Consulta, permisos: string[]) {
     const datos = await this.consultarLiquidezCompleto(consulta);
     const proyeccion = datos.proyeccion;
-    const valor = proyeccion.valor as { saldoProyectado?: { estado: EstadoIndicadorM7; valor: Array<{ fecha: string; moneda: string; saldo: number }> | null }; ingresos?: Array<Record<string, unknown>>; egresos?: Array<Record<string, unknown>> } | null;
-    const serie = valor?.saldoProyectado?.estado === 'VALIDO' ? valor.saldoProyectado.valor?.filter(punto => /^\d{4}-\d{2}-\d{2}$/.test(punto.fecha) && typeof punto.moneda === 'string' && Number.isFinite(Number(punto.saldo))) || [] : [];
-    let primerDeficit; let minimoProyectado;
+    const valor = proyeccion.valor as { eventos?: Array<{ fecha: string; moneda: string; liquidezProyectada: number }>; ingresos?: Array<Record<string, unknown>>; egresos?: Array<Record<string, unknown>> } | null;
+    const serie = valor?.eventos?.filter(punto => /^\d{4}-\d{2}-\d{2}$/.test(punto.fecha) && typeof punto.moneda === 'string' && Number.isFinite(Number(punto.liquidezProyectada))) || [];
+    const fechaCorte = new Date(`${fechaNegocio()}T00:00:00Z`);
+    const parametros = await prisma.parametro_remuneracional.findMany({ where: { codigo: { startsWith: prefijoUmbralLiquidez }, tipo: 'DASHBOARD', unidad: 'MONTO', estado: 'activo', vigencia_desde: { lte: fechaCorte }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fechaCorte } }] }, orderBy: { valor: 'desc' } });
+    const umbrales = parametros.filter(fila => fila.valor !== null).map(fila => ({ id: fila.id_parametro_remuneracional, nombre: fila.nombre, valor: Number(fila.valor) }));
+    let alertas; let minimoProyectado;
     if (!serie.length) {
-      primerDeficit = indicador('CONFIGURACION_PENDIENTE', null, 'CU231 no dispone de saldo de apertura ni de una serie válida de saldo proyectado');
+      alertas = indicador('DATOS_INSUFICIENTES', null, 'CU231 no dispone de una serie válida de liquidez proyectada');
       minimoProyectado = indicador('CONFIGURACION_PENDIENTE', null, 'No existe una serie absoluta válida para identificar el mínimo del horizonte');
     } else {
       const monedas = [...new Set(serie.map(punto => punto.moneda))];
-      const primeros = monedas.map(moneda => serie.filter(punto => punto.moneda === moneda && Number(punto.saldo) < 0).sort((a, b) => a.fecha.localeCompare(b.fecha))[0]).filter(Boolean);
-      const minimos = monedas.map(moneda => serie.filter(punto => punto.moneda === moneda).sort((a, b) => Number(a.saldo) - Number(b.saldo) || a.fecha.localeCompare(b.fecha))[0]);
-      primerDeficit = primeros.length ? indicador('VALIDO', primeros, 'Primer saldo negativo por moneda dentro del horizonte válido de CU231') : indicador('SIN_RESULTADOS', [], 'Sin déficit dentro del horizonte');
+      const cruces = monedas.flatMap(moneda => umbrales.flatMap(umbral => {
+        const puntos = serie.filter(punto => punto.moneda === moneda).sort((a, b) => a.fecha.localeCompare(b.fecha));
+        const indice = puntos.findIndex((punto, posicion) => punto.liquidezProyectada < umbral.valor && (posicion === 0 || puntos[posicion - 1].liquidezProyectada >= umbral.valor));
+        return indice >= 0 ? [{ moneda, umbral: umbral.valor, nombre: umbral.nombre, primeraFechaCruce: puntos[indice].fecha, liquidezProyectada: puntos[indice].liquidezProyectada, mensaje: `La liquidez proyectada bajaría de ${umbral.valor}` }] : [];
+      }));
+      const minimos = monedas.map(moneda => serie.filter(punto => punto.moneda === moneda).sort((a, b) => Number(a.liquidezProyectada) - Number(b.liquidezProyectada) || a.fecha.localeCompare(b.fecha))[0]);
+      alertas = umbrales.length ? indicador(cruces.length ? 'VALIDO' : 'SIN_RESULTADOS', cruces, 'Primer cruce descendente por umbral monetario configurable') : indicador('CONFIGURACION_PENDIENTE', null, 'No existen umbrales monetarios de liquidez vigentes');
       minimoProyectado = indicador('VALIDO', minimos, 'Menor saldo proyectado por moneda dentro del horizonte');
     }
     const factores: Array<Record<string, unknown>> = [];
     if (permisos.includes('CU225')) for (const fila of valor?.ingresos || []) factores.push({ ...fila, naturaleza: 'COBRO_M3', origen: 'M3' });
     if (permisos.includes('CU227')) for (const fila of valor?.egresos || []) factores.push({ ...fila, naturaleza: 'PAGO_M5', origen: 'M5' });
     const hayPermisoFactores = permisos.includes('CU225') || permisos.includes('CU227');
-    return { periodo: datos.periodo, estado: primerDeficit.estado === 'CONFIGURACION_PENDIENTE' ? 'CONFIGURACION_PENDIENTE' as const : 'VALIDO' as const, primerDeficit, minimoProyectado, factores: hayPermisoFactores ? indicador(factores.length ? 'VALIDO' : 'SIN_RESULTADOS', factores, 'Compromisos reales visibles según permisos de sus fuentes; no representan causalidad automática') : indicador('SIN_PERMISO', null, 'CU232 no concede acceso al detalle de cobros o pagos subyacentes'), criterio: 'Sin score, ranking ni recomendación automática' };
+    return { periodo: datos.periodo, estado: alertas.estado === 'CONFIGURACION_PENDIENTE' ? 'CONFIGURACION_PENDIENTE' as const : 'VALIDO' as const, umbrales: indicador(umbrales.length ? 'VALIDO' : 'CONFIGURACION_PENDIENTE', umbrales, 'Umbrales monetarios vigentes del Mantenedor de Parámetros'), alertas, primerDeficit: alertas, minimoProyectado, factores: hayPermisoFactores ? indicador(factores.length ? 'VALIDO' : 'SIN_RESULTADOS', factores, 'Compromisos reales visibles según permisos de sus fuentes; no representan causalidad automática') : indicador('SIN_PERMISO', null, 'CU232 no concede acceso al detalle de cobros o pagos subyacentes'), criterio: 'Sin score, ranking ni recomendación automática' };
   }
 
   async consultarMargenProyectos(consulta: Consulta, permisos?: string[]) {
@@ -726,10 +791,10 @@ export class M7Controller {
       const actuales = instalaciones.filter(servicio => servicio.servicio_terreno_fecha_real && dentro(servicio.servicio_terreno_fecha_real, periodo));
       const anteriores = instalaciones.filter(servicio => servicio.servicio_terreno_fecha_real && servicio.servicio_terreno_fecha_real >= periodo.anteriorDesde && servicio.servicio_terreno_fecha_real < periodo.anteriorHastaExclusiva);
       const evolucion = [...actuales.reduce((mapa, servicio) => { const clave = servicio.servicio_terreno_fecha_real!.toISOString().slice(0, 7); mapa.set(clave, (mapa.get(clave) || 0) + 1); return mapa; }, new Map<string, number>())].map(([periodoClave, cantidad]) => ({ periodo: periodoClave, cantidad }));
-      const ubicaciones = [...actuales.reduce((mapa, servicio) => { const region = servicio.obra?.obra_region?.trim() || null; const comuna = servicio.obra?.obra_comuna?.trim() || null; const clave = region || comuna ? `${region || 'SIN_REGION'}|${comuna || 'SIN_COMUNA'}` : 'SIN_UBICACION|SIN_UBICACION'; mapa.set(clave, (mapa.get(clave) || 0) + 1); return mapa; }, new Map<string, number>())].map(([clave, cantidad]) => { const [region, comuna] = clave.split('|'); return { region, comuna, cantidad }; });
-      const sinUbicacion = actuales.filter(servicio => !servicio.obra?.obra_region?.trim() && !servicio.obra?.obra_comuna?.trim()).length;
+      const ubicaciones = [...actuales.reduce((mapa, servicio) => { const region = servicio.obra?.obra_region?.trim() || null; const ciudad = servicio.obra?.obra_ciudad?.trim() || null; const comuna = servicio.obra?.obra_comuna?.trim() || null; const zona = region && /metropolitana/i.test(region) ? 'SANTIAGO' : region ? 'REGIONES' : 'SIN_UBICACION'; const clave = region || ciudad || comuna ? `${zona}|${region || 'SIN_REGION'}|${ciudad || 'SIN_CIUDAD'}|${comuna || 'SIN_COMUNA'}` : 'SIN_UBICACION|SIN_UBICACION|SIN_UBICACION|SIN_UBICACION'; mapa.set(clave, (mapa.get(clave) || 0) + 1); return mapa; }, new Map<string, number>())].map(([clave, cantidad]) => { const [zona, region, ciudad, comuna] = clave.split('|'); return { zona, region, ciudad, comuna, cantidad }; });
+      const sinUbicacion = actuales.filter(servicio => !servicio.obra?.obra_region?.trim() || !servicio.obra?.obra_ciudad?.trim() || !servicio.obra?.obra_comuna?.trim()).length;
       const comparacion = anteriores.length === 0 ? indicador('NO_APLICA', { anterior: 0, actual: actuales.length, diferenciaAbsoluta: actuales.length, variacionPorcentual: null }, 'La base comparadora es cero; la variación porcentual no aplica') : indicador('VALIDO', { anterior: anteriores.length, actual: actuales.length, diferenciaAbsoluta: actuales.length - anteriores.length, variacionPorcentual: Number((((actuales.length - anteriores.length) / anteriores.length) * 100).toFixed(2)) }, 'Comparación con el período inmediatamente anterior de igual duración');
-      const detalle = actuales.map(servicio => ({ idServicio: servicio.servicio_terreno_servicio_terreno_id.toString(), tipo: servicio.servicio_terreno_tipo_servicio, estado: servicio.servicio_terreno_estado, fecha: fechaIso(servicio.servicio_terreno_fecha_real!), region: servicio.obra?.obra_region || null, comuna: servicio.obra?.obra_comuna || null, destinoOwner: '/terreno/visitas' }));
+      const detalle = actuales.map(servicio => ({ idServicio: servicio.servicio_terreno_servicio_terreno_id.toString(), tipo: servicio.servicio_terreno_tipo_servicio, estado: servicio.servicio_terreno_estado, fecha: fechaIso(servicio.servicio_terreno_fecha_real!), zona: servicio.obra?.obra_region && /metropolitana/i.test(servicio.obra.obra_region) ? 'SANTIAGO' : servicio.obra?.obra_region ? 'REGIONES' : 'SIN_UBICACION', region: servicio.obra?.obra_region || null, ciudad: servicio.obra?.obra_ciudad || null, comuna: servicio.obra?.obra_comuna || null, destinoOwner: '/terreno/visitas' }));
       return { periodo: periodoSalida(periodo), estado: actuales.length ? (sinUbicacion ? 'PARCIALMENTE_DISPONIBLE' as const : 'VALIDO' as const) : 'SIN_RESULTADOS' as const, volumen: indicador(actuales.length ? 'VALIDO' : 'SIN_RESULTADOS', actuales.length, 'Servicios cerrados cuyo tipo propietario identifica exactamente una instalación'), evolucion: indicador(evolucion.length ? 'VALIDO' : 'SIN_RESULTADOS', evolucion, 'Volumen de instalaciones identificables por período'), comparacion, geografia: indicador(sinUbicacion ? 'PARCIALMENTE_DISPONIBLE' : actuales.length ? 'VALIDO' : 'SIN_RESULTADOS', ubicaciones, `${sinUbicacion} instalación(es) sin ubicación normalizada; no se infiere región desde texto libre`), instalaciones: detalle, cobertura: 'No incluye servicios cuyo tipo no permita identificar inequívocamente una instalación' };
     } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, volumen: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), evolucion: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), geografia: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible') }; }
   }
@@ -759,6 +824,7 @@ export class M7Controller {
       const atrasadas = calculables.filter(tarea => tarea.tarea_horario_limite! < fechaReferencia).map(tarea => presentar(tarea, true));
       const enPlazo = calculables.filter(tarea => tarea.tarea_horario_limite! >= fechaReferencia).map(tarea => presentar(tarea, false));
       const sinInformacion = sinFecha.map(tarea => ({ idTarea: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, estadoTarea: tarea.tarea_estado_de_tarea, idServicio: tarea.id_servicio_terreno?.toString() || null, idOrden: tarea.id_orden_trabajo?.toString() || null, diasAtraso: null }));
+      const duraciones = confirmadas.filter(tarea => tarea.tarea_fecha_de_inicio && tarea.tarea_fecha_de_termino && tarea.tarea_fecha_de_termino >= tarea.tarea_fecha_de_inicio).map(tarea => ({ idTarea: tarea.tarea_tarea_id.toString(), inicioReal: fechaIso(tarea.tarea_fecha_de_inicio!), terminoReal: fechaIso(tarea.tarea_fecha_de_termino!), duracionDias: diasCalendario(tarea.tarea_fecha_de_inicio!, tarea.tarea_fecha_de_termino!) }));
       const resumen = { coberturaTemporalValida: calculables.length, atrasadas: atrasadas.length, enPlazo: enPlazo.length, sinFechaSuficiente: sinFecha.length, relacionInstalacionNoConfirmada: relacionNoConfirmada, finalizadasOAnuladasExcluidas: finalizadasExcluidas };
       return {
         periodo: periodoSalida(periodo), fechaReferencia: fechaIso(fechaReferencia), estado: 'PARCIALMENTE_DISPONIBLE' as const,
@@ -767,9 +833,9 @@ export class M7Controller {
         enPlazo: indicador(enPlazo.length ? 'VALIDO' : 'SIN_RESULTADOS', enPlazo, 'Tareas con fecha límite válida aún no vencida; no incluye tareas sin fecha'),
         sinInformacionTemporal: indicador(sinFecha.length ? 'DATOS_INSUFICIENTES' : 'SIN_RESULTADOS', sinInformacion, 'La ausencia de tarea_horario_limite no se interpreta como cero ni como trabajo en plazo'),
         relacionInstalacionNoConfirmada: indicador(relacionNoConfirmada ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', { cantidad: relacionNoConfirmada }, 'Tareas excluidas porque no tienen relación directa con un servicio identificado exactamente como instalación'),
-        duracion: indicador('DATOS_INSUFICIENTES', null, 'NO CALCULABLE: no existe una pareja propietaria de inicio real y término real'),
-        tiempoCiclo: indicador('DATOS_INSUFICIENTES', null, 'NO CALCULABLE: el owner no define inequívocamente los eventos inicial y final del ciclo'),
-        cobertura: indicador('PARCIALMENTE_DISPONIBLE', resumen, 'CU252 parcial; no usa creación, actualización, OT ni ejecución como sustitutos de inicio o término'),
+        duracion: duraciones.length ? indicador('VALIDO', duraciones, 'Término real menos inicio real informado por el owner') : indicador('DATOS_INSUFICIENTES', null, 'No existen instalaciones cerradas con inicio y término reales'),
+        tiempoCiclo: duraciones.length ? indicador('VALIDO', { cantidad: duraciones.length, promedioDias: redondear(duraciones.reduce((suma, fila) => suma + fila.duracionDias, 0) / duraciones.length) }, 'Promedio de duraciones reales cerradas') : indicador('DATOS_INSUFICIENTES', null, 'No existe base real para calcular tiempo de ciclo'),
+        cobertura: indicador(sinFecha.length || relacionNoConfirmada ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO', resumen, 'Usa exclusivamente fecha comprometida e inicio/término reales del owner'),
         criterio: 'Sin score, prioridad, causalidad de incidencias ni escritura en Terreno/OT',
       };
     } catch {
@@ -792,6 +858,214 @@ export class M7Controller {
       ];
       return { periodo: periodoSalida(periodo), estado: actuales.length ? (vinculados === actuales.length ? 'VALIDO' as const : 'PARCIALMENTE_DISPONIBLE' as const) : 'SIN_RESULTADOS' as const, cantidad: indicador(actuales.length ? 'VALIDO' : 'SIN_RESULTADOS', actuales.length, 'Registros del productor canónico terreno.incidencia_retrabajo_tarea'), estados: indicador(estados.length ? 'VALIDO' : 'SIN_RESULTADOS', estados, 'Estados propietarios; pendiente/corregida/cerrada no se reinterpretan'), evolucion: indicador('VALIDO', evolucion, 'Comparación temporal de registros de incidencia/retrabajo'), registros: detalle, retrabajos: indicador(actuales.length ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', actuales.length ? detalle.map(item => ({ referencia: item.id, idOrden: item.idOrden, idServicio: item.idServicio })) : [], 'El productor reúne incidencia y retrabajo en una misma entidad; no se inventa una clasificación separada'), cobertura: indicador(vinculados === actuales.length ? 'VALIDO' : 'PARCIALMENTE_DISPONIBLE', { vinculados, sinVinculoOperacional: actuales.length - vinculados }, 'Vínculo únicamente por ejecución → tarea → OT/servicio'), privacidad: 'Sin ranking ni identificación del trabajador' };
     } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, cantidad: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), estados: indicador('FUENTE_NO_DISPONIBLE', null, 'Terreno no está disponible'), registros: [] }; }
+  }
+
+  async registrarAjusteLiquidez(entrada: Record<string, unknown>, actor: { id: bigint; administrador: boolean }) {
+    if (!actor.administrador) throw new ErrorAplicacion(403, 'Sólo un Administrador puede registrar ajustes manuales de liquidez');
+    const naturaleza = normalizarTexto(String(entrada.naturaleza || entrada.tipo || ''));
+    if (!['entrada', 'salida'].includes(naturaleza)) throw new ErrorAplicacion(400, 'Naturaleza permitida: entrada o salida');
+    const monto = new Prisma.Decimal(String(entrada.monto || 0));
+    if (!monto.isFinite() || monto.lte(0)) throw new ErrorAplicacion(400, 'El monto debe ser mayor que cero');
+    const justificacion = String(entrada.justificacion || '').trim();
+    if (!justificacion) throw new ErrorAplicacion(400, 'La justificación es obligatoria');
+    const idMoneda = Number(entrada.idMoneda);
+    if (!Number.isInteger(idMoneda) || idMoneda <= 0) throw new ErrorAplicacion(400, 'La moneda es obligatoria');
+    const fecha = entrada.fecha ? fechaUtc(entrada.fecha, 'Fecha') : new Date();
+    return prisma.$transaction(async tx => {
+      if (!await tx.moneda.findUnique({ where: { id_moneda: idMoneda } })) throw new ErrorAplicacion(404, 'Moneda no encontrada');
+      const movimiento = await tx.movimiento_financiero.create({ data: { id_moneda: idMoneda, fecha_movimiento: fecha, tipo_movimiento_financiero: 'AJUSTE_MANUAL_LIQUIDEZ', naturaleza_movimiento: naturaleza === 'entrada' ? 'ingreso' : 'egreso', motivo_movimiento: justificacion, monto_movimiento: monto.toDecimalPlaces(2), observacion: `Responsable M4: ${actor.id.toString()}` } });
+      await tx.origen_movimiento_financiero.create({ data: { id_movimiento_financiero: movimiento.id_movimiento_financiero, entidad_origen: 'ajuste_manual_liquidez', id_registro_origen: movimiento.id_movimiento_financiero, descripcion_origen: justificacion } });
+      await tx.evento_auditoria.create({ data: { id_usuario: actor.id, tipo_evento: 'AJUSTE_LIQUIDEZ', entidad_afectada: 'movimiento_financiero', id_registro_afectado: movimiento.id_movimiento_financiero, accion_realizada: naturaleza === 'entrada' ? 'AJUSTE_ENTRADA' : 'AJUSTE_SALIDA', descripcion_evento: justificacion } });
+      return { idMovimiento: movimiento.id_movimiento_financiero, naturaleza: naturaleza.toUpperCase(), monto: Number(movimiento.monto_movimiento), fecha: movimiento.fecha_movimiento, responsable: actor.id.toString(), justificacion };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async consultarParametrosDeltaM7() {
+    const filas = await prisma.parametro_remuneracional.findMany({ where: { OR: [{ codigo: { startsWith: prefijoUmbralLiquidez } }, { codigo: { startsWith: prefijoCostoInstalacion } }, { codigo: codigoDiasStockInmovil }] }, orderBy: [{ codigo: 'asc' }, { vigencia_desde: 'desc' }] });
+    return { estado: filas.length ? 'VALIDO' as const : 'CONFIGURACION_PENDIENTE' as const, parametros: filas.map(fila => ({ id: fila.id_parametro_remuneracional, codigo: fila.codigo, nombre: fila.nombre, valor: fila.valor === null ? null : Number(fila.valor), unidad: fila.unidad, referencia: fila.referencia, vigenciaDesde: fechaIso(fila.vigencia_desde), vigenciaHasta: fila.vigencia_hasta ? fechaIso(fila.vigencia_hasta) : null, estado: fila.estado })) };
+  }
+
+  async consultarParametrosPorFamiliaM7(familia: 'UMBRAL_LIQUIDEZ' | 'COSTO_INSTALACION' | 'DIAS_STOCK_INMOVIL') {
+    const todos = await this.consultarParametrosDeltaM7();
+    const prefijo = familia === 'UMBRAL_LIQUIDEZ' ? prefijoUmbralLiquidez : familia === 'COSTO_INSTALACION' ? prefijoCostoInstalacion : codigoDiasStockInmovil;
+    const parametros = todos.parametros.filter(fila => familia === 'DIAS_STOCK_INMOVIL' ? fila.codigo === prefijo : fila.codigo.startsWith(prefijo));
+    return { estado: parametros.length ? 'VALIDO' as const : 'CONFIGURACION_PENDIENTE' as const, familia, parametros };
+  }
+
+  configurarUmbralLiquidezM7(entrada: Record<string, unknown>) { return this.configurarParametroDeltaM7({ ...entrada, familia: 'UMBRAL_LIQUIDEZ' }); }
+  configurarCostoInstalacionM7(entrada: Record<string, unknown>) { return this.configurarParametroDeltaM7({ ...entrada, familia: 'COSTO_INSTALACION' }); }
+  configurarDiasStockInmovilM7(entrada: Record<string, unknown>) { return this.configurarParametroDeltaM7({ ...entrada, familia: 'DIAS_STOCK_INMOVIL' }); }
+
+  async configurarParametroDeltaM7(entrada: Record<string, unknown>) {
+    const familia = String(entrada.familia || '').toUpperCase();
+    const desde = fechaUtc(entrada.vigenciaDesde, 'Vigencia desde');
+    const valor = new Prisma.Decimal(String(entrada.valor ?? ''));
+    if (!valor.isFinite() || valor.lt(0)) throw new ErrorAplicacion(400, 'El valor debe ser numérico y no negativo');
+    let codigo = ''; let nombre = ''; let unidad = ''; let referencia: string | null = null;
+    if (familia === 'UMBRAL_LIQUIDEZ') { const etiqueta = String(entrada.etiqueta || entrada.valor || '').trim(); codigo = `${prefijoUmbralLiquidez}${slugParametro(etiqueta)}`; nombre = `Umbral de liquidez ${etiqueta}`; unidad = 'MONTO'; }
+    else if (familia === 'COSTO_INSTALACION') { const ciudad = String(entrada.ciudad || '').trim(); const comuna = String(entrada.comuna || '').trim(); if (!ciudad || !comuna) throw new ErrorAplicacion(400, 'Ciudad y comuna son obligatorias'); codigo = `${prefijoCostoInstalacion}${slugParametro(`${ciudad}_${comuna}`)}`; nombre = `Costo instalación ${ciudad} / ${comuna}`; unidad = 'MONTO'; referencia = JSON.stringify({ ciudad, comuna }); }
+    else if (familia === 'DIAS_STOCK_INMOVIL') { if (!valor.isInteger() || valor.lt(1)) throw new ErrorAplicacion(400, 'Los días deben ser un entero positivo'); codigo = codigoDiasStockInmovil; nombre = 'Días sin movimiento para stock inmóvil'; unidad = 'DIAS'; }
+    else throw new ErrorAplicacion(400, 'Familia de parámetro M7 inválida');
+    try {
+      await prisma.$transaction(async tx => {
+        const efectivas = await tx.parametro_remuneracional.findMany({ where: { codigo, estado: 'activo', vigencia_desde: { lt: desde }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: desde } }] } });
+        if (efectivas.length > 1) throw new ErrorAplicacion(409, 'La vigencia histórica del parámetro es ambigua');
+        if (efectivas.length === 1) { const hasta = new Date(desde); hasta.setUTCDate(hasta.getUTCDate() - 1); await tx.parametro_remuneracional.update({ where: { id_parametro_remuneracional: efectivas[0].id_parametro_remuneracional }, data: { vigencia_hasta: hasta } }); }
+        await tx.parametro_remuneracional.create({ data: { codigo, tipo: 'DASHBOARD', nombre, descripcion: 'Parámetro operativo M7 mantenido sin hardcodear reglas', valor, unidad, vigencia_desde: desde, referencia, estado: 'activo' } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'El parámetro cambió concurrentemente'); throw error; }
+    return this.consultarParametrosDeltaM7();
+  }
+
+  async consultarExposicionCreditoM7(consulta: Consulta) {
+    if (!this.creditoM8) return { estado: 'FUENTE_NO_DISPONIBLE' as const, exposicion: indicador('FUENTE_NO_DISPONIBLE', null, 'Información de Crédito no disponible'), owner: 'M8' };
+    try { return { estado: 'VALIDO' as const, exposicion: indicador('VALIDO', await this.creditoM8.consultarExposicion(consulta), 'Contrato M8→M7; M7 no recalcula cupo ni Crédito comprometido'), owner: 'M8' }; }
+    catch { return { estado: 'FUENTE_NO_DISPONIBLE' as const, exposicion: indicador('FUENTE_NO_DISPONIBLE', null, 'Información de Crédito no disponible'), owner: 'M8' }; }
+  }
+
+  async consultarAlertasCreditoM7(consulta: Consulta) {
+    if (!this.creditoM8) return { estado: 'FUENTE_NO_DISPONIBLE' as const, alertas: indicador('FUENTE_NO_DISPONIBLE', null, 'Alertas y restricciones de Crédito no disponibles'), owner: 'M8', criterio: 'La morosidad por sí sola no suspende automáticamente' };
+    try { return { estado: 'VALIDO' as const, alertas: indicador('VALIDO', await this.creditoM8.consultarAlertas(consulta), 'Restricciones y alertas decididas por M8'), owner: 'M8', criterio: 'La morosidad es antecedente, no decisión automática' }; }
+    catch { return { estado: 'FUENTE_NO_DISPONIBLE' as const, alertas: indicador('FUENTE_NO_DISPONIBLE', null, 'Alertas y restricciones de Crédito no disponibles'), owner: 'M8' }; }
+  }
+
+  async consultarBloqueosEconomicosM7(consulta: Consulta) {
+    if (!this.bloqueosOwner) return { estado: 'FUENTE_NO_DISPONIBLE' as const, bloqueos: indicador('FUENTE_NO_DISPONIBLE', null, 'El owner operacional aún no publica bloqueos objetivos'), criterio: 'Un atraso no se convierte automáticamente en bloqueo' };
+    try { return { estado: 'VALIDO' as const, bloqueos: indicador('VALIDO', await this.bloqueosOwner.consultarBloqueos(consulta), 'Contrato de bloqueos objetivos del owner; sólo lectura') }; }
+    catch { return { estado: 'FUENTE_NO_DISPONIBLE' as const, bloqueos: indicador('FUENTE_NO_DISPONIBLE', null, 'La fuente de bloqueos no está disponible') }; }
+  }
+
+  async consultarResumenIva(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    try {
+      const [ventas, compras] = await Promise.all([
+        prisma.documento_tributario.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_documento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true } }),
+        prisma.documento_compra_proveedor.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_documento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true } }),
+      ]);
+      const agrupar = (filas: Array<{ moneda: { codigo_moneda: string }; monto_impuesto: Prisma.Decimal }>) => sumarPorMoneda(filas.map(fila => ({ moneda: fila.moneda.codigo_moneda, monto: Number(fila.monto_impuesto) })));
+      const ivaVentas = agrupar(ventas); const ivaCompras = agrupar(compras); const monedas = [...new Set([...ivaVentas, ...ivaCompras].map(fila => fila.moneda))];
+      const estimado = monedas.map(moneda => ({ moneda, ivaVentas: ivaVentas.find(fila => fila.moneda === moneda)?.monto || 0, ivaCompras: ivaCompras.find(fila => fila.moneda === moneda)?.monto || 0 })).map(fila => ({ ...fila, ivaEstimado: redondear(fila.ivaVentas - fila.ivaCompras) }));
+      return { periodo: periodoSalida(periodo), estado: estimado.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, ivaVentas, ivaCompras, ivaEstimado: estimado, naturaleza: 'IVA estimado; no constituye declaración oficial SII' };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, ivaEstimado: indicador('FUENTE_NO_DISPONIBLE', null, 'Documentos tributarios no disponibles') }; }
+  }
+
+  private async costosInstalacionVigentes(fecha: Date) {
+    const filas = await prisma.parametro_remuneracional.findMany({ where: { codigo: { startsWith: prefijoCostoInstalacion }, tipo: 'DASHBOARD', unidad: 'MONTO', estado: 'activo', vigencia_desde: { lte: fecha }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }] } });
+    return filas.flatMap(fila => { try { const ubicacion = JSON.parse(fila.referencia || '{}') as { ciudad?: string; comuna?: string }; return ubicacion.ciudad && ubicacion.comuna && fila.valor !== null ? [{ id: fila.id_parametro_remuneracional, ciudad: ubicacion.ciudad, comuna: ubicacion.comuna, valor: Number(fila.valor) }] : []; } catch { return []; } });
+  }
+
+  async consultarCostosFabricacion(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta); const corte = new Date(periodo.hastaExclusiva.getTime() - 86400000);
+    try {
+      const [proyectos, precios, costosZona] = await Promise.all([
+        prisma.proyecto_financiero.findMany({ where: { id_proyecto_terreno: { not: null } }, include: { proyecto: { include: { orden_trabajo: { include: { material_orden_trabajo: true, especificaciones_puerta: { include: { especificacion_servicio_terreno: { include: { servicio_terreno: { include: { obra: true } } } } } } } } } }, tarea_remunerable: { where: { estado_validacion: 'validada', fecha_tarea: { gte: periodo.desde, lt: periodo.hastaExclusiva } } } } }),
+        prisma.historial_precio_material.findMany({ where: { estado_precio: 'vigente', fecha_vigencia_inicio: { lte: corte }, OR: [{ fecha_vigencia_fin: null }, { fecha_vigencia_fin: { gte: corte } }] }, orderBy: { fecha_vigencia_inicio: 'desc' } }),
+        this.costosInstalacionVigentes(corte),
+      ]);
+      const precioPorSku = new Map<string, number>(); for (const precio of precios) if (!precioPorSku.has(precio.material_sku)) precioPorSku.set(precio.material_sku, Number(precio.precio_unitario_convertido || precio.precio_unitario));
+      const filas = proyectos.map(proyecto => {
+        const ordenes = proyecto.proyecto?.orden_trabajo || [];
+        const materialesDetalle = ordenes.flatMap(orden => orden.material_orden_trabajo.flatMap(material => { const costo = precioPorSku.get(material.material_sku); const cantidad = Number(material.material_orden_trabajo_consumo_real ?? material.material_orden_trabajo_consumo_estimado ?? 0); return costo === undefined || cantidad <= 0 ? [] : [{ sku: material.material_sku, cantidad, costoUnitario: costo, costo: redondear(cantidad * costo), idOrden: orden.orden_trabajo_id_orden.toString() }]; }));
+        const extras = proyecto.tarea_remunerable.map(tarea => ({ idTareaRemunerable: tarea.id_tarea_remunerable, monto: Number(tarea.monto_calculado) }));
+        const ubicaciones = ordenes.flatMap(orden => orden.especificaciones_puerta?.especificacion_servicio_terreno.flatMap(vinculo => { const servicio = vinculo.servicio_terreno; return servicio && esServicioInstalacion(servicio.servicio_terreno_tipo_servicio) && servicio.obra ? [{ idServicio: servicio.servicio_terreno_servicio_terreno_id.toString(), fechaReal: servicio.servicio_terreno_fecha_real ? fechaIso(servicio.servicio_terreno_fecha_real) : null, region: servicio.obra.obra_region, ciudad: servicio.obra.obra_ciudad, comuna: servicio.obra.obra_comuna }] : []; }) || []);
+        const instalaciones = ubicaciones.map(ubicacion => { const config = costosZona.find(item => normalizarTexto(item.ciudad) === normalizarTexto(ubicacion.ciudad) && normalizarTexto(item.comuna) === normalizarTexto(ubicacion.comuna)); return { ...ubicacion, costo: config?.valor ?? null, parametro: config?.id ?? null }; });
+        const materiales = materialesDetalle.reduce((suma, item) => suma + item.costo, 0); const remuneracionesExtra = extras.reduce((suma, item) => suma + item.monto, 0); const costosInstalacion = instalaciones.every(item => item.costo !== null) ? instalaciones.reduce((suma, item) => suma + Number(item.costo), 0) : null;
+        return { idProyecto: proyecto.id_proyecto_financiero, codigo: proyecto.codigo_proyecto_financiero, materiales: redondear(materiales), remuneracionesExtra: redondear(remuneracionesExtra), costoInstalacion: costosInstalacion === null ? null : redondear(costosInstalacion), costoFabricacion: costosInstalacion === null ? null : redondear(materiales + remuneracionesExtra + costosInstalacion), desglose: { materiales: materialesDetalle, remuneracionesExtra: extras, instalaciones }, estado: costosInstalacion === null ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO' };
+      });
+      return { periodo: periodoSalida(periodo), estado: filas.some(fila => fila.estado === 'PARCIALMENTE_DISPONIBLE') ? 'PARCIALMENTE_DISPONIBLE' as const : filas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, proyectos: filas, formula: 'materiales atribuibles + remuneraciones extra atribuibles + costo de instalación configurado por ciudad/comuna' };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, proyectos: [] }; }
+  }
+
+  async consultarMargenInstalaciones(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    const costos = await this.consultarCostosFabricacion(consulta);
+    if (!('proyectos' in costos)) return costos;
+    const ids = costos.proyectos.map(proyecto => proyecto.idProyecto);
+    const proyectos = await prisma.proyecto_financiero.findMany({ where: { id_proyecto_financiero: { in: ids } }, include: { nota_venta: true } });
+    const filas = costos.proyectos.flatMap(costo => {
+      const proyecto = proyectos.find(item => item.id_proyecto_financiero === costo.idProyecto); const instalaciones = costo.desglose.instalaciones;
+      if (!proyecto?.nota_venta || instalaciones.length !== 1 || instalaciones[0].costo === null || !instalaciones[0].fechaReal) return [];
+      const fecha = new Date(`${instalaciones[0].fechaReal}T00:00:00Z`); if (!Number.isFinite(fecha.getTime())) return [];
+      const precio = Number(proyecto.nota_venta.monto_neto); const costoInstalacion = Number(instalaciones[0].costo);
+      return [{ idProyecto: costo.idProyecto, idServicio: instalaciones[0].idServicio, fecha: instalaciones[0].fechaReal, region: instalaciones[0].region, ciudad: instalaciones[0].ciudad, comuna: instalaciones[0].comuna, precio, costo: costoInstalacion, margen: redondear(precio - costoInstalacion) }];
+    });
+    const actuales = filas.filter(fila => dentro(new Date(`${fila.fecha}T00:00:00Z`), periodo));
+    const anteriores = filas.filter(fila => { const fecha = new Date(`${fila.fecha}T00:00:00Z`); return fecha >= periodo.anteriorDesde && fecha < periodo.anteriorHastaExclusiva; });
+    const agregar = (items: typeof filas) => items.length ? { cantidad: items.length, precioMedio: redondear(items.reduce((s, f) => s + f.precio, 0) / items.length), costoMedio: redondear(items.reduce((s, f) => s + f.costo, 0) / items.length), margenAgregado: redondear(items.reduce((s, f) => s + f.margen, 0)), margenMedio: redondear(items.reduce((s, f) => s + f.margen, 0) / items.length) } : null;
+    const actual = agregar(actuales); const anterior = agregar(anteriores);
+    const geografia = [...actuales.reduce((mapa, fila) => { const clave = `${fila.region || 'SIN_REGION'}|${fila.ciudad || 'SIN_CIUDAD'}|${fila.comuna || 'SIN_COMUNA'}`; const grupo = mapa.get(clave) || []; grupo.push(fila); mapa.set(clave, grupo); return mapa; }, new Map<string, typeof filas>())].map(([clave, items]) => { const [region, ciudad, comuna] = clave.split('|'); return { region, ciudad, comuna, ...agregar(items) }; });
+    const comparacion = actual && anterior ? indicador('VALIDO', { actual, anterior, diferenciaMargenAgregado: redondear(actual.margenAgregado - anterior.margenAgregado), variacionMargenPorcentual: anterior.margenAgregado === 0 ? null : redondear((actual.margenAgregado - anterior.margenAgregado) / Math.abs(anterior.margenAgregado) * 100) }, 'Período inmediatamente anterior de igual duración') : indicador('DATOS_INSUFICIENTES', null, 'No existe una base atribuible en ambos períodos para comparar');
+    return { periodo: costos.periodo, estado: actuales.length ? 'VALIDO' as const : 'DATOS_INSUFICIENTES' as const, instalaciones: actuales, agregados: actual, geografia, comparacion, cobertura: 'Sólo proyectos con una única instalación fechada y Nota de Venta inequívoca; no se prorratean ventas generales' };
+  }
+
+  async consultarInventarioValorizado(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta); const corte = new Date(periodo.hastaExclusiva.getTime() - 86400000);
+    try {
+      const [stocks, precios] = await Promise.all([
+        prisma.inventario_bodega.findMany({ include: { bodega: true, material: { include: { material_categoria_general: true } } } }),
+        prisma.historial_precio_material.findMany({ where: { estado_precio: 'vigente', fecha_vigencia_inicio: { lte: corte }, OR: [{ fecha_vigencia_fin: null }, { fecha_vigencia_fin: { gte: corte } }] }, orderBy: { fecha_vigencia_inicio: 'desc' } }),
+      ]);
+      const precioPorSku = new Map<string, number>(); for (const precio of precios) if (!precioPorSku.has(precio.material_sku)) precioPorSku.set(precio.material_sku, Number(precio.precio_unitario_convertido || precio.precio_unitario));
+      const filas = stocks.map(stock => { const cantidad = Number(stock.inventario_bodega_cantidad_fisica || 0); const costoUnitario = precioPorSku.get(stock.material_sku) ?? null; return { sku: stock.material_sku, material: stock.material.material_nombre_material, bodega: stock.bodega.bodega_nombre_bodega, ubicacion: stock.bodega.bodega_direccion, categoria: stock.material.material_categoria_general?.material_categoria_general_nombre || null, stock: cantidad, costoUnitario, valor: costoUnitario === null ? null : redondear(cantidad * costoUnitario) }; });
+      const calculables = filas.filter(fila => fila.valor !== null); const sinCosto = filas.filter(fila => fila.stock > 0 && fila.valor === null);
+      return { periodo: periodoSalida(periodo), estado: sinCosto.length ? 'PARCIALMENTE_DISPONIBLE' as const : filas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, valorTotal: calculables.length ? indicador('VALIDO', redondear(calculables.reduce((suma, fila) => suma + Number(fila.valor), 0)), 'Stock actual por costo unitario válido') : indicador(filas.length ? 'DATOS_INSUFICIENTES' : 'SIN_RESULTADOS', null, 'No hay costos unitarios válidos para valorizar'), inventario: filas, cobertura: { valorizados: calculables.length, sinCostoValido: sinCosto.length } };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, inventario: [] }; }
+  }
+
+  async consultarMaterialesProyectoOt(consulta: Consulta) {
+    resolverPeriodoM7(consulta);
+    try {
+      const [asignados, comprados] = await Promise.all([
+        prisma.material_orden_trabajo.findMany({ include: { material: true, orden_trabajo: { include: { proyecto: true } } } }),
+        prisma.detalle_material_orden_compra_m5.findMany({ include: { material: true, orden_compra: { include: { proveedor: true } } } }),
+      ]);
+      return { estado: asignados.length || comprados.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, materialesBodegaAsignados: asignados.map(item => ({ sku: item.material_sku, material: item.material.material_nombre_material, cantidadEstimada: item.material_orden_trabajo_consumo_estimado === null ? null : Number(item.material_orden_trabajo_consumo_estimado), cantidadReal: item.material_orden_trabajo_consumo_real === null ? null : Number(item.material_orden_trabajo_consumo_real), idOrden: item.orden_trabajo_id_orden.toString(), idProyecto: item.orden_trabajo.proyecto_id_proyecto?.toString() || null, destinoOrden: '/terreno/produccion' })), materialesCompradosEspecificamente: comprados.filter(item => item.orden_compra.id_proyecto_financiero_contexto || item.orden_compra.id_orden_trabajo_contexto).map(item => ({ idCompra: item.id_ocs_m5, sku: item.material_sku, material: item.material.material_nombre_material, cantidadPedida: Number(item.cantidad_pedida), cantidadRecibida: Number(item.cantidad_recibida), idProyecto: item.orden_compra.id_proyecto_financiero_contexto, idOrden: item.orden_compra.id_orden_trabajo_contexto?.toString() || null, proveedor: item.orden_compra.proveedor.nombre_razon_social, destinoCompra: `/ordenes-compra-servicios/${item.id_ocs_m5}` })) };
+    } catch { return { estado: 'FUENTE_NO_DISPONIBLE' as const, materialesBodegaAsignados: [], materialesCompradosEspecificamente: [] }; }
+  }
+
+  async consultarRiesgoStock(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta);
+    try {
+      const [stocks, entradas, demandas, reservas] = await Promise.all([
+        prisma.inventario_bodega.findMany(),
+        prisma.detalle_material_orden_compra_m5.findMany({ include: { material: true, orden_compra: true } }),
+        prisma.material_orden_trabajo.findMany({ include: { orden_trabajo: true, material: true } }),
+        prisma.reserva_inventario.findMany({ where: { reserva_inventario_estado_reserva: { notIn: ['liberada', 'cancelada'] } }, include: { material: true } }),
+      ]);
+      const stock = new Map<string, number>(); for (const fila of stocks) stock.set(fila.material_sku, (stock.get(fila.material_sku) || 0) + Number(fila.inventario_bodega_cantidad_fisica || 0) - Number(fila.inventario_bodega_cantidad_reservada || 0));
+      const entrada = new Map<string, number>(); for (const fila of entradas.filter(item => item.cantidad_recibida.lt(item.cantidad_pedida))) entrada.set(fila.material_sku, (entrada.get(fila.material_sku) || 0) + Number(fila.cantidad_pedida.minus(fila.cantidad_recibida)));
+      const demanda = new Map<string, number>(); for (const fila of reservas) if (fila.material_sku) demanda.set(fila.material_sku, (demanda.get(fila.material_sku) || 0) + Number(fila.reserva_inventario_cantidad_reservada || 0));
+      const otsReservadas = new Set(reservas.filter(fila => fila.orden_trabajo_id_orden).map(fila => `${fila.orden_trabajo_id_orden}:${fila.material_sku}`));
+      for (const fila of demandas.filter(item => !['completada', 'cancelada'].includes(normalizarTexto(item.orden_trabajo.orden_trabajo_estado)))) if (!otsReservadas.has(`${fila.orden_trabajo_id_orden}:${fila.material_sku}`)) demanda.set(fila.material_sku, (demanda.get(fila.material_sku) || 0) + Math.max(0, Number(fila.material_orden_trabajo_consumo_estimado || 0) - Number(fila.material_orden_trabajo_consumo_real || 0)));
+      const skus = [...new Set([...stock.keys(), ...entrada.keys(), ...demanda.keys()])];
+      const nombre = new Map([...entradas, ...demandas, ...reservas].map(item => [item.material_sku!, item.material?.material_nombre_material || item.material_sku]));
+      const materiales = skus.map(sku => { const actual = redondear(stock.get(sku) || 0, 4); const esperada = redondear(entrada.get(sku) || 0, 4); const conocida = redondear(demanda.get(sku) || 0, 4); const disponible = redondear(actual + esperada, 4); return { sku, material: nombre.get(sku) || sku, stock: actual, entradasEsperadas: esperada, demandaConocida: conocida, disponibilidadFutura: disponible, faltante: redondear(Math.max(0, conocida - disponible), 4), riesgo: disponible < conocida }; });
+      return { periodo: periodoSalida(periodo), estado: materiales.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, materiales, riesgos: materiales.filter(item => item.riesgo), criterio: 'Stock disponible + entradas esperadas comparado con demanda futura confirmada; sin score ni reserva automática' };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, materiales: [], riesgos: [] }; }
+  }
+
+  async consultarRotacionInventario(consulta: Consulta) {
+    const periodo = resolverPeriodoM7(consulta); const corte = new Date(`${fechaNegocio()}T00:00:00Z`);
+    try {
+      const parametro = await prisma.parametro_remuneracional.findFirst({ where: { codigo: codigoDiasStockInmovil, tipo: 'DASHBOARD', unidad: 'DIAS', estado: 'activo', vigencia_desde: { lte: corte }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: corte } }] }, orderBy: { vigencia_desde: 'desc' } });
+      if (!parametro?.valor) return { periodo: periodoSalida(periodo), estado: 'CONFIGURACION_PENDIENTE' as const, stockInmovil: indicador('CONFIGURACION_PENDIENTE', null, 'Configure días sin movimiento para stock inmóvil') };
+      const [movimientos, stocks] = await Promise.all([prisma.movimiento_inventario.findMany({ where: { movimiento_inventario_fecha_hora: { not: null } }, include: { movimiento_inventario_tipo_movimiento: true, material: true }, orderBy: { movimiento_inventario_fecha_hora: 'desc' } }), prisma.inventario_bodega.findMany({ include: { material: true } })]);
+      const dias = Number(parametro.valor); const ultimo = new Map<string, Date>(); for (const movimiento of movimientos) if (movimiento.material_sku && movimiento.movimiento_inventario_fecha_hora && !ultimo.has(movimiento.material_sku)) ultimo.set(movimiento.material_sku, movimiento.movimiento_inventario_fecha_hora);
+      const stock = new Map<string, { material: string | null; cantidad: number }>(); for (const fila of stocks) { const actual = stock.get(fila.material_sku) || { material: fila.material.material_nombre_material, cantidad: 0 }; actual.cantidad += Number(fila.inventario_bodega_cantidad_fisica || 0); stock.set(fila.material_sku, actual); }
+      const inmovil = [...stock].flatMap(([sku, dato]) => { const fecha = ultimo.get(sku); const sinMovimiento = fecha ? diasCalendario(fecha, corte) : null; return dato.cantidad > 0 && (sinMovimiento === null || sinMovimiento >= dias) ? [{ sku, material: dato.material, stock: dato.cantidad, ultimoMovimiento: fecha?.toISOString() || null, diasSinMovimiento: sinMovimiento }] : []; });
+      const salidas = movimientos.filter(m => dentro(m.movimiento_inventario_fecha_hora!, periodo) && /salida|consumo|egreso/i.test(m.movimiento_inventario_tipo_movimiento?.movimiento_inventario_tipo_movimiento_nombre || ''));
+      const rotacion = salidas.length ? indicador('VALIDO', sumarPorMoneda(salidas.filter(m => m.material_sku).map(m => ({ moneda: m.material_sku!, monto: Number(m.movimiento_inventario_cantidad || 0) }))).map(f => ({ sku: f.moneda, cantidadSalida: f.monto })), 'Salidas reales clasificadas por el owner durante el período') : indicador('DATOS_INSUFICIENTES', null, 'No existe histórico de salidas clasificadas suficiente para calcular rotación/cobertura');
+      return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, parametroDias: dias, stockInmovil: indicador(inmovil.length ? 'VALIDO' : 'SIN_RESULTADOS', inmovil, 'Stock sin movimiento durante al menos los días configurados'), rotacion, cobertura: rotacion.estado === 'VALIDO' ? indicador('PARCIALMENTE_DISPONIBLE', null, 'La cobertura temporal requiere demanda futura fechada por material') : indicador('DATOS_INSUFICIENTES', null, 'Histórico insuficiente') };
+    } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, stockInmovil: indicador('FUENTE_NO_DISPONIBLE', null, 'Inventario no disponible') }; }
+  }
+
+  async consultarComprasRecepciones(consulta: Consulta) {
+    resolverPeriodoM7(consulta);
+    try {
+      const detalles = await prisma.detalle_material_orden_compra_m5.findMany({ include: { material: true, orden_compra: { include: { proveedor: true } } }, orderBy: [{ fecha_esperada: 'asc' }, { id_detalle_material_oc_m5: 'asc' }] });
+      const filas = detalles.filter(item => item.cantidad_recibida.lt(item.cantidad_pedida)).map(item => ({ idCompra: item.id_ocs_m5, proveedor: item.orden_compra.proveedor.nombre_razon_social, sku: item.material_sku, material: item.material.material_nombre_material, cantidadPedida: Number(item.cantidad_pedida), cantidadRecibida: Number(item.cantidad_recibida), cantidadPendiente: Number(item.cantidad_pedida.minus(item.cantidad_recibida)), fechaEsperada: item.fecha_esperada ? fechaIso(item.fecha_esperada) : item.orden_compra.fecha_esperada_recepcion ? fechaIso(item.orden_compra.fecha_esperada_recepcion) : null, idFichaCliente: item.orden_compra.id_ficha_cliente_contexto, idCotizacion: item.orden_compra.id_cotizacion_contexto, idProyecto: item.orden_compra.id_proyecto_financiero_contexto, idOrden: item.orden_compra.id_orden_trabajo_contexto?.toString() || null, acciones: [accion('Abrir compra', `/ordenes-compra-servicios/${item.id_ocs_m5}`)] }));
+      return { estado: filas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, ordenesPendientes: filas };
+    } catch { return { estado: 'FUENTE_NO_DISPONIBLE' as const, ordenesPendientes: [] }; }
   }
 
   async consultarResumenResultados(consulta: Consulta) {

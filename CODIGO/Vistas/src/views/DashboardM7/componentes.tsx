@@ -75,6 +75,7 @@ export const ContenidoIndicadores: React.FC<{ datos: RespuestaM7 | null; error: 
   if (cargando) return <div className="px-5 py-10 text-sm text-gray-500">Consultando fuentes vigentes…</div>;
   if (error) return <div role="alert" className="border-y border-red-200 bg-red-50 px-5 py-4 text-red-800">{error}</div>;
   if (!datos) return null;
+  if (datos.estado === 'FUENTE_NO_DISPONIBLE') return <div role="status" className="border-y border-amber-200 bg-amber-50 px-5 py-4 text-amber-900">La fuente de información no está disponible temporalmente.</div>;
   const entradas = Object.entries(datos).filter(([clave]) => !['periodo', 'estado', 'permiso', ...omitir].includes(clave));
   return <div className="divide-y divide-gray-200 bg-white">{entradas.map(([clave, contenido]) => <section key={clave} className="px-5 py-6 sm:px-8"><div className="mx-auto max-w-7xl"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h2 className="text-base font-bold text-gray-950">{titulo(clave)}</h2>{esIndicador(contenido) && <Estado estado={contenido.estado} />}</div>{esIndicador(contenido) ? <><Valor valor={contenido.valor} /><p className="mt-2 text-xs text-gray-500">{contenido.detalle}</p></> : <Valor valor={contenido} />}</div></section>)}</div>;
 };

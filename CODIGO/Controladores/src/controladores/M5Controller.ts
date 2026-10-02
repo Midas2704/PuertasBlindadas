@@ -58,6 +58,7 @@ const incluirOcs = {
   historial: { include: { usuario: true }, orderBy: { fecha_hora: 'desc' as const } },
   ajustes: { include: { usuario_solicitante: true, usuario_confirmante: true }, orderBy: { fecha_solicitud: 'desc' as const } },
   efectos_financieros: true,
+  detalles_material: { include: { material: true }, orderBy: { material_sku: 'asc' as const } },
 } satisfies Prisma.orden_compra_servicio_m5Include;
 type OrdenCompraServicio = Prisma.orden_compra_servicio_m5GetPayload<{ include: typeof incluirOcs }>;
 
@@ -619,6 +620,14 @@ export class M5Controller {
       tieneEfectosFinancieros: orden.efectos_financieros.length > 0,
       montoAutorizadoOriginal: Number(orden.monto_autorizado_original),
       idMoneda: orden.id_moneda,
+      contexto: {
+        idFichaCliente: orden.id_ficha_cliente_contexto,
+        idCotizacion: orden.id_cotizacion_contexto,
+        idProyectoFinanciero: orden.id_proyecto_financiero_contexto,
+        idOrdenTrabajo: orden.id_orden_trabajo_contexto?.toString() || null,
+      },
+      fechaEsperadaRecepcion: orden.fecha_esperada_recepcion,
+      materiales: orden.detalles_material.map(item => ({ sku: item.material_sku, nombre: item.material.material_nombre_material, cantidadPedida: Number(item.cantidad_pedida), cantidadRecibida: Number(item.cantidad_recibida), cantidadPendiente: Number(item.cantidad_pedida.minus(item.cantidad_recibida)), fechaEsperada: item.fecha_esperada })),
       referencia: orden.referencia,
       periodo: orden.periodo,
       descripcion: orden.descripcion,
@@ -645,11 +654,36 @@ export class M5Controller {
     const idProveedor = identificador(valorEntrada(entrada, 'idProveedor', 'id_proveedor'));
     const montoAutorizado = montoPositivo(valorEntrada(entrada, 'montoAutorizado', 'monto_autorizado'));
     const idMoneda = entrada.idMoneda === undefined && entrada.id_moneda === undefined ? null : identificador(valorEntrada(entrada, 'idMoneda', 'id_moneda'));
+    const opcional = (valor: unknown) => valor === undefined || valor === null || valor === '' ? null : identificador(valor);
+    const idFichaCliente = opcional(valorEntrada(entrada, 'idFichaCliente', 'id_ficha_cliente_contexto'));
+    const idCotizacion = opcional(valorEntrada(entrada, 'idCotizacion', 'id_cotizacion_contexto'));
+    const idProyecto = opcional(valorEntrada(entrada, 'idProyectoFinanciero', 'id_proyecto_financiero_contexto'));
+    const idOrden = valorEntrada(entrada, 'idOrdenTrabajo', 'id_orden_trabajo_contexto');
+    const idOrdenTrabajo = idOrden === undefined || idOrden === null || idOrden === '' ? null : BigInt(String(idOrden));
+    const fechaEsperada = valorEntrada(entrada, 'fechaEsperadaRecepcion', 'fecha_esperada_recepcion');
+    const fechaEsperadaRecepcion = fechaEsperada === undefined || fechaEsperada === null || fechaEsperada === '' ? null : fechaEntrada(fechaEsperada, 'Fecha esperada de recepción');
+    const materialesEntrada = Array.isArray(entrada.materiales) ? entrada.materiales as Entrada[] : [];
+    const materiales = materialesEntrada.map(item => {
+      const sku = texto(valorEntrada(item, 'sku', 'material_sku'), 16);
+      const cantidadPedida = montoPositivo(valorEntrada(item, 'cantidadPedida', 'cantidad_pedida'));
+      const cantidadRecibida = item.cantidadRecibida === undefined && item.cantidad_recibida === undefined ? new Prisma.Decimal(0) : montoNoNegativo(valorEntrada(item, 'cantidadRecibida', 'cantidad_recibida'));
+      if (cantidadRecibida.gt(cantidadPedida)) throw new ErrorAplicacion(400, 'La cantidad recibida no puede superar la cantidad pedida');
+      const fechaMaterial = valorEntrada(item, 'fechaEsperada', 'fecha_esperada');
+      return { material_sku: sku, cantidad_pedida: cantidadPedida, cantidad_recibida: cantidadRecibida, fecha_esperada: fechaMaterial ? fechaEntrada(fechaMaterial, 'Fecha esperada del material') : fechaEsperadaRecepcion };
+    });
+    if (new Set(materiales.map(item => item.material_sku)).size !== materiales.length) throw new ErrorAplicacion(400, 'No se puede repetir un material en la Orden de Compra');
     return prisma.$transaction(async tx => {
       const proveedor = await tx.proveedor.findUnique({ where: { id_proveedor: idProveedor } });
       if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
       if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'Sólo puede utilizarse un proveedor Activo para una OCS');
       if (idMoneda && !await tx.moneda.findFirst({ where: { id_moneda: idMoneda, estado_moneda: 'activo' } })) throw new ErrorAplicacion(404, 'Moneda activa no encontrada');
+      if (idFichaCliente && !await tx.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFichaCliente } })) throw new ErrorAplicacion(404, 'Ficha de Cliente de contexto no encontrada');
+      const cotizacion = idCotizacion ? await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion } }) : null;
+      if (idCotizacion && !cotizacion) throw new ErrorAplicacion(404, 'Cotización de contexto no encontrada');
+      if (cotizacion && idFichaCliente && cotizacion.id_ficha_cliente !== idFichaCliente) throw new ErrorAplicacion(409, 'La Cotización no pertenece al Cliente indicado');
+      if (idProyecto && !await tx.proyecto_financiero.findUnique({ where: { id_proyecto_financiero: idProyecto } })) throw new ErrorAplicacion(404, 'Proyecto de contexto no encontrado');
+      if (idOrdenTrabajo && !await tx.orden_trabajo.findUnique({ where: { orden_trabajo_id_orden: idOrdenTrabajo } })) throw new ErrorAplicacion(404, 'Orden de Trabajo de contexto no encontrada');
+      if (materiales.length && await tx.material.count({ where: { material_sku: { in: materiales.map(item => item.material_sku) } } }) !== materiales.length) throw new ErrorAplicacion(404, 'Uno o más materiales no existen');
       const orden = await tx.orden_compra_servicio_m5.create({ data: {
         id_proveedor: idProveedor,
         monto_autorizado: montoAutorizado,
@@ -660,6 +694,12 @@ export class M5Controller {
         descripcion: contacto(entrada.descripcion, 1000),
         creado_por: usuario,
         id_moneda: idMoneda,
+        id_ficha_cliente_contexto: idFichaCliente,
+        id_cotizacion_contexto: idCotizacion,
+        id_proyecto_financiero_contexto: idProyecto,
+        id_orden_trabajo_contexto: idOrdenTrabajo,
+        fecha_esperada_recepcion: fechaEsperadaRecepcion,
+        detalles_material: materiales.length ? { create: materiales } : undefined,
       } });
       await tx.historial_orden_compra_servicio_m5.create({ data: { id_ocs_m5: orden.id_orden_compra_servicio_m5, campo: 'creacion', valor_anterior: null, valor_nuevo: JSON.stringify({ idProveedor, montoAutorizado: Number(montoAutorizado), estado: 'abierta' }), usuario_id_usuario: usuario } });
       const completa = await tx.orden_compra_servicio_m5.findUniqueOrThrow({ where: { id_orden_compra_servicio_m5: orden.id_orden_compra_servicio_m5 }, include: incluirOcs });

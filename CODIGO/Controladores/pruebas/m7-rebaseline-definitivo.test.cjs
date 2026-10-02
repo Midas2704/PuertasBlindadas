@@ -55,9 +55,10 @@ test('M7 rebaseline definitivo CU215-CU258', async t => {
     assert.equal('costosDirectosAtribuibles' in resultado.proyectos[0], false);
   });
 
-  await t.test('CU228 no concede CU229 ni las consultas de flujo existentes', () => {
-    assert.equal(permiteOperacion('consultarLiquidezM7', ['CU228']), false);
-    assert.equal(permiteOperacion('consultarLiquidezM7', ['CU229']), false);
+  await t.test('CU228 y CU229 acceden a segmentos independientes de liquidez', () => {
+    assert.equal(permiteOperacion('consultarLiquidezM7', ['CU228']), true);
+    assert.equal(permiteOperacion('consultarLiquidezM7', ['CU229']), true);
+    assert.equal(permiteOperacion('registrarAjusteLiquidezM7', ['CU229']), false);
   });
 
   await t.test('universo definitivo termina en CU258 sin CU249-PRE ni CU259', () => {

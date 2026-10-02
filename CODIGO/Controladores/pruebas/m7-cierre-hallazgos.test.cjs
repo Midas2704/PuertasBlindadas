@@ -78,7 +78,7 @@ test('M7 cierre de hallazgos CU225 CU226 CU227 CU230 CU231 CU232 y navegación',
 
   const flujo = await modulo.consultarLiquidez({ ...consulta, granularidad: 'dia' }, ['CU230', 'CU42']);
   await t.test('17 CU230 agrupa por día', () => assert.equal(flujo.flujoHistorico.valor.granularidad, 'dia'));
-  await t.test('18 CU230 separa entradas y salidas', () => { const total = flujo.flujoHistorico.valor.totales.find(f => f.moneda === 'CLP'); assert.equal(total.entradas, 120); assert.equal(total.salidas, 20); });
+  await t.test('18 CU230 separa entradas y salidas', () => { const total = flujo.flujoHistorico.valor.totales.find(f => f.moneda === 'CLP'); assert.equal(total.ingresosRecibidos, 120); assert.equal(total.egresosRealizados, 20); });
   await t.test('19 CU230 calcula flujo neto', () => assert.equal(flujo.flujoHistorico.valor.totales.find(f => f.moneda === 'CLP').flujoNeto, 100));
   await t.test('20 CU230 compara período anterior', () => assert.equal(flujo.flujoHistorico.valor.comparacion.find(f => f.moneda === 'CLP').diferenciaAbsoluta, 50));
   await t.test('21 CU230 soporta semana', async () => { const r = await modulo.consultarLiquidez({ ...consulta, granularidad: 'semana' }, ['CU230']); assert.equal(r.flujoHistorico.valor.granularidad, 'semana'); });
@@ -89,9 +89,9 @@ test('M7 cierre de hallazgos CU225 CU226 CU227 CU230 CU231 CU232 y navegación',
   await t.test('26 CU230 oculta id y ruta sin permiso owner', async () => { const r = await modulo.consultarLiquidez({ ...consulta, origen: 'pago_cliente' }, ['CU230']); const m = r.flujoHistorico.valor.movimientos[0]; assert.equal(Object.hasOwn(m, 'acciones'), false); assert.equal(Object.hasOwn(m.origenes[0], 'id'), false); });
 
   const liquidez = await modulo.consultarLiquidez(consulta, ['CU231']);
-  await t.test('27 CU231 no inventa saldo inicial', () => assert.equal(liquidez.proyeccion.valor.saldoProyectado.valor, null));
-  await t.test('28 CU231 separa compromisos y saldo', () => assert.ok(liquidez.proyeccion.valor.serieCompromisos.length > 0));
-  await t.test('29 CU231 acumulado no se llama saldo', () => assert.equal(liquidez.proyeccion.valor.serieCompromisos.some(f => Object.hasOwn(f, 'saldo')), false));
+  await t.test('27 CU231 parte de liquidez acumulada real', () => assert.ok(liquidez.proyeccion.valor.saldosFinales.length > 0));
+  await t.test('28 CU231 separa compromisos y liquidez proyectada', () => assert.ok(liquidez.proyeccion.valor.eventos.length > 0));
+  await t.test('29 CU231 no presenta compromisos futuros como realizados', () => assert.equal(liquidez.proyeccion.valor.eventos.some(f => Object.hasOwn(f, 'saldo')), false));
   const riesgo = await modulo.consultarRiesgoDeficit(consulta, ['CU232']);
   await t.test('30 CU232 productivo queda condicionado', () => { assert.equal(riesgo.estado, 'CONFIGURACION_PENDIENTE'); assert.equal(riesgo.primerDeficit.valor, null); });
 

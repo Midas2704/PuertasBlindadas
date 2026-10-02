@@ -55,6 +55,7 @@ import RiesgoDeficitM7 from './views/DashboardM7/RiesgoDeficitM7';
 import ExposicionProyectosM7 from './views/DashboardM7/ExposicionProyectosM7';
 import ContextoProyectoM7 from './views/DashboardM7/ContextoProyectoM7';
 import OperacionCostosM7 from './views/DashboardM7/OperacionCostosM7';
+import DeltaControladoM7 from './views/DashboardM7/DeltaControladoM7';
 
 const App: React.FC = () => {
   return (
@@ -97,16 +98,17 @@ const App: React.FC = () => {
           <Route path="dashboard-m7/centro-atencion" element={<Protegido permiso="CU216"><CentroAtencionM7 /></Protegido>} />
           <Route path="dashboard-m7/cotizaciones-pendientes" element={<Protegido permiso="CU217"><CotizacionesPendientesM7 /></Protegido>} />
           <Route path="dashboard-m7/clientes/:id" element={<Protegido permiso="CU221"><ContextoClienteM7 /></Protegido>} />
-          <Route path="dashboard-m7/ventas" element={<Protegido permiso={['CU219','CU220']}><AnalisisVentasM7 /></Protegido>} />
-          <Route path="dashboard-m7/cuentas-cobrar" element={<Protegido permiso={['CU222','CU223','CU225']}><CuentasCobrarM7 /></Protegido>} />
+          <Route path="dashboard-m7/ventas" element={<Protegido permiso={['CU218','CU219','CU220']}><AnalisisVentasM7 /></Protegido>} />
+          <Route path="dashboard-m7/cuentas-cobrar" element={<Protegido permiso={['CU222','CU223','CU224','CU225']}><CuentasCobrarM7 /></Protegido>} />
           <Route path="dashboard-m7/cuentas-pagar" element={<Protegido permiso={['CU226','CU227']}><CuentasPagarM7 /></Protegido>} />
-          <Route path="dashboard-m7/liquidez" element={<Protegido permiso={['CU230','CU231']}><LiquidezM7 /></Protegido>} />
+          <Route path="dashboard-m7/liquidez" element={<Protegido permiso={['CU228','CU229','CU230','CU231']}><LiquidezM7 /></Protegido>} />
           <Route path="dashboard-m7/riesgo-deficit" element={<Protegido permiso="CU232"><RiesgoDeficitM7 /></Protegido>} />
           <Route path="dashboard-m7/margen-proyectos" element={<Protegido permiso={['CU233','CU234','CU235']}><MargenProyectosM7 /></Protegido>} />
           <Route path="dashboard-m7/proyectos/exposicion" element={<Protegido permiso="CU236"><ExposicionProyectosM7 /></Protegido>} />
           <Route path="dashboard-m7/proyectos/:id" element={<Protegido permiso="CU237"><ContextoProyectoM7 /></Protegido>} />
           <Route path="dashboard-m7/resumenes" element={<Protegido permiso={['CU238','CU239']}><ResumenesM7 /></Protegido>} />
           <Route path="dashboard-m7/operacion" element={<Protegido permiso={['CU242','CU247','CU248','CU250','CU252','CU253']}><OperacionCostosM7 /></Protegido>} />
+          <Route path="dashboard-m7/control" element={<Protegido permiso={['CU228','CU232','CU240','CU241','CU243','CU244','CU249','CU251','CU254','CU255','CU256','CU257','CU258']}><DeltaControladoM7 /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

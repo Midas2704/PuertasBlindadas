@@ -87,8 +87,8 @@ test('M7 CU216-CU221 definitivo', async t => {
   await t.test('11 no genera probabilidad ni forecast', () => { assert.ok(pendientes.cotizaciones.every(fila => !Object.hasOwn(fila, 'probabilidad') && !Object.hasOwn(fila, 'forecast'))); assert.match(pendientes.naturaleza, /no representa.*forecast.*probabilidad/i); });
   await t.test('12 navegación preserva owners M2 y M1', () => { const fila = pendientes.cotizaciones.find(item => item.idCotizacion === cotizacionPendiente.id_cotizacion); assert.match(fila.destinoCotizacion, /^\/cotizacion\/nueva\?borrador=/); assert.match(fila.destinoCliente, /^\/clientes\//); });
 
-  await t.test('13 CU218 sigue sin operación funcional', () => assert.equal(Object.values(operacionesPermiso).includes('CU218'), false));
-  await t.test('14 no existe fórmula de conversión inventada', () => { const fuente = readFileSync(resolve('src/controladores/M7Controller.ts'), 'utf8'); assert.doesNotMatch(fuente, /cotizaciones\s*convertidas|tasa\s*de\s*conversi[oó]n|probabilidad_de_cierre/i); });
+  await t.test('13 CU218 habilita únicamente el segmento de conversión', () => { assert.equal(permiteOperacion('consultarAnalisisVentasM7', ['CU218']), true); assert.equal(permiteOperacion('consultarAnalisisVentasM7', ['CU217']), false); });
+  await t.test('14 conversión usa Nota de Venta válida sin forecast ni probabilidad', async () => { const ventas218 = await modulo.consultarAnalisisVentas(consulta, ['CU218']); assert.equal(Object.hasOwn(ventas218, 'conversion'), true); assert.equal(Object.hasOwn(ventas218, 'montoNeto'), false); assert.doesNotMatch(JSON.stringify(ventas218), /forecast|probabilidad/i); });
 
   const ventas219 = await modulo.consultarAnalisisVentas(consulta, ['CU219']);
   await t.test('15 ticket medio usa ventas válidas', () => { assert.equal(ventas219.cantidad.valor, 4); assert.equal(ventas219.ticketMedio.valor.porMoneda[0].monto, 225); });

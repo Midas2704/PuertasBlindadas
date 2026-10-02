@@ -73,7 +73,10 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consultarPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
   | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'consultarCostoRemuneracionesM7' | 'descargarPdfDashboardM7'
   | 'consultarOrdenesTrabajoM7' | 'consultarCargaOperacionalM7' | 'consultarInstalacionesM7' | 'consultarAtrasosInstalacionesM7' | 'consultarIncidenciasRetrabajosM7'
-  | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7';
+  | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7'
+  | 'registrarAjusteLiquidezM7' | 'consultarParametrosLiquidezM7' | 'configurarParametroLiquidezM7' | 'consultarCostosInstalacionM7' | 'configurarCostoInstalacionM7' | 'consultarParametroStockInmovilM7' | 'configurarParametroStockInmovilM7'
+  | 'consultarExposicionCreditoM7' | 'consultarAlertasCreditoM7' | 'consultarResumenIvaM7' | 'consultarCostosFabricacionM7' | 'consultarBloqueosEconomicosM7' | 'consultarMargenInstalacionesM7'
+  | 'consultarInventarioValorizadoM7' | 'consultarMaterialesProyectoOtM7' | 'consultarRiesgoStockM7' | 'consultarRotacionInventarioM7' | 'consultarComprasRecepcionesM7';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -448,6 +451,9 @@ export class C_Finanzas {
       case 'consultarCuentasPagarM7': return this.m7.consultarCuentasPagar(solicitud.consulta || {}, actor.permisos);
       case 'consultarLiquidezM7': return this.m7.consultarLiquidez(solicitud.consulta || {}, actor.permisos);
       case 'consultarRiesgoDeficitM7': return this.m7.consultarRiesgoDeficit(solicitud.consulta || {}, actor.permisos);
+      case 'registrarAjusteLiquidezM7': return this.m7.registrarAjusteLiquidez(cuerpo, { id: actor.id, administrador: actor.administrador });
+      case 'consultarParametrosLiquidezM7': return this.m7.consultarParametrosPorFamiliaM7('UMBRAL_LIQUIDEZ');
+      case 'configurarParametroLiquidezM7': return this.m7.configurarUmbralLiquidezM7(cuerpo);
       case 'consultarExposicionProyectosM7': return this.m7.consultarExposicionProyectos(solicitud.consulta || {}, actor.permisos);
       case 'consultarContextoProyectoM7': return this.m7.consultarContextoProyecto(identificador(parametros.id), solicitud.consulta || {}, actor.permisos);
       case 'consultarMargenProyectosM7': return this.m7.consultarMargenProyectos(solicitud.consulta || {}, actor.permisos);
@@ -459,6 +465,21 @@ export class C_Finanzas {
       case 'consultarInstalacionesM7': return this.m7.consultarInstalaciones(solicitud.consulta || {});
       case 'consultarAtrasosInstalacionesM7': return this.m7.consultarAtrasosInstalaciones(solicitud.consulta || {});
       case 'consultarIncidenciasRetrabajosM7': return this.m7.consultarIncidenciasRetrabajos(solicitud.consulta || {});
+      case 'consultarExposicionCreditoM7': return this.m7.consultarExposicionCreditoM7(solicitud.consulta || {});
+      case 'consultarAlertasCreditoM7': return this.m7.consultarAlertasCreditoM7(solicitud.consulta || {});
+      case 'consultarResumenIvaM7': return this.m7.consultarResumenIva(solicitud.consulta || {});
+      case 'consultarCostosFabricacionM7': return this.m7.consultarCostosFabricacion(solicitud.consulta || {});
+      case 'consultarBloqueosEconomicosM7': return this.m7.consultarBloqueosEconomicosM7(solicitud.consulta || {});
+      case 'consultarMargenInstalacionesM7': return this.m7.consultarMargenInstalaciones(solicitud.consulta || {});
+      case 'consultarInventarioValorizadoM7': return this.m7.consultarInventarioValorizado(solicitud.consulta || {});
+      case 'consultarMaterialesProyectoOtM7': return this.m7.consultarMaterialesProyectoOt(solicitud.consulta || {});
+      case 'consultarRiesgoStockM7': return this.m7.consultarRiesgoStock(solicitud.consulta || {});
+      case 'consultarRotacionInventarioM7': return this.m7.consultarRotacionInventario(solicitud.consulta || {});
+      case 'consultarComprasRecepcionesM7': return this.m7.consultarComprasRecepciones(solicitud.consulta || {});
+      case 'consultarCostosInstalacionM7': return this.m7.consultarParametrosPorFamiliaM7('COSTO_INSTALACION');
+      case 'configurarCostoInstalacionM7': return this.m7.configurarCostoInstalacionM7(cuerpo);
+      case 'consultarParametroStockInmovilM7': return this.m7.consultarParametrosPorFamiliaM7('DIAS_STOCK_INMOVIL');
+      case 'configurarParametroStockInmovilM7': return this.m7.configurarDiasStockInmovilM7(cuerpo);
       case 'descargarPdfDashboardM7': return this.m7.descargarPdfContextual(cuerpo, actor.permisos);
       case 'consultarUmbralMargenM7': return this.m7.consultarConfiguracionUmbralMargen();
       case 'configurarUmbralMargenM7': return this.m7.configurarUmbralMargen(cuerpo);

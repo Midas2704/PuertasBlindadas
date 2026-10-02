@@ -926,11 +926,17 @@ model orden_compra_servicio_m5 {
   fecha_actualizacion          DateTime                             @default(now()) @db.Timestamptz(6)
   creado_por                   BigInt
   id_moneda                    Int?
+  id_ficha_cliente_contexto    Int?
+  id_cotizacion_contexto       Int?
+  id_proyecto_financiero_contexto Int?
+  id_orden_trabajo_contexto    BigInt?
+  fecha_esperada_recepcion     DateTime?                            @db.Date
   proveedor                    proveedor                            @relation(fields: [id_proveedor], references: [id_proveedor], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_proveedor")
   usuario_creador              usuario                              @relation("ocs_m5_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_creador")
   historial                    historial_orden_compra_servicio_m5[]
   ajustes                      ajuste_orden_compra_servicio_m5[]
   efectos_financieros          efecto_financiero_ocs_m5[]
+  detalles_material            detalle_material_orden_compra_m5[]
 
   @@index([id_proveedor, fecha_creacion], map: "idx_ocs_m5_proveedor_fecha")
   @@index([estado_ocs, fecha_creacion], map: "idx_ocs_m5_estado_fecha")
@@ -1793,6 +1799,22 @@ model tarifa_esquema_remuneracional {
   @@schema("finanzas")
 }
 
+/// Extensión mínima del owner Compras para cantidades de material pedidas y recibidas.
+model detalle_material_orden_compra_m5 {
+  id_detalle_material_oc_m5 Int                      @id @default(autoincrement())
+  id_ocs_m5                 Int
+  material_sku              String                   @db.VarChar(16)
+  cantidad_pedida           Decimal                  @db.Decimal(12, 4)
+  cantidad_recibida         Decimal                  @default(0) @db.Decimal(12, 4)
+  fecha_esperada            DateTime?                @db.Date
+  orden_compra              orden_compra_servicio_m5 @relation(fields: [id_ocs_m5], references: [id_orden_compra_servicio_m5], onDelete: Restrict, onUpdate: NoAction)
+  material                  material                 @relation(fields: [material_sku], references: [material_sku], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([id_ocs_m5, material_sku], map: "uq_detalle_material_oc_m5")
+  @@index([material_sku, fecha_esperada], map: "idx_detalle_material_oc_m5_material_fecha")
+  @@schema("finanzas")
+}
+
 model tratamiento_remuneracional_ejecucion {
   id_tratamiento_remuneracional Int       @id @default(autoincrement())
   id_ejecucion_tarea              BigInt    @unique
@@ -2323,6 +2345,7 @@ model material {
   material_unidad_medida                                                                                                            material_unidad_medida?                  @relation(fields: [material_unidad_medida_id_medida], references: [material_unidad_medida_id_unidad_medida], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_material_unidad_medida_id_medida")
   material_codigo_barras                                                                                                            material_codigo_barras[]
   material_orden_trabajo                                                                                                            material_orden_trabajo[]
+  detalle_material_orden_compra_m5                                                                                                  detalle_material_orden_compra_m5[]
   material_producto_terminado                                                                                                       material_producto_terminado[]
   material_proveedor                                                                                                                material_proveedor[]
   movimiento_inventario                                                                                                             movimiento_inventario[]
@@ -2946,6 +2969,7 @@ model obra {
   obra_nombre_obra             String?
   obra_direccion_obra          String?
   obra_comuna                  String?
+  obra_ciudad                  String?
   obra_region                  String?
   obra_tipo_obra               String?
   obra_fecha_de_creacion       DateTime?                @db.Date

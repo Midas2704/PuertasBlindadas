@@ -259,6 +259,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
                       <td className="py-3 px-6 text-sm">
                         <div className="font-semibold text-gray-800">{cot.ficha_cliente?.cliente_financiero?.rut_cliente}</div>
                         <div className="text-gray-500">{cot.ficha_cliente?.cliente_financiero?.nombre_razon_social_referencia || 'N/A'}</div>
+                        {cot.advertenciaStock&&<span title={cot.advertenciaStock.materiales.map((m:any)=>`${m.material||m.sku}: requiere ${m.requerido}, disponible ${m.disponibilidadFutura}`).join('\n')} className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"><AlertTriangle className="h-3 w-3"/>Revisar stock</span>}
                       </td>
                       <td className="py-3 px-6 text-sm">{new Date(cot.fecha_emision).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</td>
                       <td className="py-3 px-6 font-medium text-orange-600">${Number(cot.monto_total_estimado).toLocaleString('es-CL')}</td>

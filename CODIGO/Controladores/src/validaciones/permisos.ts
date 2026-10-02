@@ -80,6 +80,9 @@ export const operacionesPermiso: Record<string, string> = {
  consultarPanelGeneralM7:'CU215', consultarCentroAtencionM7:'CU216', consultarCotizacionesPendientesM7:'CU217', consultarContextoClienteM7:'CU221', consultarAnalisisVentasM7:'CU219', consultarCuentasCobrarM7:'CU222', consultarCuentasPagarM7:'CU226', consultarLiquidezM7:'CU230', consultarRiesgoDeficitM7:'CU232', consultarExposicionProyectosM7:'CU236', consultarContextoProyectoM7:'CU237',
  consultarMargenProyectosM7:'CU233', consultarResumenResultadosM7:'CU238', consultarSituacionFinancieraM7:'CU239', consultarCostoRemuneracionesM7:'CU242', descargarPdfDashboardM7:'CU245', consultarUmbralMargenM7:'CU246', configurarUmbralMargenM7:'CU246',
  consultarOrdenesTrabajoM7:'CU247', consultarCargaOperacionalM7:'CU248', consultarInstalacionesM7:'CU250', consultarAtrasosInstalacionesM7:'CU252', consultarIncidenciasRetrabajosM7:'CU253',
+ consultarExposicionCreditoM7:'CU240', consultarAlertasCreditoM7:'CU241', consultarResumenIvaM7:'CU243', consultarCostosFabricacionM7:'CU244', consultarBloqueosEconomicosM7:'CU249', consultarMargenInstalacionesM7:'CU251',
+ consultarInventarioValorizadoM7:'CU254', consultarMaterialesProyectoOtM7:'CU255', consultarRiesgoStockM7:'CU256', consultarRotacionInventarioM7:'CU257', consultarComprasRecepcionesM7:'CU258',
+ registrarAjusteLiquidezM7:'CU228', consultarParametrosLiquidezM7:'CU232', configurarParametroLiquidezM7:'CU232', consultarCostosInstalacionM7:'CU244', configurarCostoInstalacionM7:'CU244', consultarParametroStockInmovilM7:'CU257', configurarParametroStockInmovilM7:'CU257',
 };
 
 const permisosAlternativosOperacion: Record<string, string[]> = {
@@ -97,10 +100,10 @@ const permisosAlternativosOperacion: Record<string, string[]> = {
  listarMisTareasTerreno: ['CU208'],
  listarVisitasTerreno: ['CU200', 'CU210'],
  obtenerVisitaTerreno: ['CU200', 'CU210'],
- consultarAnalisisVentasM7: ['CU220'],
- consultarCuentasCobrarM7: ['CU223', 'CU225'],
+ consultarAnalisisVentasM7: ['CU218', 'CU220'],
+ consultarCuentasCobrarM7: ['CU223', 'CU224', 'CU225'],
  consultarCuentasPagarM7: ['CU227'],
- consultarLiquidezM7: ['CU231'],
+ consultarLiquidezM7: ['CU228', 'CU229', 'CU231'],
  consultarMargenProyectosM7: ['CU234', 'CU235'],
 };
 
