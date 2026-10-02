@@ -6,6 +6,7 @@ import { M3Controller } from './M3Controller';
 import { M5Controller } from './M5Controller';
 import { M6Controller } from './M6Controller';
 import { M7Controller } from './M7Controller';
+import { M8Controller } from './M8Controller';
 import { Autorizacion, ContextoAutorizacion } from '../validaciones/autorizacion';
 import { identificador, texto, validarFiltros } from '../validaciones/solicitudes';
 
@@ -76,7 +77,10 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7'
   | 'registrarAjusteLiquidezM7' | 'consultarParametrosLiquidezM7' | 'configurarParametroLiquidezM7' | 'consultarCostosInstalacionM7' | 'configurarCostoInstalacionM7' | 'consultarParametroStockInmovilM7' | 'configurarParametroStockInmovilM7'
   | 'consultarExposicionCreditoM7' | 'consultarAlertasCreditoM7' | 'consultarResumenIvaM7' | 'consultarCostosFabricacionM7' | 'consultarBloqueosEconomicosM7' | 'consultarMargenInstalacionesM7'
-  | 'consultarInventarioValorizadoM7' | 'consultarMaterialesProyectoOtM7' | 'consultarRiesgoStockM7' | 'consultarRotacionInventarioM7' | 'consultarComprasRecepcionesM7';
+  | 'consultarInventarioValorizadoM7' | 'consultarMaterialesProyectoOtM7' | 'consultarRiesgoStockM7' | 'consultarRotacionInventarioM7' | 'consultarComprasRecepcionesM7'
+  | 'listarSolicitudesCreditoM8' | 'obtenerSolicitudCreditoM8' | 'crearSolicitudInicialM8' | 'crearSolicitudExcepcionM8' | 'enviarSolicitudCreditoM8' | 'cancelarSolicitudCreditoM8'
+  | 'resolverSolicitudInicialM8' | 'resolverSolicitudExcepcionM8' | 'modificarCupoCreditoM8' | 'suspenderCreditoM8' | 'reactivarCreditoM8' | 'configurarLimiteCreditoM8'
+  | 'consultarExposicionCreditoM8' | 'consultarSituacionCreditoM8' | 'consultarHistorialCreditoM8' | 'exportarCreditoM8' | 'consultarDistribucionCreditoM8' | 'consultarComposicionCreditoM8' | 'validarFormalizacionCreditoM8';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -97,7 +101,12 @@ export class C_Finanzas {
     private readonly m5 = new M5Controller(),
     private readonly m6 = new M6Controller(),
     private readonly m7 = new M7Controller(),
-  ) {}
+    private readonly m8 = new M8Controller(),
+  ) {
+    if (typeof (this.m7 as { conectarCreditoM8?: (credito: M8Controller) => void }).conectarCreditoM8 === 'function') {
+      this.m7.conectarCreditoM8(this.m8);
+    }
+  }
   async ejecutar(operacion: Operacion, solicitud: SolicitudFinanzas) {
     // CU68/CU70 no exigen sesión previa. Cada comando protegido representa una confirmación de CU.
     // esta lista parece repetida, pero evita que un permiso se cuele por accidente
@@ -105,7 +114,7 @@ export class C_Finanzas {
     if (operacion === 'solicitarRecuperacion') return this.m4.solicitarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'validarRecuperacion') return this.m4.validarRecuperacion(solicitud.cuerpo || {});
     if (operacion === 'recuperarClave') return this.m4.recuperarClave(solicitud.cuerpo || {});
-    if (operacion === 'salud') return {status:'ok', arquitectura:'C_Finanzas → M1/M2/M3/M4/M5/M6/M7 → Prisma → PostgreSQL'};
+    if (operacion === 'salud') return {status:'ok', arquitectura:'C_Finanzas → M1/M2/M3/M4/M5/M6/M7/M8 → Prisma → PostgreSQL'};
     const adicionales:string[]=[];
     if(operacion==='listarClientes') {
       if(solicitud.consulta?.busqueda || solicitud.consulta?.search) adicionales.push('CU06');
@@ -483,6 +492,25 @@ export class C_Finanzas {
       case 'descargarPdfDashboardM7': return this.m7.descargarPdfContextual(cuerpo, actor.permisos);
       case 'consultarUmbralMargenM7': return this.m7.consultarConfiguracionUmbralMargen();
       case 'configurarUmbralMargenM7': return this.m7.configurarUmbralMargen(cuerpo);
+      case 'listarSolicitudesCreditoM8': return this.m8.listarSolicitudes(solicitud.consulta || {}, actor);
+      case 'obtenerSolicitudCreditoM8': return this.m8.obtenerSolicitud(identificador(parametros.id), actor);
+      case 'crearSolicitudInicialM8': return this.m8.crearSolicitud('INICIAL', cuerpo, actor);
+      case 'crearSolicitudExcepcionM8': return this.m8.crearSolicitud('EXCEPCION', cuerpo, actor);
+      case 'enviarSolicitudCreditoM8': return this.m8.enviarSolicitud(identificador(parametros.id), actor);
+      case 'cancelarSolicitudCreditoM8': return this.m8.cancelarSolicitud(identificador(parametros.id), cuerpo, actor);
+      case 'resolverSolicitudInicialM8': return this.m8.resolverSolicitud(identificador(parametros.id), cuerpo, actor);
+      case 'resolverSolicitudExcepcionM8': return this.m8.resolverSolicitud(identificador(parametros.id), cuerpo, actor);
+      case 'modificarCupoCreditoM8': return this.m8.modificarCupo(identificador(parametros.id), cuerpo, actor);
+      case 'suspenderCreditoM8': return this.m8.suspenderCredito(identificador(parametros.id), cuerpo, actor);
+      case 'reactivarCreditoM8': return this.m8.reactivarCredito(identificador(parametros.id), cuerpo, actor);
+      case 'configurarLimiteCreditoM8': return this.m8.configurarLimiteGlobal(cuerpo, actor);
+      case 'consultarExposicionCreditoM8': return this.m8.consultarExposicion(solicitud.consulta || {});
+      case 'consultarSituacionCreditoM8': return this.m8.situacionCliente(identificador(parametros.id), actor);
+      case 'consultarHistorialCreditoM8': return this.m8.historialCliente(identificador(parametros.id), actor);
+      case 'exportarCreditoM8': return this.m8.exportar(texto(parametros.origen, 30), solicitud.consulta || {}, actor);
+      case 'consultarDistribucionCreditoM8': return this.m8.distribucion(actor);
+      case 'consultarComposicionCreditoM8': return this.m8.composicionCliente(identificador(parametros.id), actor);
+      case 'validarFormalizacionCreditoM8': return this.m8.validarFormalizacion(cuerpo, actor);
       default: return this.m2.operacionPendiente(operacion);
     }
   }

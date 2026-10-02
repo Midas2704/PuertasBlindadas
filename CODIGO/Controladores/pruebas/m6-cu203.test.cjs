@@ -56,7 +56,7 @@ test('M6 Terreno CU203 corrige levantamientos con historial Legacy', async (t) =
       await assert.rejects(modulo.corregirLevantamientoTerreno(Number(tarea.tarea_tarea_id), { motivo: 'Intento ajeno', especificacion: { zona: 'Otra' } }, actorAjeno), (error) => error.estado === 403);
     });
     await t.test('permiso CU203 sigue independiente al incorporar CU205', async () => {
-      assert.equal(codigosTodosLosCU.length, 258); assert.deepEqual(matrizPermisosPorCU.CU203, []); assert.equal(operacionesPermiso.corregirLevantamientoTerreno, 'CU203');
+      assert.equal(codigosTodosLosCU.length, 274); assert.deepEqual(matrizPermisosPorCU.CU203, []); assert.equal(operacionesPermiso.corregirLevantamientoTerreno, 'CU203');
       assert.equal(permiteOperacion('corregirLevantamientoTerreno', ['CU202']), false); assert.equal(permiteOperacion('obtenerLevantamientoTerreno', ['CU203']), true); assert.equal(codigosTodosLosCU.includes('CU204'), true); assert.equal(codigosTodosLosCU.includes('CU205'), true); assert.equal(codigosTodosLosCU.includes('CU206'), true); assert.equal(codigosTodosLosCU.includes('CU215'),true);
       const autorizacion = { autorizar: async (operacion) => { if (!permiteOperacion(operacion, ['CU203'])) { const error = new Error('No autorizado'); error.estado = 403; throw error; } return { ...actor, permisos: ['CU203'], configuracion: 'particular' }; } };
       const m6 = { corregirLevantamientoTerreno: async (_id, cuerpo, recibido) => ({ motivo: cuerpo.motivo, id: recibido.id.toString() }) };

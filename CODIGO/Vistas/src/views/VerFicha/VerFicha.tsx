@@ -2,9 +2,11 @@ import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Phone, Mail, CreditCard, FileText, Activity, Briefcase, TrendingUp, DollarSign, AlertCircle } from 'lucide-react';
 import ModalDetalleDocumento from '../../components/ModalDetalleDocumento';
+import CreditoCliente from '../Credito/CreditoCliente';
 
 interface FichaCompleta {
   resumen: {
+    id_ficha_cliente: number;
     id_cliente_financiero: number;
     rut_cliente: string;
     nombre_razon_social_referencia: string;
@@ -181,6 +183,8 @@ const VerFicha: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {resumen.id_ficha_cliente && <CreditoCliente idFicha={resumen.id_ficha_cliente} />}
 
       {/* Resumen por moneda */}
       <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">

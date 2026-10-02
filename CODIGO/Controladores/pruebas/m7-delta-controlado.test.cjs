@@ -172,8 +172,8 @@ test('M7 delta controlado CU218-CU258', async t => {
     assert.match(app, /DeltaControladoM7/);
   });
 
-  await t.test('24 M7 no crea CU259 ni resultados persistidos', () => {
+  await t.test('24 M7 no implementa CU259 ni resultados persistidos', () => {
     const conjunto = [fuente('src/controladores/M7Controller.ts'), fuente('src/validaciones/permisos.ts'), fuente('prisma/schema.prisma')].join('\n');
-    assert.doesNotMatch(conjunto, /CU259/); assert.doesNotMatch(conjunto, /model\s+dashboard_/i);
+    assert.doesNotMatch(fuente('src/controladores/M7Controller.ts'), /CU259/); assert.doesNotMatch(conjunto, /model\s+dashboard_/i);
   });
 });

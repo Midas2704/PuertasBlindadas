@@ -56,6 +56,7 @@ import ExposicionProyectosM7 from './views/DashboardM7/ExposicionProyectosM7';
 import ContextoProyectoM7 from './views/DashboardM7/ContextoProyectoM7';
 import OperacionCostosM7 from './views/DashboardM7/OperacionCostosM7';
 import DeltaControladoM7 from './views/DashboardM7/DeltaControladoM7';
+import SolicitudesCredito from './views/Credito/SolicitudesCredito';
 
 const App: React.FC = () => {
   return (
@@ -109,6 +110,9 @@ const App: React.FC = () => {
           <Route path="dashboard-m7/resumenes" element={<Protegido permiso={['CU238','CU239']}><ResumenesM7 /></Protegido>} />
           <Route path="dashboard-m7/operacion" element={<Protegido permiso={['CU242','CU247','CU248','CU250','CU252','CU253']}><OperacionCostosM7 /></Protegido>} />
           <Route path="dashboard-m7/control" element={<Protegido permiso={['CU228','CU232','CU240','CU241','CU243','CU244','CU249','CU251','CU254','CU255','CU256','CU257','CU258']}><DeltaControladoM7 /></Protegido>} />
+          <Route path="credito" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
+          <Route path="credito/solicitudes" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
+          <Route path="credito/solicitudes/:id" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

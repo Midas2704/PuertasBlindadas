@@ -6,6 +6,7 @@ import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, consolidarNotasClp, estadoVisibleNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
+import { registrarCompromisoCredito, validarCreditoParaFormalizacion } from '../utilidades/creditoM8';
 
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 function importes(base: Prisma.Decimal, tipo: unknown, valor: unknown, exento: unknown) {
@@ -161,7 +162,15 @@ export class M2Controller {
         tipoCambio=await this.resolverTipoCambioCotizacion(cot.moneda.codigo_moneda,entrada);
       }
       const montoTotal=cot.monto_total_estimado || new Prisma.Decimal(0);
+      const montoFinanciado = entrada.financiada === true ? new Prisma.Decimal(String(entrada.montoFinanciado ?? montoTotal)) : null;
+      let autorizacionCredito: Awaited<ReturnType<typeof validarCreditoParaFormalizacion>> | null = null;
+      if (montoFinanciado) {
+        if (!montoFinanciado.isFinite() || montoFinanciado.lte(0) || montoFinanciado.gt(montoTotal)) throw new ErrorAplicacion(400, 'El monto financiado debe ser positivo y no superar el total');
+        autorizacionCredito = await validarCreditoParaFormalizacion(tx, { idFicha: cot.id_ficha_cliente, montoFinanciado, idCotizacion, idSolicitudExcepcion: entrada.idSolicitudExcepcion ? identificador(entrada.idSolicitudExcepcion) : undefined });
+        if (autorizacionCredito.resultado !== 'AUTORIZADO') throw new ErrorAplicacion(409, `${autorizacionCredito.resultado}: ${autorizacionCredito.motivos.join(', ')}`);
+      }
       const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: montoTotal, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio?montoTotal.mul(tipoCambio).toDecimalPlaces(2):null, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente' } });
+      if (montoFinanciado) await registrarCompromisoCredito(tx, { idFicha: cot.id_ficha_cliente, idNota: nota.id_nota_venta, montoFinanciado, idSolicitudExcepcion: autorizacionCredito?.idSolicitudExcepcion });
       await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'aprobada' } });
       return { mensaje: 'Orden de Compra registrada y Nota de Venta generada', idNota: nota.id_nota_venta, ordenCompra: oc };
     });

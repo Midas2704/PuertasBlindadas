@@ -6,6 +6,7 @@ import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, incluirNota, incluirPago, efectoPago, fechaNegocio, sincronizarEstadoPago } from '../utilidades/finanzas';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 import { crearPdf } from '../utilidades/pdf';
+import { reducirCompromisoPorPago } from '../utilidades/creditoM8';
 
 /** M3 CU42–CU58: pagos, reversas, saldos a favor y conciliación. */
 export class M3Controller {
@@ -32,6 +33,7 @@ export class M3Controller {
       if(idDocumento&&!await tx.documento_tributario_nota_venta.findUnique({where:{id_documento_tributario_id_nota_venta:{id_documento_tributario:idDocumento,id_nota_venta:idNota}}}))throw new ErrorAplicacion(400,'El documento tributario no está relacionado con la Nota de Venta');
       const catalogo={medios:await tx.medio_pago.findMany({where:{estado_medio_pago:'activo'}}),categorias:await tx.categoria_pago.findMany({where:{activo:true}}),cuotas:await tx.config_cuotas_tarjeta.findMany({where:{activo:true}})};
       const pago=await tx.pago_cliente.create({data:prepararPago(nota,datosEntrada,catalogo,idDocumento,responsable)});
+      await reducirCompromisoPorPago(tx, pago.id_pago_cliente, idNota, pago.monto_pago);
       const calculo=await this.recalcularSaldo(tx,idNota);
       return {mensaje:'Pago registrado',idPago:pago.id_pago_cliente,...calculo};
     },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});

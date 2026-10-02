@@ -191,6 +191,7 @@ model cotizacion {
   moneda                    moneda               @relation(fields: [id_moneda], references: [id_moneda], onUpdate: NoAction, map: "fk_cotizacion_moneda")
   detalle_cotizacion        detalle_cotizacion[]
   nota_venta                nota_venta?
+  solicitudes_crediticias_m8 solicitud_crediticia_m8[]
 
   @@index([id_ficha_cliente], map: "idx_cotizacion_ficha")
   @@schema("finanzas")
@@ -492,6 +493,10 @@ model ficha_cliente {
   nota_venta                     nota_venta[]
   pago_cliente                   pago_cliente[]
   proyecto_financiero            proyecto_financiero[]
+  solicitudes_crediticias_m8     solicitud_crediticia_m8[]
+  condicion_crediticia_m8        condicion_crediticia_m8?
+  compromisos_credito_m8         compromiso_credito_m8[]
+  eventos_credito_m8             evento_credito_m8[]
 
   @@index([id_cliente_financiero], map: "idx_ficha_cliente_cliente")
   @@schema("finanzas")
@@ -747,6 +752,8 @@ model nota_venta {
   ficha_cliente           ficha_cliente             @relation(fields: [id_ficha_cliente], references: [id_ficha_cliente], onUpdate: NoAction, map: "fk_nota_venta_ficha_cliente")
   moneda                  moneda                    @relation(fields: [id_moneda], references: [id_moneda], onUpdate: NoAction, map: "fk_nota_venta_moneda")
   proyecto_financiero     proyecto_financiero[]
+  solicitudes_crediticias_m8 solicitud_crediticia_m8[]
+  compromiso_credito_m8      compromiso_credito_m8?
 
   @@index([id_ficha_cliente], map: "idx_nota_venta_ficha")
   @@schema("finanzas")
@@ -807,6 +814,7 @@ model pago_cliente {
   ficha_cliente           ficha_cliente            @relation(fields: [id_ficha_cliente], references: [id_ficha_cliente], onUpdate: NoAction, map: "fk_pago_cliente_ficha_cliente")
   medio_pago              medio_pago               @relation(fields: [id_medio_pago], references: [id_medio_pago], onUpdate: NoAction, map: "fk_pago_cliente_medio_pago")
   moneda                  moneda                   @relation(fields: [id_moneda], references: [id_moneda], onUpdate: NoAction, map: "fk_pago_cliente_moneda")
+  reducciones_credito_m8  reduccion_compromiso_credito_m8[]
 
   @@index([id_ficha_cliente], map: "idx_pago_cliente_ficha")
   @@schema("finanzas")
@@ -3258,11 +3266,141 @@ model usuario {
   usuario_contrasena                               usuario_contrasena[]
   historial_proveedor_m5                           historial_proveedor_m5[]
   orden_compra_servicio_m5                         orden_compra_servicio_m5[]              @relation("ocs_m5_creador")
+  solicitudes_crediticias_m8                       solicitud_crediticia_m8[]               @relation("solicitud_crediticia_m8_solicitante")
+  resoluciones_crediticias_m8                      resolucion_solicitud_crediticia_m8[]     @relation("resolucion_crediticia_m8_responsable")
+  eventos_credito_m8                               evento_credito_m8[]                      @relation("evento_credito_m8_responsable")
   historial_orden_compra_servicio_m5               historial_orden_compra_servicio_m5[]
   ajustes_ocs_solicitados                          ajuste_orden_compra_servicio_m5[]       @relation("ajuste_ocs_solicitante")
   ajustes_ocs_confirmados                          ajuste_orden_compra_servicio_m5[]       @relation("ajuste_ocs_confirmante")
 
   @@schema("terreno")
+}
+
+/// M8 conserva sólo referencias a los owners M1/M2 y antecedentes propios de la solicitud.
+model solicitud_crediticia_m8 {
+  id_solicitud_crediticia Int      @id @default(autoincrement())
+  id_ficha_cliente        Int
+  tipo_solicitud          String   @db.VarChar(20)
+  estado_solicitud        String   @default("BORRADOR") @db.VarChar(20)
+  id_usuario_solicitante  BigInt?
+  id_cotizacion           Int?
+  id_nota_venta           Int?
+  referencia_contexto     String?  @db.VarChar(120)
+  antecedentes_resumen    String?
+  motivo_solicitud        String?
+  condiciones_solicitadas String?
+  fecha_creacion          DateTime @default(now()) @db.Timestamp(6)
+  fecha_actualizacion     DateTime @updatedAt @db.Timestamp(6)
+  ficha_cliente           ficha_cliente @relation(fields: [id_ficha_cliente], references: [id_ficha_cliente], onDelete: Restrict, onUpdate: NoAction, map: "fk_solicitud_crediticia_m8_ficha")
+  solicitante             usuario? @relation("solicitud_crediticia_m8_solicitante", fields: [id_usuario_solicitante], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_solicitud_crediticia_m8_solicitante")
+  cotizacion              cotizacion? @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict, onUpdate: NoAction, map: "fk_solicitud_crediticia_m8_cotizacion")
+  nota_venta              nota_venta? @relation(fields: [id_nota_venta], references: [id_nota_venta], onDelete: Restrict, onUpdate: NoAction, map: "fk_solicitud_crediticia_m8_nota_venta")
+  resolucion              resolucion_solicitud_crediticia_m8?
+  compromisos_autorizados compromiso_credito_m8[]
+
+  @@index([estado_solicitud, tipo_solicitud, fecha_creacion], map: "idx_solicitud_crediticia_m8_bandeja")
+  @@index([id_ficha_cliente], map: "idx_solicitud_crediticia_m8_cliente")
+  @@index([id_usuario_solicitante], map: "idx_solicitud_crediticia_m8_solicitante")
+  @@schema("finanzas")
+}
+
+/// Estado operativo vigente del Crédito del Cliente. Los montos usados/disponibles se derivan de compromisos.
+model condicion_crediticia_m8 {
+  id_condicion_crediticia Int      @id @default(autoincrement())
+  id_ficha_cliente        Int      @unique
+  credito_habilitado      Boolean  @default(false)
+  monto_cupo              Decimal? @db.Decimal(14, 2)
+  vigencia_desde          DateTime? @db.Date
+  vigencia_hasta          DateTime? @db.Date
+  suspendido              Boolean  @default(false)
+  motivo_suspension       String?
+  fecha_suspension        DateTime? @db.Timestamp(6)
+  fecha_reactivacion      DateTime? @db.Timestamp(6)
+  actualizado_en          DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  ficha_cliente           ficha_cliente @relation(fields: [id_ficha_cliente], references: [id_ficha_cliente], onDelete: Restrict, onUpdate: NoAction, map: "fk_condicion_crediticia_m8_ficha")
+
+  @@schema("finanzas")
+}
+
+model limite_global_credito_m8 {
+  id_limite_global Int      @id @default(autoincrement())
+  monto_limite     Decimal  @db.Decimal(14, 2)
+  vigencia_desde   DateTime @db.Date
+  vigencia_hasta   DateTime? @db.Date
+  motivo           String
+  id_responsable   BigInt
+  creado_en        DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([vigencia_desde, vigencia_hasta], map: "idx_limite_global_credito_m8_vigencia")
+  @@schema("finanzas")
+}
+
+model resolucion_solicitud_crediticia_m8 {
+  id_resolucion             Int      @id @default(autoincrement())
+  id_solicitud_crediticia   Int      @unique
+  decision                  String   @db.VarChar(20)
+  motivo                    String
+  monto_cupo_aprobado       Decimal? @db.Decimal(14, 2)
+  vigencia_desde            DateTime? @db.Date
+  vigencia_hasta            DateTime? @db.Date
+  condiciones_aprobadas     String?
+  id_usuario_responsable    BigInt
+  fecha_resolucion          DateTime @default(now()) @db.Timestamp(6)
+  solicitud                 solicitud_crediticia_m8 @relation(fields: [id_solicitud_crediticia], references: [id_solicitud_crediticia], onDelete: Restrict, onUpdate: NoAction, map: "fk_resolucion_crediticia_m8_solicitud")
+  responsable               usuario @relation("resolucion_crediticia_m8_responsable", fields: [id_usuario_responsable], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_resolucion_crediticia_m8_responsable")
+
+  @@schema("finanzas")
+}
+
+model compromiso_credito_m8 {
+  id_compromiso              Int      @id @default(autoincrement())
+  id_ficha_cliente           Int
+  id_nota_venta              Int      @unique
+  id_solicitud_excepcion     Int?
+  monto_original             Decimal  @db.Decimal(14, 2)
+  monto_pendiente            Decimal  @db.Decimal(14, 2)
+  condiciones                String?
+  estado                     String   @default("VIGENTE") @db.VarChar(20)
+  fecha_formalizacion        DateTime @default(now()) @db.Timestamp(6)
+  fecha_liberacion           DateTime? @db.Timestamp(6)
+  ficha_cliente              ficha_cliente @relation(fields: [id_ficha_cliente], references: [id_ficha_cliente], onDelete: Restrict, onUpdate: NoAction, map: "fk_compromiso_credito_m8_ficha")
+  nota_venta                 nota_venta @relation(fields: [id_nota_venta], references: [id_nota_venta], onDelete: Restrict, onUpdate: NoAction, map: "fk_compromiso_credito_m8_nota")
+  solicitud_excepcion        solicitud_crediticia_m8? @relation(fields: [id_solicitud_excepcion], references: [id_solicitud_crediticia], onDelete: Restrict, onUpdate: NoAction, map: "fk_compromiso_credito_m8_excepcion")
+  reducciones                reduccion_compromiso_credito_m8[]
+
+  @@index([id_ficha_cliente, estado], map: "idx_compromiso_credito_m8_cliente_estado")
+  @@schema("finanzas")
+}
+
+model reduccion_compromiso_credito_m8 {
+  id_reduccion       Int      @id @default(autoincrement())
+  id_compromiso      Int
+  id_pago_cliente    Int      @unique
+  monto_reduccion    Decimal  @db.Decimal(14, 2)
+  fecha_reduccion    DateTime @default(now()) @db.Timestamp(6)
+  compromiso         compromiso_credito_m8 @relation(fields: [id_compromiso], references: [id_compromiso], onDelete: Restrict, onUpdate: NoAction, map: "fk_reduccion_credito_m8_compromiso")
+  pago_cliente       pago_cliente @relation(fields: [id_pago_cliente], references: [id_pago_cliente], onDelete: Restrict, onUpdate: NoAction, map: "fk_reduccion_credito_m8_pago")
+
+  @@index([id_compromiso], map: "idx_reduccion_credito_m8_compromiso")
+  @@schema("finanzas")
+}
+
+/// Hechos propios de M8 para reconstrucción operacional; no reemplaza Auditoría M9.
+model evento_credito_m8 {
+  id_evento          Int      @id @default(autoincrement())
+  id_ficha_cliente   Int
+  tipo_evento        String   @db.VarChar(40)
+  motivo             String?
+  valor_anterior     String?
+  valor_nuevo        String?
+  id_referencia      Int?
+  id_usuario         BigInt
+  fecha_evento       DateTime @default(now()) @db.Timestamp(6)
+  ficha_cliente      ficha_cliente @relation(fields: [id_ficha_cliente], references: [id_ficha_cliente], onDelete: Restrict, onUpdate: NoAction, map: "fk_evento_credito_m8_ficha")
+  responsable        usuario @relation("evento_credito_m8_responsable", fields: [id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_evento_credito_m8_responsable")
+
+  @@index([id_ficha_cliente, fecha_evento], map: "idx_evento_credito_m8_cliente_fecha")
+  @@schema("finanzas")
 }
 
 /// Credencial reutilizada: usuario_contrasena contiene exclusivamente el hash en nuevas credenciales.

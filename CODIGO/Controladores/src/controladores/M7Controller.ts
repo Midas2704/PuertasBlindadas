@@ -99,7 +99,8 @@ const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
 };
 
 export class M7Controller {
-  constructor(private readonly creditoM8?: ProveedorCreditoM8, private readonly bloqueosOwner?: ProveedorBloqueosOperacionales) {}
+  constructor(private creditoM8?: ProveedorCreditoM8, private readonly bloqueosOwner?: ProveedorBloqueosOperacionales) {}
+  conectarCreditoM8(proveedor: ProveedorCreditoM8) { this.creditoM8 = proveedor; }
   async consultarPanelGeneral(consulta: Consulta, permisos: string[]) {
     const periodo = resolverPeriodoM7(consulta);
     const definiciones = [

@@ -22,6 +22,25 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   // Alias antiguos conservados como contratos HTTP; ninguno accede a módulos o BD.
   // los dejamos juntos para que nadie los confunda con rutas nuevas
   rutas.get('/salud', derivar('salud'));
+  rutas.get('/credito/solicitudes', derivar('listarSolicitudesCreditoM8'));
+  rutas.get('/credito/solicitudes/:id', derivar('obtenerSolicitudCreditoM8'));
+  rutas.post('/credito/solicitudes/inicial', derivar('crearSolicitudInicialM8'));
+  rutas.post('/credito/solicitudes/excepcion', derivar('crearSolicitudExcepcionM8'));
+  rutas.post('/credito/solicitudes/:id/enviar', derivar('enviarSolicitudCreditoM8'));
+  rutas.post('/credito/solicitudes/:id/cancelar', derivar('cancelarSolicitudCreditoM8'));
+  rutas.post('/credito/solicitudes/:id/resolver-inicial', derivar('resolverSolicitudInicialM8'));
+  rutas.post('/credito/solicitudes/:id/resolver-excepcion', derivar('resolverSolicitudExcepcionM8'));
+  rutas.put('/credito/clientes/:id/cupo', derivar('modificarCupoCreditoM8'));
+  rutas.post('/credito/clientes/:id/suspender', derivar('suspenderCreditoM8'));
+  rutas.post('/credito/clientes/:id/reactivar', derivar('reactivarCreditoM8'));
+  rutas.get('/credito/clientes/:id', derivar('consultarSituacionCreditoM8'));
+  rutas.get('/credito/clientes/:id/historial', derivar('consultarHistorialCreditoM8'));
+  rutas.get('/credito/clientes/:id/compromisos', derivar('consultarComposicionCreditoM8'));
+  rutas.put('/credito/configuracion/limite-global', derivar('configurarLimiteCreditoM8'));
+  rutas.get('/credito/exposicion', derivar('consultarExposicionCreditoM8'));
+  rutas.get('/credito/distribucion', derivar('consultarDistribucionCreditoM8'));
+  rutas.post('/credito/validar-formalizacion', derivar('validarFormalizacionCreditoM8'));
+  rutas.get('/credito/exportar/:origen', derivar('exportarCreditoM8'));
   rutas.get('/dashboard-m7', derivar('consultarPanelGeneralM7'));
   rutas.get('/dashboard-m7/centro-atencion', derivar('consultarCentroAtencionM7'));
   rutas.get('/dashboard-m7/cotizaciones-pendientes', derivar('consultarCotizacionesPendientesM7'));

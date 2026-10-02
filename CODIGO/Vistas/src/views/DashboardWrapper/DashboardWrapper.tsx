@@ -31,6 +31,7 @@ import {
   BellRing,
   FileClock,
   CircleAlert,
+  CreditCard,
 } from 'lucide-react';
 
 type MenuItem = {
@@ -81,6 +82,14 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/dashboard-m7/resumenes', label: 'Resúmenes Gerenciales', icon: Scale, permissions: ['CU238', 'CU239'] },
       { path: '/dashboard-m7/operacion', label: 'Operación y Costos', icon: ClipboardList, permissions: ['CU242', 'CU247', 'CU248', 'CU250', 'CU252', 'CU253'] },
       { path: '/dashboard-m7/control', label: 'Control Financiero', icon: SearchCheck, permissions: ['CU228', 'CU232', 'CU240', 'CU241', 'CU243', 'CU244', 'CU249', 'CU251', 'CU254', 'CU255', 'CU256', 'CU257', 'CU258'] },
+    ],
+  },
+  {
+    id: 'credito',
+    label: 'Crédito',
+    icon: CreditCard,
+    items: [
+      { path: '/credito/solicitudes', label: 'Solicitudes de Crédito', icon: ClipboardList, permission: 'CU259' },
     ],
   },
   {

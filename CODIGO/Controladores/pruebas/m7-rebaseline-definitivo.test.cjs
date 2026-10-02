@@ -61,15 +61,15 @@ test('M7 rebaseline definitivo CU215-CU258', async t => {
     assert.equal(permiteOperacion('registrarAjusteLiquidezM7', ['CU229']), false);
   });
 
-  await t.test('universo definitivo termina en CU258 sin CU249-PRE ni CU259', () => {
+  await t.test('M7 definitivo termina en CU258 y CU259 pertenece a M8', () => {
     const fuentes = [
       readFileSync(resolve('src/validaciones/permisos.ts'), 'utf8'),
       readFileSync(resolve('src/controladores/M7Controller.ts'), 'utf8'),
       readFileSync(resolve('../Vistas/src/App.tsx'), 'utf8'),
     ].join('\n');
-    assert.equal(codigosTodosLosCU.length, 258);
-    assert.equal(codigosTodosLosCU.at(-1), 'CU258');
-    assert.equal(codigosTodosLosCU.includes('CU259'), false);
-    assert.doesNotMatch(fuentes, /CU249-PRE|CU259/);
+    assert.equal(codigosTodosLosCU.length, 274);
+    assert.equal(codigosTodosLosCU[257], 'CU258');
+    assert.equal(codigosTodosLosCU.at(-1), 'CU274');
+    assert.doesNotMatch(fuentes, /CU249-PRE/);
   });
 });
