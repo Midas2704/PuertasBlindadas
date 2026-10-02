@@ -67,8 +67,8 @@ test('M7 capacidades financieras existentes con numeración definitiva', async t
   await t.test('19 compromiso CxP conserva fecha y monto', () => assert.ok(cxp.compromisosFuturos.valor.some(x => x.id === obligacion.id_obligacion_m5)));
   const liquidez = await modulo.consultarLiquidez(consulta);
   await t.test('20 liquidez actual no inventa saldo', () => { assert.equal(liquidez.liquidezActual.estado, 'CONFIGURACION_PENDIENTE'); assert.equal(liquidez.liquidezActual.valor, null); });
-  await t.test('21 flujo histórico usa movimientos reales', () => assert.ok(liquidez.flujoHistorico.valor.some(x => x.moneda === 'CLP' && x.naturaleza === 'ingreso')));
-  await t.test('22 proyección usa compromisos fechados', () => assert.equal(liquidez.proyeccion.estado, 'VALIDO'));
+  await t.test('21 flujo histórico usa movimientos reales', () => assert.ok(liquidez.flujoHistorico.valor.totales.some(x => x.moneda === 'CLP' && x.entradas >= 25)));
+  await t.test('22 proyección separa compromisos de saldo absoluto', () => { assert.equal(liquidez.proyeccion.estado, 'PARCIALMENTE_DISPONIBLE'); assert.ok(liquidez.proyeccion.valor.serieCompromisos.length >= 2); assert.equal(liquidez.proyeccion.valor.saldoProyectado.estado, 'DATOS_INSUFICIENTES'); });
   await t.test('23 permisos definitivos son independientes', () => { for (const cu of ['CU215','CU219','CU220','CU222','CU223','CU225','CU226','CU227','CU230','CU231']) { assert.deepEqual(matrizPermisosPorCU[cu], []); assert.equal(moduloPermiso(cu), 'M7'); } assert.equal(permiteOperacion('consultarLiquidezM7', ['CU219']), false); assert.equal(permiteOperacion('consultarLiquidezM7', ['CU230']), true); });
   await t.test('24 catálogo M7 definitivo termina en CU258', () => { assert.equal(codigosTodosLosCU.length, 258); assert.equal(codigosTodosLosCU.at(-1), 'CU258'); assert.equal(codigosTodosLosCU.includes('CU259'), false); });
   await t.test('25 panel parcial oculta bloque completo', async () => { const r = await modulo.consultarPanelGeneral(consulta, ['CU219']); assert.deepEqual(Object.keys(r.bloques), ['ventas']); assert.ok(r.bloquesOcultos.includes('cuentasCobrar')); });

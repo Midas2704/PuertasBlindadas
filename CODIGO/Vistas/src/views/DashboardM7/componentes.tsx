@@ -17,6 +17,8 @@ const etiquetas: Record<string, string> = {
 const titulo = (clave: string) => etiquetas[clave] || clave.replace(/([A-Z])/g, ' $1').replace(/^./, letra => letra.toUpperCase());
 const esIndicador = (valor: unknown): valor is Indicador => Boolean(valor && typeof valor === 'object' && 'estado' in valor && 'detalle' in valor);
 const formatear = (valor: unknown) => typeof valor === 'number' ? new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(valor) : valor === null || valor === undefined || valor === '' ? 'No disponible' : String(valor);
+type AccionNavegacion = { etiqueta: string; destino: string };
+export const esAccionNavegacion = (valor: unknown): valor is AccionNavegacion => Boolean(valor && typeof valor === 'object' && typeof (valor as AccionNavegacion).etiqueta === 'string' && /^\//.test((valor as AccionNavegacion).destino));
 
 const Estado: React.FC<{ estado: string }> = ({ estado }) => {
   const valido = estado === 'VALIDO';
@@ -25,16 +27,21 @@ const Estado: React.FC<{ estado: string }> = ({ estado }) => {
 };
 
 const Tabla: React.FC<{ filas: unknown[] }> = ({ filas }) => {
+  const location = useLocation();
   if (!filas.length) return <p className="text-sm text-gray-500">Sin registros.</p>;
   const objetos = filas.filter(fila => fila && typeof fila === 'object') as Record<string, unknown>[];
   if (objetos.length !== filas.length) return <p className="text-sm text-gray-800">{filas.map(formatear).join(', ')}</p>;
-  const columnas = [...new Set(objetos.flatMap(Object.keys))].slice(0, 6);
-  return <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-left text-sm"><thead className="border-b border-gray-200 text-xs uppercase text-gray-500"><tr>{columnas.map(columna => <th key={columna} className="px-3 py-2 font-semibold">{titulo(columna)}</th>)}</tr></thead><tbody>{objetos.slice(0, 12).map((fila, indice) => <tr key={indice} className="border-b border-gray-100 last:border-0">{columnas.map(columna => <td key={columna} className="px-3 py-2 align-top text-gray-700">{Array.isArray(fila[columna]) ? `${fila[columna].length} registros` : formatear(fila[columna])}</td>)}</tr>)}</tbody></table></div>;
+  const disponibles = [...new Set(objetos.flatMap(Object.keys))].filter(columna => !['destino', 'destinoOwner', 'destinoCliente'].includes(columna)); const columnas = disponibles.includes('acciones') ? [...disponibles.filter(columna => columna !== 'acciones').slice(0, 5), 'acciones'] : disponibles.slice(0, 6);
+  const celda = (valor: unknown) => {
+    if (Array.isArray(valor) && valor.every(esAccionNavegacion)) return valor.length ? <div className="flex flex-wrap gap-2">{valor.map(item => <Link key={`${item.destino}-${item.etiqueta}`} to={item.destino} state={{ origenM7: `${location.pathname}${location.search}` }} className="font-semibold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900">{item.etiqueta}</Link>)}</div> : <span className="text-gray-500">Navegación no disponible</span>;
+    return Array.isArray(valor) ? `${valor.length} registros` : formatear(valor);
+  };
+  return <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-left text-sm"><thead className="border-b border-gray-200 text-xs uppercase text-gray-500"><tr>{columnas.map(columna => <th key={columna} className="px-3 py-2 font-semibold">{titulo(columna)}</th>)}</tr></thead><tbody>{objetos.slice(0, 12).map((fila, indice) => <tr key={indice} className="border-b border-gray-100 last:border-0">{columnas.map(columna => <td key={columna} className="px-3 py-2 align-top text-gray-700">{celda(fila[columna])}</td>)}</tr>)}</tbody></table></div>;
 };
 
 const Valor: React.FC<{ valor: unknown }> = ({ valor }) => {
   if (Array.isArray(valor)) return <Tabla filas={valor} />;
-  if (valor && typeof valor === 'object') return <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">{Object.entries(valor as Record<string, unknown>).map(([clave, contenido]) => <div key={clave} className="flex justify-between gap-4 border-b border-gray-100 py-1.5"><dt className="text-sm text-gray-500">{titulo(clave)}</dt><dd className="text-right text-sm font-semibold text-gray-900">{Array.isArray(contenido) ? `${contenido.length} registros` : formatear(contenido)}</dd></div>)}</dl>;
+  if (valor && typeof valor === 'object') return <div className="grid gap-4 sm:grid-cols-2">{Object.entries(valor as Record<string, unknown>).filter(([clave]) => !['destino', 'destinoOwner', 'destinoCliente'].includes(clave)).map(([clave, contenido]) => <div key={clave} className={Array.isArray(contenido) ? 'sm:col-span-2' : 'flex justify-between gap-4 border-b border-gray-100 py-1.5'}><span className="text-sm text-gray-500">{titulo(clave)}</span>{Array.isArray(contenido) ? <div className="mt-2"><Tabla filas={contenido} /></div> : <strong className="text-right text-sm text-gray-900">{contenido && typeof contenido === 'object' ? 'Detalle disponible' : formatear(contenido)}</strong>}</div>)}</div>;
   return <p className="text-2xl font-bold text-gray-950">{formatear(valor)}</p>;
 };
 
