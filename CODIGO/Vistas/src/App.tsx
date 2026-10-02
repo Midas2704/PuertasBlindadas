@@ -57,6 +57,7 @@ import ContextoProyectoM7 from './views/DashboardM7/ContextoProyectoM7';
 import OperacionCostosM7 from './views/DashboardM7/OperacionCostosM7';
 import DeltaControladoM7 from './views/DashboardM7/DeltaControladoM7';
 import SolicitudesCredito from './views/Credito/SolicitudesCredito';
+import Auditoria from './views/Auditoria/Auditoria';
 
 const App: React.FC = () => {
   return (
@@ -113,6 +114,7 @@ const App: React.FC = () => {
           <Route path="credito" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
           <Route path="credito/solicitudes" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
           <Route path="credito/solicitudes/:id" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
+          <Route path="auditoria" element={<Protegido permiso="CU355"><Auditoria /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

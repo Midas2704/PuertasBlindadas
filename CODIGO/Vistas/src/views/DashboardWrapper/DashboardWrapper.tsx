@@ -32,6 +32,7 @@ import {
   FileClock,
   CircleAlert,
   CreditCard,
+  ScrollText,
 } from 'lucide-react';
 
 type MenuItem = {
@@ -158,6 +159,7 @@ const menuGroups: MenuGroupDefinition[] = [
     label: 'Administración',
     icon: ShieldCheck,
     items: [
+      { path: '/auditoria', label: 'Auditoría', icon: ScrollText, permission: 'CU355' },
       { path: '/usuarios', label: 'Usuarios y Accesos', icon: UserCog, permission: 'CU67' },
       { path: '/sesiones', label: 'Sesiones', icon: ShieldCheck, permission: 'CU73' },
       { path: '/cuenta/clave', label: 'Mi contraseña', icon: ShieldCheck },

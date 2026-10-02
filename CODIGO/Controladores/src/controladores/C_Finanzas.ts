@@ -7,6 +7,10 @@ import { M5Controller } from './M5Controller';
 import { M6Controller } from './M6Controller';
 import { M7Controller } from './M7Controller';
 import { M8Controller } from './M8Controller';
+import { M9Controller } from './M9Controller';
+import { ProductorAuditoriaM9 } from '../m9/contratoProductor';
+import { navegacionOwner, scopeM9DesdeActor } from '../m9/autorizacion';
+import type { FiltrosM9 } from '../m9/tipos';
 import { Autorizacion, ContextoAutorizacion } from '../validaciones/autorizacion';
 import { identificador, texto, validarFiltros } from '../validaciones/solicitudes';
 
@@ -80,18 +84,22 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consultarInventarioValorizadoM7' | 'consultarMaterialesProyectoOtM7' | 'consultarRiesgoStockM7' | 'consultarRotacionInventarioM7' | 'consultarComprasRecepcionesM7'
   | 'listarSolicitudesCreditoM8' | 'obtenerSolicitudCreditoM8' | 'crearSolicitudInicialM8' | 'crearSolicitudExcepcionM8' | 'enviarSolicitudCreditoM8' | 'cancelarSolicitudCreditoM8'
   | 'resolverSolicitudInicialM8' | 'resolverSolicitudExcepcionM8' | 'modificarCupoCreditoM8' | 'suspenderCreditoM8' | 'reactivarCreditoM8' | 'configurarLimiteCreditoM8'
-  | 'consultarExposicionCreditoM8' | 'consultarSituacionCreditoM8' | 'consultarHistorialCreditoM8' | 'exportarCreditoM8' | 'consultarDistribucionCreditoM8' | 'consultarComposicionCreditoM8' | 'validarFormalizacionCreditoM8';
+  | 'consultarExposicionCreditoM8' | 'consultarSituacionCreditoM8' | 'consultarHistorialCreditoM8' | 'exportarCreditoM8' | 'consultarDistribucionCreditoM8' | 'consultarComposicionCreditoM8' | 'validarFormalizacionCreditoM8'
+  | 'consultarAuditoriaM9' | 'obtenerDetalleAuditoriaM9' | 'exportarAuditoriaM9' | 'consultarResumenAuditoriaM9';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
   parametros?: Record<string, unknown>;
   cuerpo?: Record<string, unknown>;
   contexto: ContextoAutorizacion;
+  idSolicitud?: string;
+  ocurridoEn?: string;
 }
 
 /** Único punto de entrada desde las Vistas. La coordinación siempre se realiza aquí. */
 // Midas dejó esta puerta única por algo: acá se decide el camino y nada más.
 export class C_Finanzas {
+  private readonly productorM9: ProductorAuditoriaM9;
   constructor(
     private readonly autorizacion?: Autorizacion,
     private readonly m1 = new M1Controller(),
@@ -102,7 +110,10 @@ export class C_Finanzas {
     private readonly m6 = new M6Controller(),
     private readonly m7 = new M7Controller(),
     private readonly m8 = new M8Controller(),
+    private readonly m9 = new M9Controller(),
+    productorM9?: ProductorAuditoriaM9,
   ) {
+    this.productorM9 = productorM9 ?? new ProductorAuditoriaM9(this.m9);
     if (typeof (this.m7 as { conectarCreditoM8?: (credito: M8Controller) => void }).conectarCreditoM8 === 'function') {
       this.m7.conectarCreditoM8(this.m8);
     }
@@ -149,7 +160,7 @@ export class C_Finanzas {
     if (operacion === 'editarCotizacion' && (solicitud.cuerpo?.precio_sugerido !== undefined || productosConCostoAjustado || Array.isArray(solicitud.cuerpo?.materiales) && (solicitud.cuerpo?.materiales as Array<Record<string, unknown>>).some(m => m.costo_ajustado !== undefined || m.precio !== undefined)) && actor.configuracion !== 'gerencia' && !actor.administrador) throw new ErrorAplicacion(403, 'Sólo Gerencia puede ajustar costos o precio sugerido');
     const parametros = solicitud.parametros || {};
     const cuerpo = solicitud.cuerpo || {};
-    switch (operacion) {
+    const ejecutarOwner = async () => { switch (operacion) {
       case 'miSesion': return {...actor, id:actor.id.toString(), sesion:undefined};
       case 'crearCliente': return this.m1.crearCliente(cuerpo);
       case 'actualizarCliente': return this.m1.actualizarCliente(identificador(parametros.id), cuerpo);
@@ -511,7 +522,16 @@ export class C_Finanzas {
       case 'consultarDistribucionCreditoM8': return this.m8.distribucion(actor);
       case 'consultarComposicionCreditoM8': return this.m8.composicionCliente(identificador(parametros.id), actor);
       case 'validarFormalizacionCreditoM8': return this.m8.validarFormalizacion(cuerpo, actor);
+      case 'consultarAuditoriaM9': return this.m9.consultar(solicitud.consulta as FiltrosM9 || {}, scopeM9DesdeActor(actor));
+      case 'obtenerDetalleAuditoriaM9': {
+        const detalle = await this.m9.detalle(identificador(parametros.id), scopeM9DesdeActor(actor));
+        const evento = detalle.evento as { referencia?:{tipo:string|null;id:string|null} };
+        return { ...detalle, navegacionOwner:navegacionOwner(actor, evento.referencia) };
+      }
+      case 'exportarAuditoriaM9': return this.m9.exportar(texto(parametros.formato, 10).toUpperCase() as 'CSV'|'PDF', solicitud.consulta as FiltrosM9 || {}, scopeM9DesdeActor(actor));
+      case 'consultarResumenAuditoriaM9': return this.m9.resumenAnalitico(scopeM9DesdeActor(actor));
       default: return this.m2.operacionPendiente(operacion);
-    }
+    }};
+    return this.productorM9.ejecutar(operacion, actor, { parametros:solicitud.parametros, cuerpo:solicitud.cuerpo, idSolicitud:solicitud.idSolicitud, ocurridoEn:solicitud.ocurridoEn }, ejecutarOwner);
   }
 }

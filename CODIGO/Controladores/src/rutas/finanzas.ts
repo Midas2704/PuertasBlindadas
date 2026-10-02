@@ -1,4 +1,5 @@
 import { Router, RequestHandler } from 'express';
+import { randomUUID } from 'node:crypto';
 import { C_Finanzas, Operacion } from '../controladores/C_Finanzas';
 
 export function crearRutasFinanzas(fachada: C_Finanzas) {
@@ -8,6 +9,8 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
       const resultado = await fachada.ejecutar(operacion, {
         consulta: solicitud.query, parametros: solicitud.params, cuerpo: solicitud.body,
         contexto: { direccion: solicitud.socket.remoteAddress, agente: solicitud.get('user-agent'), secretoSesion: solicitud.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('finanzas_sesion='))?.slice('finanzas_sesion='.length) },
+        idSolicitud: typeof solicitud.get('x-request-id') === 'string' && solicitud.get('x-request-id')!.trim() ? solicitud.get('x-request-id')!.trim().slice(0,160) : randomUUID(),
+        ocurridoEn: typeof solicitud.get('x-request-occurred-at') === 'string' && solicitud.get('x-request-occurred-at')!.trim() ? solicitud.get('x-request-occurred-at')!.trim().slice(0,60) : new Date().toISOString(),
       });
       respuesta.set('Cache-Control','no-store');
       if (operacion === 'iniciarSesion') {
@@ -22,6 +25,10 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   // Alias antiguos conservados como contratos HTTP; ninguno accede a módulos o BD.
   // los dejamos juntos para que nadie los confunda con rutas nuevas
   rutas.get('/salud', derivar('salud'));
+  rutas.get('/auditoria/exportar/:formato', derivar('exportarAuditoriaM9'));
+  rutas.get('/auditoria/resumen', derivar('consultarResumenAuditoriaM9'));
+  rutas.get('/auditoria/:id', derivar('obtenerDetalleAuditoriaM9'));
+  rutas.get('/auditoria', derivar('consultarAuditoriaM9'));
   rutas.get('/credito/solicitudes', derivar('listarSolicitudesCreditoM8'));
   rutas.get('/credito/solicitudes/:id', derivar('obtenerSolicitudCreditoM8'));
   rutas.post('/credito/solicitudes/inicial', derivar('crearSolicitudInicialM8'));

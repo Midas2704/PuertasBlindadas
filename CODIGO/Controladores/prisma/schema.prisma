@@ -3683,3 +3683,144 @@ model token_recuperacion {
  @@index([id_usuario])
  @@schema("terreno")
 }
+
+/// Evidencia técnica M9. La migración 044 impide UPDATE y DELETE ordinarios.
+model evento_auditoria_m9 {
+  id_evento_m9          Int       @id @default(autoincrement())
+  identidad_logica      String    @unique @db.VarChar(160)
+  version_contrato      String    @db.VarChar(20)
+  fecha_ocurrencia      DateTime  @db.Timestamptz(6)
+  zona_horaria          String    @db.VarChar(80)
+  fecha_persistencia    DateTime  @db.Timestamptz(6)
+  ejecutor_tipo         String    @db.VarChar(10)
+  ejecutor_referencia   String?   @db.VarChar(120)
+  productor             String    @db.VarChar(80)
+  modulo_origen         String    @db.VarChar(40)
+  operacion             String    @db.VarChar(100)
+  resultado             String    @db.VarChar(10)
+  entidad_tipo          String?   @db.VarChar(80)
+  entidad_referencia    String?   @db.VarChar(160)
+  secuencia             Int?
+  valores_anteriores    Json?
+  valores_nuevos        Json?
+  motivo                String?
+  causa                 String?
+  id_evento_origen      Int?
+  id_evento_correctivo  Int?
+  contexto_terminal     Boolean   @default(false)
+  evento_privacidad     Boolean   @default(false)
+  metadatos_tecnicos    Json?
+  hash_contenido        String    @db.Char(64)
+  hash_integridad       String    @db.Char(64)
+  evento_origen         evento_auditoria_m9?  @relation("m9_origen_derivado", fields: [id_evento_origen], references: [id_evento_m9], onDelete: Restrict)
+  derivados             evento_auditoria_m9[] @relation("m9_origen_derivado")
+  evento_correctivo     evento_auditoria_m9?  @relation("m9_original_correctivo", fields: [id_evento_correctivo], references: [id_evento_m9], onDelete: Restrict)
+  correcciones          evento_auditoria_m9[] @relation("m9_original_correctivo")
+
+  @@index([fecha_ocurrencia, id_evento_m9])
+  @@index([modulo_origen, operacion, resultado])
+  @@index([entidad_tipo, entidad_referencia])
+  @@index([productor, secuencia])
+  @@schema("finanzas")
+}
+
+/// Cola durable para eventos no críticos cuya evidencia aún no pudo persistirse.
+model pendiente_evento_m9 {
+  id_pendiente_m9       Int       @id @default(autoincrement())
+  identidad_logica      String    @unique @db.VarChar(160)
+  productor             String    @db.VarChar(80)
+  modulo_origen         String    @db.VarChar(40)
+  operacion             String    @db.VarChar(100)
+  fecha_ocurrencia      DateTime  @db.Timestamptz(6)
+  creado_en             DateTime  @default(now()) @db.Timestamptz(6)
+  proximo_intento_en    DateTime  @default(now()) @db.Timestamptz(6)
+  resuelto_en           DateTime? @db.Timestamptz(6)
+  estado                String    @default("PENDIENTE") @db.VarChar(20)
+  cantidad_intentos     Int       @default(0)
+  ultimo_error_codigo   String?   @db.VarChar(100)
+  ultimo_error_en       DateTime? @db.Timestamptz(6)
+  payload_evento        Json
+
+  @@index([estado, proximo_intento_en])
+  @@index([productor, estado])
+  @@schema("finanzas")
+}
+
+/// Los intentos son diagnóstico técnico y nunca evidencia de negocio.
+model intento_retry_m9 {
+  id_intento_m9       Int      @id @default(autoincrement())
+  id_pendiente_m9     Int
+  numero_intento      Int
+  estado              String   @db.VarChar(20)
+  error_codigo        String?  @db.VarChar(100)
+  iniciado_en         DateTime @db.Timestamptz(6)
+  finalizado_en       DateTime @db.Timestamptz(6)
+
+  @@unique([id_pendiente_m9, numero_intento])
+  @@index([estado, finalizado_en])
+  @@schema("finanzas")
+}
+
+/// Umbrales técnicos aportados por configuración, nunca por la lógica M9.
+model configuracion_alerta_m9 {
+  id_configuracion_alerta Int      @id @default(autoincrement())
+  codigo                  String   @unique @db.VarChar(100)
+  metrica                 String   @db.VarChar(80)
+  operador                String   @db.VarChar(4)
+  umbral                  Decimal  @db.Decimal(24, 6)
+  activa                  Boolean  @default(true)
+  vigencia_desde          DateTime @db.Timestamptz(6)
+  vigencia_hasta          DateTime? @db.Timestamptz(6)
+
+  @@index([metrica, activa, vigencia_desde])
+  @@schema("finanzas")
+}
+
+model categoria_retencion_m9 {
+  id_categoria_retencion Int      @id @default(autoincrement())
+  codigo                 String   @unique @db.VarChar(100)
+  descripcion            String?  @db.VarChar(300)
+  ownership              String   @db.VarChar(40)
+  creada_en              DateTime @default(now()) @db.Timestamptz(6)
+
+  @@schema("finanzas")
+}
+
+/// Cada cambio crea una fila nueva; las versiones anteriores se conservan.
+model politica_tratamiento_m9 {
+  id_politica_m9          Int      @id @default(autoincrement())
+  id_categoria_retencion Int
+  version                 Int
+  accion                  String   @db.VarChar(20)
+  modulo_objetivo         String?  @db.VarChar(40)
+  entidad_objetivo        String?  @db.VarChar(80)
+  estrategia_ref          String?  @db.VarChar(100)
+  permite_correlacion     Boolean  @default(false)
+  preservar_minimo        Boolean  @default(false)
+  finalidad_ref           String?  @db.VarChar(200)
+  base_ref                String?  @db.VarChar(200)
+  politica_owner_ref      String?  @db.VarChar(200)
+  vigencia_desde          DateTime @db.Timestamptz(6)
+  vigencia_hasta          DateTime? @db.Timestamptz(6)
+  creada_en               DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([id_categoria_retencion, version])
+  @@index([id_categoria_retencion, vigencia_desde, vigencia_hasta])
+  @@schema("finanzas")
+}
+
+/// Overlay de privacidad: la evidencia ordinaria original continúa inmutable.
+model tratamiento_privacidad_m9 {
+  id_tratamiento_m9       Int      @id @default(autoincrement())
+  id_evento_m9            Int
+  id_politica_m9          Int
+  accion                  String   @db.VarChar(20)
+  estado                  String   @db.VarChar(30)
+  correlacion_anonima     String?  @db.VarChar(160)
+  aplicado_en             DateTime @db.Timestamptz(6)
+  evidencia_terminal_id   Int?
+
+  @@unique([id_evento_m9, id_politica_m9])
+  @@index([id_evento_m9, aplicado_en])
+  @@schema("finanzas")
+}
