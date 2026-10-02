@@ -4,6 +4,7 @@ import Usuarios from './views/Seguridad/Usuarios';
 import Sesiones from './views/Seguridad/Sesiones';
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { DialogosSistema } from './components/DialogosSistema';
 
 // Layout; acá se decide la carcasa y el resto sólo pinta su vista
 import DashboardWrapper from './views/DashboardWrapper/DashboardWrapper';
@@ -62,6 +63,7 @@ import Auditoria from './views/Auditoria/Auditoria';
 const App: React.FC = () => {
   return (
     <BrowserRouter>
+      <DialogosSistema />
       <ProveedorSesion><Routes>
         <Route path="/login" element={<Acceso modo="login"/>}/>
         <Route path="/recuperar" element={<Acceso modo="recuperar"/>}/>

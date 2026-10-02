@@ -1,3 +1,4 @@
+import { confirmarAccion, solicitarTexto } from '../../components/DialogosSistema';
 import { usarSesion } from '../../seguridad/Sesion';
 import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect } from 'react';
@@ -64,8 +65,8 @@ const CatalogoClientes: React.FC = () => {
     const resultado = await respuesta.json(); if (!respuesta.ok) throw new Error(resultado.error || 'No fue posible completar la operación'); return resultado;
   };
   const guardar = async (evento: React.FormEvent) => { evento.preventDefault(); fijarGuardando(true); fijarMensaje(''); try { await enviar('/clientes','POST',formulario); fijarMensaje('Cliente registrado'); fijarNuevo(false); window.location.reload(); } catch (e) { fijarMensaje((e as Error).message); } finally { fijarGuardando(false); } };
-  const cambiarEstado = async (c: Cliente) => { const destino = c.estado === 'activo' ? 'desactivar' : 'reactivar'; if (!window.confirm(`¿${destino === 'desactivar' ? 'Desactivar' : 'Reactivar'} a ${c.razonSocial}?`)) return; try { await enviar(`/clientes/${c.id_cliente_financiero}/${destino}`,'POST',{confirmado:true}); window.location.reload(); } catch (e) { fijarError((e as Error).message); } };
-  const editar = async (c: Cliente) => { const nombre = window.prompt('Nombre o Razón Social', c.razonSocial); if (nombre === null) return; const correo = window.prompt('Correo', c.correo || '') ?? ''; const telefono = window.prompt('Teléfono', c.telefono || '') ?? ''; try { await enviar(`/clientes/${c.id_cliente_financiero}`,'PUT',{nombre,correo,telefono}); window.location.reload(); } catch (e) { fijarError((e as Error).message); } };
+  const cambiarEstado = async (c: Cliente) => { const destino = c.estado === 'activo' ? 'desactivar' : 'reactivar'; if (!await confirmarAccion(`¿${destino === 'desactivar' ? 'Desactivar' : 'Reactivar'} a ${c.razonSocial}?`)) return; try { await enviar(`/clientes/${c.id_cliente_financiero}/${destino}`,'POST',{confirmado:true}); window.location.reload(); } catch (e) { fijarError((e as Error).message); } };
+  const editar = async (c: Cliente) => { const nombre = await solicitarTexto('Nombre o Razón Social', c.razonSocial); if (nombre === null) return; const correo = await solicitarTexto('Correo', c.correo || '') ?? ''; const telefono = await solicitarTexto('Teléfono', c.telefono || '') ?? ''; try { await enviar(`/clientes/${c.id_cliente_financiero}`,'PUT',{nombre,correo,telefono}); window.location.reload(); } catch (e) { fijarError((e as Error).message); } };
 
   return (
     <div className="p-8 max-w-7xl mx-auto font-sans">

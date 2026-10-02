@@ -1,3 +1,4 @@
+import { solicitarTexto } from '../../components/DialogosSistema';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, BriefcaseBusiness, CalendarDays, CircleDollarSign, FileCheck2, FileText, Layers3, Plus, Save, Sparkles } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -167,7 +168,7 @@ export default function FichaEmpleado() {
   };
 
   const terminarRelacion = async (relacion: RelacionLaboral) => {
-    const fechaTermino = window.prompt('Fecha de término (AAAA-MM-DD)');
+    const fechaTermino = await solicitarTexto('Fecha de término (AAAA-MM-DD)');
     if (!fechaTermino) return;
     setError(''); setMensaje('');
     try {
@@ -200,7 +201,7 @@ export default function FichaEmpleado() {
     catch (causa) { setError((causa as Error).message); } finally { setGuardando(false); }
   };
   const asignarDeduccion=async()=>{setGuardando(true);setError('');try{await respuestaJson(`/empleados/${id}/deducciones`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nuevaDeduccion)});setNuevaDeduccion({idConcepto:'',vigenciaDesde:'',vigenciaHasta:'',valorAplicable:'',fundamento:'',autorizacionReferencia:''});setMensaje('Deducción recurrente asignada.');setVersion(v=>v+1)}catch(e){setError((e as Error).message)}finally{setGuardando(false)}};
-  const finalizarDeduccion=async(a:Deduccion)=>{const vigenciaHasta=window.prompt('Fecha de término (AAAA-MM-DD)');if(!vigenciaHasta)return;try{await respuestaJson(`/empleados/${id}/deducciones/${a.id}/finalizar`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({vigenciaHasta})});setVersion(v=>v+1)}catch(e){setError((e as Error).message)}};
+  const finalizarDeduccion=async(a:Deduccion)=>{const vigenciaHasta=await solicitarTexto('Fecha de término (AAAA-MM-DD)');if(!vigenciaHasta)return;try{await respuestaJson(`/empleados/${id}/deducciones/${a.id}/finalizar`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({vigenciaHasta})});setVersion(v=>v+1)}catch(e){setError((e as Error).message)}};
 
   return <div className="min-h-full bg-slate-50 p-5 lg:p-8"><div className="mx-auto max-w-6xl">
     <button onClick={() => navegar('/empleados')} className="mb-5 flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900"><ArrowLeft className="h-4 w-4" />Volver al catálogo</button>

@@ -1,3 +1,4 @@
+import { confirmarAccion } from '../../components/DialogosSistema';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUpDown, Building2, Edit3, Eye, Plus, Power, RefreshCcw, Search, ShieldCheck, X } from 'lucide-react';
@@ -97,7 +98,7 @@ export default function CatalogoProveedores() {
 
   const cambiarEstado = async (proveedor: Proveedor) => {
     const accion = proveedor.estado === 'activo' ? 'desactivar' : 'reactivar';
-    if (!window.confirm(`¿Confirmas ${accion} a ${proveedor.razonSocial}?`)) return;
+    if (!await confirmarAccion(`¿Confirmas ${accion} a ${proveedor.razonSocial}?`)) return;
     try {
       await respuestaJson(`/proveedores/${proveedor.idProveedor}/${accion}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmado: true }) });
       setMensaje(accion === 'desactivar' ? 'Proveedor desactivado.' : 'Proveedor reactivado.'); setVersion(valor => valor + 1);

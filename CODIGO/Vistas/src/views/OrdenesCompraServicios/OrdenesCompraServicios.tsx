@@ -1,3 +1,4 @@
+import { confirmarAccion } from '../../components/DialogosSistema';
 import { useEffect, useState } from 'react';
 import { Ban, CheckCircle2, Edit3, Eye, FilePlus2, RefreshCcw, ReceiptText, SlidersHorizontal, X } from 'lucide-react';
 import { solicitarFinanzas } from '../../api/finanzas';
@@ -97,12 +98,12 @@ export default function OrdenesCompraServicios() {
   };
 
   const confirmarAjuste = async (ajusteId: number) => {
-    if (!seleccionada || !window.confirm('¿Confirmas aplicar este ajuste?')) return;
+    if (!seleccionada || !await confirmarAccion('¿Confirmas aplicar este ajuste?')) return;
     try { await respuestaJson(`/ordenes-compra-servicios/${seleccionada.id}/ajustes/${ajusteId}/confirmar`, { method: 'POST' }); setMensaje('Ajuste confirmado.'); recargar(); }
     catch (causa) { setError((causa as Error).message); }
   };
   const reabrir = async (orden: Ocs) => {
-    if (!window.confirm(`¿Confirmas reabrir OCS-${orden.id}?`)) return;
+    if (!await confirmarAccion(`¿Confirmas reabrir OCS-${orden.id}?`)) return;
     try { await respuestaJson(`/ordenes-compra-servicios/${orden.id}/reabrir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmado: true }) }); setMensaje('OCS reabierta.'); recargar(); }
     catch (causa) { setError((causa as Error).message); }
   };
