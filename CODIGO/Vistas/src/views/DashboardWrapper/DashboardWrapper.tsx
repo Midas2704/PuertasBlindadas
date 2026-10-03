@@ -1,5 +1,5 @@
 import { usarSesion, operar } from '../../seguridad/Sesion';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import {
   Anchor,
@@ -15,6 +15,7 @@ import {
   ListChecks,
   ListTodo,
   MapPinned,
+  Menu,
   Receipt,
   SearchCheck,
   Settings,
@@ -25,6 +26,7 @@ import {
   UserCog,
   Users,
   WalletCards,
+  X,
   ChartNoAxesCombined,
   Scale,
   BellRing,
@@ -52,6 +54,7 @@ type MenuGroupProps = {
   isOpen: boolean;
   pathname: string;
   onToggle: () => void;
+  onNavigate: () => void;
 };
 
 const dashboardItem: MenuItem = {
@@ -158,10 +161,11 @@ const menuGroups: MenuGroupDefinition[] = [
 const routeIsActive = (pathname: string, path: string) =>
   pathname === path || (path !== '/' && pathname.startsWith(`${path}/`));
 
-const MenuLink: React.FC<{ item: MenuItem; pathname: string; child?: boolean }> = ({
+const MenuLink: React.FC<{ item: MenuItem; pathname: string; child?: boolean; onNavigate?: () => void }> = ({
   item,
   pathname,
   child = false,
+  onNavigate,
 }) => {
   const Icon = item.icon;
   const isActive = routeIsActive(pathname, item.path);
@@ -169,6 +173,7 @@ const MenuLink: React.FC<{ item: MenuItem; pathname: string; child?: boolean }> 
   return (
     <Link
       to={item.path}
+      onClick={onNavigate}
       aria-current={isActive ? 'page' : undefined}
       className={`flex min-w-0 items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition-colors ${
         child ? 'ml-3 text-sm' : ''
@@ -184,7 +189,7 @@ const MenuLink: React.FC<{ item: MenuItem; pathname: string; child?: boolean }> 
   );
 };
 
-const MenuGroup: React.FC<MenuGroupProps> = ({ group, isOpen, pathname, onToggle }) => {
+const MenuGroup: React.FC<MenuGroupProps> = ({ group, isOpen, pathname, onToggle, onNavigate }) => {
   const GroupIcon = group.icon;
 
   return (
@@ -209,7 +214,7 @@ const MenuGroup: React.FC<MenuGroupProps> = ({ group, isOpen, pathname, onToggle
       {isOpen && (
         <div id={`menu-group-${group.id}`} className="mt-1 space-y-1 border-l border-gray-800 pl-1">
           {group.items.map((item) => (
-            <MenuLink key={item.path} item={item} pathname={pathname} child />
+            <MenuLink key={item.path} item={item} pathname={pathname} child onNavigate={onNavigate} />
           ))}
         </div>
       )}
@@ -220,6 +225,22 @@ const MenuGroup: React.FC<MenuGroupProps> = ({ group, isOpen, pathname, onToggle
 const DashboardWrapper: React.FC = () => {
   const { sesion, actualizar } = usarSesion();
   const location = useLocation();
+  const [mobileMenu, setMobileMenu] = useState({ open: false, pathname: location.pathname });
+  const mobileMenuOpen = mobileMenu.open && mobileMenu.pathname === location.pathname;
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const overflowAnterior = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const cerrarConEscape = (evento: KeyboardEvent) => {
+      if (evento.key === 'Escape') setMobileMenu({ open: false, pathname: location.pathname });
+    };
+    document.addEventListener('keydown', cerrarConEscape);
+    return () => {
+      document.body.style.overflow = overflowAnterior;
+      document.removeEventListener('keydown', cerrarConEscape);
+    };
+  }, [location.pathname, mobileMenuOpen]);
 
   const canSee = (item: MenuItem) =>
     (!item.permission || Boolean(sesion?.permisos.includes(item.permission))) &&
@@ -255,21 +276,44 @@ const DashboardWrapper: React.FC = () => {
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-slate-50 font-sans lg:h-screen lg:flex-row lg:overflow-hidden">
-      <aside className="flex max-h-[70vh] w-full shrink-0 flex-col bg-[#111111] text-gray-300 lg:h-screen lg:max-h-none lg:w-72">
-        <div className="flex h-20 shrink-0 items-center border-b border-gray-800 px-6">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm lg:hidden">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="rounded-md bg-primary-600 p-2 text-white"><ShieldCheck className="h-5 w-5" /></span>
+          <span className="truncate font-bold text-gray-950">Finanzas PBlindadas</span>
+        </div>
+        <button
+          type="button"
+          aria-label="Abrir menú principal"
+          aria-controls="sidebar-principal"
+          aria-expanded={mobileMenuOpen}
+          onClick={() => setMobileMenu({ open: true, pathname: location.pathname })}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-gray-300 text-gray-800"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      </header>
+
+      {mobileMenuOpen && <button type="button" aria-label="Cerrar menú principal" onClick={() => setMobileMenu({ open: false, pathname: location.pathname })} className="fixed inset-0 z-40 bg-black/50 lg:hidden" />}
+
+      <aside
+        id="sidebar-principal"
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(18rem,calc(100vw-3rem))] shrink-0 flex-col bg-[#111111] text-gray-300 shadow-2xl transition-transform duration-200 lg:static lg:z-auto lg:h-screen lg:w-72 lg:translate-x-0 lg:shadow-none ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}
+      >
+        <div className="flex h-20 shrink-0 items-center justify-between border-b border-gray-800 px-5 lg:px-6">
           <div className="flex min-w-0 items-center gap-3 text-white">
             <div className="shrink-0 rounded-lg bg-primary-600 p-2">
               <ShieldCheck className="h-6 w-6 text-white" />
             </div>
-            <span className="min-w-0 text-lg font-bold tracking-tight">Finanzas PBlindadas</span>
+            <span className="min-w-0 truncate text-lg font-bold tracking-tight">Finanzas PBlindadas</span>
           </div>
+          <button type="button" aria-label="Cerrar menú principal" onClick={() => setMobileMenu({ open: false, pathname: location.pathname })} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-gray-300 hover:bg-gray-800 hover:text-white lg:hidden"><X className="h-5 w-5" /></button>
         </div>
 
         <nav
           aria-label="Navegación principal"
           className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-4 lg:py-6"
         >
-          {canSee(dashboardItem) && <MenuLink item={dashboardItem} pathname={location.pathname} />}
+          {canSee(dashboardItem) && <MenuLink item={dashboardItem} pathname={location.pathname} onNavigate={() => setMobileMenu({ open: false, pathname: location.pathname })} />}
 
           {visibleGroups.map((group) => (
             <MenuGroup
@@ -278,11 +322,12 @@ const DashboardWrapper: React.FC = () => {
               isOpen={openGroupId === group.id}
               pathname={location.pathname}
               onToggle={() => toggleGroup(group.id)}
+              onNavigate={() => setMobileMenu({ open: false, pathname: location.pathname })}
             />
           ))}
         </nav>
 
-        <div className="hidden shrink-0 border-t border-gray-800 p-6 text-sm text-gray-500 lg:block">
+        <div className="shrink-0 border-t border-gray-800 p-4 text-sm text-gray-500 lg:p-6">
           <p className="mb-1 break-words text-white">{sesion?.nombre}</p>
           <button
             type="button"
@@ -294,13 +339,11 @@ const DashboardWrapper: React.FC = () => {
           >
             Cerrar mi sesión
           </button>
-          <p>Módulo Finanzas</p>
-          <p>© 2026 Puertas Blindadas</p>
-          <p>Producto desarrollado por MidasSupremacySPA</p>
+          <div className="hidden lg:block"><p>Módulo Finanzas</p><p>© 2026 Puertas Blindadas</p><p>Producto desarrollado por MidasSupremacySPA</p></div>
         </div>
       </aside>
 
-      <main className="min-w-0 flex-1 lg:overflow-y-auto">
+      <main className="min-w-0 flex-1 overflow-x-hidden lg:overflow-y-auto">
         <Outlet />
       </main>
     </div>
