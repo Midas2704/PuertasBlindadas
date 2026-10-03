@@ -15,7 +15,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:provision-root": "node dist/administracion/aprovisionarCuentaRaiz.js",
     "db:seed": "prisma db seed"
-    ,"db:seed:demo": "node -r ts-node/register prisma/seed.ts && node dist/administracion/sembrarDemoCompleto.js seed"
+    ,"db:seed:demo": "node dist/administracion/sembrarDemoCompleto.js seed"
     ,"db:seed:demo:status": "node dist/administracion/sembrarDemoCompleto.js status"
     ,"db:seed:demo:verify": "node dist/administracion/sembrarDemoCompleto.js verify"
     ,"db:seed:demo:clean": "node dist/administracion/sembrarDemoCompleto.js clean"

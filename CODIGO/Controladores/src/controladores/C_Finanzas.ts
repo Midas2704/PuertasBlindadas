@@ -8,6 +8,7 @@ import { M6Controller } from './M6Controller';
 import { M7Controller } from './M7Controller';
 import { M8Controller } from './M8Controller';
 import { M9Controller } from './M9Controller';
+import { AdaptadorCreditoM8ParaM7 } from '../servicios/AdaptadorCreditoM8ParaM7';
 import { ProductorAuditoriaM9 } from '../m9/contratoProductor';
 import { navegacionOwner, scopeM9DesdeActor } from '../m9/autorizacion';
 import type { FiltrosM9 } from '../m9/tipos';
@@ -114,8 +115,8 @@ export class C_Finanzas {
     productorM9?: ProductorAuditoriaM9,
   ) {
     this.productorM9 = productorM9 ?? new ProductorAuditoriaM9(this.m9);
-    if (typeof (this.m7 as { conectarCreditoM8?: (credito: M8Controller) => void }).conectarCreditoM8 === 'function') {
-      this.m7.conectarCreditoM8(this.m8);
+    if (typeof (this.m7 as { conectarCreditoM8?: (credito: AdaptadorCreditoM8ParaM7) => void }).conectarCreditoM8 === 'function') {
+      this.m7.conectarCreditoM8(new AdaptadorCreditoM8ParaM7(this.m8));
     }
   }
   async ejecutar(operacion: Operacion, solicitud: SolicitudFinanzas) {
