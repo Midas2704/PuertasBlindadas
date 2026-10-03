@@ -150,7 +150,7 @@ const DashboardAnterior: React.FC = () => {
 
 const DashboardPrincipal: React.FC = () => {
   const { sesion } = usarSesion();
-  return sesion?.permisos.includes('CU215') ? <PanelGeneralM7 compacto /> : <DashboardAnterior />;
+  return sesion?.permisos.includes('CU215') ? <PanelGeneralM7 /> : <DashboardAnterior />;
 };
 
 export default DashboardPrincipal;
