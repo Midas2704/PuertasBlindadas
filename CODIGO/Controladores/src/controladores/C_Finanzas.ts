@@ -15,6 +15,15 @@ import type { FiltrosM9 } from '../m9/tipos';
 import { Autorizacion, ContextoAutorizacion } from '../validaciones/autorizacion';
 import { identificador, texto, validarFiltros } from '../validaciones/solicitudes';
 
+const normalizarFiltrosHttpM9 = (consulta?: Record<string, unknown>): FiltrosM9 => {
+  const filtros = { ...(consulta || {}) };
+  for (const campo of ['pagina', 'tamano'] as const) {
+    const valor = filtros[campo];
+    if (typeof valor === 'string' && valor.trim() !== '') filtros[campo] = Number(valor);
+  }
+  return filtros as FiltrosM9;
+};
+
 export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' | 'crearCliente' | 'actualizarCliente' | 'desactivarCliente' | 'reactivarCliente' | 'inventario' | 'productos' | 'monedas'
   | 'bandeja' | 'historial' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
   | 'descartarBorrador' | 'aprobarCotizacion' | 'aprobarVenta' | 'editarCotizacion' | 'tipoCambio'
@@ -523,13 +532,13 @@ export class C_Finanzas {
       case 'consultarDistribucionCreditoM8': return this.m8.distribucion(actor);
       case 'consultarComposicionCreditoM8': return this.m8.composicionCliente(identificador(parametros.id), actor);
       case 'validarFormalizacionCreditoM8': return this.m8.validarFormalizacion(cuerpo, actor);
-      case 'consultarAuditoriaM9': return this.m9.consultar(solicitud.consulta as FiltrosM9 || {}, scopeM9DesdeActor(actor));
+      case 'consultarAuditoriaM9': return this.m9.consultar(normalizarFiltrosHttpM9(solicitud.consulta), scopeM9DesdeActor(actor));
       case 'obtenerDetalleAuditoriaM9': {
         const detalle = await this.m9.detalle(identificador(parametros.id), scopeM9DesdeActor(actor));
         const evento = detalle.evento as { referencia?:{tipo:string|null;id:string|null} };
         return { ...detalle, navegacionOwner:navegacionOwner(actor, evento.referencia) };
       }
-      case 'exportarAuditoriaM9': return this.m9.exportar(texto(parametros.formato, 10).toUpperCase() as 'CSV'|'PDF', solicitud.consulta as FiltrosM9 || {}, scopeM9DesdeActor(actor));
+      case 'exportarAuditoriaM9': return this.m9.exportar(texto(parametros.formato, 10).toUpperCase() as 'CSV'|'PDF', normalizarFiltrosHttpM9(solicitud.consulta), scopeM9DesdeActor(actor));
       case 'consultarResumenAuditoriaM9': return this.m9.resumenAnalitico(scopeM9DesdeActor(actor));
       default: return this.m2.operacionPendiente(operacion);
     }};

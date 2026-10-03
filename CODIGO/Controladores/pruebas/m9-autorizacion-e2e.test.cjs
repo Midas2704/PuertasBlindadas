@@ -41,6 +41,24 @@ test('CU363-CU365 lista, detalle y exportan el mismo scope con eventos terminale
  const terminales=(await repo.listar({tamano:50},['M9'])).eventos;assert.deepEqual(terminales.map(e=>e.operacion).sort(),['APERTURA_DETALLE','CONSULTA_EVIDENCIA','EXPORTACION_EVIDENCIA']);assert.ok(terminales.every(e=>e.contextoTerminal));
 });
 
+test('frontera HTTP M9 normaliza paginación string sin debilitar validación ni scope',async()=>{
+ const repo=new RepositorioAuditoriaM9Memoria(),m9=new M9Controller({repositorio:repo});
+ await m9.recibir(base('http-m1-a','M1',{resultado:'RECHAZADO'}));
+ await m9.recibir(base('http-m1-b','M1',{operacion:'OTRA'}));
+ await m9.recibir(base('http-m5','M5'));
+ const f=fachada(autorizacion(['CU355','CU359','CU05'],'gerencia'),m9);
+ const primera=await f.ejecutar('consultarAuditoriaM9',{consulta:{pagina:'1',tamano:'25',modulo:'M1',resultado:'RECHAZADO'},contexto:{}});
+ assert.equal(primera.total,1);assert.equal(primera.pagina,1);assert.equal(primera.tamano,25);assert.equal(primera.eventos[0].identidadLogica,'http-m1-a');
+ const segunda=await f.ejecutar('consultarAuditoriaM9',{consulta:{pagina:'2',tamano:'1',modulo:'M1',orden:'asc'},contexto:{}});
+ assert.equal(segunda.pagina,2);assert.equal(segunda.tamano,1);assert.equal(segunda.total,2);assert.equal(segunda.eventos.length,1);
+ for(const consulta of [{pagina:'abc'},{pagina:'1.5'},{pagina:'0'},{tamano:'0'},{tamano:'-1'},{tamano:'999999'}]) await assert.rejects(f.ejecutar('consultarAuditoriaM9',{consulta,contexto:{}}),e=>e.estado===400&&e.codigo==='M9_FILTRO_INVALIDO');
+ const csv=await f.ejecutar('exportarAuditoriaM9',{parametros:{formato:'CSV'},consulta:{pagina:'1',tamano:'25',desde:'2026-10-01',hasta:'2026-10-31',modulo:'M1',resultado:'RECHAZADO'},contexto:{}});
+ assert.equal(csv.total,1);assert.match(csv.contenido,/^data:text\/csv;base64/);
+ const pdf=await f.ejecutar('exportarAuditoriaM9',{parametros:{formato:'PDF'},consulta:{pagina:'1',tamano:'25',modulo:'M1'},contexto:{}});
+ assert.equal(pdf.total,2);assert.match(pdf.contenido,/^data:application\/pdf;base64/);
+ assert.equal((await f.ejecutar('consultarAuditoriaM9',{consulta:{pagina:'1',tamano:'25'},contexto:{}})).eventos.some(e=>e.modulo==='M5'),false);
+});
+
 test('exportación revalida M4 en cada solicitud y conserva masking',async()=>{
  const repo=new RepositorioAuditoriaM9Memoria(),m9=new M9Controller({repositorio:repo});await m9.recibir(base('revalidar'));
  let permitir=true,veces=0;const auth={autorizar:async operacion=>{veces++;if(operacion==='exportarAuditoriaM9'&&!permitir){const e=new Error('revocado');e.estado=403;throw e}return actor(['CU355','CU359','CU05'],'contador')}};

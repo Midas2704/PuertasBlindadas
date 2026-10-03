@@ -21,6 +21,11 @@ test('dataset DEMO integral es verificable e idempotente', () => {
     assert.equal(credito.totalSolicitudes, 25);
     assert.ok(credito.totalCompromisos >= 10);
     assert.equal(despues.rangoHistorico.meses, 25);
+    assert.equal(despues.actividadEfectivaPosteriorRango, 0);
+    assert.ok(despues.fechasMaximasEfectivas.pagoCliente <= `${despues.rangoHistorico.hasta}-31`);
+    assert.ok(despues.fechasMaximasEfectivas.movimientoFinanciero <= `${despues.rangoHistorico.hasta}-31`);
+    assert.equal(Object.keys(despues.seriesMensuales.pagos).some(mes => mes > despues.rangoHistorico.hasta), false);
+    assert.equal(Object.keys(despues.seriesMensuales.movimientosFinancieros).some(mes => mes > despues.rangoHistorico.hasta), false);
     assert.ok(despues.clientes >= 50);
     assert.ok(despues.usuarios >= 5);
     assert.ok(despues.items >= 10);

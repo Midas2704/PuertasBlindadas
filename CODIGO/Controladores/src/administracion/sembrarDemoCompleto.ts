@@ -10,6 +10,7 @@ const hoy = new Date(`${fechaNegocio()}T00:00:00Z`);
 const fecha = (dias = 0) => { const valor = new Date(hoy); valor.setUTCDate(valor.getUTCDate() + dias); return valor; };
 const inicioMes = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), 1));
 const finMes = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() + 1, 0));
+const acotarFechaEfectiva = (valor: Date) => valor > finMes ? new Date(finMes) : valor;
 const MESES_HISTORICOS = 25;
 const mesHistorico = (indice: number, dia = 1) => new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - (MESES_HISTORICOS - 1 - indice), dia));
 const claveMes = (valor: Date) => `${valor.getUTCFullYear()}-${String(valor.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -242,10 +243,14 @@ async function sembrarHistoricoRealista() {
         await tx.documento_tributario_nota_venta.upsert({ where: { id_documento_tributario_id_nota_venta: { id_documento_tributario: documento.id_documento_tributario, id_nota_venta: nota.id_nota_venta } }, update: {}, create: { id_documento_tributario: documento.id_documento_tributario, id_nota_venta: nota.id_nota_venta } });
         if (orden % 7 !== 0) {
           const pagado = orden % 5 === 0 ? Math.round(total * .45) : total;
-          const fechaPago = new Date(vencimiento); fechaPago.setUTCDate(fechaPago.getUTCDate() + (orden % 6 === 0 ? 18 : -variacion(1, 8, orden, mes)));
-          const pago = await tx.pago_cliente.upsert({ where: { referencia_demostracion: `${PREFIJO}-PAGO-${clave}` }, update: {}, create: { referencia_demostracion: `${PREFIJO}-PAGO-${clave}`, id_ficha_cliente: ficha.id_ficha_cliente, id_moneda: clp.id_moneda, id_medio_pago: transferencia.id_medio_pago, id_categoria_pago: categoria.id_categoria_pago, fecha_pago: fechaPago, monto_pago: pagado, comprobante_pago: `${PREFIJO}://cobro/${clave}` } });
+          const fechaPagoCalculada = new Date(vencimiento); fechaPagoCalculada.setUTCDate(fechaPagoCalculada.getUTCDate() + (orden % 6 === 0 ? 18 : -variacion(1, 8, orden, mes)));
+          const fechaPago = acotarFechaEfectiva(fechaPagoCalculada);
+          const pago = await tx.pago_cliente.upsert({ where: { referencia_demostracion: `${PREFIJO}-PAGO-${clave}` }, update: { fecha_pago: fechaPago }, create: { referencia_demostracion: `${PREFIJO}-PAGO-${clave}`, id_ficha_cliente: ficha.id_ficha_cliente, id_moneda: clp.id_moneda, id_medio_pago: transferencia.id_medio_pago, id_categoria_pago: categoria.id_categoria_pago, fecha_pago: fechaPago, monto_pago: pagado, comprobante_pago: `${PREFIJO}://cobro/${clave}` } });
           if (!await tx.asignacion_pago_cliente.findFirst({ where: { id_pago_cliente: pago.id_pago_cliente, id_nota_venta: nota.id_nota_venta } })) await tx.asignacion_pago_cliente.create({ data: { id_pago_cliente: pago.id_pago_cliente, id_nota_venta: nota.id_nota_venta, monto_asignado: pagado } });
-          if (!await tx.movimiento_financiero.findFirst({ where: { observacion: `${PREFIJO} Movimiento venta ${clave}` } })) await tx.movimiento_financiero.create({ data: { id_moneda: clp.id_moneda, fecha_movimiento: fechaPago, tipo_movimiento_financiero: 'PAGO_CLIENTE', naturaleza_movimiento: 'ingreso', motivo_movimiento: `${PREFIJO} cobro histórico`, monto_movimiento: pagado, estado_movimiento: 'registrado', observacion: `${PREFIJO} Movimiento venta ${clave}` } });
+          const observacionMovimiento = `${PREFIJO} Movimiento venta ${clave}`;
+          const movimiento = await tx.movimiento_financiero.findFirst({ where: { observacion: observacionMovimiento } });
+          if (movimiento) await tx.movimiento_financiero.update({ where: { id_movimiento_financiero: movimiento.id_movimiento_financiero }, data: { fecha_movimiento: fechaPago } });
+          else await tx.movimiento_financiero.create({ data: { id_moneda: clp.id_moneda, fecha_movimiento: fechaPago, tipo_movimiento_financiero: 'PAGO_CLIENTE', naturaleza_movimiento: 'ingreso', motivo_movimiento: `${PREFIJO} cobro histórico`, monto_movimiento: pagado, estado_movimiento: 'registrado', observacion: observacionMovimiento } });
         }
         if (proyecto) {
           const codigo = `${PREFIJO}-PF-${String(correlativoVenta).padStart(3, '0')}`;
@@ -398,12 +403,16 @@ async function sembrarComprasEInventarioHistorico() {
         const pagada = mes < 21 || orden === 1, parcial = !pagada && orden === 2, saldo = pagada ? 0 : parcial ? Math.round(monto * .45) : monto;
         if (!obligacion) obligacion = await tx.obligacion_proveedor_m5.create({ data: { id_documento_m5: documento.id_documento_m5, id_proveedor: proveedor.id_proveedor, monto_original: monto, id_moneda: clp.id_moneda, saldo_inicial: monto, saldo_actual: saldo, fecha_emision: documento.fecha_emision, fecha_vencimiento: documento.fecha_vencimiento!, estado_pago: pagada ? 'Pagada' : parcial ? 'Parcial' : 'Pendiente', generado_por: actor.usuario_id_usuario } });
         if (pagada || parcial) {
-          const fechaPagoProveedor = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 12 + orden));
-          let operacion = await tx.operacion_pago_proveedor_m5.findFirst({ where: { id_proveedor: proveedor.id_proveedor, fecha_efectiva_pago: fechaPagoProveedor } });
+          const fechaPagoProveedor = acotarFechaEfectiva(new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 12 + orden)));
+          const movimientoExistente = await tx.movimiento_pago_proveedor_m5.findFirst({ where: { id_obligacion_m5: obligacion.id_obligacion_m5 } });
+          let operacion = movimientoExistente ? await tx.operacion_pago_proveedor_m5.update({ where: { id_operacion_pago_m5: movimientoExistente.id_operacion_pago_m5 }, data: { fecha_efectiva_pago: fechaPagoProveedor, fecha_confirmacion: fechaPagoProveedor } }) : await tx.operacion_pago_proveedor_m5.findFirst({ where: { id_proveedor: proveedor.id_proveedor, fecha_efectiva_pago: fechaPagoProveedor } });
           const aplicado = pagada ? monto : monto - saldo;
           if (!operacion) operacion = await tx.operacion_pago_proveedor_m5.create({ data: { id_proveedor: proveedor.id_proveedor, estado: 'confirmada', fecha_efectiva_pago: fechaPagoProveedor, creado_por: actor.usuario_id_usuario, confirmado_por: actor.usuario_id_usuario, fecha_confirmacion: fechaPagoProveedor, total_confirmado: aplicado } });
-          if (!await tx.movimiento_pago_proveedor_m5.findFirst({ where: { id_operacion_pago_m5: operacion.id_operacion_pago_m5, id_obligacion_m5: obligacion.id_obligacion_m5 } })) await tx.movimiento_pago_proveedor_m5.create({ data: { id_operacion_pago_m5: operacion.id_operacion_pago_m5, id_obligacion_m5: obligacion.id_obligacion_m5, id_medio_pago: medio.id_medio_pago, id_moneda: clp.id_moneda, monto_aplicado: aplicado, equivalente_clp: aplicado, estado: 'Vigente' } });
-          if (!await tx.movimiento_financiero.findFirst({ where: { observacion: `${PREFIJO} Movimiento proveedor ${clave}` } })) await tx.movimiento_financiero.create({ data: { id_moneda: clp.id_moneda, fecha_movimiento: fechaPagoProveedor, tipo_movimiento_financiero: 'PAGO_PROVEEDOR', naturaleza_movimiento: 'egreso', motivo_movimiento: `${PREFIJO} pago proveedor histórico`, monto_movimiento: aplicado, estado_movimiento: 'registrado', observacion: `${PREFIJO} Movimiento proveedor ${clave}` } });
+          if (!movimientoExistente) await tx.movimiento_pago_proveedor_m5.create({ data: { id_operacion_pago_m5: operacion.id_operacion_pago_m5, id_obligacion_m5: obligacion.id_obligacion_m5, id_medio_pago: medio.id_medio_pago, id_moneda: clp.id_moneda, monto_aplicado: aplicado, equivalente_clp: aplicado, estado: 'Vigente' } });
+          const observacionMovimiento = `${PREFIJO} Movimiento proveedor ${clave}`;
+          const movimientoFinanciero = await tx.movimiento_financiero.findFirst({ where: { observacion: observacionMovimiento } });
+          if (movimientoFinanciero) await tx.movimiento_financiero.update({ where: { id_movimiento_financiero: movimientoFinanciero.id_movimiento_financiero }, data: { fecha_movimiento: fechaPagoProveedor } });
+          else await tx.movimiento_financiero.create({ data: { id_moneda: clp.id_moneda, fecha_movimiento: fechaPagoProveedor, tipo_movimiento_financiero: 'PAGO_PROVEEDOR', naturaleza_movimiento: 'egreso', motivo_movimiento: `${PREFIJO} pago proveedor histórico`, monto_movimiento: aplicado, estado_movimiento: 'registrado', observacion: observacionMovimiento } });
         }
       }
       for (let gasto = 1; gasto <= 3; gasto++) {
@@ -625,10 +634,14 @@ async function conteos() {
   for (const fila of remuneracionesFechadas) acumular(series.remuneraciones, `${fila.periodo.anio}-${String(fila.periodo.mes).padStart(2, '0')}`, Number(fila.total_haberes || 0));
   const anuales = Object.fromEntries(Object.entries(series).map(([nombre, serie]) => [nombre, Object.entries(serie).reduce<Serie>((salida, [mes, valor]) => { const anio = mes.slice(0, 4); const actual = salida[anio] ?? { cantidad: 0, monto: 0 }; actual.cantidad += valor.cantidad; actual.monto += valor.monto; salida[anio] = actual; return salida; }, {})]));
   const meses = Object.keys(series.cotizaciones).sort();
+  const fechaMaxima = (valores: Date[]) => valores.length ? new Date(Math.max(...valores.map(valor => valor.getTime()))) : null;
+  const fechaMaximaPagoCliente = fechaMaxima(pagosFechados.map(fila => fila.fecha_pago));
+  const fechaMaximaMovimientoFinanciero = fechaMaxima(movimientosFechados.map(fila => fila.fecha_movimiento));
+  const actividadEfectivaPosteriorRango = pagosFechados.filter(fila => fila.fecha_pago > finMes).length + movimientosFechados.filter(fila => fila.fecha_movimiento > finMes).length;
   const saldoCxC = notasSaldo.reduce((total, nota) => total + Math.max(0, Number(nota.monto_total) - nota.asignacion_pago_cliente.reduce((suma, asignacion) => suma + Number(asignacion.monto_asignado), 0)), 0);
   const costoRemuneraciones = remuneracionesFechadas.reduce((total, fila) => total + Number(fila.total_haberes || 0), 0);
   const unidadesStock = stockDemo.reduce((total, fila) => total + Number(fila.inventario_bodega_cantidad_fisica || 0), 0);
-  return { rangoHistorico: { desde: meses[0] ?? null, hasta: meses.length ? meses[meses.length - 1] : null, meses: meses.length }, usuarios, clientes, items, materiales, cotizaciones, notas, pagos, movimientosFinancieros, proveedores, ocs, documentosProveedor, obligaciones, pagosProveedor, categoriasEgreso, envios, cajaChica, empleados, esquemas, haberes, remuneraciones, documentosRemuneracion, pagosRemuneracion, honorarios, parametros, proyectos, proyectosFinancieros, obras, visitas, tareas, ejecuciones, incidencias, ots, stock, unidadesStock, movimientosInventario, compras, solicitudes, compromisos, eventos, limiteGlobal: Number(limite?.monto_limite || 0), exposicion: Number(exposicion._sum.monto_pendiente || 0), saldoCxC, saldoCxP: Number(saldoCxp._sum.saldo_actual || 0), costoRemuneraciones, seriesMensuales: series, seriesAnuales: anuales };
+  return { rangoHistorico: { desde: meses[0] ?? null, hasta: meses.length ? meses[meses.length - 1] : null, meses: meses.length }, fechasMaximasEfectivas: { pagoCliente: fechaMaximaPagoCliente?.toISOString().slice(0, 10) ?? null, movimientoFinanciero: fechaMaximaMovimientoFinanciero?.toISOString().slice(0, 10) ?? null }, actividadEfectivaPosteriorRango, usuarios, clientes, items, materiales, cotizaciones, notas, pagos, movimientosFinancieros, proveedores, ocs, documentosProveedor, obligaciones, pagosProveedor, categoriasEgreso, envios, cajaChica, empleados, esquemas, haberes, remuneraciones, documentosRemuneracion, pagosRemuneracion, honorarios, parametros, proyectos, proyectosFinancieros, obras, visitas, tareas, ejecuciones, incidencias, ots, stock, unidadesStock, movimientosInventario, compras, solicitudes, compromisos, eventos, limiteGlobal: Number(limite?.monto_limite || 0), exposicion: Number(exposicion._sum.monto_pendiente || 0), saldoCxC, saldoCxP: Number(saldoCxp._sum.saldo_actual || 0), costoRemuneraciones, seriesMensuales: series, seriesAnuales: anuales };
 }
 
 async function cortesHistoricosM7() {
@@ -654,6 +667,8 @@ async function verificar() {
   if (resumen.limiteGlobal <= 0) fallos.push('límite global M8 no configurado');
   if (resumen.exposicion <= 0) fallos.push('exposición M8 no positiva');
   if (resumen.rangoHistorico.meses < 24) fallos.push(`histórico insuficiente: ${resumen.rangoHistorico.meses} meses`);
+  if (resumen.actividadEfectivaPosteriorRango > 0) fallos.push(`actividad efectiva posterior al rango: ${resumen.actividadEfectivaPosteriorRango}`);
+  for (const [tipo, fechaMaxima] of Object.entries(resumen.fechasMaximasEfectivas)) if (fechaMaxima && new Date(`${fechaMaxima}T00:00:00Z`) > finMes) fallos.push(`${tipo} excede el cierre ${finMes.toISOString().slice(0, 10)}: ${fechaMaxima}`);
   if (Object.keys(resumen.seriesMensuales.ventas).length < 12) fallos.push('menos de 12 meses con ventas');
   if (new Set(Object.values(resumen.seriesMensuales.ventas).map(valor => valor.monto)).size < 2) fallos.push('ventas mensuales sin variación');
   if (Object.keys(resumen.seriesAnuales.ventas).length < 2) fallos.push('ventas no cubren al menos dos años');
