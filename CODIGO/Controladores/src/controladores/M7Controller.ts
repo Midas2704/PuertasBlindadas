@@ -76,6 +76,20 @@ const inicioBucket = (fecha: Date, granularidad: 'dia' | 'semana' | 'mes') => {
 const esServicioInstalacion = (tipo: string | null | undefined) => normalizarTexto(tipo) === 'instalacion';
 const redondear = (valor: number, decimales = 2) => Number(valor.toFixed(decimales));
 const slugParametro = (valor: unknown) => String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 22);
+const claveMes = (fecha: Date) => `${fecha.getUTCFullYear()}-${String(fecha.getUTCMonth() + 1).padStart(2, '0')}`;
+
+function resolverVentanaHistoricaM7(consulta: Consulta) {
+  const corte = resolverPeriodoM7(consulta);
+  const meses = Number(consulta.meses ?? 12);
+  if (!Number.isInteger(meses) || meses < 1 || meses > 24) throw new ErrorAplicacion(400, 'La ventana histórica debe contener entre 1 y 24 meses');
+  const desde = new Date(Date.UTC(corte.desde.getUTCFullYear(), corte.desde.getUTCMonth() - meses + 1, 1));
+  const periodos = Array.from({ length: meses }, (_, indice) => {
+    const inicio = new Date(Date.UTC(desde.getUTCFullYear(), desde.getUTCMonth() + indice, 1));
+    const hastaExclusiva = new Date(Date.UTC(inicio.getUTCFullYear(), inicio.getUTCMonth() + 1, 1));
+    return { clave: claveMes(inicio), desde: inicio, hastaExclusiva };
+  });
+  return { corte, desde, hastaExclusiva: corte.hastaExclusiva, meses, periodos };
+}
 
 export interface ProveedorCreditoM8 {
   consultarExposicion(consulta: Consulta): Promise<unknown>;
@@ -139,6 +153,110 @@ export class M7Controller {
       catch { return [clave, { permisos: requeridos.filter(permiso => permisos.includes(permiso)), periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const }] as const; }
     }));
     return { periodo: periodoSalida(periodo), bloques: Object.fromEntries(resultados), bloquesOcultos: definiciones.filter(([, requeridos]) => !requeridos.some(permiso => permisos.includes(permiso))).map(([clave]) => clave) };
+  }
+
+  async consultarHistoricoPanelGeneral(consulta: Consulta, permisos: string[]) {
+    const ventana = resolverVentanaHistoricaM7(consulta);
+    const puede = (codigo: string) => permisos.includes(codigo);
+    const filas = new Map(ventana.periodos.map(periodo => [periodo.clave, {
+      periodo: periodo.clave,
+      ventasNetas: null as number | null,
+      cantidadVentas: 0,
+      cotizaciones: 0,
+      convertidas: 0,
+      conversionPorcentual: null as number | null,
+      ingresosRecibidos: 0,
+      egresosRealizados: 0,
+      flujoNeto: 0,
+      costoRemuneraciones: null as number | null,
+      costosDirectos: null as number | null,
+      resultadoGerencial: null as number | null,
+      instalaciones: 0,
+      ordenesTrabajo: 0,
+      incidencias: 0,
+    }]));
+    try {
+      const [ventas, cotizaciones, movimientos, costos, tareasRemunerables, remuneraciones, instalaciones, ordenes, incidencias] = await Promise.all([
+        prisma.nota_venta.findMany({
+          where: { fecha_emision: { gte: ventana.desde, lt: ventana.hastaExclusiva }, estado_nota_venta: { in: estadosVentaDefinitiva } },
+          select: { fecha_emision: true, monto_neto: true, tipo_cambio_usado: true, moneda: { select: { codigo_moneda: true } }, ficha_cliente: { select: { cliente_financiero: { select: { id_cliente_financiero: true, nombre_razon_social_referencia: true } } } } },
+        }),
+        prisma.cotizacion.findMany({ where: { fecha_emision: { gte: ventana.desde, lt: ventana.hastaExclusiva } }, select: { fecha_emision: true, nota_venta: { select: { estado_nota_venta: true } } } }),
+        prisma.movimiento_financiero.findMany({
+          where: { fecha_movimiento: { gte: ventana.desde, lt: ventana.hastaExclusiva }, estado_movimiento: { notIn: ['anulado', 'rechazado'] } },
+          select: { fecha_movimiento: true, naturaleza_movimiento: true, monto_movimiento: true, tipo_movimiento_financiero: true, moneda: { select: { codigo_moneda: true } }, origen_movimiento_financiero: { select: { entidad_origen: true } } },
+        }),
+        prisma.costo_proyecto.findMany({ where: { fecha_costo: { gte: ventana.desde, lt: ventana.hastaExclusiva }, estado_costo: { not: 'anulado' } }, select: { fecha_costo: true, monto_costo: true, moneda: { select: { codigo_moneda: true } } } }),
+        prisma.tarea_remunerable.findMany({ where: { fecha_tarea: { gte: ventana.desde, lt: ventana.hastaExclusiva }, estado_validacion: 'validada', id_proyecto_financiero: { not: null } }, select: { fecha_tarea: true, monto_calculado: true } }),
+        prisma.remuneracion.findMany({ where: { estado: 'cerrada', periodo: { fecha_inicio: { gte: ventana.desde, lt: ventana.hastaExclusiva } } }, select: { total_haberes: true, total_aportes_empleador: true, periodo: { select: { fecha_inicio: true } } } }),
+        prisma.servicio_terreno.findMany({ where: { servicio_terreno_estado: 'cerrada', servicio_terreno_fecha_real: { gte: ventana.desde, lt: ventana.hastaExclusiva } }, select: { servicio_terreno_fecha_real: true, servicio_terreno_tipo_servicio: true } }),
+        prisma.orden_trabajo.findMany({ where: { orden_trabajo_fecha_hora: { gte: ventana.desde, lt: ventana.hastaExclusiva } }, select: { orden_trabajo_fecha_hora: true } }),
+        prisma.incidencia_retrabajo_tarea.findMany({ where: { fecha_registro: { gte: ventana.desde, lt: ventana.hastaExclusiva } }, select: { fecha_registro: true } }),
+      ]);
+
+      const ventasValidasPorMes = new Map<string, boolean>();
+      const clientes = new Map<number, { cliente: string; monto: number }>();
+      if (puede('CU219') || puede('CU220') || puede('CU238')) for (const venta of ventas) {
+        const fila = filas.get(claveMes(venta.fecha_emision)); if (!fila) continue;
+        const monto = venta.moneda.codigo_moneda === 'CLP' ? venta.monto_neto : venta.tipo_cambio_usado?.gt(0) ? venta.monto_neto.mul(venta.tipo_cambio_usado) : null;
+        fila.cantidadVentas += 1;
+        if (monto) {
+          fila.ventasNetas = redondear((fila.ventasNetas || 0) + Number(monto));
+          const cliente = venta.ficha_cliente.cliente_financiero;
+          const acumulado = clientes.get(cliente.id_cliente_financiero) || { cliente: cliente.nombre_razon_social_referencia, monto: 0 };
+          acumulado.monto = redondear(acumulado.monto + Number(monto)); clientes.set(cliente.id_cliente_financiero, acumulado);
+        } else ventasValidasPorMes.set(claveMes(venta.fecha_emision), false);
+      }
+      if (puede('CU218')) for (const cotizacion of cotizaciones) {
+        const fila = filas.get(claveMes(cotizacion.fecha_emision)); if (!fila) continue;
+        fila.cotizaciones += 1;
+        if (cotizacion.nota_venta && !['anulada', 'revertida', 'revertida_total'].includes(normalizarTexto(cotizacion.nota_venta.estado_nota_venta))) fila.convertidas += 1;
+      }
+      if (puede('CU230')) for (const movimiento of movimientos) {
+        if (movimiento.moneda.codigo_moneda !== 'CLP' || normalizarTexto(movimiento.tipo_movimiento_financiero).includes('caja chica') || movimiento.origen_movimiento_financiero.some(origen => normalizarTexto(origen.entidad_origen).includes('caja chica'))) continue;
+        const fila = filas.get(claveMes(movimiento.fecha_movimiento)); if (!fila) continue;
+        const monto = Number(movimiento.monto_movimiento); const naturaleza = normalizarTexto(movimiento.naturaleza_movimiento);
+        if (naturaleza === 'ingreso') fila.ingresosRecibidos = redondear(fila.ingresosRecibidos + monto);
+        else if (naturaleza === 'egreso') fila.egresosRealizados = redondear(fila.egresosRealizados + monto);
+      }
+      const costosPorMes = new Map<string, number>();
+      if (puede('CU238')) {
+        for (const costo of costos) if (costo.moneda.codigo_moneda === 'CLP') costosPorMes.set(claveMes(costo.fecha_costo), redondear((costosPorMes.get(claveMes(costo.fecha_costo)) || 0) + Number(costo.monto_costo)));
+        for (const tarea of tareasRemunerables) costosPorMes.set(claveMes(tarea.fecha_tarea), redondear((costosPorMes.get(claveMes(tarea.fecha_tarea)) || 0) + Number(tarea.monto_calculado)));
+      }
+      if (puede('CU242')) for (const remuneracion of remuneraciones) {
+        if (remuneracion.total_haberes === null || remuneracion.total_aportes_empleador === null) continue;
+        const fila = filas.get(claveMes(remuneracion.periodo.fecha_inicio)); if (!fila) continue;
+        fila.costoRemuneraciones = redondear((fila.costoRemuneraciones || 0) + Number(remuneracion.total_haberes) + Number(remuneracion.total_aportes_empleador));
+      }
+      if (puede('CU250')) for (const servicio of instalaciones) if (servicio.servicio_terreno_fecha_real && esServicioInstalacion(servicio.servicio_terreno_tipo_servicio)) filas.get(claveMes(servicio.servicio_terreno_fecha_real))!.instalaciones += 1;
+      if (puede('CU247')) for (const orden of ordenes) if (orden.orden_trabajo_fecha_hora) filas.get(claveMes(orden.orden_trabajo_fecha_hora))!.ordenesTrabajo += 1;
+      if (puede('CU253')) for (const incidencia of incidencias) filas.get(claveMes(incidencia.fecha_registro))!.incidencias += 1;
+
+      for (const fila of filas.values()) {
+        fila.conversionPorcentual = fila.cotizaciones ? redondear(fila.convertidas / fila.cotizaciones * 100) : null;
+        fila.flujoNeto = redondear(fila.ingresosRecibidos - fila.egresosRealizados);
+        fila.costosDirectos = costosPorMes.has(fila.periodo) ? costosPorMes.get(fila.periodo)! : null;
+        fila.resultadoGerencial = fila.ventasNetas !== null && fila.costosDirectos !== null && ventasValidasPorMes.get(fila.periodo) !== false ? redondear(fila.ventasNetas - fila.costosDirectos) : null;
+      }
+      const totalClientes = [...clientes.values()].reduce((total, cliente) => total + cliente.monto, 0);
+      const principalesClientes = puede('CU220') ? [...clientes.entries()].map(([idCliente, cliente]) => ({ idCliente, ...cliente, participacionPorcentual: totalClientes > 0 ? redondear(cliente.monto / totalClientes * 100) : null })).sort((a, b) => b.monto - a.monto || a.cliente.localeCompare(b.cliente)).slice(0, 10) : [];
+      return {
+        periodo: { desde: claveMes(ventana.desde), hasta: claveMes(ventana.corte.desde), meses: ventana.meses },
+        moneda: 'CLP', meses: [...filas.values()], principalesClientes,
+        disponibilidad: { ventas: puede('CU219'), conversion: puede('CU218'), flujo: puede('CU230'), resultadoGerencial: puede('CU238'), remuneraciones: puede('CU242'), operacion: puede('CU247') || puede('CU250') || puede('CU253') },
+        cobertura: {
+          resultadoGerencial: 'Ventas netas menos costos directos atribuibles; no es un Estado de Resultados contable',
+          cuentasCobrar: 'NO_HISTORIZABLE: no existe snapshot mensual owner completo; se mantiene el valor del corte seleccionado',
+          cuentasPagar: 'NO_HISTORIZABLE: saldo_actual no conserva snapshots mensuales; se mantiene el valor del corte seleccionado',
+          credito: 'CORTE_DISPONIBLE: M8 no entrega snapshots mensuales y M7 no recalcula Crédito',
+          inventario: 'CORTE_DISPONIBLE: no se repite el valor actual como serie histórica',
+        },
+      };
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      return { periodo: { desde: claveMes(ventana.desde), hasta: claveMes(ventana.corte.desde), meses: ventana.meses }, moneda: 'CLP', meses: [], principalesClientes: [], estado: 'FUENTE_NO_DISPONIBLE' as const };
+    }
   }
 
   async consultarCentroAtencion(consulta: Consulta, permisos: string[]) {

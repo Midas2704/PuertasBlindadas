@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart,
   Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { BarChart3, ChevronRight } from 'lucide-react';
@@ -19,14 +19,21 @@ const COLORES = [NARANJA, GRIS, '#9ca3af', VERDE, ROJO, '#d97706'];
 const abreviar = (valor: number) => new Intl.NumberFormat('es-CL', { notation: 'compact', maximumFractionDigits: 1 }).format(valor);
 const fechaCorta = (valor: unknown) => {
   const texto = String(valor ?? '');
+  if (/^\d{4}-\d{2}$/.test(texto)) return new Intl.DateTimeFormat('es-CL', { month: 'short', timeZone: 'UTC' }).format(new Date(`${texto}-01T00:00:00Z`));
   if (!/^\d{4}-\d{2}-\d{2}/.test(texto)) return texto;
   return new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', timeZone: 'UTC' }).format(new Date(texto));
+};
+
+const fechaCompleta = (valor: unknown) => {
+  const texto = String(valor ?? '');
+  if (/^\d{4}-\d{2}$/.test(texto)) return new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${texto}-01T00:00:00Z`));
+  return fechaCorta(valor);
 };
 
 const TooltipGrafico = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name?: string; value?: unknown; color?: string; dataKey?: string }>; label?: unknown }) => {
   if (!active || !payload?.length) return null;
   return <div className="max-w-64 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs shadow-lg">
-    {label !== undefined && <p className="mb-1 font-semibold text-gray-900">{fechaCorta(label)}</p>}
+    {label !== undefined && <p className="mb-1 font-semibold capitalize text-gray-900">{fechaCompleta(label)}</p>}
     {payload.map((item, indice) => <div key={`${item.dataKey}-${indice}`} className="flex items-center justify-between gap-4 py-0.5">
       <span className="flex min-w-0 items-center gap-1.5 text-gray-600"><i className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />{item.name}</span>
       <strong className="text-gray-950">{formatearDato(item.value, String(item.dataKey || item.name || 'valor'))}</strong>
@@ -67,12 +74,25 @@ export function GraficoArea({ datos, series, etiqueta = 'etiqueta', referencias 
 export function GraficoBarras({ datos, series, etiqueta = 'etiqueta', apiladas = false, horizontal = false }: { datos: DatoGrafico[]; series: SerieGrafico[]; etiqueta?: string; apiladas?: boolean; horizontal?: boolean }) {
   if (!datos.length || !series.length) return <EstadoSinDatos texto="No hay composición suficiente para graficar." />;
   const alto = Math.max(190, horizontal ? Math.min(datos.length, 8) * 34 + 54 : 190);
-  return <MarcoGrafico alto={alto}><ResponsiveContainer width="100%" height="100%"><BarChart data={datos.slice(0, 10)} layout={horizontal ? 'vertical' : 'horizontal'} margin={{ top: 8, right: 8, left: horizontal ? 20 : -18, bottom: 0 }}>
+  return <MarcoGrafico alto={alto}><ResponsiveContainer width="100%" height="100%"><BarChart data={datos} layout={horizontal ? 'vertical' : 'horizontal'} margin={{ top: 8, right: 8, left: horizontal ? 20 : -18, bottom: 0 }}>
     <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" horizontal={!horizontal} vertical={horizontal} />
     {horizontal ? <><XAxis type="number" tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis type="category" width={92} dataKey={etiqueta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/></> : <><XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/></>}
     <Tooltip content={<TooltipGrafico />} />{series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
     {series.map((serie, indice) => <Bar key={serie.clave} dataKey={serie.clave} name={serie.nombre} fill={serie.color || COLORES[indice % COLORES.length]} stackId={apiladas ? 'total' : undefined} radius={apiladas ? undefined : [3, 3, 0, 0]} maxBarSize={34} />)}
   </BarChart></ResponsiveContainer></MarcoGrafico>;
+}
+
+export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', alto = 300, porcentaje = false }: { datos: DatoGrafico[]; barras: SerieGrafico[]; lineas: SerieGrafico[]; etiqueta?: string; alto?: number; porcentaje?: boolean }) {
+  if (!datos.length) return <EstadoSinDatos texto="No hay una serie histórica suficiente para graficar." />;
+  return <div className="w-full overflow-x-auto"><div className="min-w-[680px]" style={{ height: alto }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
+    <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} />
+    <XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
+    <YAxis yAxisId="monto" tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />
+    {porcentaje && <YAxis yAxisId="porcentaje" orientation="right" domain={[0, 100]} tickFormatter={valor => `${valor}%`} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />}
+    <Tooltip content={<TooltipGrafico />} /><Legend wrapperStyle={{ fontSize: 11 }} />
+    {barras.map((serie, indice) => <Bar key={serie.clave} yAxisId="monto" dataKey={serie.clave} name={serie.nombre} fill={serie.color || COLORES[indice % COLORES.length]} radius={[3, 3, 0, 0]} maxBarSize={28} />)}
+    {lineas.map((serie, indice) => <Line key={serie.clave} yAxisId={porcentaje ? 'porcentaje' : 'monto'} type="monotone" dataKey={serie.clave} name={serie.nombre} stroke={serie.color || COLORES[(indice + barras.length) % COLORES.length]} strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />)}
+  </ComposedChart></ResponsiveContainer></div></div>;
 }
 
 export function GraficoDonut({ datos, centro }: { datos: Array<{ nombre: string; valor: number; color?: string }>; centro?: string }) {

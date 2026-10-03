@@ -49,6 +49,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/credito/validar-formalizacion', derivar('validarFormalizacionCreditoM8'));
   rutas.get('/credito/exportar/:origen', derivar('exportarCreditoM8'));
   rutas.get('/dashboard-m7', derivar('consultarPanelGeneralM7'));
+  rutas.get('/dashboard-m7/historico', derivar('consultarHistoricoPanelGeneralM7'));
   rutas.get('/dashboard-m7/centro-atencion', derivar('consultarCentroAtencionM7'));
   rutas.get('/dashboard-m7/cotizaciones-pendientes', derivar('consultarCotizacionesPendientesM7'));
   rutas.get('/dashboard-m7/clientes/:id', derivar('consultarContextoClienteM7'));

@@ -40,7 +40,10 @@ after(async () => {
 
 test('M7 capacidades existentes remapeadas CU233-CU246', async t => {
   await preparar();
+  const resolverUmbralReal = modulo.resolverUmbralMargen;
+  modulo.resolverUmbralMargen = async () => null;
   const margen = await modulo.consultarMargenProyectos(consulta);
+  modulo.resolverUmbralMargen = resolverUmbralReal;
   const util = margen.proyectos.find(p => p.idProyecto === proyectoUtil.id_proyecto_financiero);
   const perdida = margen.proyectos.find(p => p.idProyecto === proyectoPerdida.id_proyecto_financiero);
   const cero = margen.proyectos.find(p => p.idProyecto === proyectoCero.id_proyecto_financiero);

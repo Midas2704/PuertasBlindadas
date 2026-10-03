@@ -1,234 +1,97 @@
-import type { ComponentType, ReactNode } from 'react';
-import {
-  BanknoteArrowDown, BanknoteArrowUp, BellRing, ChartNoAxesCombined, CircleAlert,
-  FileClock, Gauge, Scale, Wallet,
-} from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ArrowRight, BanknoteArrowDown, BanknoteArrowUp, ChartNoAxesCombined, Wallet } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { EncabezadoM7, PdfDashboard, Periodo, estadoHumano, formatearDato, usarConsultaM7 } from './componentes';
+import { solicitarFinanzas } from '../../api/finanzas';
+import { EncabezadoM7, PdfDashboard, Periodo, EstadoDato, estadoHumano, formatearDato, usarConsultaM7 } from './componentes';
 import type { RespuestaM7 } from './componentes';
-import {
-  EstadoSinDatos, GraficoArea, GraficoBarras, GraficoDonut, GraficoLinea,
-  GraficoProgreso, TarjetaIndicador,
-} from './graficos';
-import type { DatoGrafico, SerieGrafico } from './graficos';
+import { EstadoSinDatos, GraficoBarras, GraficoCombinado, GraficoDonut, GraficoProgreso } from './graficos';
+import type { DatoGrafico } from './graficos';
 
-type TipoGrafico = 'linea' | 'area' | 'barras' | 'barras-horizontal' | 'donut' | 'progreso';
-type Configuracion = {
-  titulo: string;
-  ruta: string;
-  icono: ComponentType<{ className?: string }>;
-  tipo: TipoGrafico;
-  etiquetaPrincipal: string;
-  camposPrincipales?: string[];
-  camposSecundarios?: string[];
-  colecciones?: string[];
-  series?: string[];
-  amplia?: boolean;
+type MesHistorico = DatoGrafico & {
+  periodo: string; ventasNetas: number | null; cantidadVentas: number; cotizaciones: number; convertidas: number;
+  conversionPorcentual: number | null; ingresosRecibidos: number; egresosRealizados: number; flujoNeto: number;
+  costoRemuneraciones: number | null; costosDirectos: number | null; resultadoGerencial: number | null;
+  instalaciones: number; ordenesTrabajo: number; incidencias: number;
 };
-
-const configuraciones: Record<string, Configuracion> = {
-  centroAtencion: { titulo: 'Centro de Atención', ruta: '/dashboard-m7/centro-atencion', icono: BellRing, tipo: 'donut', etiquetaPrincipal: 'Excepciones', camposPrincipales: ['cantidad', 'total'], colecciones: ['excepciones', 'cobertura'], series: ['cantidad'] },
-  cotizacionesPendientes: { titulo: 'Cotizaciones pendientes', ruta: '/dashboard-m7/cotizaciones-pendientes', icono: FileClock, tipo: 'barras-horizontal', etiquetaPrincipal: 'Monto potencial', camposPrincipales: ['montoPotencial', 'monto', 'cantidad'], colecciones: ['cotizaciones'], series: ['montoPotencial'] },
-  ventas: { titulo: 'Ventas', ruta: '/dashboard-m7/ventas', icono: ChartNoAxesCombined, tipo: 'linea', etiquetaPrincipal: 'Ventas netas', camposPrincipales: ['totalClp', 'montoNeto', 'monto', 'cantidad'], camposSecundarios: ['cantidad', 'ticketMedio', 'tasaPorcentual'], colecciones: ['evolucion', 'clientes'], series: ['montoNeto', 'monto'], amplia: true },
-  cuentasCobrar: { titulo: 'Cuentas por cobrar', ruta: '/dashboard-m7/cuentas-cobrar', icono: BanknoteArrowUp, tipo: 'barras-horizontal', etiquetaPrincipal: 'Saldo pendiente', camposPrincipales: ['saldo', 'monto', 'cantidad'], camposSecundarios: ['cantidad', 'diasAtraso'], colecciones: ['cartera', 'aging'], series: ['saldo', 'monto', 'cantidad'], amplia: true },
-  cuentasPagar: { titulo: 'Cuentas por pagar', ruta: '/dashboard-m7/cuentas-pagar', icono: BanknoteArrowDown, tipo: 'barras-horizontal', etiquetaPrincipal: 'Saldo por pagar', camposPrincipales: ['saldo', 'monto', 'cantidad'], colecciones: ['proveedores', 'obligaciones', 'estados'], series: ['saldo', 'monto', 'cantidad'] },
-  liquidez: { titulo: 'Liquidez y flujo', ruta: '/dashboard-m7/liquidez', icono: Wallet, tipo: 'linea', etiquetaPrincipal: 'Liquidez disponible', camposPrincipales: ['liquidez', 'saldoFinal', 'saldo', 'monto'], camposSecundarios: ['ingresos', 'egresos'], colecciones: ['serie', 'eventos', 'movimientos'], series: ['liquidez', 'saldo', 'liquidezProyectada', 'ingresos', 'egresos', 'entradas', 'salidas'], amplia: true },
-  riesgoDeficit: { titulo: 'Riesgo de déficit', ruta: '/dashboard-m7/riesgo-deficit', icono: CircleAlert, tipo: 'area', etiquetaPrincipal: 'Mínimo proyectado', camposPrincipales: ['minimoProyectado', 'saldoMinimo', 'liquidezProyectada', 'monto'], colecciones: ['eventos', 'cruces', 'umbrales'], series: ['liquidezProyectada', 'saldoProyectado', 'saldo', 'monto'], amplia: true },
-  margenProyectos: { titulo: 'Margen por proyecto', ruta: '/dashboard-m7/margen-proyectos', icono: Gauge, tipo: 'barras', etiquetaPrincipal: 'Margen directo', camposPrincipales: ['margenDirecto', 'margen', 'resultado'], colecciones: ['proyectos'], series: ['ingresos', 'costosDirectos', 'margenDirecto', 'margen'] },
-  exposicionProyectos: { titulo: 'Exposición de Proyectos', ruta: '/dashboard-m7/proyectos/exposicion', icono: Gauge, tipo: 'barras', etiquetaPrincipal: 'Exposición', camposPrincipales: ['exposicion', 'monto', 'saldo'], colecciones: ['proyectos'], series: ['cobrado', 'porCobrar', 'porPagar', 'exposicion'], amplia: true },
-  resumenResultados: { titulo: 'Resumen de resultados', ruta: '/dashboard-m7/resumenes', icono: ChartNoAxesCombined, tipo: 'barras', etiquetaPrincipal: 'Resultado gerencial', camposPrincipales: ['resultadoGerencial', 'monto'], colecciones: ['resultadoGerencial'], series: ['ingresos', 'costosDirectos', 'resultadoGerencial'] },
-  situacionFinanciera: { titulo: 'Situación financiera', ruta: '/dashboard-m7/resumenes', icono: Scale, tipo: 'barras', etiquetaPrincipal: 'Posición financiera', camposPrincipales: ['posicion', 'saldo', 'monto'], series: ['cuentasPorCobrar', 'cuentasPorPagar', 'liquidez'] },
-  costoRemuneraciones: { titulo: 'Costo de remuneraciones', ruta: '/dashboard-m7/operacion', icono: Scale, tipo: 'barras', etiquetaPrincipal: 'Costo agregado', camposPrincipales: ['costoTotal', 'totalClp', 'monto'], colecciones: ['evolucion', 'periodos'], series: ['costo', 'monto', 'total'] },
-  ordenesTrabajo: { titulo: 'Órdenes de Trabajo', ruta: '/dashboard-m7/operacion', icono: Gauge, tipo: 'donut', etiquetaPrincipal: 'Órdenes', camposPrincipales: ['cantidad', 'total'], colecciones: ['estados', 'ordenes'], series: ['cantidad'] },
-  cargaOperacional: { titulo: 'Carga operacional', ruta: '/dashboard-m7/operacion', icono: Gauge, tipo: 'barras', etiquetaPrincipal: 'Tareas abiertas', camposPrincipales: ['abiertas', 'cantidad', 'total'], colecciones: ['carga', 'tareas', 'asignaciones'], series: ['abiertas', 'atrasadas', 'proximas', 'cantidad'] },
-  instalaciones: { titulo: 'Instalaciones', ruta: '/dashboard-m7/operacion', icono: ChartNoAxesCombined, tipo: 'barras', etiquetaPrincipal: 'Instalaciones', camposPrincipales: ['cantidad', 'total'], colecciones: ['evolucion', 'geografia', 'instalaciones'], series: ['cantidad'] },
-  atrasosInstalaciones: { titulo: 'Atrasos de instalaciones', ruta: '/dashboard-m7/operacion', icono: FileClock, tipo: 'barras-horizontal', etiquetaPrincipal: 'Casos atrasados', camposPrincipales: ['cantidad', 'diasAtraso'], colecciones: ['atrasos'], series: ['diasAtraso'] },
-  incidenciasRetrabajos: { titulo: 'Incidencias y retrabajos', ruta: '/dashboard-m7/operacion', icono: CircleAlert, tipo: 'donut', etiquetaPrincipal: 'Incidencias', camposPrincipales: ['cantidad', 'total'], colecciones: ['incidencias', 'estados'], series: ['cantidad'] },
-  exposicionCredito: { titulo: 'Exposición crediticia', ruta: '/dashboard-m7/control', icono: Gauge, tipo: 'progreso', etiquetaPrincipal: 'Exposición utilizada', camposPrincipales: ['exposicionUtilizada', 'utilizado'], camposSecundarios: ['limiteGlobal', 'capacidadDisponible', 'cupoTotalAgregado', 'totalSolicitudes', 'totalCompromisos'], colecciones: ['clientes', 'clientesSobreLimite'], series: ['exposicion', 'concentracion'], amplia: true },
-  alertasCredito: { titulo: 'Alertas de crédito', ruta: '/dashboard-m7/control', icono: CircleAlert, tipo: 'donut', etiquetaPrincipal: 'Alertas activas', camposPrincipales: ['cantidad', 'total'], colecciones: ['alertas', 'restricciones'], series: ['cantidad'] },
-  resumenIva: { titulo: 'IVA estimado', ruta: '/dashboard-m7/control', icono: Scale, tipo: 'barras', etiquetaPrincipal: 'IVA neto', camposPrincipales: ['ivaNeto', 'monto', 'total'], colecciones: ['porMoneda', 'resumen'], series: ['debito', 'credito', 'ivaNeto', 'monto'] },
-  costosFabricacion: { titulo: 'Costos de fabricación', ruta: '/dashboard-m7/control', icono: Scale, tipo: 'barras', etiquetaPrincipal: 'Costo atribuible', camposPrincipales: ['costoFabricacion', 'monto'], colecciones: ['proyectos'], series: ['materiales', 'remuneracionesExtra', 'costoInstalacion', 'costoFabricacion'], amplia: true },
-  bloqueosEconomicos: { titulo: 'Bloqueos económicos', ruta: '/dashboard-m7/control', icono: CircleAlert, tipo: 'donut', etiquetaPrincipal: 'Bloqueos', camposPrincipales: ['cantidad', 'total'], colecciones: ['bloqueos', 'estados'], series: ['cantidad'] },
-  margenInstalaciones: { titulo: 'Margen de instalaciones', ruta: '/dashboard-m7/control', icono: Gauge, tipo: 'barras', etiquetaPrincipal: 'Margen agregado', camposPrincipales: ['margenAgregado', 'margen', 'cantidad'], colecciones: ['geografia', 'instalaciones'], series: ['precio', 'costo', 'margen'] },
-  inventarioValorizado: { titulo: 'Inventario valorizado', ruta: '/dashboard-m7/control', icono: Scale, tipo: 'barras-horizontal', etiquetaPrincipal: 'Valor total', camposPrincipales: ['valorTotal', 'valor'], colecciones: ['inventario'], series: ['valor', 'stock'], amplia: true },
-  materialesProyectoOt: { titulo: 'Materiales por Proyecto y OT', ruta: '/dashboard-m7/control', icono: Gauge, tipo: 'barras', etiquetaPrincipal: 'Materiales vinculados', camposPrincipales: ['cantidad', 'total'], colecciones: ['materialesBodegaAsignados', 'materialesCompradosEspecificamente'], series: ['cantidadEstimada', 'cantidadReal', 'cantidadPedida', 'cantidadRecibida'] },
-  riesgoStock: { titulo: 'Riesgo de stock', ruta: '/dashboard-m7/control', icono: CircleAlert, tipo: 'barras', etiquetaPrincipal: 'Materiales en riesgo', camposPrincipales: ['cantidad', 'faltante'], colecciones: ['riesgos', 'materiales'], series: ['stock', 'entradasEsperadas', 'demandaConocida', 'faltante'], amplia: true },
-  rotacionInventario: { titulo: 'Rotación de inventario', ruta: '/dashboard-m7/control', icono: ChartNoAxesCombined, tipo: 'barras-horizontal', etiquetaPrincipal: 'Stock inmóvil', camposPrincipales: ['cantidad', 'diasSinMovimiento'], colecciones: ['stockInmovil', 'rotacion'], series: ['stock', 'diasSinMovimiento', 'cantidadSalida'] },
-  comprasRecepciones: { titulo: 'Compras y recepciones', ruta: '/dashboard-m7/control', icono: FileClock, tipo: 'barras', etiquetaPrincipal: 'Pendiente de recibir', camposPrincipales: ['cantidadPendiente', 'cantidad'], colecciones: ['ordenesPendientes'], series: ['cantidadPedida', 'cantidadRecibida', 'cantidadPendiente'] },
+type Historico = {
+  periodo: { desde: string; hasta: string; meses: number }; moneda: string; meses: MesHistorico[];
+  principalesClientes: Array<{ idCliente: number; cliente: string; monto: number; participacionPorcentual: number | null }>;
+  cobertura: Record<string, string>; disponibilidad: Record<string, boolean>; estado?: string;
 };
-
-const compactas = ['ventas', 'liquidez', 'cuentasCobrar', 'cuentasPagar', 'riesgoDeficit', 'margenProyectos', 'exposicionCredito', 'cargaOperacional', 'inventarioValorizado', 'centroAtencion'];
-const secciones = [
-  { titulo: 'Pulso financiero', claves: ['ventas', 'cotizacionesPendientes', 'cuentasCobrar', 'cuentasPagar', 'liquidez', 'riesgoDeficit', 'resumenResultados', 'situacionFinanciera'] },
-  { titulo: 'Proyectos y operación', claves: ['margenProyectos', 'exposicionProyectos', 'costoRemuneraciones', 'ordenesTrabajo', 'cargaOperacional', 'instalaciones', 'atrasosInstalaciones', 'incidenciasRetrabajos'] },
-  { titulo: 'Crédito, costos e inventario', claves: ['exposicionCredito', 'alertasCredito', 'resumenIva', 'costosFabricacion', 'bloqueosEconomicos', 'margenInstalaciones', 'inventarioValorizado', 'materialesProyectoOt', 'riesgoStock', 'rotacionInventario', 'comprasRecepciones'] },
-  { titulo: 'Atención y contexto', claves: ['centroAtencion'] },
-];
 
 const esObjeto = (valor: unknown): valor is Record<string, unknown> => Boolean(valor) && typeof valor === 'object' && !Array.isArray(valor);
-const desenvolver = (valor: unknown): unknown => esObjeto(valor) && 'valor' in valor ? desenvolver(valor.valor) : valor;
 const numero = (valor: unknown) => typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
-const etiquetaHumana = (clave: string) => clave.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').replace(/^./, letra => letra.toUpperCase());
-const esTecnica = (clave: string) => /^(id|acciones|destino|parametro|estado|version|codigo|sku|fechaHora)/i.test(clave);
+const desenvolver = (valor: unknown): unknown => esObjeto(valor) && 'valor' in valor ? desenvolver(valor.valor) : valor;
 
-function buscarPorClave(origen: unknown, claves: string[], profundidad = 0): { clave: string; valor: unknown } | null {
-  if (profundidad > 5 || !esObjeto(origen)) return null;
-  for (const clave of claves) if (clave in origen) return { clave, valor: desenvolver(origen[clave]) };
-  for (const valor of Object.values(origen)) {
-    const hallado = buscarPorClave(desenvolver(valor), claves, profundidad + 1);
-    if (hallado) return hallado;
+function buscarNumero(origen: unknown, claves: string[], profundidad = 0): number | null {
+  if (profundidad > 6 || !esObjeto(origen)) return null;
+  for (const clave of claves) if (clave in origen) {
+    const valor = desenvolver(origen[clave]); const directo = numero(valor); if (directo !== null) return directo;
+    if (Array.isArray(valor)) { const clp = valor.find(item => esObjeto(item) && item.moneda === 'CLP'); if (esObjeto(clp)) for (const candidato of ['monto', 'saldo', 'liquidez']) { const hallado = numero(clp[candidato]); if (hallado !== null) return hallado; } }
+    if (esObjeto(valor)) for (const candidato of ['totalClp', 'monto', 'saldo', 'liquidez', 'valor']) { const hallado = numero(valor[candidato]); if (hallado !== null) return hallado; }
   }
+  for (const valor of Object.values(origen)) { const hallado = buscarNumero(desenvolver(valor), claves, profundidad + 1); if (hallado !== null) return hallado; }
   return null;
 }
 
-function buscarNumero(origen: unknown, claves: string[]) {
-  const hallado = buscarPorClave(origen, claves);
-  if (!hallado) return null;
-  const directo = numero(hallado.valor);
-  if (directo !== null) return { clave: hallado.clave, valor: directo };
-  if (esObjeto(hallado.valor)) {
-    for (const [clave, valor] of Object.entries(hallado.valor)) {
-      const candidato = numero(valor);
-      if (candidato !== null && !esTecnica(clave)) return { clave, valor: candidato };
-    }
-  }
-  return null;
-}
-
-function buscarColeccion(origen: unknown, claves: string[]) {
-  const hallado = buscarPorClave(origen, claves);
-  if (hallado && Array.isArray(hallado.valor) && hallado.valor.length) return hallado.valor.filter(esObjeto);
-  return [];
-}
-
-function nombreFila(fila: Record<string, unknown>, indice: number) {
-  const claves = ['fecha', 'dia', 'mes', 'nombre', 'cliente', 'proveedor', 'codigo', 'familia', 'estado', 'condicion', 'material', 'categoria', 'comuna', 'moneda', 'tarea'];
-  const clave = claves.find(item => typeof fila[item] === 'string' && String(fila[item]).trim());
-  return clave ? String(fila[clave]) : `Registro ${indice + 1}`;
-}
-
-function prepararGrafico(bloque: RespuestaM7, config: Configuracion) {
-  const filas = buscarColeccion(bloque, config.colecciones || []);
-  const datos: DatoGrafico[] = filas.slice(0, 12).map((fila, indice) => {
-    const salida: DatoGrafico = { etiqueta: nombreFila(fila, indice) };
-    for (const [clave, valor] of Object.entries(fila)) {
-      if (numero(valor) !== null && !esTecnica(clave)) salida[clave] = valor as number;
-    }
-    return salida;
-  });
-  const candidatas = config.series || [];
-  const presentes = candidatas.filter(clave => datos.some(fila => numero(fila[clave]) !== null));
-  if (!presentes.length && datos.length) {
-    const detectadas = Object.keys(datos[0]).filter(clave => clave !== 'etiqueta' && datos.some(fila => numero(fila[clave]) !== null));
-    presentes.push(...detectadas.slice(0, 4));
-  }
-  const series: SerieGrafico[] = presentes.slice(0, 4).map(clave => ({ clave, nombre: etiquetaHumana(clave) }));
-  return { datos, series };
-}
-
-function estadoBloque(bloque: RespuestaM7) {
-  if (typeof bloque.estado === 'string') return bloque.estado;
+function estadoBloque(bloque?: RespuestaM7) {
+  if (!bloque) return undefined; if (typeof bloque.estado === 'string') return bloque.estado;
   const indicador = Object.values(bloque).find(valor => esObjeto(valor) && typeof valor.estado === 'string') as Record<string, unknown> | undefined;
   return typeof indicador?.estado === 'string' ? indicador.estado : undefined;
 }
 
-function resumenTarjeta(bloque: RespuestaM7, config: Configuracion) {
-  const principal = buscarNumero(bloque, config.camposPrincipales || []);
-  const secundarios = (config.camposSecundarios || []).flatMap(clave => {
-    const dato = buscarNumero(bloque, [clave]);
-    return dato ? [{ etiqueta: etiquetaHumana(clave), valor: formatearDato(dato.valor, clave) }] : [];
-  });
-  const variacion = buscarNumero(bloque, ['variacionPorcentual', 'variacionMargenPorcentual']);
-  const coleccion = buscarColeccion(bloque, config.colecciones || []);
-  return {
-    principal: principal ? formatearDato(principal.valor, principal.clave) : coleccion.length ? `${coleccion.length} registros` : estadoHumano(estadoBloque(bloque)),
-    secundarios,
-    variacion: variacion ? `${variacion.valor >= 0 ? '+' : ''}${formatearDato(variacion.valor, 'porcentaje')}` : null,
-  };
+function buscarColeccion(origen: unknown, clave: string, profundidad = 0): Record<string, unknown>[] {
+  if (profundidad > 6 || !esObjeto(origen)) return [];
+  if (Array.isArray(origen[clave])) return (origen[clave] as unknown[]).filter(esObjeto);
+  for (const valor of Object.values(origen)) { const hallado = buscarColeccion(desenvolver(valor), clave, profundidad + 1); if (hallado.length) return hallado; }
+  return [];
 }
 
-function graficoBloque(bloque: RespuestaM7, config: Configuracion): ReactNode {
-  if (['FUENTE_NO_DISPONIBLE', 'DATOS_INSUFICIENTES', 'CONFIGURACION_PENDIENTE'].includes(estadoBloque(bloque) || '')) {
-    return <EstadoSinDatos texto={estadoHumano(estadoBloque(bloque))} />;
-  }
-  if (config.tipo === 'progreso') {
-    const utilizado = buscarNumero(bloque, ['exposicionUtilizada', 'utilizado']);
-    const disponible = buscarNumero(bloque, ['capacidadDisponible', 'disponible']);
-    return utilizado && disponible ? <GraficoProgreso utilizado={utilizado.valor} disponible={disponible.valor} /> : <EstadoSinDatos texto="La capacidad no está disponible para este período." />;
-  }
-  const { datos, series } = prepararGrafico(bloque, config);
-  if (config.tipo === 'donut') {
-    const piezas = datos.flatMap((fila, indice) => {
-      const serie = series[0];
-      const valor = serie ? numero(fila[serie.clave]) : null;
-      return valor === null ? [] : [{ nombre: String(fila.etiqueta || `Grupo ${indice + 1}`), valor }];
-    });
-    return <GraficoDonut datos={piezas} centro={piezas.length ? String(piezas.reduce((suma, pieza) => suma + pieza.valor, 0)) : undefined} />;
-  }
-  if (config.tipo === 'linea') return <GraficoLinea datos={datos} series={series} />;
-  if (config.tipo === 'area') return <GraficoArea datos={datos} series={series} />;
-  return <GraficoBarras datos={datos} series={series} horizontal={config.tipo === 'barras-horizontal'} apiladas={series.length > 1 && ['Costos de fabricación', 'Riesgo de stock'].includes(config.titulo)} />;
+function usarHistorico(anio: number, mes: number, version: number) {
+  const [datos, setDatos] = useState<Historico | null>(null); const [error, setError] = useState(''); const [cargando, setCargando] = useState(true);
+  useEffect(() => { const abort = new AbortController(); setCargando(true); setError(''); solicitarFinanzas(`/dashboard-m7/historico?anio=${anio}&mes=${mes}&meses=12`, { signal: abort.signal }).then(async respuesta => { const cuerpo = await respuesta.json(); if (!respuesta.ok) throw new Error(cuerpo.error || 'No fue posible consultar el histórico'); setDatos(cuerpo); }).catch(causa => { if (!abort.signal.aborted) setError((causa as Error).message); }).finally(() => { if (!abort.signal.aborted) setCargando(false); }); return () => abort.abort(); }, [anio, mes, version]);
+  return { datos, error, cargando };
 }
 
-function graficoComplementario(claveBloque: string, bloque: RespuestaM7): ReactNode | undefined {
-  if (claveBloque === 'ventas') {
-    const total = buscarNumero(bloque, ['totalCotizaciones']);
-    const convertidas = buscarNumero(bloque, ['convertidas']);
-    if (!total || !convertidas || total.valor <= 0) return undefined;
-    return <div><p className="mb-2 text-xs font-semibold text-gray-500">Conversión de cotizaciones</p><GraficoDonut datos={[
-      { nombre: 'Convertidas', valor: convertidas.valor },
-      { nombre: 'No convertidas', valor: Math.max(0, total.valor - convertidas.valor) },
-    ]} centro={formatearDato(convertidas.valor / total.valor * 100, 'porcentaje')} /></div>;
-  }
-  if (claveBloque === 'exposicionCredito') {
-    const clientes = buscarColeccion(bloque, ['clientes']);
-    const datos = clientes.slice(0, 8).map((cliente, indice) => ({
-      etiqueta: nombreFila(cliente, indice),
-      exposicion: numero(cliente.exposicion),
-    }));
-    return datos.some(fila => fila.exposicion !== null) ? <div><p className="mb-2 text-xs font-semibold text-gray-500">Concentración por cliente</p><GraficoBarras datos={datos} series={[{ clave: 'exposicion', nombre: 'Exposición' }]} horizontal /></div> : undefined;
-  }
-  return undefined;
+function comparar(meses: MesHistorico[], clave: keyof MesHistorico) {
+  const actual = numero(meses.at(-1)?.[clave]); const anterior = numero(meses.at(-2)?.[clave]); const anual = numero(meses.at(-12)?.[clave]);
+  const calculo = (base: number | null) => actual === null || base === null || base === 0 ? null : { diferencia: actual - base, porcentaje: (actual - base) / Math.abs(base) * 100 };
+  return { actual, anterior: calculo(anterior), anual: calculo(anual) };
 }
 
-function TarjetaDashboard({ claveBloque, bloque, anio, mes }: { claveBloque: string; bloque: RespuestaM7; anio: number; mes: number }) {
-  const config = configuraciones[claveBloque];
-  const Icono = config.icono;
-  const resumen = resumenTarjeta(bloque, config);
-  return <TarjetaIndicador
-    titulo={config.titulo}
-    icono={<Icono className="h-5 w-5" />}
-    estado={estadoBloque(bloque)}
-    principal={resumen.principal}
-    etiquetaPrincipal={config.etiquetaPrincipal}
-    variacion={resumen.variacion}
-    secundarios={resumen.secundarios}
-    grafico={graficoBloque(bloque, config)}
-    graficoSecundario={graficoComplementario(claveBloque, bloque)}
-    ruta={`${config.ruta}?anio=${anio}&mes=${mes}`}
-    amplia={config.amplia}
-  />;
+function Kpi({ titulo, valor, periodo, icono, estado, comparacion, descripcion }: { titulo: string; valor: number | null; periodo: string; icono: ReactNode; estado?: string; comparacion?: ReturnType<typeof comparar>; descripcion?: string }) {
+  return <article className="min-w-0 border-t-4 border-[#FE8F01] bg-white p-4 shadow-sm sm:p-5"><div className="flex items-start justify-between gap-3"><span className="rounded-md bg-orange-50 p-2 text-[#b85e00]">{icono}</span><EstadoDato estado={estado} compacto /></div><p className="mt-4 text-xs font-bold uppercase text-[#676767]">{titulo}</p><p className="mt-1 break-words text-2xl font-bold text-black sm:text-3xl">{valor === null ? 'No disponible' : formatearDato(valor, 'monto')}</p><p className="mt-1 text-xs capitalize text-gray-500">{periodo}</p>{comparacion && <div className="mt-3 space-y-1 border-t border-gray-100 pt-3 text-xs text-gray-600">{comparacion.anterior && <p>{comparacion.anterior.porcentaje >= 0 ? 'Subió' : 'Bajó'} {Math.abs(comparacion.anterior.porcentaje).toLocaleString('es-CL', { maximumFractionDigits: 1 })}% vs. mes anterior</p>}{comparacion.anual && <p>{comparacion.anual.porcentaje >= 0 ? 'Subió' : 'Bajó'} {Math.abs(comparacion.anual.porcentaje).toLocaleString('es-CL', { maximumFractionDigits: 1 })}% vs. mismo mes año anterior</p>}{!comparacion.anterior && !comparacion.anual && <p>Sin base comparable válida.</p>}</div>}{descripcion && <p className="mt-3 text-xs leading-5 text-gray-500">{descripcion}</p>}</article>;
+}
+
+function Seccion({ titulo, descripcion, children, ruta }: { titulo: string; descripcion?: string; children: ReactNode; ruta?: string }) {
+  return <section className="border border-gray-200 bg-white p-4 shadow-sm sm:p-6"><div className="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-black">{titulo}</h2>{descripcion && <p className="mt-1 max-w-3xl text-sm text-gray-500">{descripcion}</p>}</div>{ruta && <Link to={ruta} className="inline-flex items-center gap-1 text-sm font-bold text-[#b85e00] hover:text-black">Ver detalle <ArrowRight className="h-4 w-4" /></Link>}</div>{children}</section>;
+}
+
+function ResumenCorte({ titulo, bloque, ruta, claves }: { titulo: string; bloque?: RespuestaM7; ruta: string; claves: string[] }) {
+  const valor = buscarNumero(bloque, claves); const estado = estadoBloque(bloque);
+  return <article className="flex min-w-0 flex-col border border-gray-200 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-2"><h3 className="text-sm font-bold text-black">{titulo}</h3><EstadoDato estado={estado} compacto /></div><p className="mt-3 break-words text-xl font-bold">{valor === null ? estadoHumano(estado) : formatearDato(valor, 'monto')}</p><Link to={ruta} className="mt-4 inline-flex items-center gap-1 text-sm font-bold text-[#b85e00]">Ver detalle <ArrowRight className="h-4 w-4" /></Link></article>;
 }
 
 export default function PanelGeneralM7({ compacto = false }: { compacto?: boolean }) {
-  const consulta = usarConsultaM7('/dashboard-m7', true);
-  const bloques = (consulta.datos?.bloques || {}) as Record<string, RespuestaM7>;
-  const clavesVisibles = compacto ? compactas.filter(clave => bloques[clave]) : Object.keys(bloques).filter(clave => configuraciones[clave]);
-
-  return <div className="min-h-full bg-gray-50">
-    <EncabezadoM7 titulo={compacto ? 'Dashboard Financiero' : 'Resumen financiero'} descripcion="Visión ejecutiva de liquidez, cartera, ventas, operación, crédito y riesgos" />
-    <Periodo anio={consulta.anio} mes={consulta.mes} cambiar={consulta.cambiar} cargando={consulta.cargando} recargar={consulta.recargar} />
-    <PdfDashboard origen="panel" anio={consulta.anio} mes={consulta.mes} />
-    {consulta.error && <div className="border-y border-red-200 bg-red-50 px-5 py-4 text-red-800">{consulta.error}</div>}
-    <main className="mx-auto max-w-[1500px] px-5 py-6 sm:px-8">
-      {compacto ? <section>
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase text-[#b85e00]">Período seleccionado</p><h2 className="mt-1 text-xl font-bold text-gray-950">Indicadores prioritarios</h2></div><Link to={`/dashboard-m7?anio=${consulta.anio}&mes=${consulta.mes}`} className="text-sm font-bold text-[#b85e00] hover:text-black">Ver dashboard completo</Link></div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{clavesVisibles.map(clave => <TarjetaDashboard key={clave} claveBloque={clave} bloque={bloques[clave]} anio={consulta.anio} mes={consulta.mes} />)}</div>
-      </section> : secciones.map(seccion => {
-        const claves = seccion.claves.filter(clave => bloques[clave]);
-        return claves.length ? <section key={seccion.titulo} className="mb-9"><div className="mb-4"><p className="text-xs font-bold uppercase text-[#b85e00]">Dashboard M7</p><h2 className="mt-1 text-xl font-bold text-gray-950">{seccion.titulo}</h2></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{claves.map(clave => <TarjetaDashboard key={clave} claveBloque={clave} bloque={bloques[clave]} anio={consulta.anio} mes={consulta.mes} />)}</div></section> : null;
-      })}
-      {!consulta.cargando && !clavesVisibles.length && !consulta.error && <EstadoSinDatos texto="No hay bloques habilitados para esta cuenta." />}
-    </main>
-  </div>;
+  const consulta = usarConsultaM7('/dashboard-m7', true); const [versionHistorico, recargarHistorico] = useState(0); const historico = usarHistorico(consulta.anio, consulta.mes, versionHistorico);
+  const bloques = (consulta.datos?.bloques || {}) as Record<string, RespuestaM7>; const meses = historico.datos?.meses || [];
+  const periodoTexto = useMemo(() => new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric' }).format(new Date(consulta.anio, consulta.mes - 1, 1)), [consulta.anio, consulta.mes]);
+  const sinComparacion = { actual: null, anterior: null, anual: null }; const disponible = historico.datos?.disponibilidad || {};
+  const resultado = disponible.resultadoGerencial ? comparar(meses, 'resultadoGerencial') : sinComparacion; const flujo = disponible.flujo ? comparar(meses, 'flujoNeto') : sinComparacion; const cxc = buscarNumero(bloques.cuentasCobrar, ['saldo']); const cxp = buscarNumero(bloques.cuentasPagar, ['saldo']);
+  const clientes = (historico.datos?.principalesClientes || []).map(cliente => ({ etiqueta: cliente.cliente, monto: cliente.monto, participacion: cliente.participacionPorcentual }));
+  const proyectos = buscarColeccion(bloques.margenProyectos, 'proyectos').map((proyecto, indice) => ({ etiqueta: String(proyecto.codigo || proyecto.nombre || `Proyecto ${indice + 1}`), ingresos: numero(proyecto.ingresosAtribuibles), costos: numero(proyecto.costosDirectosAtribuibles), margen: numero(proyecto.margenDirecto) })).filter(proyecto => proyecto.ingresos !== null || proyecto.costos !== null || proyecto.margen !== null).sort((a, b) => (b.ingresos || 0) - (a.ingresos || 0)).slice(0, 8);
+  const costosProyecto = buscarColeccion(bloques.costosFabricacion, 'proyectos');
+  const composicionCostos = [
+    { nombre: 'Materiales', valor: costosProyecto.reduce((total, proyecto) => total + (numero(proyecto.materiales) || 0), 0) },
+    { nombre: 'Remuneraciones atribuibles', valor: costosProyecto.reduce((total, proyecto) => total + (numero(proyecto.remuneracionesExtra) || 0), 0) },
+    { nombre: 'Instalación configurada', valor: costosProyecto.reduce((total, proyecto) => total + (numero(proyecto.costoInstalacion) || 0), 0) },
+  ].filter(item => item.valor > 0);
+  const recargar = () => { consulta.recargar(); recargarHistorico(version => version + 1); }; const error = consulta.error || historico.error;
+  return <div className="min-h-full bg-gray-50"><EncabezadoM7 titulo={compacto ? 'Dashboard Financiero' : 'Resumen gerencial'} descripcion="Indicadores del mes de corte y evolución real de los 12 meses terminados en ese período" /><Periodo anio={consulta.anio} mes={consulta.mes} cambiar={consulta.cambiar} cargando={consulta.cargando || historico.cargando} recargar={recargar} />{!compacto && <PdfDashboard origen="panel" anio={consulta.anio} mes={consulta.mes} />}{error && <div className="border-y border-red-200 bg-red-50 px-5 py-4 text-red-800">{error}</div>}
+    <main className="mx-auto max-w-[1500px] space-y-5 px-4 py-6 sm:px-8"><section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Kpi titulo="Resultado gerencial" valor={resultado.actual} periodo={periodoTexto} icono={<ChartNoAxesCombined className="h-5 w-5" />} estado={resultado.actual === null ? 'DATOS_INSUFICIENTES' : 'VALIDO'} comparacion={resultado} descripcion="Ventas netas menos costos directos atribuibles. No representa un Estado de Resultados contable." /><Kpi titulo="Cuentas por cobrar" valor={cxc} periodo="Saldo vigente a la fecha de consulta" icono={<BanknoteArrowUp className="h-5 w-5" />} estado={estadoBloque(bloques.cuentasCobrar)} descripcion="No se presenta como saldo histórico del mes de corte porque no existen snapshots owner completos." /><Kpi titulo="Cuentas por pagar" valor={cxp} periodo="Saldo vigente a la fecha de consulta" icono={<BanknoteArrowDown className="h-5 w-5" />} estado={estadoBloque(bloques.cuentasPagar)} descripcion="No se replica el saldo actual como una evolución ficticia." /><Kpi titulo="Flujo neto del período" valor={flujo.actual} periodo={periodoTexto} icono={<Wallet className="h-5 w-5" />} estado={flujo.actual === null ? 'SIN_RESULTADOS' : 'VALIDO'} comparacion={flujo} /></section>
+      <Seccion titulo="Ventas, costos y resultado — últimos 12 meses" descripcion="Resultado gerencial basado exclusivamente en ventas netas y costos directos atribuibles. Los meses sin costos reconstruibles permanecen sin dato." ruta={`/dashboard-m7/resumenes?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoCombinado datos={meses} barras={[{ clave: 'ventasNetas', nombre: 'Ventas netas', color: '#FE8F01' }, { clave: 'costosDirectos', nombre: 'Costos directos', color: '#9ca3af' }]} lineas={[{ clave: 'resultadoGerencial', nombre: 'Resultado gerencial', color: '#000000' }]} alto={compacto ? 260 : 340} /></Seccion>
+      {!compacto && <div className="grid gap-5 xl:grid-cols-2">{disponible.ventas && <Seccion titulo="Ventas mensuales — últimos 12 meses" descripcion="Monto neto y cantidad de ventas definitivas." ruta={`/dashboard-m7/ventas?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoCombinado datos={meses} barras={[{ clave: 'ventasNetas', nombre: 'Ventas netas', color: '#FE8F01' }]} lineas={[{ clave: 'cantidadVentas', nombre: 'Cantidad de ventas', color: '#676767' }]} /></Seccion>}{disponible.conversion && <Seccion titulo="Conversión de cotizaciones" descripcion="Cotizaciones emitidas y formalizadas como Nota de Venta; no es forecast." ruta={`/dashboard-m7/ventas?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoCombinado datos={meses} barras={[{ clave: 'cotizaciones', nombre: 'Cotizaciones', color: '#9ca3af' }, { clave: 'convertidas', nombre: 'Convertidas', color: '#FE8F01' }]} lineas={[{ clave: 'conversionPorcentual', nombre: 'Conversión', color: '#000000' }]} porcentaje /></Seccion>}{disponible.flujo && <Seccion titulo="Flujo de caja — últimos 12 meses" descripcion="Ingresos recibidos, egresos realizados y flujo neto. Caja Chica permanece excluida según M7." ruta={`/dashboard-m7/liquidez?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoCombinado datos={meses} barras={[{ clave: 'ingresosRecibidos', nombre: 'Ingresos', color: '#FE8F01' }, { clave: 'egresosRealizados', nombre: 'Egresos', color: '#676767' }]} lineas={[{ clave: 'flujoNeto', nombre: 'Flujo neto', color: '#000000' }]} /></Seccion>}{disponible.remuneraciones && <Seccion titulo="Costo laboral — últimos 12 meses" descripcion="Haberes y aportes del empleador de remuneraciones oficiales cerradas." ruta={`/dashboard-m7/operacion?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoBarras datos={meses} series={[{ clave: 'costoRemuneraciones', nombre: 'Costo laboral', color: '#FE8F01' }]} etiqueta="periodo" /></Seccion>}{clientes.length > 0 && <Seccion titulo="Principales clientes por ventas" descripcion="Participación objetiva sobre ventas netas consolidadas en CLP durante la ventana de 12 meses." ruta={`/dashboard-m7/ventas?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoBarras datos={clientes} series={[{ clave: 'monto', nombre: 'Ventas netas', color: '#FE8F01' }]} horizontal /></Seccion>}{disponible.operacion && <Seccion titulo="Actividad operacional — últimos 12 meses" descripcion="Instalaciones cerradas, OT creadas e incidencias registradas; son hechos owner, no un índice de desempeño." ruta={`/dashboard-m7/operacion?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoCombinado datos={meses} barras={[{ clave: 'instalaciones', nombre: 'Instalaciones', color: '#FE8F01' }, { clave: 'ordenesTrabajo', nombre: 'OT', color: '#676767' }]} lineas={[{ clave: 'incidencias', nombre: 'Incidencias', color: '#000000' }]} /></Seccion>}</div>}
+      {!compacto && <><section><div className="mb-3"><p className="text-xs font-bold uppercase text-[#b85e00]">Análisis del corte</p><h2 className="mt-1 text-xl font-bold">Proyectos, crédito e inventario</h2></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><ResumenCorte titulo="Margen por proyecto" bloque={bloques.margenProyectos} ruta={`/dashboard-m7/margen-proyectos?anio=${consulta.anio}&mes=${consulta.mes}`} claves={['margenDirecto', 'resultado']} /><ResumenCorte titulo="Exposición crediticia" bloque={bloques.exposicionCredito} ruta={`/dashboard-m7/control?anio=${consulta.anio}&mes=${consulta.mes}`} claves={['exposicionUtilizada', 'utilizado']} /><ResumenCorte titulo="Inventario valorizado" bloque={bloques.inventarioValorizado} ruta={`/dashboard-m7/control?anio=${consulta.anio}&mes=${consulta.mes}`} claves={['valorTotal', 'valor']} /><ResumenCorte titulo="Centro de Atención" bloque={bloques.centroAtencion} ruta={`/dashboard-m7/centro-atencion?anio=${consulta.anio}&mes=${consulta.mes}`} claves={['cantidad', 'total']} /></div></section><div className="grid gap-5 xl:grid-cols-2">{proyectos.length > 0 && <Seccion titulo="Proyectos principales del corte" descripcion="Ingresos, costos directos y margen atribuibles. No constituye un score ni una decisión automática." ruta={`/dashboard-m7/margen-proyectos?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoBarras datos={proyectos} series={[{ clave: 'ingresos', nombre: 'Ingresos', color: '#FE8F01' }, { clave: 'costos', nombre: 'Costos directos', color: '#9ca3af' }, { clave: 'margen', nombre: 'Margen', color: '#000000' }]} horizontal /></Seccion>}{composicionCostos.length > 0 && <Seccion titulo="Composición de costos directos" descripcion="Sólo materiales, remuneraciones atribuibles e instalación configurada. No representa gastos totales." ruta={`/dashboard-m7/control?anio=${consulta.anio}&mes=${consulta.mes}`}><GraficoDonut datos={composicionCostos} /></Seccion>}</div>{bloques.exposicionCredito && <Seccion titulo="Crédito al corte" descripcion="Información consumida desde el contrato M8 → M7; no se recalcula Crédito ni se fabrica histórico mensual." ruta={`/dashboard-m7/control?anio=${consulta.anio}&mes=${consulta.mes}`}><div className="grid gap-5 lg:grid-cols-2"><GraficoProgreso utilizado={buscarNumero(bloques.exposicionCredito, ['exposicionUtilizada', 'utilizado']) || 0} disponible={buscarNumero(bloques.exposicionCredito, ['capacidadDisponible', 'disponible']) || 0} /><div className="grid grid-cols-2 gap-3"><ResumenCorte titulo="Clientes sobre cupo" bloque={bloques.exposicionCredito} ruta="/dashboard-m7/control" claves={['clientesSobreLimite', 'sobrecupo']} /><ResumenCorte titulo="Alertas" bloque={bloques.alertasCredito} ruta="/dashboard-m7/control" claves={['cantidad', 'total']} /></div></div></Seccion>}</>}
+      {!consulta.cargando && !historico.cargando && !meses.length && !error && <EstadoSinDatos texto="No hay información histórica habilitada para esta cuenta." />}
+    </main></div>;
 }

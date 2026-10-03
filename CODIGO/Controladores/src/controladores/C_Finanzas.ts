@@ -85,7 +85,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida'
   | 'registrarResultadoVisita' | 'registrarIncidenciaRetrabajo' | 'listarIncidenciasOperativas' | 'actualizarIncidenciaOperativa'
   | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
-  | 'consultarPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
+  | 'consultarPanelGeneralM7' | 'consultarHistoricoPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
   | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'consultarCostoRemuneracionesM7' | 'descargarPdfDashboardM7'
   | 'consultarOrdenesTrabajoM7' | 'consultarCargaOperacionalM7' | 'consultarInstalacionesM7' | 'consultarAtrasosInstalacionesM7' | 'consultarIncidenciasRetrabajosM7'
   | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7'
@@ -473,6 +473,7 @@ export class C_Finanzas {
       case 'consultarSaldo': return this.m3.consultarSaldo(identificador(parametros.id));
       case 'catalogosPago': return this.m3.consultarCatalogos(solicitud.consulta?.idFicha?identificador(solicitud.consulta.idFicha):undefined);
       case 'consultarPanelGeneralM7': return this.m7.consultarPanelGeneral(solicitud.consulta || {}, actor.permisos);
+      case 'consultarHistoricoPanelGeneralM7': return this.m7.consultarHistoricoPanelGeneral(solicitud.consulta || {}, actor.permisos);
       case 'consultarCentroAtencionM7': return this.m7.consultarCentroAtencion(solicitud.consulta || {}, actor.permisos);
       case 'consultarCotizacionesPendientesM7': return this.m7.consultarCotizacionesPendientes(solicitud.consulta || {});
       case 'consultarContextoClienteM7': return this.m7.consultarContextoCliente(identificador(parametros.id), solicitud.consulta || {}, actor.permisos);
