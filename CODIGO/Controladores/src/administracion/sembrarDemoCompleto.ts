@@ -117,6 +117,10 @@ async function sembrarPersonasYOperacion() {
   await prisma.$transaction(async tx => {
     const actor = await tx.usuario.findFirstOrThrow({ where: { administrador_original: true } });
     const vinculo = await tx.tipo_vinculo_laboral.upsert({ where: { nombre_tipo_vinculo_laboral: `${PREFIJO} Contrato indefinido` }, update: {}, create: { nombre_tipo_vinculo_laboral: `${PREFIJO} Contrato indefinido`, descripcion_tipo_vinculo_laboral: 'Configuración ficticia de demostración' } });
+    const vinculoPlazo = await tx.tipo_vinculo_laboral.upsert({ where: { nombre_tipo_vinculo_laboral: `${PREFIJO} Contrato a plazo fijo` }, update: {}, create: { nombre_tipo_vinculo_laboral: `${PREFIJO} Contrato a plazo fijo`, descripcion_tipo_vinculo_laboral: 'Configuración ficticia de demostración' } });
+    const afps = await Promise.all(['Capital', 'Cuprum', 'Habitat', 'Modelo', 'PlanVital', 'Provida', 'Uno'].map(nombre_afp => tx.afp.upsert({ where: { nombre_afp }, update: { estado_afp: 'activo' }, create: { nombre_afp } })));
+    const fonasa = await tx.prevision_salud.upsert({ where: { nombre_prevision_salud: 'Fonasa' }, update: { tipo_prevision_salud: 'FONASA', estado_prevision_salud: 'activo' }, create: { nombre_prevision_salud: 'Fonasa', tipo_prevision_salud: 'FONASA' } });
+    const isapreDemo = await tx.prevision_salud.upsert({ where: { nombre_prevision_salud: `${PREFIJO} Isapre` }, update: { tipo_prevision_salud: 'ISAPRE', estado_prevision_salud: 'activo' }, create: { nombre_prevision_salud: `${PREFIJO} Isapre`, tipo_prevision_salud: 'ISAPRE' } });
     const esquemas = [];
     for (let indice = 1; indice <= 5; indice++) {
       esquemas.push(await tx.esquema_remuneracional.upsert({ where: { codigo: `${PREFIJO}-ESQUEMA-${indice}` }, update: {}, create: { codigo: `${PREFIJO}-ESQUEMA-${indice}`, nombre: `${PREFIJO} Esquema ${indice}`, descripcion: 'Esquema ficticio para QA visual', vigencia_desde: inicioMes } }));
@@ -126,10 +130,13 @@ async function sembrarPersonasYOperacion() {
     const medio = await tx.medio_pago.upsert({ where: { nombre_medio_pago: `${PREFIJO} Transferencia` }, update: {}, create: { nombre_medio_pago: `${PREFIJO} Transferencia`, codigo_medio_pago: 'DEMO_UI_TRANSFERENCIA', requiere_respaldo: false } });
     for (let indice = 1; indice <= 5; indice++) {
       const rut = rutDemo(30 + indice);
-      const empleado = await tx.empleado.upsert({ where: { rut_empleado: rut }, update: { correo_particular: `demo-ui-empleado${indice}@example.invalid` }, create: { rut_empleado: rut, nombres: `Empleado Demo ${indice}`, apellido_paterno: 'Visual', apellido_materno: 'QA', fecha_ingreso: fecha(-400 + indice * 30), sueldo_base: 700000 + indice * 175000, fecha_aplicacion_sueldo_base: inicioMes, estado_laboral: indice === 5 ? 'inactivo' : 'activo', correo_particular: `demo-ui-empleado${indice}@example.invalid`, telefono_particular: `+56 9 1000 ${String(indice).padStart(4, '0')}`, id_tipo_vinculo_laboral: vinculo.id_tipo_vinculo_laboral } });
+      const tipoVinculo = indice % 3 === 0 ? vinculoPlazo : vinculo;
+      const salud = indice % 2 === 0 ? isapreDemo : fonasa;
+      const empleado = await tx.empleado.upsert({ where: { rut_empleado: rut }, update: { correo_particular: `demo-ui-empleado${indice}@example.invalid`, id_afp: afps[(indice - 1) % afps.length].id_afp, id_prevision_salud: salud.id_prevision_salud, id_tipo_vinculo_laboral: tipoVinculo.id_tipo_vinculo_laboral, seguro_cesantia: true }, create: { rut_empleado: rut, nombres: `Empleado Demo ${indice}`, apellido_paterno: 'Visual', apellido_materno: 'QA', fecha_ingreso: fecha(-400 + indice * 30), sueldo_base: 700000 + indice * 175000, fecha_aplicacion_sueldo_base: inicioMes, estado_laboral: indice === 5 ? 'inactivo' : 'activo', correo_particular: `demo-ui-empleado${indice}@example.invalid`, telefono_particular: `+56 9 1000 ${String(indice).padStart(4, '0')}`, id_tipo_vinculo_laboral: tipoVinculo.id_tipo_vinculo_laboral, id_afp: afps[(indice - 1) % afps.length].id_afp, id_prevision_salud: salud.id_prevision_salud } });
       const relacionDemo = await tx.relacion_laboral_empleado.findFirst({ where: { id_empleado: empleado.id_empleado, estado: 'vigente' } });
-      if (!relacionDemo) await tx.relacion_laboral_empleado.create({ data: { id_empleado: empleado.id_empleado, fecha_inicio: fecha(-400 + indice * 30), fecha_termino: finMes, estado: 'vigente', jornada: 'Completa', id_tipo_vinculo_laboral: vinculo.id_tipo_vinculo_laboral } });
-      else await tx.relacion_laboral_empleado.update({ where: { id_relacion_laboral_empleado: relacionDemo.id_relacion_laboral_empleado }, data: { fecha_termino: finMes } });
+      if (!relacionDemo) await tx.relacion_laboral_empleado.create({ data: { id_empleado: empleado.id_empleado, fecha_inicio: fecha(-400 + indice * 30), fecha_termino: finMes, estado: 'vigente', jornada: 'Completa', id_tipo_vinculo_laboral: tipoVinculo.id_tipo_vinculo_laboral } });
+      else await tx.relacion_laboral_empleado.update({ where: { id_relacion_laboral_empleado: relacionDemo.id_relacion_laboral_empleado }, data: { fecha_termino: finMes, id_tipo_vinculo_laboral: tipoVinculo.id_tipo_vinculo_laboral } });
+      if (salud.id_prevision_salud === isapreDemo.id_prevision_salud) await tx.cotizacion_salud_empleado.upsert({ where: { id_empleado_vigencia_desde: { id_empleado: empleado.id_empleado, vigencia_desde: inicioMes } }, update: { valor: 0.08, unidad: 'PORCENTAJE', activa: true }, create: { id_empleado: empleado.id_empleado, valor: 0.08, unidad: 'PORCENTAJE', vigencia_desde: inicioMes } });
       const esquema = esquemas[indice - 1];
       if (!await tx.asignacion_esquema_remuneracional.findFirst({ where: { id_empleado: empleado.id_empleado, id_esquema: esquema.id_esquema_remuneracional, activa: true } })) await tx.asignacion_esquema_remuneracional.create({ data: { id_empleado: empleado.id_empleado, id_esquema: esquema.id_esquema_remuneracional, vigencia_desde: inicioMes } });
       let remuneracion = await tx.remuneracion.findFirst({ where: { id_periodo_remuneracion: periodo.id_periodo_remuneracion, id_empleado: empleado.id_empleado, reemplaza_a_id: null } });
@@ -266,15 +273,22 @@ async function sembrarHistoricoRealista() {
     const actor = await tx.usuario.findFirstOrThrow({ where: { administrador_original: true } });
     const clp = await tx.moneda.findUniqueOrThrow({ where: { codigo_moneda: 'CLP' } });
     const vinculo = await tx.tipo_vinculo_laboral.findUniqueOrThrow({ where: { nombre_tipo_vinculo_laboral: `${PREFIJO} Contrato indefinido` } });
+    const vinculoPlazo = await tx.tipo_vinculo_laboral.findUniqueOrThrow({ where: { nombre_tipo_vinculo_laboral: `${PREFIJO} Contrato a plazo fijo` } });
+    const afps = await tx.afp.findMany({ where: { nombre_afp: { in: ['Capital', 'Cuprum', 'Habitat', 'Modelo', 'PlanVital', 'Provida', 'Uno'] } }, orderBy: { nombre_afp: 'asc' } });
+    const fonasa = await tx.prevision_salud.findUniqueOrThrow({ where: { nombre_prevision_salud: 'Fonasa' } });
+    const isapreDemo = await tx.prevision_salud.findUniqueOrThrow({ where: { nombre_prevision_salud: `${PREFIJO} Isapre` } });
     const medio = await tx.medio_pago.findUniqueOrThrow({ where: { nombre_medio_pago: `${PREFIJO} Transferencia` } });
     const esquemas = await tx.esquema_remuneracional.findMany({ where: { codigo: { startsWith: `${PREFIJO}-ESQUEMA-` } }, orderBy: { id_esquema_remuneracional: 'asc' } });
     const empleadosCreados = [];
     for (let indice = 0; indice < empleados.length; indice++) {
       const rut = rutDemo(31 + indice), ingreso = mesHistorico(Math.min(indice % 8, 7), 1);
       const [nombres, paterno, materno] = empleados[indice];
-      const empleado = await tx.empleado.upsert({ where: { rut_empleado: rut }, update: { nombres, apellido_paterno: paterno, apellido_materno: materno }, create: { rut_empleado: rut, nombres, apellido_paterno: paterno, apellido_materno: materno, fecha_ingreso: ingreso, sueldo_base: 720000 + indice * 65000, fecha_aplicacion_sueldo_base: ingreso, estado_laboral: indice >= 16 ? 'inactivo' : 'activo', correo_particular: `demo-ui-empleado${indice + 1}@example.invalid`, telefono_particular: `+56 9 7100 ${String(indice + 1).padStart(4, '0')}`, id_tipo_vinculo_laboral: vinculo.id_tipo_vinculo_laboral } });
+      const tipoVinculo = indice % 4 === 0 ? vinculoPlazo : vinculo;
+      const salud = indice % 3 === 0 ? isapreDemo : fonasa;
+      const empleado = await tx.empleado.upsert({ where: { rut_empleado: rut }, update: { nombres, apellido_paterno: paterno, apellido_materno: materno, id_afp: afps[indice % afps.length].id_afp, id_prevision_salud: salud.id_prevision_salud, id_tipo_vinculo_laboral: tipoVinculo.id_tipo_vinculo_laboral, seguro_cesantia: true }, create: { rut_empleado: rut, nombres, apellido_paterno: paterno, apellido_materno: materno, fecha_ingreso: ingreso, sueldo_base: 720000 + indice * 65000, fecha_aplicacion_sueldo_base: ingreso, estado_laboral: indice >= 16 ? 'inactivo' : 'activo', correo_particular: `demo-ui-empleado${indice + 1}@example.invalid`, telefono_particular: `+56 9 7100 ${String(indice + 1).padStart(4, '0')}`, id_tipo_vinculo_laboral: tipoVinculo.id_tipo_vinculo_laboral, id_afp: afps[indice % afps.length].id_afp, id_prevision_salud: salud.id_prevision_salud } });
       empleadosCreados.push(empleado);
-      if (!await tx.relacion_laboral_empleado.findFirst({ where: { id_empleado: empleado.id_empleado } })) await tx.relacion_laboral_empleado.create({ data: { id_empleado: empleado.id_empleado, fecha_inicio: ingreso, fecha_termino: indice >= 16 ? mesHistorico(21, 28) : null, estado: indice >= 16 ? 'terminada' : 'vigente', jornada: 'Completa', id_tipo_vinculo_laboral: vinculo.id_tipo_vinculo_laboral } });
+      if (!await tx.relacion_laboral_empleado.findFirst({ where: { id_empleado: empleado.id_empleado } })) await tx.relacion_laboral_empleado.create({ data: { id_empleado: empleado.id_empleado, fecha_inicio: ingreso, fecha_termino: indice >= 16 ? mesHistorico(21, 28) : null, estado: indice >= 16 ? 'terminada' : 'vigente', jornada: 'Completa', id_tipo_vinculo_laboral: tipoVinculo.id_tipo_vinculo_laboral } });
+      if (salud.id_prevision_salud === isapreDemo.id_prevision_salud) await tx.cotizacion_salud_empleado.upsert({ where: { id_empleado_vigencia_desde: { id_empleado: empleado.id_empleado, vigencia_desde: inicioMes } }, update: { valor: 0.08, unidad: 'PORCENTAJE', activa: true }, create: { id_empleado: empleado.id_empleado, valor: 0.08, unidad: 'PORCENTAJE', vigencia_desde: inicioMes } });
       const esquema = esquemas[indice % esquemas.length];
       if (!await tx.asignacion_esquema_remuneracional.findFirst({ where: { id_empleado: empleado.id_empleado, activa: true } })) await tx.asignacion_esquema_remuneracional.create({ data: { id_empleado: empleado.id_empleado, id_esquema: esquema.id_esquema_remuneracional, vigencia_desde: ingreso } });
     }
@@ -516,11 +530,13 @@ async function limpiarDemo() {
     await tx.componente_remuneracion.deleteMany({ where: { id_remuneracion: { in: idsRemuneracion } } });
     await tx.remuneracion.deleteMany({ where: { id_remuneracion: { in: idsRemuneracion } } });
     await tx.asignacion_esquema_remuneracional.deleteMany({ where: { OR: [{ id_empleado: { in: idsEmpleado } }, { esquema: { codigo: { startsWith: `${PREFIJO}-ESQUEMA` } } }] } });
+    await tx.cotizacion_salud_empleado.deleteMany({ where: { id_empleado: { in: idsEmpleado } } });
     await tx.relacion_laboral_empleado.deleteMany({ where: { id_empleado: { in: idsEmpleado } } });
     await tx.empleado.deleteMany({ where: { id_empleado: { in: idsEmpleado } } });
     await tx.esquema_remuneracional.deleteMany({ where: { codigo: { startsWith: `${PREFIJO}-ESQUEMA` } } });
     await tx.concepto_remuneracion.deleteMany({ where: { codigo_m6: { startsWith: `${PREFIJO}-HABER-` } } });
-    await tx.tipo_vinculo_laboral.deleteMany({ where: { nombre_tipo_vinculo_laboral: `${PREFIJO} Contrato indefinido` } });
+    await tx.tipo_vinculo_laboral.deleteMany({ where: { nombre_tipo_vinculo_laboral: { startsWith: `${PREFIJO} Contrato ` } } });
+    await tx.prevision_salud.deleteMany({ where: { nombre_prevision_salud: `${PREFIJO} Isapre` } });
     await tx.asignacion_pago_cliente.deleteMany({ where: { id_pago_cliente: { in: idsPago } } });
     await tx.pago_cliente.deleteMany({ where: { id_pago_cliente: { in: idsPago } } });
     await tx.documento_tributario_nota_venta.deleteMany({ where: { OR: [{ id_documento_tributario: { in: idsDocumento } }, { id_nota_venta: { in: idsNota } }] } });
