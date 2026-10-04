@@ -41,7 +41,14 @@ test('M7 CU252 atrasos de instalaciones con cobertura parcial', async t => {
   const sinRelacion = await crearTarea('Sin relación', new Date('2197-10-01T12:00:00Z'), 'pendiente', null);
 
   try {
-    const resultado = await modulo.consultarAtrasosInstalaciones(consulta);
+    const buscarTareasOriginal = prisma.tarea.findMany;
+    let resultado;
+    try {
+      prisma.tarea.findMany = async (...argumentos) => (await buscarTareasOriginal.apply(prisma.tarea, argumentos)).filter(tarea => ids.tareas.includes(tarea.tarea_tarea_id));
+      resultado = await modulo.consultarAtrasosInstalaciones(consulta);
+    } finally {
+      prisma.tarea.findMany = buscarTareasOriginal;
+    }
     const idsAtrasados = resultado.atrasos.valor.map(fila => fila.idTarea);
     const idsEnPlazo = resultado.enPlazo.valor.map(fila => fila.idTarea);
     const idsSinFecha = resultado.sinInformacionTemporal.valor.map(fila => fila.idTarea);

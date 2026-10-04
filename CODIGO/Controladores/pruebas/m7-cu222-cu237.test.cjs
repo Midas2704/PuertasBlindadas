@@ -49,7 +49,14 @@ after(async () => {
 
 test('M7 Tanda 2 CU222 CU223 CU232 CU236 CU237', async t => {
   await preparar();
-  const cxc = await modulo.consultarCuentasCobrar(consulta, ['CU222', 'CU223']);
+  const buscarNotasOriginal = prisma.nota_venta.findMany;
+  let cxc;
+  try {
+    prisma.nota_venta.findMany = async (...argumentos) => (await buscarNotasOriginal.apply(prisma.nota_venta, argumentos)).filter(nota => ids.notas.includes(nota.id_nota_venta));
+    cxc = await modulo.consultarCuentasCobrar(consulta, ['CU222', 'CU223']);
+  } finally {
+    prisma.nota_venta.findMany = buscarNotasOriginal;
+  }
   await t.test('01 obligación vencida calcula días correctos', () => { const fila = cxc.cartera.valor.find(item => item.idNota === notaVencida.id_nota_venta); const esperados = Math.floor((new Date(`${fechaNegocio()}T00:00:00Z`).getTime() - new Date('2026-09-20T00:00:00Z').getTime()) / 86400000); assert.equal(fila.condicion, 'VENCIDA'); assert.equal(fila.diasAtraso, esperados); });
   await t.test('02 obligación futura no aparece como morosa', () => { assert.equal(cxc.morosidad.valor.obligaciones.some(item => item.idNota === notaFutura.id_nota_venta), false); assert.equal(cxc.cartera.valor.find(item => item.idNota === notaFutura.id_nota_venta).condicion, 'FUTURA'); });
   await t.test('03 fecha faltante no inventa aging', () => { const fila = cxc.cartera.valor.find(item => item.idNota === notaSinFecha.id_nota_venta); assert.equal(fila.fechaVencimiento, null); assert.equal(fila.diasAtraso, null); assert.equal(fila.condicion, 'SIN_FECHA'); });
@@ -65,15 +72,19 @@ test('M7 Tanda 2 CU222 CU223 CU232 CU236 CU237', async t => {
   const riesgoValido = new M7Controller();
   riesgoValido.consultarLiquidezCompleto = async () => ({ periodo: { desde: '2026-10-01', hasta: '2026-10-31' }, proyeccion: { estado: 'VALIDO', valor: { eventos: [{ fecha: '2026-10-01', moneda: 'CLP', liquidezProyectada: 100 }, { fecha: '2026-10-02', moneda: 'CLP', liquidezProyectada: -20 }, { fecha: '2026-10-03', moneda: 'CLP', liquidezProyectada: -50 }], ingresos: [{ fecha: '2026-10-02', moneda: 'CLP', monto: 20, referencia: 'NV:1' }], egresos: [{ fecha: '2026-10-03', moneda: 'CLP', monto: 70, referencia: 'OP:1' }] } } });
   const buscarParametrosOriginal = prisma.parametro_remuneracional.findMany;
-  prisma.parametro_remuneracional.findMany = async () => [{ id_parametro_remuneracional: 1, nombre: 'Umbral cero', valor: 0 }];
-  const riesgo = await riesgoValido.consultarRiesgoDeficit(consulta, ['CU232', 'CU225']);
+  let riesgo;
+  try {
+    prisma.parametro_remuneracional.findMany = async () => [{ id_parametro_remuneracional: 1, nombre: 'Umbral cero', valor: 0 }];
+    riesgo = await riesgoValido.consultarRiesgoDeficit(consulta, ['CU232', 'CU225']);
+  } finally {
+    prisma.parametro_remuneracional.findMany = buscarParametrosOriginal;
+  }
   await t.test('11 detecta primera fecha negativa', () => assert.equal(riesgo.primerDeficit.valor[0].primeraFechaCruce, '2026-10-02'));
   await t.test('12 identifica mínimo del horizonte', () => { assert.equal(riesgo.minimoProyectado.valor[0].liquidezProyectada, -50); assert.equal(riesgo.minimoProyectado.valor[0].fecha, '2026-10-03'); });
-  await t.test('13 sin déficit lo informa', async () => { const sin = new M7Controller(); sin.consultarLiquidezCompleto = async () => ({ periodo: {}, proyeccion: { estado: 'VALIDO', valor: { eventos: [{ fecha: '2026-10-01', moneda: 'CLP', liquidezProyectada: 10 }] } } }); const r = await sin.consultarRiesgoDeficit(consulta, ['CU232']); assert.equal(r.primerDeficit.estado, 'SIN_RESULTADOS'); });
+  await t.test('13 sin déficit lo informa', async () => { const sin = new M7Controller(); sin.consultarLiquidezCompleto = async () => ({ periodo: {}, proyeccion: { estado: 'VALIDO', valor: { eventos: [{ fecha: '2026-10-01', moneda: 'CLP', liquidezProyectada: 10 }] } } }); const original = prisma.parametro_remuneracional.findMany;try{prisma.parametro_remuneracional.findMany=async()=>[{id_parametro_remuneracional:1,nombre:'Umbral cero',valor:0}];const r = await sin.consultarRiesgoDeficit(consulta, ['CU232']); assert.equal(r.primerDeficit.estado, 'SIN_RESULTADOS')}finally{prisma.parametro_remuneracional.findMany=original} });
   await t.test('14 factor sin permiso no se expone', async () => { const r = await riesgoValido.consultarRiesgoDeficit(consulta, ['CU232']); assert.equal(r.factores.estado, 'SIN_PERMISO'); assert.equal(r.factores.valor, null); });
   await t.test('15 riesgo no crea score ranking ni recomendación', () => { assert.doesNotMatch(JSON.stringify(riesgo), /"score"|"ranking"|"recomendacion"/i); });
-  prisma.parametro_remuneracional.findMany = buscarParametrosOriginal;
-  await t.test('16 proyección inválida no calcula', async () => { const r = await modulo.consultarRiesgoDeficit(consulta, ['CU232']); assert.equal(r.primerDeficit.estado, 'DATOS_INSUFICIENTES'); assert.equal(r.minimoProyectado.valor, null); });
+  await t.test('16 proyección inválida no calcula', async () => { const sinProyeccion = new M7Controller(); sinProyeccion.consultarLiquidezCompleto = async () => ({ periodo: {}, proyeccion: { estado: 'DATOS_INSUFICIENTES', valor: null } }); const r = await sinProyeccion.consultarRiesgoDeficit(consulta, ['CU232']); assert.equal(r.primerDeficit.estado, 'DATOS_INSUFICIENTES'); assert.equal(r.minimoProyectado.valor, null); });
 
   const exposicion = await modulo.consultarExposicionProyectos(consulta, ['CU236']);
   const filaProyecto = exposicion.proyectos.find(item => item.idProyecto === proyectoAbierto.id_proyecto_financiero);

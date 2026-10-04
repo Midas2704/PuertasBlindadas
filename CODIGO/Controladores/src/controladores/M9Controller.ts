@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
-import { archivoPdf } from '../utilidades/pdf';
+import { crearInformeAuditoriaM9 } from '../m9/informeAuditoriaPdf';
+import { archivoAuditoriaM9Csv } from '../m9/exportacionAuditoriaCsv';
 import { ObservabilidadM9 } from '../m9/observabilidad';
 import { DiagnosticosM9, DiagnosticosMemoriaM9, FuentePendientesM9, FuenteRetryM9, PendientesMemoriaM9, RelojM9, RelojSistemaM9, RetryMemoriaM9, SenalesM9, SenalesMemoriaM9 } from '../m9/puertos';
 import { RepositorioAuditoriaM9, RepositorioAuditoriaM9Prisma } from '../m9/RepositorioAuditoriaM9';
@@ -222,12 +223,9 @@ export class M9Controller {
       const metadatos = { correlationId: hashM9({ filtros, total: congelado.total, formato }) };
       let archivo: { nombre: string; mime: string; contenido: string };
       if (formato === 'CSV') {
-        const columnas = ['id', 'identidadLogica', 'ocurrencia', 'persistencia', 'productor', 'modulo', 'operacion', 'resultado'];
-        const celda = (valor: unknown) => `"${String(valor ?? '').replace(/"/g, '""')}"`;
-        const csv = [columnas.join(','), ...congelado.eventos.map(evento => columnas.map(columna => celda((evento as unknown as JsonM9)[columna])).join(','))].join('\n');
-        archivo = { nombre: 'auditoria-m9.csv', mime: 'text/csv;charset=utf-8', contenido: `data:text/csv;base64,${Buffer.from(csv).toString('base64')}` };
+        archivo = archivoAuditoriaM9Csv(congelado.eventos);
       } else {
-        archivo = archivoPdf('auditoria-m9.pdf', ['AUDITORIA M9', `Solicitante: ${scope.solicitante}`, `Total: ${congelado.total}`, ...congelado.eventos.map(evento => `${evento.id} | ${evento.ocurrencia} | ${evento.modulo} | ${evento.operacion} | ${evento.resultado}`)]);
+        archivo = crearInformeAuditoriaM9(congelado.eventos, filtros, scope, this.reloj.ahora());
       }
       await this.terminal('EXPORTACION_EVIDENCIA', scope, 'EXITOSO', metadatos);
       return { ...archivo, total: congelado.total, conjunto: metadatos.correlationId };

@@ -5,7 +5,7 @@ import { normalizarRut, validarYNormalizarRut, variantesRut } from '../utilidade
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
 import { FuentePagoRemuneracion, FuentePagoRemuneracionPrisma } from '../servicios/FuentePagoRemuneracion';
 import { OrigenPagoRemuneracion, RepositorioPagoRemuneracionPrisma } from '../servicios/RepositorioPagoRemuneracion';
-import { archivoPdf } from '../utilidades/pdf';
+import { archivoCalculoPreliminarM6, archivoComprobanteAnticipoM6, archivoLiquidacionM6, archivoPeriodoRemuneracionesM6 } from '../m6/documentosRemuneracionPdf';
 import { CorreoDesarrollo, CorreoDocumental } from '../utilidades/correo';
 import { AuditoriaDocumental, AuditoriaDocumentalLegacyPrisma, CondicionDocumento } from '../servicios/AuditoriaDocumental';
 
@@ -994,7 +994,7 @@ export class M6Controller {
 
   private incluirRemuneracion = {
     periodo: true,
-    empleado: true,
+    empleado: { include: { cargo: true, asignaciones_esquema_remuneracional: { include: { esquema: true }, orderBy: { vigencia_desde: 'desc' as const } } } },
     componentes: { include: { concepto: true }, orderBy: { creado_en: 'asc' as const } },
     ajustes_posteriores: { include: { regularizacion: true }, orderBy: { creado_en: 'asc' as const } },
   };
@@ -1957,31 +1957,8 @@ export class M6Controller {
     }
   }
 
-  private lineasLiquidacion(item: any, marca: string) {
-    const periodo = `${String(item.periodo.mes).padStart(2, '0')}/${item.periodo.anio}`;
-    const monto = (valor: any) => valor === null || valor === undefined ? 'No disponible' : Number(valor).toFixed(2);
-    return [
-      `LIQUIDACION DE REMUNERACION - ${marca}`,
-      `Empleado: ${nombreCompleto(item.empleado)}`,
-      `RUT: ${item.empleado.rut_empleado}`,
-      `Periodo: ${periodo}`,
-      `Cierre: ${item.cerrado_en?.toISOString() || 'Pendiente'}`,
-      '', 'COMPONENTES',
-      ...item.componentes.map((componente: any) => `${componente.descripcion}: ${componente.monto === null ? 'PENDIENTE' : monto(componente.monto)} [${componente.estado_revision}]`),
-      '', `Total haberes: ${monto(item.total_haberes)}`,
-      `Total deducciones: ${monto(item.total_deducciones)}`,
-      `Aportes empleador: ${monto(item.total_aportes_empleador)}`,
-      `Base imponible: ${monto(item.base_imponible)}`,
-      `Base tributable: ${monto(item.base_tributable)}`,
-      `Liquido: ${monto(item.liquido_preliminar)}`,
-      `Referencia: remuneracion-${item.id_remuneracion}`,
-    ];
-  }
-
   private archivoLiquidacion(item: any) {
-    const historica = item.estado === 'reemplazada';
-    const marca = historica ? 'OFICIAL HISTORICA / REEMPLAZADA' : 'OFICIAL / VIGENTE';
-    return archivoPdf(`liquidacion-${item.periodo.anio}-${String(item.periodo.mes).padStart(2, '0')}-${item.id_remuneracion}${historica ? '-historica' : ''}.pdf`, this.lineasLiquidacion(item, marca));
+    return archivoLiquidacionM6(item);
   }
 
   private async cargarLiquidacion(tx: Prisma.TransactionClient, idRemuneracion: number) {
@@ -2000,19 +1977,7 @@ export class M6Controller {
   }
 
   private archivoComprobanteAnticipo(item: any, pagos: any[]) {
-    const neto = pagos.reduce((total, pago) => pago.estado === 'CONFIRMADO'
-      ? total.plus(pago.monto).minus(pago.reversiones.reduce((suma: Prisma.Decimal, reversion: any) => suma.plus(reversion.monto), new Prisma.Decimal(0)))
-      : total, new Prisma.Decimal(0));
-    return archivoPdf(`comprobante-anticipo-${item.id_anticipo}.pdf`, [
-      'COMPROBANTE OFICIAL DE ANTICIPO',
-      `Empleado: ${nombreCompleto(item.empleado)}`,
-      `Periodo: ${String(item.periodo.mes).padStart(2, '0')}/${item.periodo.anio}`,
-      `Monto valorizado: ${item.monto_final?.toString() || 'No disponible'}`,
-      ...pagos.map((pago) => `Pago ${pago.id_pago_remuneracion}: ${pago.monto.toString()} - ${pago.estado} - neto ${pago.estado === 'CONFIRMADO' ? pago.monto.minus(pago.reversiones.reduce((s: Prisma.Decimal, r: any) => s.plus(r.monto), new Prisma.Decimal(0))).toString() : '0'}`),
-      `Monto efectivo actual: ${neto.toString()}`,
-      `Condicion economica: ${neto.gt(0) ? 'CON PAGO EFECTIVO' : 'SIN SALDO PAGADO VIGENTE'}`,
-      `Referencia: anticipo-${item.id_anticipo}`,
-    ]);
+    return archivoComprobanteAnticipoM6(item, pagos);
   }
 
   async listarDocumentosRemuneracion(consulta: Record<string, unknown>, actor: ActorDocumentoM6) {
@@ -2115,12 +2080,7 @@ export class M6Controller {
       if (item.estado !== 'abierta') throw new ErrorAplicacion(409, 'Sólo una remuneración ABIERTA puede exportarse como cálculo preliminar');
       this.exigirAlcanceDocumento(actor, item.id_empleado);
       const revision = await this.bloqueosRemuneracion(tx, item);
-      const archivo = archivoPdf(`calculo-preliminar-no-oficial-${item.id_remuneracion}.pdf`, [
-        ...this.lineasLiquidacion(item, 'NO OFICIAL / CALCULO PRELIMINAR'),
-        '', 'BLOQUEOS', ...revision.bloqueos.map((bloqueo) => `${bloqueo.codigo}: ${bloqueo.detalle}`),
-        '', 'ADVERTENCIAS', ...revision.advertencias.map((advertencia) => `${advertencia.codigo}: ${advertencia.detalle}`),
-        `Exportado: ${new Date().toISOString()}`,
-      ]);
+      const archivo = archivoCalculoPreliminarM6(item, revision);
       await this.auditoriaDocumental.registrar(tx, { actorId: actor.id, tipoDocumento: 'REMUNERACION', idDocumento: idRemuneracion, accion: 'EXPORTACION_PRELIMINAR', condicion: 'GENERADO', metadata: { oficial: false, nombre: archivo.nombre } });
       return archivo;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
@@ -2135,7 +2095,7 @@ export class M6Controller {
     return prisma.$transaction(async (tx) => {
       const items = await tx.remuneracion.findMany({ where: { estado: 'cerrada', id_empleado: idEmpleado ?? undefined, periodo: { anio, mes } }, include: this.incluirRemuneracion, orderBy: [{ empleado: { apellido_paterno: 'asc' } }, { id_remuneracion: 'desc' }] });
       if (!items.length) throw new ErrorAplicacion(404, 'No existen remuneraciones oficiales vigentes para los filtros');
-      const archivo = archivoPdf(`remuneraciones-oficiales-${anio}-${String(mes).padStart(2, '0')}.pdf`, ['REMUNERACIONES OFICIALES / CERRADAS', `Periodo: ${String(mes).padStart(2, '0')}/${anio}`, `Cantidad: ${items.length}`, '', ...items.flatMap((item) => [`${nombreCompleto(item.empleado)} | RUT ${item.empleado.rut_empleado} | Remuneracion ${item.id_remuneracion} | Liquido ${item.liquido_preliminar?.toString() || 'No disponible'}`])]);
+      const archivo = archivoPeriodoRemuneracionesM6(items, anio, mes);
       await this.auditoriaDocumental.registrar(tx, { actorId: actor.id, tipoDocumento: 'PERIODO_REMUNERACION', idDocumento: items[0].id_periodo_remuneracion, accion: 'EXPORTACION_OFICIAL', condicion: 'GENERADO', metadata: { oficial: true, anio, mes, idEmpleado, cantidad: items.length, nombre: archivo.nombre } });
       return archivo;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });

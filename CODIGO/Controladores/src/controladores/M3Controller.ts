@@ -5,7 +5,7 @@ import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, incluirNota, incluirPago, efectoPago, fechaNegocio, sincronizarEstadoPago } from '../utilidades/finanzas';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
-import { crearPdf } from '../utilidades/pdf';
+import { archivoComprobantePagoM3 } from '../m3/comprobantePagoPdf';
 import { reducirCompromisoPorPago } from '../utilidades/creditoM8';
 
 /** M3 CU42–CU58: pagos, reversas, saldos a favor y conciliación. */
@@ -150,14 +150,7 @@ export class M3Controller {
     const rut = cliente.rut_cliente?.trim(); const nombre = cliente.nombre_razon_social_referencia?.trim();
     const medio = pago.medio_pago.nombre_medio_pago?.trim(); const moneda = pago.moneda.codigo_moneda?.trim();
     if (!rut || !nombre || !pago.fecha_pago || !medio || !moneda || !pago.monto_pago.gt(0)) throw new ErrorAplicacion(409,'El pago no tiene todos los antecedentes obligatorios para generar el comprobante');
-    const adicionales = [
-      pago.categoria_pago?.nombre ? `Categoria: ${pago.categoria_pago.nombre}` : '',
-      pago.cantidad_cuotas ? `Cuotas: ${pago.cantidad_cuotas}` : '',
-      pago.asignacion_pago_cliente?.documento_tributario ? `Documento: ${pago.asignacion_pago_cliente.documento_tributario.folio_documento}` : '',
-      pago.observacion ? `Observacion: ${pago.observacion}` : '',
-    ].filter(Boolean);
-    const pdf = crearPdf(['Comprobante de pago',`Pago: ${idPago}`,`RUT cliente: ${rut}`,`Cliente: ${nombre}`,`Fecha: ${pago.fecha_pago.toISOString().slice(0,10)}`,`Medio: ${medio}`,`Monto: ${pago.monto_pago.toString()}`,`Moneda: ${moneda}`,`Monto vigente: ${pago.montoEfectivo}`,`Estado: ${pago.anulacion_pago?'Anulado':pago.reversion_pago.length?'Con reversion':pago.estado_verificacion}`,...adicionales]).toString('base64');
-    return { nombre: `comprobante-pago-${idPago}.pdf`, contenido: `data:application/pdf;base64,${pdf}` };
+    return archivoComprobantePagoM3(pago);
   }
 
   async conciliarPago(idPago: number, entrada: Record<string, unknown>, responsable: string) {

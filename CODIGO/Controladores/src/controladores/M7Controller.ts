@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, efectoPago, fechaNegocio, incluirNota } from '../utilidades/finanzas';
-import { archivoPdf } from '../utilidades/pdf';
+import { crearInformeDashboardM7 } from '../m7/informeDashboardPdf';
 
 type Consulta = Record<string, unknown>;
 export type EstadoIndicadorM7 = 'VALIDO' | 'SIN_RESULTADOS' | 'DATOS_INSUFICIENTES' | 'FUENTE_NO_DISPONIBLE' | 'DESACTUALIZADO' | 'PARCIALMENTE_DISPONIBLE' | 'SIN_PERMISO' | 'ERROR_CALCULO' | 'NO_APLICA' | 'CONFIGURACION_PENDIENTE';
@@ -75,6 +75,7 @@ const inicioBucket = (fecha: Date, granularidad: 'dia' | 'semana' | 'mes') => {
 };
 const esServicioInstalacion = (tipo: string | null | undefined) => normalizarTexto(tipo) === 'instalacion';
 const redondear = (valor: number, decimales = 2) => Number(valor.toFixed(decimales));
+export const equivalenteClpCxc = (saldo: number, moneda: string, tipoCambio: number | null) => moneda === 'CLP' ? saldo : tipoCambio !== null && tipoCambio > 0 ? redondear(saldo * tipoCambio) : null;
 const slugParametro = (valor: unknown) => String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 22);
 const claveMes = (fecha: Date) => `${fecha.getUTCFullYear()}-${String(fecha.getUTCMonth() + 1).padStart(2, '0')}`;
 
@@ -99,19 +100,6 @@ export interface ProveedorCreditoM8 {
 export interface ProveedorBloqueosOperacionales {
   consultarBloqueos(consulta: Consulta): Promise<unknown>;
 }
-const lineasPdf = (valor: unknown, prefijo = '', profundidad = 0): string[] => {
-  if (profundidad > 4) return [`${prefijo}: detalle disponible en pantalla`];
-  if (valor === null || valor === undefined) return [`${prefijo}: No disponible`];
-  if (typeof valor !== 'object') return [`${prefijo}: ${String(valor)}`];
-  if (Array.isArray(valor)) {
-    if (!valor.length) return [`${prefijo}: Sin registros`];
-    return valor.slice(0, 40).flatMap((item, indice) => lineasPdf(item, `${prefijo} ${indice + 1}`.trim(), profundidad + 1));
-  }
-  return Object.entries(valor as Record<string, unknown>)
-    .filter(([clave]) => clave !== 'actualizadoEn' && clave !== 'permiso')
-    .flatMap(([clave, contenido]) => lineasPdf(contenido, prefijo ? `${prefijo} / ${clave}` : clave, profundidad + 1));
-};
-
 export class M7Controller {
   constructor(private creditoM8?: ProveedorCreditoM8, private readonly bloqueosOwner?: ProveedorBloqueosOperacionales) {}
   conectarCreditoM8(proveedor: ProveedorCreditoM8) { this.creditoM8 = proveedor; }
@@ -401,7 +389,8 @@ export class M7Controller {
         const vencimiento = nota.fecha_vencimiento;
         const diasAtraso = vencimiento && vencimiento < fechaReferencia ? diasCalendario(vencimiento, fechaReferencia) : vencimiento ? 0 : null;
         const condicion = !vencimiento ? 'SIN_FECHA' : vencimiento < fechaReferencia ? 'VENCIDA' : vencimiento >= periodo.hastaExclusiva ? 'FUTURA' : 'VIGENTE';
-        return { idNota: nota.id_nota_venta, numeroNota: nota.numero_nota_venta, idCliente: nota.ficha_cliente.cliente_financiero.id_cliente_financiero, cliente: nota.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, moneda: nota.moneda.codigo_moneda, saldo: calculo.saldoPendiente, fechaVencimiento: vencimiento ? fechaIso(vencimiento) : null, diasAtraso, condicion, estadoOwner: nota.estado_pago, destinoCliente: rutaCliente(nota.ficha_cliente.cliente_financiero) };
+        const equivalenteClp = equivalenteClpCxc(calculo.saldoPendiente, nota.moneda.codigo_moneda, nota.tipo_cambio_usado?.gt(0) ? Number(nota.tipo_cambio_usado) : null);
+        return { idNota: nota.id_nota_venta, numeroNota: nota.numero_nota_venta, idCliente: nota.ficha_cliente.cliente_financiero.id_cliente_financiero, cliente: nota.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, moneda: nota.moneda.codigo_moneda, saldo: calculo.saldoPendiente, equivalenteClp, fechaVencimiento: vencimiento ? fechaIso(vencimiento) : null, diasAtraso, condicion, estadoOwner: nota.estado_pago, destinoCliente: rutaCliente(nota.ficha_cliente.cliente_financiero) };
       });
       const numero = (valor: unknown) => valor === undefined ? null : Number(valor);
       const idCliente = numero(consulta.idCliente); const saldoMin = numero(consulta.saldoMin); const saldoMax = numero(consulta.saldoMax); const condicion = String(consulta.condicion || '').trim().toUpperCase(); const estadoOwner = String(consulta.estadoOwner || '').trim().toLowerCase();
@@ -1241,15 +1230,12 @@ export class M7Controller {
     const datos = await fuente.cargar();
     const periodo = resolverPeriodoM7(consulta);
     const generado = new Date();
-    const filtros = Object.entries(consulta).filter(([clave]) => ['anio', 'mes', 'desde', 'hasta'].includes(clave)).map(([clave, valor]) => `${clave}=${String(valor)}`).join(', ') || 'Período vigente de la consulta';
-    return archivoPdf(`dashboard-${origen}-${periodo.etiquetaDesde}-${periodo.etiquetaHasta}.pdf`, [
-      fuente.titulo,
-      `Puertas Blindadas | Dashboard financiero`,
-      `Generado: ${generado.toISOString()}`,
-      `Periodo: ${periodo.etiquetaDesde} a ${periodo.etiquetaHasta}`,
-      `Filtros: ${filtros}`,
-      '',
-      ...lineasPdf(datos),
-    ]);
+    const etiquetasFiltro: Record<string, string> = { anio: 'Año', mes: 'Mes', desde: 'Desde', hasta: 'Hasta' };
+    const filtros = Object.entries(consulta)
+      .filter(([clave]) => clave in etiquetasFiltro)
+      .map(([clave, valor]) => `${etiquetasFiltro[clave]}: ${String(valor)}`)
+      .join(' | ') || 'Período vigente de la consulta';
+    const historico = ['panel', 'ventas', 'liquidez'].includes(origen) ? await this.consultarHistoricoPanelGeneral({ ...consulta, meses: 12 }, permisos) : undefined;
+    return crearInformeDashboardM7({ origen, tituloContextual: fuente.titulo, periodo, filtros, generadoEn: generado, datos, panel: origen === 'panel' ? datos : undefined, historico });
   }
 }

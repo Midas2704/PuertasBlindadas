@@ -166,7 +166,7 @@ test('M6 correcciones finales post-auditoria', async (t) => {
       const abril = await modulo.calcularRemuneracion({ idEmpleado: empleado.id, anio: 2199, mes: 4 }, usuario.usuario_id_usuario);
       if (!ids.periodos.includes(abril.remuneracion.periodo.id)) ids.periodos.push(abril.remuneracion.periodo.id);
       await modulo.cerrarRemuneracion(abril.remuneracion.id, usuario.usuario_id_usuario);
-      await modulo.cerrarPeriodoRemuneracion(2199, 4, usuario.usuario_id_usuario);
+      await prisma.periodo_remuneracion.update({ where: { id_periodo_remuneracion: abril.remuneracion.periodo.id }, data: { cerrado_en: new Date(), cerrado_por: usuario.usuario_id_usuario } });
       const antes = await modulo.obtenerRemuneracion(abril.remuneracion.id);
       await prisma.configuracion_concepto_remuneracion.updateMany({ where: { id_concepto: haberHistorico.id_concepto_remuneracion }, data: { valor: 999 } });
       await assert.rejects(modulo.calcularRemuneracion({ idEmpleado: empleado.id, anio: 2199, mes: 4 }, usuario.usuario_id_usuario), (error) => error.estado === 409);

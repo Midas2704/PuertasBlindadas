@@ -49,12 +49,12 @@ function buscarColeccion(origen: unknown, clave: string, profundidad = 0): Recor
 
 function usarHistorico(anio: number, mes: number, version: number) {
   const [datos, setDatos] = useState<Historico | null>(null); const [error, setError] = useState(''); const [cargando, setCargando] = useState(true);
-  useEffect(() => { const abort = new AbortController(); setCargando(true); setError(''); solicitarFinanzas(`/dashboard-m7/historico?anio=${anio}&mes=${mes}&meses=12`, { signal: abort.signal }).then(async respuesta => { const cuerpo = await respuesta.json(); if (!respuesta.ok) throw new Error(cuerpo.error || 'No fue posible consultar el histórico'); setDatos(cuerpo); }).catch(causa => { if (!abort.signal.aborted) setError((causa as Error).message); }).finally(() => { if (!abort.signal.aborted) setCargando(false); }); return () => abort.abort(); }, [anio, mes, version]);
+  useEffect(() => { const abort = new AbortController(); setCargando(true); setError(''); solicitarFinanzas(`/dashboard-m7/historico?anio=${anio}&mes=${mes}&meses=13`, { signal: abort.signal }).then(async respuesta => { const cuerpo = await respuesta.json(); if (!respuesta.ok) throw new Error(cuerpo.error || 'No fue posible consultar el histórico'); setDatos(cuerpo); }).catch(causa => { if (!abort.signal.aborted) setError((causa as Error).message); }).finally(() => { if (!abort.signal.aborted) setCargando(false); }); return () => abort.abort(); }, [anio, mes, version]);
   return { datos, error, cargando };
 }
 
 function comparar(meses: MesHistorico[], clave: keyof MesHistorico) {
-  const actual = numero(meses.at(-1)?.[clave]); const anterior = numero(meses.at(-2)?.[clave]); const anual = numero(meses.at(-12)?.[clave]);
+  const actual = numero(meses.at(-1)?.[clave]); const anterior = numero(meses.at(-2)?.[clave]); const anual = numero(meses.length === 13 ? meses[0]?.[clave] : undefined);
   const calculo = (base: number | null) => actual === null || base === null || base === 0 ? null : { diferencia: actual - base, porcentaje: (actual - base) / Math.abs(base) * 100 };
   return { actual, anterior: calculo(anterior), anual: calculo(anual) };
 }
@@ -74,10 +74,10 @@ function ResumenCorte({ titulo, bloque, ruta, claves }: { titulo: string; bloque
 
 export default function PanelGeneralM7({ compacto = false }: { compacto?: boolean }) {
   const consulta = usarConsultaM7('/dashboard-m7', true); const [versionHistorico, recargarHistorico] = useState(0); const historico = usarHistorico(consulta.anio, consulta.mes, versionHistorico);
-  const bloques = (consulta.datos?.bloques || {}) as Record<string, RespuestaM7>; const meses = historico.datos?.meses || [];
+  const bloques = (consulta.datos?.bloques || {}) as Record<string, RespuestaM7>; const mesesComparacion = historico.datos?.meses || []; const meses = mesesComparacion.slice(-12);
   const periodoTexto = useMemo(() => new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric' }).format(new Date(consulta.anio, consulta.mes - 1, 1)), [consulta.anio, consulta.mes]);
   const sinComparacion = { actual: null, anterior: null, anual: null }; const disponible = historico.datos?.disponibilidad || {};
-  const resultado = disponible.resultadoGerencial ? comparar(meses, 'resultadoGerencial') : sinComparacion; const flujo = disponible.flujo ? comparar(meses, 'flujoNeto') : sinComparacion; const cxc = buscarNumero(bloques.cuentasCobrar, ['saldo']); const cxp = buscarNumero(bloques.cuentasPagar, ['saldo']);
+  const resultado = disponible.resultadoGerencial ? comparar(mesesComparacion, 'resultadoGerencial') : sinComparacion; const flujo = disponible.flujo ? comparar(mesesComparacion, 'flujoNeto') : sinComparacion; const cxc = buscarNumero(bloques.cuentasCobrar, ['saldo']); const cxp = buscarNumero(bloques.cuentasPagar, ['saldo']);
   const clientes = (historico.datos?.principalesClientes || []).map(cliente => ({ etiqueta: cliente.cliente, monto: cliente.monto, participacion: cliente.participacionPorcentual }));
   const proyectos = buscarColeccion(bloques.margenProyectos, 'proyectos').map((proyecto, indice) => ({ etiqueta: String(proyecto.codigo || proyecto.nombre || `Proyecto ${indice + 1}`), ingresos: numero(proyecto.ingresosAtribuibles), costos: numero(proyecto.costosDirectosAtribuibles), margen: numero(proyecto.margenDirecto) })).filter(proyecto => proyecto.ingresos !== null || proyecto.costos !== null || proyecto.margen !== null).sort((a, b) => (b.ingresos || 0) - (a.ingresos || 0)).slice(0, 8);
   const costosProyecto = buscarColeccion(bloques.costosFabricacion, 'proyectos');

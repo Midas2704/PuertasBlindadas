@@ -71,11 +71,11 @@ test('M7 capacidades existentes remapeadas CU233-CU246', async t => {
   const decodificar = archivo => Buffer.from(archivo.contenido.split(',')[1], 'base64').toString('latin1');
   const pdfPanel = await modulo.descargarPdfContextual({ origen: 'panel', consulta }, ['CU215', 'CU233', 'CU245']);
   const pdfMargen = await modulo.descargarPdfContextual({ origen: 'margen', consulta }, ['CU233', 'CU245']);
-  await t.test('18 genera PDF de Panel', () => assert.match(decodificar(pdfPanel), /Panel General/));
+  await t.test('18 genera informe gerencial de Panel', () => assert.match(decodificar(pdfPanel), /Informe Financiero Gerencial/));
   await t.test('19 genera PDF de análisis especializado', () => assert.match(decodificar(pdfMargen), /Margen Directo/));
   await t.test('20 PDF conserva período y filtros', () => assert.match(decodificar(pdfMargen), /2042-04-01 a 2042-04-30/));
-  await t.test('21 PDF conserva advertencias y calidad', () => assert.match(decodificar(pdfMargen), /DATOS_INSUFICIENTES/));
-  await t.test('22 PDF contiene fecha y hora', () => assert.match(decodificar(pdfMargen), /Generado: 20/));
+  await t.test('21 PDF presenta cobertura sin estados técnicos crudos', () => { assert.match(decodificar(pdfMargen), /atribución inequívoca/); assert.doesNotMatch(decodificar(pdfMargen), /DATOS_INSUFICIENTES/); });
+  await t.test('22 PDF contiene fecha completa y hora', () => assert.match(decodificar(pdfMargen), /Generado: \d{2}-\d{2}-\d{4},/));
   await t.test('23 vista sin CU245 no descarga', async () => assert.rejects(modulo.descargarPdfContextual({ origen: 'margen', consulta }, ['CU233']), e => e.estado === 403));
   await t.test('24 CU245 sin permiso de origen no descarga', async () => assert.rejects(modulo.descargarPdfContextual({ origen: 'margen', consulta }, ['CU245']), e => e.estado === 403));
   await t.test('25 Panel PDF no filtra bloques no autorizados', async () => assert.doesNotMatch(decodificar(await modulo.descargarPdfContextual({ origen: 'panel', consulta }, ['CU215', 'CU216', 'CU245'])), new RegExp(proyectoUtil.codigo_proyecto_financiero)));

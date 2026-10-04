@@ -92,7 +92,14 @@ test('M7 cierre de hallazgos CU225 CU226 CU227 CU230 CU231 CU232 y navegación',
   await t.test('27 CU231 parte de liquidez acumulada real', () => assert.ok(liquidez.proyeccion.valor.saldosFinales.length > 0));
   await t.test('28 CU231 separa compromisos y liquidez proyectada', () => assert.ok(liquidez.proyeccion.valor.eventos.length > 0));
   await t.test('29 CU231 no presenta compromisos futuros como realizados', () => assert.equal(liquidez.proyeccion.valor.eventos.some(f => Object.hasOwn(f, 'saldo')), false));
-  const riesgo = await modulo.consultarRiesgoDeficit(consulta, ['CU232']);
+  const buscarParametrosOriginal = prisma.parametro_remuneracional.findMany;
+  let riesgo;
+  try {
+    prisma.parametro_remuneracional.findMany = async () => [];
+    riesgo = await modulo.consultarRiesgoDeficit(consulta, ['CU232']);
+  } finally {
+    prisma.parametro_remuneracional.findMany = buscarParametrosOriginal;
+  }
   await t.test('30 CU232 productivo queda condicionado', () => { assert.equal(riesgo.estado, 'CONFIGURACION_PENDIENTE'); assert.equal(riesgo.primerDeficit.valor, null); });
 
   const componente = readFileSync(resolve('../Vistas/src/views/DashboardM7/componentes.tsx'), 'utf8');

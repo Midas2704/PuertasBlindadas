@@ -11,10 +11,19 @@ const claves = datos => datos.meses.map(fila => fila.periodo);
 test('M7 histórico gerencial de doce meses', async t => {
   const controlador = new M7Controller();
   const octubre = await controlador.consultarHistoricoPanelGeneral({ anio: 2026, mes: 10, meses: 12 }, permisos);
+  const octubreComparativo = await controlador.consultarHistoricoPanelGeneral({ anio: 2026, mes: 10, meses: 13 }, permisos);
   const abril = await controlador.consultarHistoricoPanelGeneral({ anio: 2026, mes: 4, meses: 12 }, permisos);
   const vacio = await controlador.consultarHistoricoPanelGeneral({ anio: 2190, mes: 12, meses: 12 }, permisos);
 
   await t.test('devuelve exactamente doce períodos para octubre 2026', () => assert.deepEqual(claves(octubre), ['2025-11','2025-12','2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10']));
+  await t.test('comparación interanual de octubre 2026 incluye octubre 2025 y conserva doce meses visibles', () => {
+    assert.deepEqual(claves(octubreComparativo), ['2025-10','2025-11','2025-12','2026-01','2026-02','2026-03','2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10']);
+    assert.deepEqual(claves(octubreComparativo).slice(-12), claves(octubre));
+    const fuente = readFileSync(resolve('../Vistas/src/views/DashboardM7/PanelGeneralM7.tsx'), 'utf8');
+    assert.match(fuente, /historico\?anio=\$\{anio\}&mes=\$\{mes\}&meses=13/);
+    assert.match(fuente, /mesesComparacion\.slice\(-12\)/);
+    assert.match(fuente, /meses\.length === 13 \? meses\[0\]/);
+  });
   await t.test('cambiar el corte desplaza la ventana completa', () => assert.deepEqual(claves(abril), ['2025-05','2025-06','2025-07','2025-08','2025-09','2025-10','2025-11','2025-12','2026-01','2026-02','2026-03','2026-04']));
   await t.test('orden cronológico estable', () => assert.deepEqual(claves(octubre), [...claves(octubre)].sort()));
   await t.test('mes sin hechos no fabrica costos ni resultado cero', () => { assert.ok(vacio.meses.every(fila => fila.ventasNetas === null && fila.costosDirectos === null && fila.resultadoGerencial === null)); });

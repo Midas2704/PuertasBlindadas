@@ -45,14 +45,15 @@ after(async () => {
 
 test('M8 CU259 consulta solicitudes crediticias', async t => {
   await preparar();
-  const todas = await modulo.listarSolicitudes({}, autorizado);
+  const ambito = { desde: '2042-01-01', hasta: '2042-12-31' };
+  const todas = await modulo.listarSolicitudes(ambito, autorizado);
   await t.test('01 usuario autorizado consulta bandeja', () => assert.equal(todas.total, 6));
   await t.test('02 usuario no autorizado recibe rechazo', () => assert.rejects(modulo.listarSolicitudes({}, denegado), error => error.estado === 403));
   await t.test('03 conjunto vacío es válido', async () => assert.equal((await modulo.listarSolicitudes({ desde: '2099-01-01' }, autorizado)).total, 0));
   await t.test('04 distingue INICIAL y EXCEPCION', () => assert.deepEqual(new Set(todas.solicitudes.map(item => item.tipo)), new Set(['INICIAL', 'EXCEPCION'])));
   for (const [indice, estado] of ['BORRADOR', 'PENDIENTE', 'APROBADA', 'RECHAZADA', 'CANCELADA'].entries()) await t.test(`${String(indice + 5).padStart(2, '0')} lee ${estado}`, () => assert.ok(todas.solicitudes.some(item => item.estado === estado)));
-  await t.test('10 filtro por estado', async () => assert.ok((await modulo.listarSolicitudes({ estado: 'APROBADA' }, autorizado)).solicitudes.every(item => item.estado === 'APROBADA')));
-  await t.test('11 filtro por tipo', async () => assert.ok((await modulo.listarSolicitudes({ tipo: 'EXCEPCION' }, autorizado)).solicitudes.every(item => item.tipo === 'EXCEPCION')));
+  await t.test('10 filtro por estado', async () => assert.ok((await modulo.listarSolicitudes({ ...ambito, estado: 'APROBADA' }, autorizado)).solicitudes.every(item => item.estado === 'APROBADA')));
+  await t.test('11 filtro por tipo', async () => assert.ok((await modulo.listarSolicitudes({ ...ambito, tipo: 'EXCEPCION' }, autorizado)).solicitudes.every(item => item.tipo === 'EXCEPCION')));
   await t.test('12 filtro por Cliente', async () => { const r = await modulo.listarSolicitudes({ cliente: String(fichas[1].id_ficha_cliente) }, autorizado); assert.equal(r.total, 1); assert.equal(r.solicitudes[0].cliente.idFicha, fichas[1].id_ficha_cliente); });
   await t.test('13 abre detalle autorizado', async () => assert.equal((await modulo.obtenerSolicitud(ids.solicitudes[0], autorizado)).id, ids.solicitudes[0]));
   await t.test('14 detalle fuera de alcance no se entrega', () => assert.rejects(modulo.obtenerSolicitud(ids.solicitudes[0], denegado), error => error.estado === 403));
