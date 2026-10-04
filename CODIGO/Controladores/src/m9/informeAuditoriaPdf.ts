@@ -49,6 +49,7 @@ const solicitanteInforme = (scope: ScopeM9) => {
 };
 
 export const referenciaInformeM9 = (evento: EventoPresentadoM9) => {
+  // MIDAS: respetamos el enmascarado resuelto por M9; presentación nunca recupera datos restringidos.
   const tipo = evento.referencia?.tipo, id = evento.referencia?.id;
   if (id === null || id === undefined || id === '' || id === '***') return id === '***' ? 'Restringida' : '—';
   return tipo ? `${humanizarM9(tipo)} ${String(id)}` : String(id);
@@ -77,6 +78,7 @@ const filtrosInforme = (filtros: FiltrosM9) => {
 };
 
 export function crearInformeAuditoriaM9(eventosEntrada: EventoPresentadoM9[], filtros: FiltrosM9, scope: ScopeM9, generadoEn: Date) {
+  // MIDAS: el informe trabaja con eventos ya filtrados y autorizados, sin volver a consultar evidencia.
   const eventos = eventosEntrada.map(evento => ({ ...evento, resultadoNormalizado: String(evento.resultado || '').toUpperCase(), moduloNormalizado: String(evento.modulo || 'SIN_MODULO').toUpperCase() }));
   const resultadosBase = ['EXITOSO', 'RECHAZADO', 'FALLIDO'];
   const plurales: Record<string, string> = { EXITOSO: 'Exitosos', RECHAZADO: 'Rechazados', FALLIDO: 'Fallidos' };

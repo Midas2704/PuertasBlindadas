@@ -253,7 +253,7 @@ const dividirTextoInforme = (valor: unknown, ancho: number, tamano = 8, maximoLi
   return lineas.length ? lineas : ['No disponible para este período'];
 };
 
-/** Documento multipágina basado en bloques visuales; sólo presenta un modelo ya calculado. */
+// MIDAS: este renderer sólo dibuja; las reglas y los montos deben llegar resueltos por cada módulo.
 export function crearDocumentoGerencialPdf(documento: DocumentoGerencialPdf) {
   const anchoPagina = 595, altoPagina = 842, margen = 42, anchoUtil = 511;
   const paginas = documento.paginas.map((pagina, indicePagina) => {

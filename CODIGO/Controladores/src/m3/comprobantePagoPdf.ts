@@ -30,6 +30,7 @@ export const archivoComprobantePagoM3 = (pago: Registro) => {
   const documento = asignacion?.documento_tributario;
   const moneda = String(pago.moneda.codigo_moneda).toUpperCase();
   const reversiones = pago.reversion_pago || [];
+  // MIDAS: una reversa no borra el pago original; el comprobante presenta su efecto vigente.
   const totalRevertido = reversiones.reduce((total: number, item: Registro) => total + Number(item.monto), 0);
   const neto = pago.anulacion_pago ? 0 : Math.max(0, Number(pago.monto_pago) - totalRevertido);
   const estado = pago.anulacion_pago ? 'Anulado' : reversiones.length ? 'Con reversión' : humanizar(pago.estado_verificacion);
@@ -74,6 +75,7 @@ export const archivoComprobantePagoM3 = (pago: Registro) => {
       ], filas: [
         { dato: 'Monto original de la operación', valor: monto(nota.monto_total, nota.moneda?.codigo_moneda || moneda) },
         { dato: 'Monto aplicado', valor: monto(asignacion.monto_asignado, moneda) },
+        // MIDAS: usamos la tasa guardada con el pago, nunca una cotización actual.
         ...(pago.tipo_cambio_usado ? [{ dato: 'Tipo de cambio histórico', valor: Number(pago.tipo_cambio_usado).toLocaleString('es-CL', { maximumFractionDigits: 4 }) }] : []),
         ...(pago.monto_convertido ? [{ dato: 'Equivalente histórico en CLP', valor: monto(pago.monto_convertido, 'CLP') }] : []),
         { dato: 'Condición', valor: esParcial ? 'Pago parcial' : 'Pago total de la operación' },

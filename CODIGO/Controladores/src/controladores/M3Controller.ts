@@ -41,7 +41,7 @@ export class M3Controller {
 
   async recalcularSaldo(tx:Prisma.TransactionClient,idNota:number) {
     const nota=await tx.nota_venta.findUniqueOrThrow({where:{id_nota_venta:idNota},include:incluirNota});
-    // CU50: actualizamos el estado del pago; el comercial se queda como está.
+    // MIDAS: una reversa cambia el pago, no el estado comercial acordado para la venta.
     return sincronizarEstadoPago(tx,nota);
   }
   async procesarExcedente(tx:Prisma.TransactionClient,idNota:number,idReversion:number,entrada:Record<string,unknown>) {

@@ -74,6 +74,7 @@ function ResumenCorte({ titulo, bloque, ruta, claves }: { titulo: string; bloque
 
 export default function PanelGeneralM7({ compacto = false }: { compacto?: boolean }) {
   const consulta = usarConsultaM7('/dashboard-m7', true); const [versionHistorico, recargarHistorico] = useState(0); const historico = usarHistorico(consulta.anio, consulta.mes, versionHistorico);
+  // MIDAS: pedimos 13 meses para comparar año contra año, pero los gráficos conservan 12 visibles.
   const bloques = (consulta.datos?.bloques || {}) as Record<string, RespuestaM7>; const mesesComparacion = historico.datos?.meses || []; const meses = mesesComparacion.slice(-12);
   const periodoTexto = useMemo(() => new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric' }).format(new Date(consulta.anio, consulta.mes - 1, 1)), [consulta.anio, consulta.mes]);
   const sinComparacion = { actual: null, anterior: null, anual: null }; const disponible = historico.datos?.disponibilidad || {};

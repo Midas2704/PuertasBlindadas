@@ -45,6 +45,7 @@ const columnasCredito: ColumnaCsv<Registro>[] = [
 ];
 
 export const archivoCreditoM8Csv = (origen: string, filas: Registro[]) => {
+  // MIDAS: la exportación presenta decisiones de M8; no vuelve a calcular cupos ni exposición.
   const columnas = origen === 'solicitudes' ? columnasSolicitudes : origen === 'cliente' ? columnasCliente : columnasCredito;
   return archivoCsvAdministrativo(`credito-${origen}.csv`, filas, columnas);
 };

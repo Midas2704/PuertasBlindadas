@@ -75,6 +75,7 @@ const inicioBucket = (fecha: Date, granularidad: 'dia' | 'semana' | 'mes') => {
 };
 const esServicioInstalacion = (tipo: string | null | undefined) => normalizarTexto(tipo) === 'instalacion';
 const redondear = (valor: number, decimales = 2) => Number(valor.toFixed(decimales));
+// MIDAS: sin una tasa histórica válida, la deuda extranjera no entra al consolidado CLP.
 export const equivalenteClpCxc = (saldo: number, moneda: string, tipoCambio: number | null) => moneda === 'CLP' ? saldo : tipoCambio !== null && tipoCambio > 0 ? redondear(saldo * tipoCambio) : null;
 const slugParametro = (valor: unknown) => String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 22);
 const claveMes = (fecha: Date) => `${fecha.getUTCFullYear()}-${String(fecha.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -468,6 +469,7 @@ export class M7Controller {
     let flujoHistorico;
     try {
       const registrados = await prisma.movimiento_financiero.findMany({ where: { fecha_movimiento: { lt: periodo.hastaExclusiva }, estado_movimiento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true, origen_movimiento_financiero: true }, orderBy: [{ fecha_movimiento: 'asc' }, { id_movimiento_financiero: 'asc' }] });
+      // MIDAS: Caja Chica tiene su propio owner y no forma parte de esta posición de liquidez.
       const movimientos = registrados.filter(m => !normalizarTexto(m.tipo_movimiento_financiero).includes('caja chica') && !m.origen_movimiento_financiero.some(o => normalizarTexto(o.entidad_origen).includes('caja chica')));
       const granularidadEntrada = normalizarTexto(String(consulta.granularidad || 'dia'));
       if (!['dia', 'semana', 'mes'].includes(granularidadEntrada)) throw new ErrorAplicacion(400, 'Granularidad inválida; use dia, semana o mes');
@@ -1026,6 +1028,7 @@ export class M7Controller {
   }
 
   async consultarExposicionCreditoM7(consulta: Consulta) {
+    // MIDAS: Crédito pertenece a M8; el Dashboard consume su contrato y no recalcula cupos.
     if (!this.creditoM8) return { estado: 'FUENTE_NO_DISPONIBLE' as const, exposicion: indicador('FUENTE_NO_DISPONIBLE', null, 'Información de Crédito no disponible'), owner: 'M8' };
     try { return { estado: 'VALIDO' as const, exposicion: indicador('VALIDO', await this.creditoM8.consultarExposicion(consulta), 'Contrato M8→M7; M7 no recalcula cupo ni Crédito comprometido'), owner: 'M8' }; }
     catch { return { estado: 'FUENTE_NO_DISPONIBLE' as const, exposicion: indicador('FUENTE_NO_DISPONIBLE', null, 'Información de Crédito no disponible'), owner: 'M8' }; }

@@ -1,6 +1,7 @@
 import { archivoCsvAdministrativo } from '../utilidades/csv';
 import { ejecutorInformeM9, EventoPresentadoM9, fechaInformeM9, humanizarM9, referenciaInformeM9 } from './informeAuditoriaPdf';
 
+// MIDAS: exportamos el conjunto ya autorizado; este helper no amplía el alcance de Auditoría.
 export const archivoAuditoriaM9Csv = (eventos: EventoPresentadoM9[]) => archivoCsvAdministrativo('auditoria-m9.csv', eventos, [
   { encabezado: 'Fecha y hora', valor: evento => fechaInformeM9(evento.ocurrencia) },
   { encabezado: 'Módulo', valor: evento => humanizarM9(evento.modulo) },

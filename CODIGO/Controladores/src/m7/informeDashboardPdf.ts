@@ -67,12 +67,14 @@ const grafico = (titulo: string, categorias: string[], series: any[], formato: '
 
 export const ordenarPagosRecientes = (pagos: Registro[]) => [...pagos].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
 
+// MIDAS: agrupamos sólo para dibujar; la proyección conserva cada evento individual.
 export const agruparEventosProyeccion = (eventos: Registro[]) => [...eventos.reduce<Map<string, { fecha: string; cambio: number; liquidezProyectada: number | null }>>((mapa, item) => {
   const fecha = String(item.fecha || ''); const actual = mapa.get(fecha) || { fecha, cambio: 0, liquidezProyectada: numero(item.liquidezProyectada) };
   actual.cambio += Number(item.cambio || 0); actual.liquidezProyectada = numero(item.liquidezProyectada); mapa.set(fecha, actual); return mapa;
 }, new Map()).values()].sort((a, b) => a.fecha.localeCompare(b.fecha));
 
 export const resumirCarteraConsolidable = (cartera: Registro[]) => {
+  // MIDAS: sin equivalente CLP válido, la deuda se informa aparte y no entra al ranking consolidado.
   const consolidables = cartera.filter(item => numero(item.equivalenteClp) !== null);
   const noConsolidables = cartera.filter(item => String(item.moneda || 'CLP') !== 'CLP' && numero(item.equivalenteClp) === null);
   const deudaClpPorCliente = [...consolidables.reduce<Map<string, number>>((mapa, item) => {
@@ -271,6 +273,7 @@ const paginasContextuales = (origen: string, titulo: string, datosEntrada: unkno
     const saldoFinal = lista(proyeccion.saldosFinales).find(item => item.moneda === 'CLP');
     const eventosAgrupados = agruparEventosProyeccion(eventos);
     const resumenProyeccion = resumirProyeccionClp(eventos, ingresos, egresos, saldoFinal || {});
+    // MIDAS: esta posición nace de movimientos registrados; no se presenta como saldo bancario.
     const posicionAcumulada = numero(liquidezActual.liquidez) ?? resumenProyeccion.base;
     paginas.push({ titulo: 'Liquidez y Flujo', subtitulo: 'Movimientos realizados y posición acumulada calculada', bloques: [
       { tipo: 'tarjetas', tarjetas: [

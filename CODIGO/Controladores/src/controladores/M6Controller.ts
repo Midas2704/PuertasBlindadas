@@ -1964,6 +1964,7 @@ export class M6Controller {
   private async cargarLiquidacion(tx: Prisma.TransactionClient, idRemuneracion: number) {
     const item = await tx.remuneracion.findUnique({ where: { id_remuneracion: idRemuneracion }, include: this.incluirRemuneracion });
     if (!item) throw new ErrorAplicacion(404, 'Remuneración no encontrada');
+    // MIDAS: una liquidación reemplazada sigue siendo un documento histórico consultable.
     if (!['cerrada', 'reemplazada'].includes(item.estado)) throw new ErrorAplicacion(409, 'La remuneración no posee una liquidación oficial');
     return item;
   }
@@ -2024,6 +2025,7 @@ export class M6Controller {
           await this.repositorioPago.bloquearRemuneracion(tx, idEntrada);
           let item = await this.cargarLiquidacion(tx, idEntrada);
           if (item.estado === 'reemplazada') {
+            // MIDAS: el reenvío parte del histórico solicitado, pero entrega la liquidación oficial vigente.
             const vigente = await tx.remuneracion.findFirst({ where: { id_empleado: item.id_empleado, id_periodo_remuneracion: item.id_periodo_remuneracion, estado: 'cerrada' }, include: this.incluirRemuneracion, orderBy: { id_remuneracion: 'desc' } });
             if (!vigente) throw new ErrorAplicacion(409, 'No existe una liquidación oficial vigente para reenviar');
             item = vigente; id = item.id_remuneracion;
@@ -2093,6 +2095,7 @@ export class M6Controller {
     const idEmpleado = actor.alcanceEmpleadoId ?? idEmpleadoEntrada;
     if (actor.alcanceEmpleadoId !== null && actor.alcanceEmpleadoId !== undefined && idEmpleadoEntrada && idEmpleadoEntrada !== actor.alcanceEmpleadoId) this.exigirAlcanceDocumento(actor, idEmpleadoEntrada);
     return prisma.$transaction(async (tx) => {
+      // MIDAS: el informe oficial incluye la versión vigente; los reemplazos quedan en la consulta histórica.
       const items = await tx.remuneracion.findMany({ where: { estado: 'cerrada', id_empleado: idEmpleado ?? undefined, periodo: { anio, mes } }, include: this.incluirRemuneracion, orderBy: [{ empleado: { apellido_paterno: 'asc' } }, { id_remuneracion: 'desc' }] });
       if (!items.length) throw new ErrorAplicacion(404, 'No existen remuneraciones oficiales vigentes para los filtros');
       const archivo = archivoPeriodoRemuneracionesM6(items, anio, mes);

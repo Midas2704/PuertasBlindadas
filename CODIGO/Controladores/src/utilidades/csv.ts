@@ -5,6 +5,7 @@ const textoCelda = (valor: unknown) => {
   if (typeof valor === 'boolean') return valor ? 'Sí' : 'No';
   if (typeof valor === 'number' || typeof valor === 'bigint') return String(valor);
   const texto = String(valor);
+  // MIDAS: neutralizamos fórmulas sólo en texto; los montos negativos reales siguen siendo números.
   return /^[\s\u00A0]*[=+\-@]/.test(texto) ? `'${texto}` : texto;
 };
 
@@ -13,7 +14,7 @@ const escapar = (valor: unknown, separador: string) => {
   return texto.includes(separador) || texto.includes('"') ? `"${texto}"` : texto;
 };
 
-/** CSV administrativo UTF-8 con BOM y neutralización de fórmulas de planilla. */
+// MIDAS: el BOM mantiene tildes y eñes al abrir el archivo directamente en una planilla.
 export const crearCsvAdministrativo = <T>(filas: T[], columnas: ColumnaCsv<T>[], separador = ',') => {
   const lineas = [
     columnas.map(columna => escapar(columna.encabezado, separador)).join(separador),
