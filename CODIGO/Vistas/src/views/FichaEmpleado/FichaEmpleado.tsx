@@ -37,6 +37,7 @@ type PerfilRemuneracional = {
   fechaAplicacionSueldoBase: string | null;
   idAfp: number | null;
   idInstitucionSalud: number | null;
+  tipoInstitucionSalud: string | null;
   seguroCesantia: boolean;
   fundamentoExclusionCesantia: string | null;
   cotizacionSalud: { valor: number; unidad: string; vigenciaDesde: string; vigenciaHasta: string | null } | null;
@@ -91,7 +92,7 @@ export default function FichaEmpleado() {
   const [institucionesSalud, setInstitucionesSalud] = useState<Catalogo[]>([]);
   const [datosBase, setDatosBase] = useState({ nombres: '', apellidoPaterno: '', apellidoMaterno: '', fechaNacimiento: '', estado: 'activo' });
   const [nuevaRelacion, setNuevaRelacion] = useState({ fechaInicio: '', idTipoVinculo: '', jornada: '' });
-  const [perfil, setPerfil] = useState({ idCargo: '', sueldoBaseActual: '', fechaAplicacionSueldoBase: '', idAfp: '', idInstitucionSalud: '', seguroCesantia: true, fundamentoExclusionCesantia: '', cotizacionSaludValor: '', cotizacionSaludUnidad: 'PORCENTAJE', cotizacionSaludVigenciaDesde: '', correoParticular: '', telefonoParticular: '', direccionParticular: '', tipoCorreo: '', consentimientoElectronico: false, canalDocumental: '' });
+  const [perfil, setPerfil] = useState({ idCargo: '', sueldoBaseActual: '', fechaAplicacionSueldoBase: '', idAfp: '', sistemaSalud: '', idInstitucionSalud: '', seguroCesantia: true, fundamentoExclusionCesantia: '', cotizacionSaludValor: '', cotizacionSaludUnidad: 'PORCENTAJE', cotizacionSaludVigenciaDesde: '', correoParticular: '', telefonoParticular: '', direccionParticular: '', tipoCorreo: '', consentimientoElectronico: false, canalDocumental: '' });
   const [esquemas, setEsquemas] = useState<Catalogo[]>([]);
   const [asignacionesEsquema, setAsignacionesEsquema] = useState<Asignacion[]>([]);
   const [haberes, setHaberes] = useState<Catalogo[]>([]);
@@ -145,10 +146,11 @@ export default function FichaEmpleado() {
         sueldoBaseActual: actual.sueldoBaseActual === null ? '' : String(actual.sueldoBaseActual),
         fechaAplicacionSueldoBase: actual.fechaAplicacionSueldoBase?.slice(0, 10) || '',
         idAfp: actual.idAfp === null ? '' : String(actual.idAfp),
+        sistemaSalud: actual.tipoInstitucionSalud || '',
         idInstitucionSalud: actual.idInstitucionSalud === null ? '' : String(actual.idInstitucionSalud),
         seguroCesantia: actual.seguroCesantia,
         fundamentoExclusionCesantia: actual.fundamentoExclusionCesantia || '',
-        cotizacionSaludValor: actual.cotizacionSalud === null ? '' : String(actual.cotizacionSalud.valor),
+        cotizacionSaludValor: actual.cotizacionSalud === null ? '' : String(actual.cotizacionSalud.unidad === 'PORCENTAJE' ? actual.cotizacionSalud.valor * 100 : actual.cotizacionSalud.valor),
         cotizacionSaludUnidad: actual.cotizacionSalud?.unidad || 'PORCENTAJE',
         cotizacionSaludVigenciaDesde: actual.cotizacionSalud?.vigenciaDesde.slice(0, 10) || '',
         correoParticular: actual.correoParticular || '',
@@ -219,7 +221,18 @@ export default function FichaEmpleado() {
   const guardarPerfil = async () => {
     setGuardando(true); setError(''); setMensaje('');
     try {
-      await respuestaJson(`/empleados/${id}/perfil-remuneracional`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(perfil) });
+      const cuerpo: Record<string, unknown> = { ...perfil };
+      delete cuerpo.sistemaSalud;
+      if (perfil.sistemaSalud === 'ISAPRE') {
+        cuerpo.cotizacionSaludValor = perfil.cotizacionSaludUnidad === 'PORCENTAJE' && perfil.cotizacionSaludValor !== ''
+          ? Number(perfil.cotizacionSaludValor) / 100
+          : perfil.cotizacionSaludValor;
+      } else {
+        delete cuerpo.cotizacionSaludValor;
+        delete cuerpo.cotizacionSaludUnidad;
+        delete cuerpo.cotizacionSaludVigenciaDesde;
+      }
+      await respuestaJson(`/empleados/${id}/perfil-remuneracional`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
       setMensaje('Perfil remuneracional actualizado.'); setVersion((valor) => valor + 1);
     } catch (causa) { setError((causa as Error).message); }
     finally { setGuardando(false); }
@@ -301,12 +314,13 @@ export default function FichaEmpleado() {
           <label className="text-sm font-medium">Sueldo base actual<input type="number" min="0" step="1" value={perfil.sueldoBaseActual} onChange={(evento) => setPerfil({ ...perfil, sueldoBaseActual: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label>
           <label className="text-sm font-medium">Aplicación sueldo base<input type="date" value={perfil.fechaAplicacionSueldoBase} onChange={(evento) => setPerfil({ ...perfil, fechaAplicacionSueldoBase: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label>
           <label className="text-sm font-medium">AFP actual<select value={perfil.idAfp} onChange={(evento) => setPerfil({ ...perfil, idAfp: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5"><option value="">Sin configurar</option>{afps.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
-          <label className="text-sm font-medium">Institución de salud<select value={perfil.idInstitucionSalud} onChange={(evento) => setPerfil({ ...perfil, idInstitucionSalud: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5"><option value="">Sin configurar</option>{institucionesSalud.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
+          <label className="text-sm font-medium">Sistema de salud<select value={perfil.sistemaSalud} onChange={(evento) => { const sistemaSalud = evento.target.value; const institucion = sistemaSalud && sistemaSalud !== 'ISAPRE' ? institucionesSalud.find((item) => item.tipo === sistemaSalud) : null; setPerfil({ ...perfil, sistemaSalud, idInstitucionSalud: institucion ? String(institucion.id) : '', cotizacionSaludValor: sistemaSalud === 'ISAPRE' ? perfil.cotizacionSaludValor : '', cotizacionSaludVigenciaDesde: sistemaSalud === 'ISAPRE' ? perfil.cotizacionSaludVigenciaDesde : '' }); }} className="mt-1 w-full rounded-md border p-2.5"><option value="">Sin configurar</option><option value="FONASA">Fonasa</option><option value="ISAPRE">Isapre</option><option value="DIPRECA">DIPRECA</option><option value="OTRO">Otro</option></select></label>
+          {perfil.sistemaSalud === 'ISAPRE' && <label className="text-sm font-medium">Institución<select value={perfil.idInstitucionSalud} onChange={(evento) => setPerfil({ ...perfil, idInstitucionSalud: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5"><option value="">Seleccionar Isapre</option>{institucionesSalud.filter((item) => item.tipo === 'ISAPRE').map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>}
           <label className="flex items-center gap-3 self-end rounded-md border px-3 py-2.5 text-sm font-medium"><input type="checkbox" checked={perfil.seguroCesantia} onChange={(evento) => setPerfil({ ...perfil, seguroCesantia: evento.target.checked })} className="h-4 w-4 accent-primary-600" />Seguro de cesantía vigente</label>
           {!perfil.seguroCesantia && <label className="text-sm font-medium md:col-span-2 lg:col-span-3">Fundamento de exclusión del Seguro de Cesantía<input required value={perfil.fundamentoExclusionCesantia} onChange={(evento) => setPerfil({ ...perfil, fundamentoExclusionCesantia: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label>}
-          <label className="text-sm font-medium">Cotización pactada de salud<input type="number" min="0" step="0.000001" value={perfil.cotizacionSaludValor} onChange={(evento) => setPerfil({ ...perfil, cotizacionSaludValor: evento.target.value })} placeholder="Sólo para plan Isapre" className="mt-1 w-full rounded-md border p-2.5" /></label>
-          <label className="text-sm font-medium">Unidad del plan<select value={perfil.cotizacionSaludUnidad} onChange={(evento) => setPerfil({ ...perfil, cotizacionSaludUnidad: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5"><option value="PORCENTAJE">Porcentaje decimal</option><option value="UF">UF</option><option value="CLP">CLP</option></select></label>
-          <label className="text-sm font-medium">Vigencia del plan<input type="date" value={perfil.cotizacionSaludVigenciaDesde} onChange={(evento) => setPerfil({ ...perfil, cotizacionSaludVigenciaDesde: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label>
+          {perfil.sistemaSalud === 'ISAPRE' && <><label className="text-sm font-medium">Cotización pactada de salud<div className="relative mt-1"><input type="number" min="0" step={perfil.cotizacionSaludUnidad === 'PORCENTAJE' ? '0.1' : '0.000001'} value={perfil.cotizacionSaludValor} onChange={(evento) => setPerfil({ ...perfil, cotizacionSaludValor: evento.target.value })} className="w-full rounded-md border p-2.5 pr-9" />{perfil.cotizacionSaludUnidad === 'PORCENTAJE' && <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-gray-500">%</span>}</div></label>
+          <label className="text-sm font-medium">Unidad del plan<select value={perfil.cotizacionSaludUnidad} onChange={(evento) => setPerfil({ ...perfil, cotizacionSaludUnidad: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5"><option value="PORCENTAJE">Porcentaje</option><option value="UF">UF</option><option value="CLP">CLP</option></select></label>
+          <label className="text-sm font-medium">Vigencia del plan<input type="date" value={perfil.cotizacionSaludVigenciaDesde} onChange={(evento) => setPerfil({ ...perfil, cotizacionSaludVigenciaDesde: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label></>}
           <label className="text-sm font-medium">Correo particular<input type="email" value={perfil.correoParticular} onChange={(evento) => setPerfil({ ...perfil, correoParticular: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label>
           <label className="text-sm font-medium">Tipo de correo<input value={perfil.tipoCorreo} onChange={(evento) => setPerfil({ ...perfil, tipoCorreo: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label>
           <label className="text-sm font-medium">Teléfono particular<input value={perfil.telefonoParticular} onChange={(evento) => setPerfil({ ...perfil, telefonoParticular: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label>

@@ -463,7 +463,7 @@ export class M6Controller {
         canal_documental: true,
         cargo: { select: { nombre_cargo: true } },
         afp: { select: { nombre_afp: true } },
-        prevision_salud: { select: { nombre_prevision_salud: true } },
+        prevision_salud: { select: { nombre_prevision_salud: true, tipo_prevision_salud: true } },
         cotizaciones_salud_m6: { where: { activa: true }, orderBy: { vigencia_desde: 'desc' }, take: 1 },
       },
     });
@@ -478,6 +478,7 @@ export class M6Controller {
       afp: empleado.afp?.nombre_afp || null,
       idInstitucionSalud: empleado.id_prevision_salud,
       institucionSalud: empleado.prevision_salud?.nombre_prevision_salud || null,
+      tipoInstitucionSalud: empleado.prevision_salud?.tipo_prevision_salud || null,
       seguroCesantia: empleado.seguro_cesantia,
       fundamentoExclusionCesantia: empleado.seguro_cesantia_fundamento_exclusion,
       cotizacionSalud: empleado.cotizaciones_salud_m6[0] ? { valor: Number(empleado.cotizaciones_salud_m6[0].valor), unidad: empleado.cotizaciones_salud_m6[0].unidad, vigenciaDesde: empleado.cotizaciones_salud_m6[0].vigencia_desde, vigenciaHasta: empleado.cotizaciones_salud_m6[0].vigencia_hasta } : null,
@@ -522,15 +523,27 @@ export class M6Controller {
 
     try {
       await prisma.$transaction(async (tx) => {
-        if (!await tx.empleado.count({ where: { id_empleado: idEmpleado } })) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+        const empleadoActual = await tx.empleado.findUnique({ where: { id_empleado: idEmpleado }, select: { id_prevision_salud: true } });
+        if (!empleadoActual) throw new ErrorAplicacion(404, 'Empleado no encontrado');
         if (typeof idCargo === 'number' && !await tx.cargo.count({ where: { id_cargo: idCargo, estado_cargo: 'activo' } })) throw new ErrorAplicacion(404, 'Cargo activo no encontrado');
         if (typeof idAfp === 'number' && !await tx.afp.count({ where: { id_afp: idAfp, estado_afp: 'activo' } })) throw new ErrorAplicacion(404, 'AFP activa no encontrada');
-        if (typeof idSalud === 'number' && !await tx.prevision_salud.count({ where: { id_prevision_salud: idSalud, estado_prevision_salud: 'activo' } })) throw new ErrorAplicacion(404, 'Institución de salud activa no encontrada');
+        const idSaludEfectivo = idSalud === undefined ? empleadoActual.id_prevision_salud : idSalud;
+        const institucionSalud = typeof idSaludEfectivo === 'number'
+          ? await tx.prevision_salud.findFirst({ where: { id_prevision_salud: idSaludEfectivo, estado_prevision_salud: 'activo' }, select: { tipo_prevision_salud: true } })
+          : null;
+        if (typeof idSalud === 'number' && !institucionSalud) throw new ErrorAplicacion(404, 'Institución de salud activa no encontrada');
         if (data.seguro_cesantia === false && !String(data.seguro_cesantia_fundamento_exclusion || '').trim()) throw new ErrorAplicacion(400, 'La exclusión del Seguro de Cesantía requiere fundamento');
         if (data.seguro_cesantia === true) data.seguro_cesantia_fundamento_exclusion = null;
         await tx.empleado.update({ where: { id_empleado: idEmpleado }, data });
         const configuraSalud = [entrada.cotizacionSaludValor, entrada.cotizacionSaludUnidad, entrada.cotizacionSaludVigenciaDesde].some(valor => valor !== undefined);
-        if (configuraSalud) {
+        const esIsapre = String(institucionSalud?.tipo_prevision_salud || '').toUpperCase() === 'ISAPRE';
+        if (!esIsapre) {
+          if (configuraSalud && [entrada.cotizacionSaludValor, entrada.cotizacionSaludUnidad, entrada.cotizacionSaludVigenciaDesde].some(valor => valor !== undefined && valor !== null && valor !== '')) {
+            throw new ErrorAplicacion(400, 'La cotización pactada sólo corresponde a una Isapre');
+          }
+          await tx.cotizacion_salud_empleado.updateMany({ where: { id_empleado: idEmpleado, activa: true }, data: { activa: false } });
+        }
+        if (configuraSalud && esIsapre) {
           const valor = decimalMonetario(entrada.cotizacionSaludValor, 'Cotización de salud', true);
           const unidad = texto(entrada.cotizacionSaludUnidad, 20).toUpperCase();
           const vigenciaDesde = fechaEntrada(entrada.cotizacionSaludVigenciaDesde, 'Vigencia de cotización de salud')!;

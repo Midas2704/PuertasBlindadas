@@ -122,6 +122,18 @@ test('M6 respeta topes, exención tributaria y bloquea configuración incompleta
   await assert.rejects(() => calcularPrevisionLegal(tx({ lista: sinAdicionalLey }), entrada()), error => error.codigo === 'CONFIGURACION_PREVISIONAL_INCOMPLETA');
 });
 
+test('M6 no inventa reglas previsionales para DIPRECA u Otro', async () => {
+  for (const salud of [
+    { nombre: 'DIPRECA', tipo: 'DIPRECA' },
+    { nombre: 'Otro', tipo: 'OTRO' },
+  ]) {
+    await assert.rejects(
+      () => calcularPrevisionLegal(tx(), entrada({ salud })),
+      error => error.codigo === 'CONFIGURACION_PREVISIONAL_INCOMPLETA' && /no tiene una regla previsional configurada/.test(error.message),
+    );
+  }
+});
+
 test('RUT módulo 11 acepta formatos válidos y rechaza dígitos incorrectos', () => {
   for (const valor of ['12.345.678-5', '12345678-5', '20.776.101-K', '20776101-k']) assert.equal(esRutValido(valor), true);
   for (const valor of ['12.345.678-4', '20.776.101-1', 'texto', '']) assert.equal(esRutValido(valor), false);

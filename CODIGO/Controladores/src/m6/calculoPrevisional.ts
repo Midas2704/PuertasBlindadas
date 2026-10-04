@@ -75,12 +75,15 @@ export async function calcularPrevisionLegal(tx: Tx, entrada: EntradaCalculo) {
   const comisionAfp = resolver(`AFP_COMISION_${nombreAfp}`, 'FACTOR_DECIMAL');
   componentes.push(componente('DEDUCCION_PREVISIONAL', `AFP ${entrada.afp} — Comisión`, baseAfp.mul(tasa(comisionAfp)), 'AFP_COMISION', comisionAfp));
 
+  const tipoSalud = codigoNombre(entrada.salud.tipo || entrada.salud.nombre);
+  if (!['FONASA', 'ISAPRE'].includes(tipoSalud)) {
+    throw new ErrorAplicacion(409, `El régimen de salud ${entrada.salud.nombre} no tiene una regla previsional configurada`, 'CONFIGURACION_PREVISIONAL_INCOMPLETA');
+  }
   const saludLegal = resolver('SALUD_TASA_LEGAL', 'FACTOR_DECIMAL');
   const montoSaludLegal = redondear(baseSalud.mul(tasa(saludLegal)));
   componentes.push(componente('DEDUCCION_PREVISIONAL', `Salud ${entrada.salud.nombre}`, montoSaludLegal, 'SALUD_LEGAL', saludLegal));
-  const tipoSalud = codigoNombre(entrada.salud.tipo || entrada.salud.nombre);
   let planSaludSnapshot: Record<string, unknown> | null = null;
-  if (tipoSalud.includes('ISAPRE')) {
+  if (tipoSalud === 'ISAPRE') {
     const planes = await tx.cotizacion_salud_empleado.findMany({ where: { id_empleado: entrada.idEmpleado, activa: true, vigencia_desde: { lte: entrada.fechaInicio }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: entrada.fechaFin } }] } });
     if (planes.length !== 1) throw new ErrorAplicacion(409, 'La cotización pactada de Isapre no está configurada de forma única para el período', 'CONFIGURACION_PREVISIONAL_INCOMPLETA');
     const plan = planes[0];
