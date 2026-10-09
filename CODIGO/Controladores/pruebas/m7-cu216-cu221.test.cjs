@@ -79,7 +79,7 @@ test('M7 CU216-CU221 definitivo', async t => {
   });
   await t.test('06 CU216 solo no filtra información subyacente', async () => { const resultado = await new CentroCompleto().consultarCentroAtencion(consulta, ['CU216']); assert.deepEqual(resultado.excepciones, []); assert.deepEqual(resultado.cobertura, []); });
 
-  const pendientes = await modulo.consultarCotizacionesPendientes(consulta);
+  const pendientes = await modulo.consultarCotizacionesPendientes(consulta, ['CU09', 'CU20']);
   await t.test('07 cuenta cotizaciones vigentes pendientes', () => assert.equal(pendientes.cantidad.valor, 2));
   await t.test('08 monto se rotula potencial', () => { assert.match(pendientes.montoPotencial.detalle, /MONTO POTENCIAL/); assert.equal(pendientes.montoPotencial.valor.find(fila => fila.moneda === 'CLP').monto, 200); });
   await t.test('09 cotización formalizada deja de aparecer', () => assert.equal(pendientes.cotizaciones.some(fila => fila.idCotizacion === cotizacionFormalizada.id_cotizacion), false));
@@ -92,7 +92,7 @@ test('M7 CU216-CU221 definitivo', async t => {
 
   const ventas219 = await modulo.consultarAnalisisVentas(consulta, ['CU219']);
   await t.test('15 ticket medio usa ventas válidas', () => { assert.equal(ventas219.cantidad.valor, 4); assert.equal(ventas219.ticketMedio.valor.porMoneda[0].monto, 225); });
-  await t.test('16 cero ventas deja ticket no aplicable', async () => { const vacio = await modulo.consultarAnalisisVentas({ anio: 2199, mes: 1 }, ['CU219']); assert.equal(vacio.ticketMedio.estado, 'NO_APLICA'); assert.equal(vacio.ticketMedio.valor, null); });
+  await t.test('16 cero ventas deja ticket no aplicable y cobertura explícita', async () => { const vacio = await modulo.consultarAnalisisVentas({ anio: 2199, mes: 1 }, ['CU219']); assert.equal(vacio.ticketMedio.estado, 'NO_APLICA'); assert.deepEqual(vacio.ticketMedio.valor, { porMoneda: [], totalClp: null }); });
   await t.test('17 monto neto sigue siendo base principal', () => assert.equal(ventas219.montoNeto.valor.porMoneda.find(fila => fila.moneda === 'CLP').monto, 900));
   await t.test('18 anuladas y revertidas no participan', () => assert.ok(ventas219.montoNeto.valor.porMoneda.every(fila => fila.monto < 2000)));
 
@@ -103,7 +103,7 @@ test('M7 CU216-CU221 definitivo', async t => {
   await t.test('22 concentración no contiene score', () => assert.ok(ventas220.concentracionClientes.valor.every(fila => !Object.hasOwn(fila, 'score'))));
   await t.test('23 Producto/Familia exige fuente estructurada', () => assert.equal(ventas220.productos.estado, 'DATOS_INSUFICIENTES'));
 
-  const contexto = await modulo.consultarContextoCliente(clienteA.id_cliente_financiero, consulta, ['CU221', 'CU219', 'CU222']);
+  const contexto = await modulo.consultarContextoCliente(clienteA.id_cliente_financiero, consulta, ['CU09', 'CU221', 'CU219', 'CU222']);
   await t.test('24 contexto de Cliente carga identidad mínima', () => assert.equal(contexto.cliente.idCliente, clienteA.id_cliente_financiero));
   await t.test('25 CU221 + CU222 muestra CxC', () => assert.ok(Object.hasOwn(contexto.bloques, 'cuentasCobrar')));
   await t.test('26 CU221 sin CU222 no devuelve CxC', async () => { const r = await modulo.consultarContextoCliente(clienteA.id_cliente_financiero, consulta, ['CU221']); assert.equal(Object.hasOwn(r.bloques, 'cuentasCobrar'), false); });

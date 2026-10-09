@@ -84,6 +84,8 @@ export function GraficoBarras({ datos, series, etiqueta = 'etiqueta', apiladas =
 
 export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', alto = 300, porcentaje = false }: { datos: DatoGrafico[]; barras: SerieGrafico[]; lineas: SerieGrafico[]; etiqueta?: string; alto?: number; porcentaje?: boolean }) {
   if (!datos.length) return <EstadoSinDatos texto="No hay una serie histórica suficiente para graficar." />;
+  const tienePresupuestoFlujo = datos.some(dato => typeof dato.flujoPresupuestado === 'number');
+  const lineasVisibles = tienePresupuestoFlujo && lineas.some(linea => linea.clave === 'flujoNeto') ? [...lineas.map(linea => linea.clave === 'flujoNeto' ? { ...linea, nombre: 'Flujo real' } : linea), { clave: 'flujoPresupuestado', nombre: 'Flujo presupuestado', color: '#b85e00' }] : lineas;
   return <div className="w-full overflow-x-auto"><div className="min-w-[680px]" style={{ height: alto }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
     <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} />
     <XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
@@ -91,7 +93,7 @@ export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', 
     {porcentaje && <YAxis yAxisId="porcentaje" orientation="right" domain={[0, 100]} tickFormatter={valor => `${valor}%`} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />}
     <Tooltip content={<TooltipGrafico />} /><Legend wrapperStyle={{ fontSize: 11 }} />
     {barras.map((serie, indice) => <Bar key={serie.clave} yAxisId="monto" dataKey={serie.clave} name={serie.nombre} fill={serie.color || COLORES[indice % COLORES.length]} radius={[3, 3, 0, 0]} maxBarSize={28} />)}
-    {lineas.map((serie, indice) => <Line key={serie.clave} yAxisId={porcentaje ? 'porcentaje' : 'monto'} type="monotone" dataKey={serie.clave} name={serie.nombre} stroke={serie.color || COLORES[(indice + barras.length) % COLORES.length]} strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />)}
+    {lineasVisibles.map((serie, indice) => <Line key={serie.clave} yAxisId={porcentaje ? 'porcentaje' : 'monto'} type="monotone" dataKey={serie.clave} name={serie.nombre} stroke={serie.color || COLORES[(indice + barras.length) % COLORES.length]} strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />)}
   </ComposedChart></ResponsiveContainer></div></div>;
 }
 

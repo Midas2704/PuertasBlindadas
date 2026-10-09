@@ -76,7 +76,8 @@ const App: React.FC = () => {
           <Route path="clientes/:rut" element={<Protegido permiso="CU09"><VerFicha /></Protegido>} />
           <Route path="proveedores" element={<Protegido permiso="CU80"><CatalogoProveedores /></Protegido>} />
           <Route path="proveedores/:id" element={<Protegido permiso="CU84"><VerFichaProveedor /></Protegido>} />
-          <Route path="ordenes-compra-servicios" element={<Protegido permiso="CU88"><OrdenesCompraServicios /></Protegido>} />
+            <Route path="ordenes-compra-servicios" element={<Protegido permiso="CU88"><OrdenesCompraServicios /></Protegido>} />
+            <Route path="ordenes-compra-servicios/:id" element={<Protegido permiso="CU88"><OrdenesCompraServicios /></Protegido>} />
           <Route path="documentos-proveedor" element={<Protegido permiso="CU95"><DocumentosProveedor /></Protegido>} />
           <Route path="cuentas-por-pagar" element={<Protegido permiso="CU106"><CuentasPorPagar /></Protegido>} />
           <Route path="pagos-proveedores" element={<Protegido permiso="CU111"><PagosProveedores /></Protegido>} />

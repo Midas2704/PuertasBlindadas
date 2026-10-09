@@ -21,14 +21,15 @@ test('M7 delta controlado CU218-CU258', async t => {
     const modulo = new M7Controller();
     modulo.consultarAnalisisVentasCompleto = async () => ({ periodo: {}, estado: 'VALIDO', conversion: { estado: 'VALIDO', valor: 50 }, montoNeto: { estado: 'VALIDO', valor: 10 } });
     modulo.consultarCuentasCobrarCompleto = async () => ({ periodo: {}, estado: 'VALIDO', concentracionDeuda: { estado: 'VALIDO', valor: [] }, obligacionesPagadas: { estado: 'VALIDO', valor: [] }, recaudacion: { estado: 'VALIDO', valor: [] } });
-    assert.deepEqual(Object.keys(await modulo.consultarAnalisisVentas({}, ['CU218'])).sort(), ['conversion', 'estado', 'periodo']);
+    assert.deepEqual(Object.keys(await modulo.consultarAnalisisVentas({}, ['CU218'])).sort(), ['conversion', 'conversionSegmentos', 'estado', 'periodo', 'segmento']);
     assert.deepEqual(Object.keys(await modulo.consultarCuentasCobrar({}, ['CU224'])).sort(), ['concentracionDeuda', 'estado', 'obligacionesPagadas', 'periodo']);
   });
 
   await t.test('03 conversión usa NV activa, excluye anulada y no depende de pagos', async () => {
     const originalNotas = prisma.nota_venta.findMany; const originalCotizaciones = prisma.cotizacion.findMany;
     prisma.nota_venta.findMany = async () => [];
-    prisma.cotizacion.findMany = async () => [{ id_cotizacion: 1, nota_venta: { estado_nota_venta: 'confirmada', asignacion_pago_cliente: [] } }, { id_cotizacion: 2, nota_venta: { estado_nota_venta: 'anulada', asignacion_pago_cliente: [{ monto: 999 }] } }, { id_cotizacion: 3, nota_venta: null }];
+    const ficha_cliente = { cliente_financiero: { tipo_cliente_financiero: { nombre_tipo_cliente_financiero: 'B2B' } } };
+    prisma.cotizacion.findMany = async () => [{ id_cotizacion: 1, ficha_cliente, nota_venta: { estado_nota_venta: 'confirmada', asignacion_pago_cliente: [] } }, { id_cotizacion: 2, ficha_cliente, nota_venta: { estado_nota_venta: 'anulada', asignacion_pago_cliente: [{ monto: 999 }] } }, { id_cotizacion: 3, ficha_cliente, nota_venta: null }];
     try { const r = await new M7Controller().consultarAnalisisVentas(consulta, ['CU218']); assert.deepEqual(r.conversion.valor, { totalCotizaciones: 3, convertidas: 1, tasaPorcentual: 33.33 }); }
     finally { prisma.nota_venta.findMany = originalNotas; prisma.cotizacion.findMany = originalCotizaciones; }
   });
@@ -40,12 +41,12 @@ test('M7 delta controlado CU218-CU258', async t => {
     finally { prisma.nota_venta.findMany = originalNotas; prisma.cotizacion.findMany = originalCotizaciones; }
   });
 
-  await t.test('05 liquidez acumula movimientos y excluye Caja Chica', async () => {
+  await t.test('05 liquidez acumula movimientos e incorpora Caja Chica sólo mediante su movimiento', async () => {
     const original = prisma.movimiento_financiero.findMany;
     const movimiento = (id, tipo, naturaleza, monto, origen = 'pago') => ({ id_movimiento_financiero: id, fecha_movimiento: new Date('2026-10-01T00:00:00Z'), estado_movimiento: 'confirmado', tipo_movimiento_financiero: tipo, naturaleza_movimiento: naturaleza, monto_movimiento: new Prisma.Decimal(monto), moneda: { codigo_moneda: 'CLP' }, origen_movimiento_financiero: [{ entidad_origen: origen, id_registro_origen: id, descripcion_origen: origen }] });
     prisma.movimiento_financiero.findMany = async () => [movimiento(1, 'PAGO_CLIENTE', 'ingreso', 100), movimiento(2, 'PAGO_PROVEEDOR', 'egreso', 20), movimiento(3, 'AJUSTE_MANUAL_LIQUIDEZ', 'ingreso', 30, 'ajuste_manual_liquidez'), movimiento(4, 'AJUSTE_MANUAL_LIQUIDEZ', 'egreso', 5, 'ajuste_manual_liquidez'), movimiento(5, 'CAJA CHICA', 'egreso', 999, 'gasto_caja_chica')];
     const modulo = new M7Controller(); modulo.consultarCuentasCobrarCompleto = async () => ({ cartera: { valor: [] } }); modulo.consultarCuentasPagarCompleto = async () => ({ cartera: { valor: [] } });
-    try { const r = await modulo.consultarLiquidez(consulta); assert.equal(r.liquidezActual.valor[0].liquidez, 105); assert.deepEqual(r.flujoHistorico.valor.totales[0], { moneda: 'CLP', ingresosRecibidos: 100, egresosRealizados: 20, ajustesEntrada: 30, ajustesSalida: 5, liquidez: 105, flujoNeto: 105 }); assert.equal(r.proyeccion.valor.horizonteDias, 30); }
+    try { const r = await modulo.consultarLiquidez(consulta); assert.equal(r.liquidezActual.estado, 'DATOS_INSUFICIENTES'); assert.equal(r.liquidezActual.valor, null); assert.deepEqual(r.flujoHistorico.valor.totales[0], { moneda: 'CLP', ingresosReales: 100, egresosReales: 1019, ajustesEntrada: 30, ajustesSalida: 5, flujoReal: -894 }); assert.equal(r.proyeccion.valor.horizonteDias, 30); }
     finally { prisma.movimiento_financiero.findMany = original; }
   });
 

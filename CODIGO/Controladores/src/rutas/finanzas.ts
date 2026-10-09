@@ -57,6 +57,9 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/dashboard-m7/cuentas-cobrar', derivar('consultarCuentasCobrarM7'));
   rutas.get('/dashboard-m7/cuentas-pagar', derivar('consultarCuentasPagarM7'));
   rutas.get('/dashboard-m7/liquidez', derivar('consultarLiquidezM7'));
+  rutas.post('/dashboard-m7/proyecciones', derivar('crearProyeccionM7'));
+  rutas.put('/dashboard-m7/proyecciones/:id', derivar('actualizarProyeccionM7'));
+  rutas.delete('/dashboard-m7/proyecciones/:id', derivar('desactivarProyeccionM7'));
   rutas.get('/dashboard-m7/riesgo-deficit', derivar('consultarRiesgoDeficitM7'));
   rutas.post('/dashboard-m7/liquidez/ajustes', derivar('registrarAjusteLiquidezM7'));
   rutas.get('/dashboard-m7/configuracion/umbrales-liquidez', derivar('consultarParametrosLiquidezM7'));
@@ -88,6 +91,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/dashboard-m7/configuracion/stock-inmovil', derivar('consultarParametroStockInmovilM7'));
   rutas.post('/dashboard-m7/configuracion/stock-inmovil', derivar('configurarParametroStockInmovilM7'));
   rutas.post('/dashboard-m7/pdf', derivar('descargarPdfDashboardM7'));
+  rutas.post('/dashboard-m7/excel', derivar('descargarExcelDashboardM7'));
   rutas.get('/dashboard-m7/configuracion/margen-critico', derivar('consultarUmbralMargenM7'));
   rutas.post('/dashboard-m7/configuracion/margen-critico', derivar('configurarUmbralMargenM7'));
   rutas.get('/terreno/visitas', derivar('listarVisitasTerreno'));
@@ -112,7 +116,12 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/terreno/visitas/:id/resultado', derivar('registrarResultadoVisita'));
   rutas.post('/terreno/ejecuciones/:id/incidencias', derivar('registrarIncidenciaRetrabajo'));
   rutas.get('/terreno/incidencias', derivar('listarIncidenciasOperativas'));
+  rutas.get('/terreno/incidencias-catalogos', derivar('catalogosIncidenciaOperativa'));
+  rutas.get('/terreno/incidencias/:id/evidencias/:evidenciaId', derivar('obtenerEvidenciaIncidencia'));
+  rutas.post('/terreno/incidencias/:id/evidencias', derivar('adjuntarEvidenciaIncidencia'));
   rutas.patch('/terreno/incidencias/:id', derivar('actualizarIncidenciaOperativa'));
+  rutas.post('/terreno/incidencias/:id/aprobar', derivar('aprobarIncidenciaOperativa'));
+  rutas.post('/terreno/incidencias/:id/rechazar', derivar('rechazarIncidenciaOperativa'));
   rutas.patch('/terreno/visitas/:id/responsable', derivar('asignarResponsableVisita'));
   rutas.get('/terreno/visitas/:id', derivar('obtenerVisitaTerreno'));
   rutas.get(['/clientes', '/clients'], derivar('listarClientes'));

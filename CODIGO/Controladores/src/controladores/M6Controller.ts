@@ -12,6 +12,7 @@ import { calcularPrevisionLegal } from '../m6/calculoPrevisional';
 
 interface ActorDocumentoM6 { id: bigint; alcanceEmpleadoId?: number | null }
 interface ActorTerrenoM6 { id: bigint; administrador: boolean }
+interface ActorIncidenciaM6 { id: bigint; permisos: string[] }
 
 type Direccion = 'asc' | 'desc';
 
@@ -20,6 +21,27 @@ const nombreCompleto = (empleado: {
   apellido_paterno: string;
   apellido_materno: string | null;
 }) => [empleado.nombres, empleado.apellido_paterno, empleado.apellido_materno].filter(Boolean).join(' ');
+
+const nombreUsuario = (usuario: { usuario_username: string | null; usuario_nombre_completo_primer_nombre_usuario: string | null; usuario_nombre_completo_primer_apellido_usuario: string | null } | null) => usuario ? [usuario.usuario_nombre_completo_primer_nombre_usuario, usuario.usuario_nombre_completo_primer_apellido_usuario].filter(Boolean).join(' ') || usuario.usuario_username || 'Usuario' : null;
+const conAuditoriaIncidencia = <T extends object>(salida: T, anterior: Record<string, unknown> | undefined, nuevo: Record<string, unknown>) => { Object.defineProperty(salida, '__auditoriaM9', { enumerable: false, value: { anterior, nuevo } }); return salida; };
+const leerEvidenciaIncidencia = (valor: unknown) => {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return null;
+  const evidencia = valor as Record<string, unknown>;
+  const contenido = String(evidencia.contenido || '');
+  const coincidencia = /^data:([a-z0-9.+/-]+);base64,([A-Za-z0-9+/=]+)$/i.exec(contenido);
+  if (!coincidencia) throw new ErrorAplicacion(400, 'La evidencia debe ser un archivo válido');
+  const permitidos = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+  if (!permitidos.has(coincidencia[1].toLowerCase())) throw new ErrorAplicacion(400, 'Formato de evidencia no permitido');
+  const datos = Buffer.from(coincidencia[2], 'base64');
+  if (!datos.length || datos.length > 5 * 1024 * 1024) throw new ErrorAplicacion(400, 'La evidencia debe pesar entre 1 byte y 5 MB');
+  return { datos, tipo: coincidencia[1].toLowerCase(), nombre: texto(evidencia.nombre, 255) || 'evidencia', observacion: texto(evidencia.observacion, 1000) || null };
+};
+export function validarRevisionIncidenciaM6(entrada: { estadoRevision: string; idCreador: bigint | null; idRevisor: bigint; idCategoria: number | null; cantidadEvidencias: number; decision: 'aprobada' | 'rechazada' }) {
+  if (entrada.estadoRevision !== 'pendiente_revision') throw new ErrorAplicacion(409, 'La incidencia ya fue revisada');
+  if (entrada.idCreador === entrada.idRevisor) throw new ErrorAplicacion(409, 'El creador no puede aprobar ni rechazar su propia incidencia');
+  if (!entrada.idCategoria) throw new ErrorAplicacion(409, 'La incidencia requiere categoría estructurada antes de revisión');
+  if (entrada.decision === 'aprobada' && !entrada.cantidadEvidencias) throw new ErrorAplicacion(409, 'Aprobación requiere evidencia');
+}
 
 const fechaEntrada = (valor: unknown, nombre: string, obligatoria = true) => {
   if ((valor === undefined || valor === null || valor === '') && !obligatoria) return null;
@@ -2782,32 +2804,96 @@ export class M6Controller {
     });
   }
 
-  async registrarIncidenciaRetrabajo(idEjecucion: number, entrada: Record<string, unknown>) {
+  async catalogosIncidenciaOperativa() {
+    const [categorias, areas] = await Promise.all([
+      prisma.categoria_incidencia_terreno.findMany({ where: { activa: true }, orderBy: { nombre: 'asc' } }),
+      prisma.area_trabajo.findMany({ where: { area_trabajo_activo: { not: false } }, orderBy: { area_trabajo_nombre_area: 'asc' } }),
+    ]);
+    return { categorias: categorias.map(categoria => ({ id: categoria.id_categoria_incidencia, codigo: categoria.codigo, nombre: categoria.nombre })), areas: areas.map(area => ({ id: area.area_trabajo_id_area.toString(), nombre: area.area_trabajo_nombre_area || area.area_trabajo_clasificacion || `Área ${area.area_trabajo_id_area.toString()}` })) };
+  }
+
+  async registrarIncidenciaRetrabajo(idEjecucion: number, entrada: Record<string, unknown>, actor: ActorIncidenciaM6) {
     const descripcion = texto(entrada.descripcion, 2000); if (!descripcion) throw new ErrorAplicacion(400, 'La descripción es obligatoria');
-    const ejecucion = await prisma.ejecucion_tarea.findUnique({ where: { id_ejecucion_tarea: BigInt(idEjecucion) } });
-    if (!ejecucion) throw new ErrorAplicacion(404, 'Ejecución no encontrada');
-    const incidencia = await prisma.incidencia_retrabajo_tarea.create({ data: { id_ejecucion_tarea: ejecucion.id_ejecucion_tarea, descripcion, causa_referencia: texto(entrada.causaReferencia, 500) || null, responsabilidad: texto(entrada.responsabilidad, 120) || null, estado: 'pendiente', fecha_registro: new Date() } });
-    return { id: incidencia.id_incidencia_retrabajo.toString(), idEjecucion: incidencia.id_ejecucion_tarea.toString(), descripcion: incidencia.descripcion, causaReferencia: incidencia.causa_referencia, responsabilidad: incidencia.responsabilidad, estado: incidencia.estado, fecha: incidencia.fecha_registro };
+    const idCategoria = Number(entrada.idCategoria); if (!Number.isInteger(idCategoria) || idCategoria <= 0) throw new ErrorAplicacion(400, 'La categoría es obligatoria');
+    const areaTexto = entrada.idArea === undefined || entrada.idArea === null || entrada.idArea === '' ? '' : String(entrada.idArea);
+    if (areaTexto && !/^\d+$/.test(areaTexto)) throw new ErrorAplicacion(400, 'Área responsable inválida');
+    const idArea = areaTexto ? BigInt(areaTexto) : null;
+    const evidencia = leerEvidenciaIncidencia(entrada.evidencia);
+    const salida = await prisma.$transaction(async tx => {
+      const [ejecucion, categoria, area] = await Promise.all([
+        tx.ejecucion_tarea.findUnique({ where: { id_ejecucion_tarea: BigInt(idEjecucion) } }),
+        tx.categoria_incidencia_terreno.findFirst({ where: { id_categoria_incidencia: idCategoria, activa: true } }),
+        idArea === null ? null : tx.area_trabajo.findFirst({ where: { area_trabajo_id_area: idArea, area_trabajo_activo: { not: false } } }),
+      ]);
+      if (!ejecucion) throw new ErrorAplicacion(404, 'Ejecución no encontrada');
+      if (!categoria) throw new ErrorAplicacion(400, 'Categoría de incidencia no disponible');
+      if (idArea !== null && !area) throw new ErrorAplicacion(400, 'Área responsable no disponible');
+      const incidencia = await tx.incidencia_retrabajo_tarea.create({ data: { id_ejecucion_tarea: ejecucion.id_ejecucion_tarea, descripcion, causa_referencia: texto(entrada.causaReferencia, 500) || null, responsabilidad: texto(entrada.responsabilidad, 120) || null, estado: 'pendiente', fecha_registro: new Date(), id_categoria_incidencia: categoria.id_categoria_incidencia, id_area_responsable: idArea, id_usuario_creador: actor.id, estado_revision: 'pendiente_revision' } });
+      if (evidencia) await tx.evidencia_terreno.create({ data: { id_incidencia_retrabajo: incidencia.id_incidencia_retrabajo, evidencia_terreno_tipo_evidencia: evidencia.tipo, evidencia_terreno_imagen_o_vector: evidencia.datos, evidencia_terreno_metadata_dispositivo: evidencia.nombre, evidencia_terreno_observacion: evidencia.observacion, evidencia_terreno_fecha_captura: new Date(), evidencia_terreno_estado_evidencia: 'registrada' } });
+      return { id: incidencia.id_incidencia_retrabajo.toString(), idEjecucion: incidencia.id_ejecucion_tarea.toString(), descripcion: incidencia.descripcion, categoria: { id: categoria.id_categoria_incidencia, codigo: categoria.codigo, nombre: categoria.nombre }, area: area ? { id: area.area_trabajo_id_area.toString(), nombre: area.area_trabajo_nombre_area || area.area_trabajo_clasificacion } : null, causaReferencia: incidencia.causa_referencia, responsabilidad: incidencia.responsabilidad, estado: incidencia.estado, estadoRevision: incidencia.estado_revision, tieneEvidencia: Boolean(evidencia), fecha: incidencia.fecha_registro };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return conAuditoriaIncidencia(salida, undefined, { id: salida.id, estado: salida.estado, estadoRevision: salida.estadoRevision, categoria: salida.categoria.codigo, area: salida.area?.id || null, tieneEvidencia: salida.tieneEvidencia });
   }
 
   async listarIncidenciasOperativas() {
-    const filas = await prisma.incidencia_retrabajo_tarea.findMany({ include: { ejecucion: { include: { tarea: true } } }, orderBy: { fecha_registro: 'desc' } });
-    return filas.map((i) => ({ id: i.id_incidencia_retrabajo.toString(), descripcion: i.descripcion, causaReferencia: i.causa_referencia, responsabilidad: i.responsabilidad, estado: i.estado, fecha: i.fecha_registro, ejecucion: { id: i.id_ejecucion_tarea.toString(), tarea: i.ejecucion.tarea ? { id: i.ejecucion.tarea.tarea_tarea_id.toString(), titulo: i.ejecucion.tarea.tarea_titulo, idOrdenTrabajo: i.ejecucion.tarea.id_orden_trabajo?.toString() || null } : null } }));
+    const filas = await prisma.incidencia_retrabajo_tarea.findMany({ include: { categoria: true, area_responsable: true, creador: true, revisor: true, evidencias: { select: { evidencia_terreno_evidencia_terreno_id: true, evidencia_terreno_tipo_evidencia: true, evidencia_terreno_metadata_dispositivo: true, evidencia_terreno_fecha_captura: true } }, ejecucion: { include: { ejecutor: true, tarea: { include: { orden_trabajo: { include: { proyecto: true } }, servicio_terreno: true } } } } }, orderBy: { fecha_registro: 'desc' } });
+    return filas.map(i => ({ id: i.id_incidencia_retrabajo.toString(), referencia: `INC-${i.id_incidencia_retrabajo.toString().padStart(5, '0')}`, descripcion: i.descripcion, categoria: i.categoria ? { id: i.categoria.id_categoria_incidencia, codigo: i.categoria.codigo, nombre: i.categoria.nombre } : null, area: i.area_responsable ? { id: i.area_responsable.area_trabajo_id_area.toString(), nombre: i.area_responsable.area_trabajo_nombre_area || i.area_responsable.area_trabajo_clasificacion } : null, causaReferencia: i.causa_referencia, responsabilidad: i.responsabilidad, responsableOwner: { id: i.ejecucion.id_usuario_ejecutor.toString(), nombre: nombreUsuario(i.ejecucion.ejecutor) }, estado: i.estado, estadoRevision: i.estado_revision, fecha: i.fecha_registro, creador: { id: i.id_usuario_creador?.toString() || null, nombre: nombreUsuario(i.creador) }, revision: i.id_usuario_revisor ? { idUsuario: i.id_usuario_revisor.toString(), nombre: nombreUsuario(i.revisor), fecha: i.fecha_revision, observacion: i.observacion_revision } : null, evidencias: i.evidencias.map(e => ({ id: e.evidencia_terreno_evidencia_terreno_id.toString(), tipo: e.evidencia_terreno_tipo_evidencia, nombre: e.evidencia_terreno_metadata_dispositivo, fecha: e.evidencia_terreno_fecha_captura })), ejecucion: { id: i.id_ejecucion_tarea.toString(), tarea: i.ejecucion.tarea ? { id: i.ejecucion.tarea.tarea_tarea_id.toString(), titulo: i.ejecucion.tarea.tarea_titulo, idOrdenTrabajo: i.ejecucion.tarea.id_orden_trabajo?.toString() || null, idServicio: i.ejecucion.tarea.id_servicio_terreno?.toString() || null, proyecto: i.ejecucion.tarea.orden_trabajo?.proyecto ? { id: i.ejecucion.tarea.orden_trabajo.proyecto.proyecto_proyecto_id.toString(), codigo: i.ejecucion.tarea.orden_trabajo.proyecto.proyecto_codigo_proyecto, nombre: i.ejecucion.tarea.orden_trabajo.proyecto.proyecto_nombre_referencia } : null } : null } }));
+  }
+
+  async obtenerEvidenciaIncidencia(idIncidencia: number, idEvidencia: number) {
+    const evidencia = await prisma.evidencia_terreno.findFirst({ where: { evidencia_terreno_evidencia_terreno_id: BigInt(idEvidencia), id_incidencia_retrabajo: BigInt(idIncidencia) } });
+    if (!evidencia?.evidencia_terreno_imagen_o_vector) throw new ErrorAplicacion(404, 'Evidencia no encontrada');
+    const tipo = evidencia.evidencia_terreno_tipo_evidencia || 'application/octet-stream';
+    return { nombre: evidencia.evidencia_terreno_metadata_dispositivo || `evidencia-${idEvidencia}`, tipo, contenido: `data:${tipo};base64,${Buffer.from(evidencia.evidencia_terreno_imagen_o_vector).toString('base64')}` };
+  }
+
+  async adjuntarEvidenciaIncidencia(id: number, entrada: Record<string, unknown>, actor: ActorIncidenciaM6) {
+    const evidencia = leerEvidenciaIncidencia(entrada.evidencia); if (!evidencia) throw new ErrorAplicacion(400, 'La evidencia es obligatoria');
+    const salida = await prisma.$transaction(async tx => {
+      const incidencia = await tx.incidencia_retrabajo_tarea.findUnique({ where: { id_incidencia_retrabajo: BigInt(id) } });
+      if (!incidencia) throw new ErrorAplicacion(404, 'Incidencia no encontrada');
+      if (incidencia.id_usuario_creador !== actor.id && !actor.permisos.includes('CU213')) throw new ErrorAplicacion(403, 'Sólo el creador o un revisor autorizado puede adjuntar evidencia');
+      if (incidencia.estado_revision !== 'pendiente_revision') throw new ErrorAplicacion(409, 'No se puede agregar evidencia después de la revisión');
+      const creada = await tx.evidencia_terreno.create({ data: { id_incidencia_retrabajo: incidencia.id_incidencia_retrabajo, evidencia_terreno_tipo_evidencia: evidencia.tipo, evidencia_terreno_imagen_o_vector: evidencia.datos, evidencia_terreno_metadata_dispositivo: evidencia.nombre, evidencia_terreno_observacion: evidencia.observacion, evidencia_terreno_fecha_captura: new Date(), evidencia_terreno_estado_evidencia: 'registrada' } });
+      return { id: incidencia.id_incidencia_retrabajo.toString(), idEvidencia: creada.evidencia_terreno_evidencia_terreno_id.toString(), tieneEvidencia: true };
+    });
+    return conAuditoriaIncidencia(salida, undefined, { id: salida.id, evidenciaAgregada: salida.idEvidencia });
   }
 
   async actualizarIncidenciaOperativa(id: number, entrada: Record<string, unknown>) {
     const accion = texto(entrada.accion, 20).toLowerCase();
-    if (!['corregir', 'cerrar'].includes(accion)) throw new ErrorAplicacion(400, 'Acción de incidencia inválida');
+    if (!['corregir', 'cerrar', 'clasificar'].includes(accion)) throw new ErrorAplicacion(400, 'Acción de incidencia inválida');
     return prisma.$transaction(async (tx) => {
       const actual = await tx.incidencia_retrabajo_tarea.findUnique({ where: { id_incidencia_retrabajo: BigInt(id) } });
       if (!actual) throw new ErrorAplicacion(404, 'Incidencia no encontrada');
+      if (accion === 'clasificar') {
+        if (actual.estado_revision !== 'pendiente_revision') throw new ErrorAplicacion(409, 'No se puede reclasificar una incidencia ya revisada');
+        const idCategoria = Number(entrada.idCategoria); if (!Number.isInteger(idCategoria) || idCategoria <= 0) throw new ErrorAplicacion(400, 'La categoría es obligatoria');
+        const areaTexto = entrada.idArea === undefined || entrada.idArea === null || entrada.idArea === '' ? '' : String(entrada.idArea); if (areaTexto && !/^\d+$/.test(areaTexto)) throw new ErrorAplicacion(400, 'Área responsable inválida'); const idArea = areaTexto ? BigInt(areaTexto) : null;
+        const [categoria, area] = await Promise.all([tx.categoria_incidencia_terreno.findFirst({ where: { id_categoria_incidencia: idCategoria, activa: true } }), idArea ? tx.area_trabajo.findFirst({ where: { area_trabajo_id_area: idArea, area_trabajo_activo: { not: false } } }) : null]);
+        if (!categoria || idArea && !area) throw new ErrorAplicacion(400, 'Categoría o área no disponible');
+        await tx.incidencia_retrabajo_tarea.update({ where: { id_incidencia_retrabajo: actual.id_incidencia_retrabajo }, data: { id_categoria_incidencia: idCategoria, id_area_responsable: idArea } });
+        return conAuditoriaIncidencia({ id: actual.id_incidencia_retrabajo.toString(), estado: actual.estado, categoria: categoria.codigo, idArea: idArea?.toString() || null }, { categoria: actual.id_categoria_incidencia, idArea: actual.id_area_responsable?.toString() || null }, { categoria: categoria.codigo, idArea: idArea?.toString() || null });
+      }
       const esperado = accion === 'corregir' ? 'pendiente' : 'corregida'; const siguiente = accion === 'corregir' ? 'corregida' : 'cerrada';
       const causa = texto(entrada.causaReferencia, 500) || actual.causa_referencia; const responsabilidad = texto(entrada.responsabilidad, 120) || actual.responsabilidad;
       if (accion === 'corregir' && (!actual.descripcion.trim() || (!causa && !responsabilidad))) throw new ErrorAplicacion(400, 'La corrección requiere contexto, causa o responsabilidad');
       if (accion === 'cerrar' && entrada.confirmado !== true) throw new ErrorAplicacion(400, 'La validación de cierre debe confirmarse');
       const cambio = await tx.incidencia_retrabajo_tarea.updateMany({ where: { id_incidencia_retrabajo: actual.id_incidencia_retrabajo, estado: esperado }, data: { estado: siguiente, causa_referencia: causa, responsabilidad } });
       if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La incidencia cambió concurrentemente o la transición no es válida');
-      return { id: actual.id_incidencia_retrabajo.toString(), estado: siguiente, causaReferencia: causa, responsabilidad };
+      return conAuditoriaIncidencia({ id: actual.id_incidencia_retrabajo.toString(), estado: siguiente, causaReferencia: causa, responsabilidad }, { estado: actual.estado, causaReferencia: actual.causa_referencia, responsabilidad: actual.responsabilidad }, { estado: siguiente, causaReferencia: causa, responsabilidad });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async resolverIncidenciaOperativa(id: number, decision: 'aprobada' | 'rechazada', entrada: Record<string, unknown>, actor: ActorIncidenciaM6) {
+    return prisma.$transaction(async tx => {
+      const actual = await tx.incidencia_retrabajo_tarea.findUnique({ where: { id_incidencia_retrabajo: BigInt(id) }, include: { evidencias: { select: { evidencia_terreno_evidencia_terreno_id: true } } } });
+      if (!actual) throw new ErrorAplicacion(404, 'Incidencia no encontrada');
+      validarRevisionIncidenciaM6({ estadoRevision: actual.estado_revision, idCreador: actual.id_usuario_creador, idRevisor: actor.id, idCategoria: actual.id_categoria_incidencia, cantidadEvidencias: actual.evidencias.length, decision });
+      const observacion = texto(entrada.observacion, 2000) || null;
+      const cambio = await tx.incidencia_retrabajo_tarea.updateMany({ where: { id_incidencia_retrabajo: actual.id_incidencia_retrabajo, estado_revision: 'pendiente_revision' }, data: { estado_revision: decision, id_usuario_revisor: actor.id, fecha_revision: new Date(), observacion_revision: observacion } });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La incidencia cambió concurrentemente');
+      return conAuditoriaIncidencia({ id: actual.id_incidencia_retrabajo.toString(), estadoRevision: decision, observacion, idRevisor: actor.id.toString() }, { estadoRevision: actual.estado_revision }, { estadoRevision: decision, observacion, idRevisor: actor.id.toString() });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 

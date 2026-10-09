@@ -670,6 +670,7 @@ model moneda {
   nota_venta                 nota_venta[]
   pago_cliente               pago_cliente[]
   pago_proveedor             pago_proveedor[]
+  proyeccion_financiera_m7   proyeccion_financiera_m7[]
   proveedor                  proveedor[]
   proyecto_financiero        proyecto_financiero[]
 
@@ -712,6 +713,30 @@ model movimiento_financiero {
   origen_movimiento_financiero origen_movimiento_financiero[]
 
   @@index([fecha_movimiento], map: "idx_movimiento_financiero_fecha")
+  @@schema("finanzas")
+}
+
+/// Presupuesto gerencial mensual M7; se mantiene separado de movimientos reales y compromisos owner.
+model proyeccion_financiera_m7 {
+  id_proyeccion_financiera_m7 Int      @id @default(autoincrement())
+  tipo                         String   @db.VarChar(30)
+  anio                         Int
+  mes                          Int
+  id_moneda                    Int
+  categoria                    String   @db.VarChar(50)
+  monto_proyectado             Decimal  @db.Decimal(14, 2)
+  observacion                  String?
+  estado                       String   @default("activo") @db.VarChar(20)
+  creado_por                   BigInt
+  fecha_creacion               DateTime @default(now()) @db.Timestamptz(6)
+  actualizado_por              BigInt?
+  fecha_actualizacion          DateTime? @db.Timestamptz(6)
+  moneda                       moneda   @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_proyeccion_m7_moneda")
+  creador                      usuario  @relation("proyeccion_m7_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  actualizador                 usuario? @relation("proyeccion_m7_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([tipo, anio, mes, estado], map: "idx_proyeccion_m7_periodo")
+  @@index([id_moneda, categoria], map: "idx_proyeccion_m7_moneda_categoria")
   @@schema("finanzas")
 }
 
@@ -2693,6 +2718,7 @@ model area_trabajo {
   area_trabajo_nombre_area   String?                   @db.VarChar(150)
   insumo_estandar_proceso    insumo_estandar_proceso[]
   orden_trabajo              orden_trabajo[]
+  incidencias                incidencia_retrabajo_tarea[]
 
   @@schema("terreno")
 }
@@ -2864,8 +2890,12 @@ model evidencia_terreno {
   evidencia_terreno_observacion          String?
   id_formulario_de_cierre                BigInt?
   id_servicio_terreno                    BigInt?
+  id_incidencia_retrabajo                BigInt?
   formulario_de_cierre                   formulario_de_cierre? @relation(fields: [id_formulario_de_cierre], references: [formulario_de_cierre_formulario_de_cierre_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_evidencia_terreno_id_formulario_de_cierre")
   servicio_terreno                       servicio_terreno?     @relation(fields: [id_servicio_terreno], references: [servicio_terreno_servicio_terreno_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_evidencia_terreno_id_servicio_terreno")
+  incidencia_retrabajo                   incidencia_retrabajo_tarea? @relation(fields: [id_incidencia_retrabajo], references: [id_incidencia_retrabajo], onDelete: Restrict, onUpdate: NoAction, map: "fk_evidencia_terreno_incidencia")
+
+  @@index([id_incidencia_retrabajo], map: "idx_evidencia_terreno_incidencia")
 
   @@schema("terreno")
 }
@@ -3219,11 +3249,35 @@ model incidencia_retrabajo_tarea {
   estado                  String    @default("pendiente") @db.VarChar(20)
   responsabilidad         String?   @db.VarChar(120)
   fecha_registro          DateTime  @default(now()) @db.Timestamptz(6)
+  id_categoria_incidencia Int?
+  id_area_responsable     BigInt?
+  id_usuario_creador      BigInt?
+  estado_revision         String    @default("pendiente_revision") @db.VarChar(30)
+  id_usuario_revisor      BigInt?
+  fecha_revision          DateTime? @db.Timestamptz(6)
+  observacion_revision    String?
   ejecucion               ejecucion_tarea @relation(fields: [id_ejecucion_tarea], references: [id_ejecucion_tarea], onDelete: Restrict, onUpdate: NoAction)
+  categoria               categoria_incidencia_terreno? @relation(fields: [id_categoria_incidencia], references: [id_categoria_incidencia], onDelete: Restrict, onUpdate: NoAction)
+  area_responsable        area_trabajo? @relation(fields: [id_area_responsable], references: [area_trabajo_id_area], onDelete: Restrict, onUpdate: NoAction)
+  creador                 usuario? @relation("incidencia_creador", fields: [id_usuario_creador], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  revisor                 usuario? @relation("incidencia_revisor", fields: [id_usuario_revisor], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  evidencias              evidencia_terreno[]
   decision_remuneracional decision_remuneracional_retrabajo?
 
   @@index([estado, fecha_registro], map: "idx_incidencia_retrabajo_pendiente")
   @@index([id_ejecucion_tarea], map: "idx_incidencia_retrabajo_ejecucion")
+  @@index([id_categoria_incidencia, estado_revision], map: "idx_incidencia_categoria_revision")
+  @@index([id_area_responsable], map: "idx_incidencia_area")
+  @@schema("terreno")
+}
+
+model categoria_incidencia_terreno {
+  id_categoria_incidencia Int      @id @default(autoincrement())
+  codigo                   String   @unique @db.VarChar(30)
+  nombre                   String   @db.VarChar(100)
+  activa                   Boolean  @default(true)
+  incidencias              incidencia_retrabajo_tarea[]
+
   @@schema("terreno")
 }
 
@@ -3235,6 +3289,8 @@ model usuario {
   version_seguridad Int @default(0)
   empleado_seguridad empleado? @relation("empleado_m4", fields: [empleado_m4], references: [rut_empleado])
   particulares usuario_permiso_particular[]
+  proyecciones_m7_creadas      proyeccion_financiera_m7[] @relation("proyeccion_m7_creador")
+  proyecciones_m7_actualizadas proyeccion_financiera_m7[] @relation("proyeccion_m7_actualizador")
   seguridad estado_seguridad_usuario?
   sesiones sesion_usuario[]
   recuperaciones token_recuperacion[]
@@ -3275,6 +3331,8 @@ model usuario {
   tarea                                            tarea[]
   ejecuciones_tarea                                ejecucion_tarea[] @relation("ejecucion_tarea_ejecutor")
   decisiones_retrabajo_resueltas                   decision_remuneracional_retrabajo[] @relation("decision_retrabajo_resolutor")
+  incidencias_terreno_creadas                      incidencia_retrabajo_tarea[] @relation("incidencia_creador")
+  incidencias_terreno_revisadas                    incidencia_retrabajo_tarea[] @relation("incidencia_revisor")
   remuneraciones_creadas                           remuneracion[] @relation("remuneracion_creador")
   periodos_remuneracion_cerrados                   periodo_remuneracion[] @relation("periodo_remuneracion_cerrador")
   remuneraciones_calculadas                        remuneracion[] @relation("remuneracion_calculador")

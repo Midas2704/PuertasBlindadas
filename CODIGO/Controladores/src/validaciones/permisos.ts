@@ -75,10 +75,10 @@ export const operacionesPermiso: Record<string, string> = {
  obtenerPreparacionSalida:'CU210', actualizarChecklistSalida:'CU210',
  registrarResultadoVisita:'CU211',
  registrarIncidenciaRetrabajo:'CU212',
- listarIncidenciasOperativas:'CU213', actualizarIncidenciaOperativa:'CU213',
+ listarIncidenciasOperativas:'CU213', catalogosIncidenciaOperativa:'CU212', obtenerEvidenciaIncidencia:'CU213', adjuntarEvidenciaIncidencia:'CU212', actualizarIncidenciaOperativa:'CU213', aprobarIncidenciaOperativa:'CU213', rechazarIncidenciaOperativa:'CU213',
  catalogoDeduccionesEmpleado:'CU214', listarDeduccionesEmpleado:'CU214', asignarDeduccionEmpleado:'CU214', finalizarDeduccionEmpleado:'CU214',
  consultarPanelGeneralM7:'CU215', consultarHistoricoPanelGeneralM7:'CU215', consultarCentroAtencionM7:'CU216', consultarCotizacionesPendientesM7:'CU217', consultarContextoClienteM7:'CU221', consultarAnalisisVentasM7:'CU219', consultarCuentasCobrarM7:'CU222', consultarCuentasPagarM7:'CU226', consultarLiquidezM7:'CU230', consultarRiesgoDeficitM7:'CU232', consultarExposicionProyectosM7:'CU236', consultarContextoProyectoM7:'CU237',
- consultarMargenProyectosM7:'CU233', consultarResumenResultadosM7:'CU238', consultarSituacionFinancieraM7:'CU239', consultarCostoRemuneracionesM7:'CU242', descargarPdfDashboardM7:'CU245', consultarUmbralMargenM7:'CU246', configurarUmbralMargenM7:'CU246',
+ consultarMargenProyectosM7:'CU233', consultarResumenResultadosM7:'CU238', consultarSituacionFinancieraM7:'CU239', consultarCostoRemuneracionesM7:'CU242', descargarPdfDashboardM7:'CU245', descargarExcelDashboardM7:'CU245', consultarUmbralMargenM7:'CU246', configurarUmbralMargenM7:'CU246', crearProyeccionM7:'CU246', actualizarProyeccionM7:'CU246', desactivarProyeccionM7:'CU246',
  consultarOrdenesTrabajoM7:'CU247', consultarCargaOperacionalM7:'CU248', consultarInstalacionesM7:'CU250', consultarAtrasosInstalacionesM7:'CU252', consultarIncidenciasRetrabajosM7:'CU253',
  consultarExposicionCreditoM7:'CU240', consultarAlertasCreditoM7:'CU241', consultarResumenIvaM7:'CU243', consultarCostosFabricacionM7:'CU244', consultarBloqueosEconomicosM7:'CU249', consultarMargenInstalacionesM7:'CU251',
  consultarInventarioValorizadoM7:'CU254', consultarMaterialesProyectoOtM7:'CU255', consultarRiesgoStockM7:'CU256', consultarRotacionInventarioM7:'CU257', consultarComprasRecepcionesM7:'CU258',
@@ -94,6 +94,10 @@ export const operacionesPermiso: Record<string, string> = {
 };
 
 const permisosAlternativosOperacion: Record<string, string[]> = {
+ listarIncidenciasOperativas: ['CU212'],
+ catalogosIncidenciaOperativa: ['CU213'],
+ obtenerEvidenciaIncidencia: ['CU212'],
+ adjuntarEvidenciaIncidencia: ['CU213'],
  listarEsquemas: ['CU163', 'CU164'],
  listarTarifasEsquema: ['CU164'],
  listarHaberes: ['CU166'],

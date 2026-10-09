@@ -80,7 +80,7 @@ test('M7 CU252 atrasos de instalaciones con cobertura parcial', async t => {
       assert.equal(panel.bloques.atrasosInstalaciones.estado, 'FUENTE_NO_DISPONIBLE'); assert.notEqual(panel.bloques.instalaciones.estado, 'FUENTE_NO_DISPONIBLE'); assert.notEqual(panel.bloques.incidenciasRetrabajos.estado, 'FUENTE_NO_DISPONIBLE');
     });
     await t.test('19 no crea score ni prioridad', () => { const claves = clavesRecursivas(resultado); assert.equal(claves.includes('score'), false); assert.equal(claves.includes('prioridad'), false); });
-    await t.test('20 conserva sólo las migraciones M7 autorizadas', () => assert.deepEqual(readdirSync(resolve('prisma/migrations')).filter(nombre => /m7/i.test(nombre)), ['040_m7_parametros_dashboard', '041_m7_delta_controlado']));
+    await t.test('20 conserva sólo las migraciones M7 autorizadas', () => assert.deepEqual(readdirSync(resolve('prisma/migrations')).filter(nombre => /m7/i.test(nombre)), ['040_m7_parametros_dashboard', '041_m7_delta_controlado', '051_m7_proyeccion_financiera']));
   } finally {
     await prisma.tarea.deleteMany({ where: { tarea_tarea_id: { in: ids.tareas } } });
     await prisma.orden_trabajo.deleteMany({ where: { orden_trabajo_id_orden: { in: ids.ordenes } } });
