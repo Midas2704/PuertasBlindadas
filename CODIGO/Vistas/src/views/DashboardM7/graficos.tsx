@@ -98,6 +98,58 @@ export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', 
   </ComposedChart></ResponsiveContainer></div></div>;
 }
 
+const porcentajeComparativo = (valor: unknown) => typeof valor === 'number' && Number.isFinite(valor)
+  ? `${Object.is(valor, -0) || valor >= 0 ? '+' : ''}${(Object.is(valor, -0) ? 0 : valor).toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+  : 'N/A';
+
+function TooltipComparativoMensual({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: DatoGrafico }>; label?: unknown }) {
+  const fila = payload?.[0]?.payload;
+  if (!active || !fila) return null;
+  const periodo = String(fila.periodo || label || '');
+  const anio = Number(periodo.slice(0, 4));
+  const mesAnterior = typeof fila.periodoMesAnterior === 'string' ? `Mes anterior · ${fechaCompleta(fila.periodoMesAnterior)}` : 'Mes anterior';
+  const filas = [
+    { etiqueta: 'Ventas netas', valor: fila.ventasNetasGerencial, color: NARANJA, tipo: 'monto' },
+    { etiqueta: `Mismo mes ${anio - 1}`, valor: fila.ventasAnioAnterior, color: '#f6b35d', tipo: 'monto', linea: true },
+    { etiqueta: 'YoY', valor: fila.yoy, color: '#c76500', tipo: 'porcentaje' },
+    { etiqueta: mesAnterior, valor: fila.ventaMesAnterior, color: '#a3a3a3', tipo: 'monto' },
+    { etiqueta: 'MoM', valor: fila.mom, color: GRIS, tipo: 'porcentaje' },
+    { etiqueta: 'Costos directos', valor: fila.costosDirectos, color: '#9ca3af', tipo: 'monto' },
+    { etiqueta: 'Resultado gerencial', valor: fila.resultadoGerencial, color: '#000000', tipo: 'monto', linea: true },
+    { etiqueta: `Resultado ${anio - 1}`, valor: fila.resultadoAnioAnterior, color: '#4b5563', tipo: 'monto', linea: true },
+  ].filter(item => typeof item.valor === 'number' && Number.isFinite(item.valor));
+  return <div className="max-w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-gray-200 bg-white px-3 py-3 text-xs shadow-xl">
+    <p className="mb-2 font-black uppercase tracking-wide text-gray-950">{fechaCompleta(periodo)}</p>
+    <div className="space-y-1.5">{filas.map(item => <div key={item.etiqueta} className="flex items-center justify-between gap-5">
+      <span className="flex min-w-0 items-center gap-2 text-gray-600"><i aria-hidden="true" className={item.linea ? 'h-0.5 w-3 shrink-0' : 'h-2.5 w-2.5 shrink-0 rounded-[2px]'} style={{ backgroundColor: item.color }} /><span>{item.etiqueta}</span></span>
+      <strong className="shrink-0 text-gray-950">{item.tipo === 'porcentaje' ? porcentajeComparativo(item.valor) : formatearDato(item.valor, 'monto')}</strong>
+    </div>)}</div>
+  </div>;
+}
+
+const LeyendaComparativa = () => <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-semibold text-gray-600">
+  <span className="flex items-center gap-1.5"><i aria-hidden="true" className="h-2.5 w-2.5 rounded-[2px] bg-[#FE8F01]" />Ventas</span>
+  <span className="flex items-center gap-1.5"><i aria-hidden="true" className="w-4 border-t-2 border-dashed border-[#f6b35d]" />Ventas año anterior</span>
+  <span className="flex items-center gap-1.5"><i aria-hidden="true" className="h-2.5 w-2.5 rounded-[2px] bg-[#9ca3af]" />Costos</span>
+  <span className="flex items-center gap-1.5"><i aria-hidden="true" className="h-0.5 w-4 bg-black" />Resultado</span>
+  <span className="flex items-center gap-1.5"><i aria-hidden="true" className="w-4 border-t-2 border-dashed border-[#4b5563]" />Resultado año anterior</span>
+</div>;
+
+export function GraficoComparativoMensual({ datos, alto = 340 }: { datos: DatoGrafico[]; alto?: number }) {
+  if (!datos.length) return <EstadoSinDatos texto="No hay una serie histórica suficiente para graficar." />;
+  return <div className="w-full"><LeyendaComparativa /><div className="w-full overflow-x-auto"><div className="min-w-[720px]" style={{ height: alto }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
+    <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} />
+    <XAxis dataKey="periodo" tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
+    <YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />
+    <Tooltip content={<TooltipComparativoMensual />} wrapperStyle={{ zIndex: 50, outline: 'none' }} allowEscapeViewBox={{ x: false, y: true }} />
+    <Bar dataKey="ventasNetasGerencial" name="Ventas" fill={NARANJA} radius={[3, 3, 0, 0]} maxBarSize={28} />
+    <Bar dataKey="costosDirectos" name="Costos" fill="#9ca3af" radius={[3, 3, 0, 0]} maxBarSize={28} />
+    <Line type="monotone" dataKey="resultadoGerencial" name="Resultado" stroke="#000000" strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />
+    <Line type="monotone" dataKey="ventasAnioAnterior" name="Ventas año anterior" stroke="#f6b35d" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2 }} activeDot={{ r: 4 }} connectNulls={false} />
+    <Line type="monotone" dataKey="resultadoAnioAnterior" name="Resultado año anterior" stroke="#4b5563" strokeWidth={1.75} strokeDasharray="3 4" dot={{ r: 2 }} activeDot={{ r: 4 }} connectNulls={false} />
+  </ComposedChart></ResponsiveContainer></div></div></div>;
+}
+
 function TooltipDonut({ active, payload, metrica, total }: { active?: boolean; payload?: Array<{ payload?: DatoDonut }>; metrica: 'VALOR' | 'UNIDADES' | 'GENERICO'; total: number }) {
   const dato = payload?.[0]?.payload;
   if (!active || !dato) return null;

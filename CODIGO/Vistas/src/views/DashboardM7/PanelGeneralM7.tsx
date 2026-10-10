@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { ControlSegmentado, EncabezadoM7, PdfDashboard, Periodo, EstadoDato, estadoHumano, formatearDato, usarConsultaM7 } from './componentes';
 import type { RespuestaM7 } from './componentes';
-import { EstadoSinDatos, GraficoBarras, GraficoCombinado, GraficoDonut, GraficoProgreso } from './graficos';
+import { EstadoSinDatos, GraficoBarras, GraficoCombinado, GraficoComparativoMensual, GraficoDonut, GraficoProgreso } from './graficos';
 import type { DatoGrafico } from './graficos';
 import { usarSesion } from '../../seguridad/Sesion';
 import { NombreProducto, PALETA_PRODUCTOS, limpiarNombreProducto } from './presentacionProductos';
@@ -67,6 +67,42 @@ function comparar(meses: MesHistorico[], clave: keyof MesHistorico) {
 
 const porcentajeCorto = (valor: number | null) => { if (valor === null) return 'N/A'; const normalizado = Object.is(valor, -0) ? 0 : valor; return `${normalizado >= 0 ? '+' : ''}${normalizado.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`; };
 
+const variacionPorcentual = (actual: number | null, base: number | null) => actual === null || base === null || base === 0 ? null : (actual - base) / Math.abs(base) * 100;
+const periodoAnterior = (periodo: string) => {
+  const fecha = new Date(`${periodo}-01T00:00:00Z`); fecha.setUTCMonth(fecha.getUTCMonth() - 1);
+  return `${fecha.getUTCFullYear()}-${String(fecha.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+function prepararComparativoMensual(visibles: MesHistorico[], historico: MesHistorico[]) {
+  const porPeriodo = new Map(historico.map(fila => [fila.periodo, fila]));
+  return visibles.map(fila => {
+    const claveAnual = `${Number(fila.periodo.slice(0, 4)) - 1}${fila.periodo.slice(4)}`;
+    const claveAnterior = periodoAnterior(fila.periodo);
+    const anual = porPeriodo.get(claveAnual); const anterior = porPeriodo.get(claveAnterior);
+    const ventaActual = numero(fila.ventasNetasGerencial); const ventaAnual = numero(anual?.ventasNetasGerencial); const ventaAnterior = numero(anterior?.ventasNetasGerencial);
+    return { ...fila, ventasAnioAnterior: ventaAnual, resultadoAnioAnterior: numero(anual?.resultadoGerencial), ventaMesAnterior: ventaAnterior, periodoMesAnterior: claveAnterior, mom: variacionPorcentual(ventaActual, ventaAnterior), yoy: variacionPorcentual(ventaActual, ventaAnual) };
+  });
+}
+function sumarYtd(meses: MesHistorico[], anio: number, mesCorte: number) {
+  const valores = meses.filter(fila => Number(fila.periodo.slice(0, 4)) === anio && Number(fila.periodo.slice(5, 7)) <= mesCorte).map(fila => numero(fila.ventasNetasGerencial)).filter((valor): valor is number => valor !== null);
+  return valores.length ? valores.reduce((total, valor) => total + valor, 0) : null;
+}
+
+function ResumenComparativoMensual({ datos, historico }: { datos: Array<MesHistorico & { mom: number | null; yoy: number | null }>; historico: MesHistorico[] }) {
+  const ultimo = datos.at(-1); if (!ultimo) return null;
+  const anio = Number(ultimo.periodo.slice(0, 4)); const mes = Number(ultimo.periodo.slice(5, 7));
+  const actual = numero(ultimo.ventasNetasGerencial); const ytdActual = sumarYtd(historico, anio, mes); const ytdAnterior = sumarYtd(historico, anio - 1, mes);
+  const periodo = new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${ultimo.periodo}-01T00:00:00Z`));
+  const item = (etiqueta: string, valor: string, destacado = false, detalle?: string) => <div className="min-w-0"><dt className={`text-[10px] font-black uppercase tracking-wide ${destacado ? 'text-[#b85e00]' : 'text-gray-500'}`}>{etiqueta}</dt><dd className="mt-1 break-words text-sm font-black text-gray-950 sm:text-base">{valor}</dd>{detalle && <p className="mt-0.5 text-[11px] capitalize text-gray-500">{detalle}</p>}</div>;
+  return <dl className="mb-5 grid grid-cols-2 gap-x-4 gap-y-4 border-y border-gray-100 bg-gray-50/70 px-4 py-4 sm:grid-cols-3 xl:grid-cols-6">
+    {item('Período actual', actual === null ? 'No disponible' : formatearDato(actual, 'monto'), false, periodo)}
+    {item('MoM', porcentajeCorto(ultimo.mom))}
+    {item('YoY', porcentajeCorto(ultimo.yoy), true)}
+    {item(`YTD ${anio}`, ytdActual === null ? 'No disponible' : formatearDato(ytdActual, 'monto'))}
+    {item(`YTD ${anio - 1}`, ytdAnterior === null ? 'No disponible' : formatearDato(ytdAnterior, 'monto'))}
+    {item('Var. YTD', porcentajeCorto(variacionPorcentual(ytdActual, ytdAnterior)), true)}
+  </dl>;
+}
+
 type ProductoEjecutivo = { nombre: string; unidades: number; ventaNetaClp: number | null; valor: number; participacion: number | null; color: string };
 function componerProductosEjecutivos(productos: Record<string, unknown>[], metrica: string): ProductoEjecutivo[] {
   const filas = productos.map(item => {
@@ -122,6 +158,7 @@ export default function PanelGeneralM7({ compacto = false }: { compacto?: boolea
   const bloques = (consulta.datos?.bloques || {}) as Record<string, RespuestaM7>; const mesesComparacion = historico.datos?.meses || []; const meses = mesesComparacion.slice(-12);
   const porPeriodo = new Map(mesesComparacion.map(fila => [fila.periodo, fila]));
   const mesesVentas = meses.map(fila => { const anterior = `${Number(fila.periodo.slice(0, 4)) - 1}${fila.periodo.slice(4)}`; return { ...fila, ventasAnioAnterior: porPeriodo.get(anterior)?.ventasNetas ?? null }; });
+  const mesesGerenciales = prepararComparativoMensual(meses, mesesComparacion);
   const periodoTexto = useMemo(() => new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric' }).format(new Date(consulta.anio, consulta.mes - 1, 1)), [consulta.anio, consulta.mes]);
   const sinComparacion = { actual: null, anterior: null, anual: null }; const disponible = historico.datos?.disponibilidad || {};
   const flujo = disponible.flujo ? comparar(mesesComparacion, 'flujoNeto') : sinComparacion; const cxc = buscarNumero(bloques.cuentasCobrar, ['saldo']); const cxp = buscarNumero(bloques.cuentasPagar, ['saldo']);
@@ -150,7 +187,7 @@ export default function PanelGeneralM7({ compacto = false }: { compacto?: boolea
   const recargar = () => { consulta.recargar(); recargarHistorico(version => version + 1); }; const error = consulta.error || historico.error;
   return <div className="min-h-full bg-gray-50"><EncabezadoM7 titulo={compacto ? 'Dashboard Financiero' : 'Resumen gerencial'} descripcion="Indicadores del mes de corte y evolución real de los 12 meses terminados en ese período" /><Periodo anio={consulta.anio} mes={consulta.mes} cambiar={consulta.cambiar} cargando={consulta.cargando || historico.cargando} recargar={recargar} /><div className="mx-auto mt-3 max-w-7xl px-5 sm:px-8"><div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"><ControlSegmentado etiqueta="Segmento comercial" valor={consulta.segmento} cambiar={consulta.cambiarSegmento} opciones={[{ valor: 'TODOS', etiqueta: 'Todos' }, { valor: 'B2B', etiqueta: 'B2B' }, { valor: 'B2C', etiqueta: 'B2C' }]} /></div></div>{!compacto && <PdfDashboard origen="panel" anio={consulta.anio} mes={consulta.mes} segmento={consulta.segmento} />}{error && <div className="border-y border-red-200 bg-red-50 px-5 py-4 text-red-800">{error}</div>}
     <main className="mx-auto max-w-[1500px] space-y-5 px-4 py-6 sm:px-8"><section><p className="text-xs font-black uppercase tracking-wide text-[#b85e00]">Productividad / Resultados</p><h2 className="mt-1 text-xl font-black text-black">Ventas y rentabilidad</h2><div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6"><KpiVenta resumen={disponible.ventas ? historico.datos?.resumenVentas : null} periodo={periodoTexto} anio={consulta.anio} mes={consulta.mes} /></div></section><section><p className="text-xs font-black uppercase tracking-wide text-[#676767]">Flujo / Liquidez</p><h2 className="mt-1 text-xl font-black text-black">Ejecutado y compromisos futuros</h2><div className="mt-3 grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3"><Kpi titulo="Ingresos proyectados" valor={ingresosProyectados} periodo="Compromisos CxC fechados" icono={<BanknoteArrowUp className="h-5 w-5" />} estado={String(indicadorProyeccion?.estado || '')}/><Kpi titulo="Egresos proyectados" valor={egresosProyectados} periodo="Compromisos CxP fechados" icono={<BanknoteArrowDown className="h-5 w-5" />} estado={String(indicadorProyeccion?.estado || '')}/><Kpi titulo="Flujo proyectado neto" valor={flujoProyectado} periodo="Entradas menos salidas comprometidas" icono={<ChartNoAxesCombined className="h-5 w-5" />} estado={String(indicadorProyeccion?.estado || '')}/><Kpi titulo="Cuentas por cobrar" valor={cxc} periodo="Saldo vigente" icono={<BanknoteArrowUp className="h-5 w-5" />} estado={estadoBloque(bloques.cuentasCobrar)}/><Kpi titulo="Cuentas por pagar" valor={cxp} periodo="Saldo vigente" icono={<BanknoteArrowDown className="h-5 w-5" />} estado={estadoBloque(bloques.cuentasPagar)}/><Kpi titulo="Flujo ejecutado" valor={flujo.actual} periodo={periodoTexto} icono={<Wallet className="h-5 w-5" />} estado={flujo.actual === null ? 'SIN_RESULTADOS' : 'VALIDO'} comparacion={flujo}/></div></section>
-      <Seccion titulo="Ventas, costos y resultado — últimos 12 meses" descripcion="Resultado gerencial general, no afectado por el filtro comercial; los meses sin costos reconstruibles permanecen sin dato." ruta={puedeVerResumenes ? `/dashboard-m7/resumenes?anio=${consulta.anio}&mes=${consulta.mes}` : undefined}><GraficoCombinado datos={meses} barras={[{ clave: 'ventasNetasGerencial', nombre: 'Ventas netas generales', color: '#FE8F01' }, { clave: 'costosDirectos', nombre: 'Costos directos', color: '#9ca3af' }]} lineas={[{ clave: 'resultadoGerencial', nombre: 'Resultado gerencial', color: '#000000' }]} alto={compacto ? 260 : 340} /></Seccion>
+      <Seccion titulo="Ventas, costos y resultado — últimos 12 meses" descripcion="Evolución mensual y comparación con el mismo período del año anterior." ruta={puedeVerResumenes ? `/dashboard-m7/resumenes?anio=${consulta.anio}&mes=${consulta.mes}&segmento=${consulta.segmento}` : undefined}><ResumenComparativoMensual datos={mesesGerenciales} historico={mesesComparacion} /><GraficoComparativoMensual datos={mesesGerenciales} alto={compacto ? 280 : 360} /></Seccion>
       {!compacto && puedeVerResultados && bloques.resumenResultados && <Seccion titulo="Estado de Resultados" descripcion="Resumen gerencial neto de IVA. EBITDA sólo se calcula con cobertura completa de gastos operacionales, sin confundir pagos de caja con gasto." ruta={`/dashboard-m7/resumenes?anio=${consulta.anio}&mes=${consulta.mes}`}><EstadoResultadosPanel bloque={bloques.resumenResultados} /></Seccion>}
       {!compacto && indicadorModelos && <Seccion titulo="Productos vendidos" descripcion="Composición de ventas definitivas según el producto registrado y cantidad real del detalle." ruta={`/dashboard-m7/ventas?${queryComercial}&metrica=${metricaProducto}`}>
         <div className="mb-5 flex flex-wrap items-end gap-5 border-b border-gray-100 pb-4"><ControlSegmentado etiqueta="Métrica" valor={metricaProducto} cambiar={setMetricaProducto} opciones={[{ valor: 'VALOR', etiqueta: 'Valor' }, { valor: 'UNIDADES', etiqueta: 'Unidades' }]} /><ControlSegmentado etiqueta="Segmento" valor={consulta.segmento} cambiar={consulta.cambiarSegmento} opciones={[{ valor: 'TODOS', etiqueta: 'Todos' }, { valor: 'B2B', etiqueta: 'B2B' }, { valor: 'B2C', etiqueta: 'B2C' }]} /></div>

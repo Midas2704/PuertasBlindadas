@@ -67,11 +67,22 @@ test('M7 ventas comparativas de panel', async t => {
     assert.equal(convertirVentaClpM7(100, 'USD', null), null);
     assert.deepEqual(resumen.coberturaMes, { incluidas: 2, excluidasSinTipoCambio: 1 });
   });
-  await t.test('gráfico conserva doce meses y agrega referencia del año anterior', () => {
-    const fuente = readFileSync(resolve('../Vistas/src/views/DashboardM7/PanelGeneralM7.tsx'), 'utf8');
-    assert.match(fuente, /mesesComparacion\.slice\(-12\)/);
-    assert.match(fuente, /ventasAnioAnterior/);
-    assert.match(fuente, /nombre: 'Año anterior'/);
+  await t.test('gráfico conserva doce meses y compara ventas y resultado con el mismo mes anterior', () => {
+    const panel = readFileSync(resolve('../Vistas/src/views/DashboardM7/PanelGeneralM7.tsx'), 'utf8');
+    const graficos = readFileSync(resolve('../Vistas/src/views/DashboardM7/graficos.tsx'), 'utf8');
+    assert.match(panel, /mesesComparacion\.slice\(-12\)/);
+    assert.match(panel, /ventasAnioAnterior: ventaAnual/);
+    assert.match(panel, /resultadoAnioAnterior: numero\(anual\?\.resultadoGerencial\)/);
+    assert.match(panel, /mom: variacionPorcentual/);
+    assert.match(panel, /yoy: variacionPorcentual/);
+    assert.match(panel, /resumenes\?anio=\$\{consulta\.anio\}&mes=\$\{consulta\.mes\}&segmento=\$\{consulta\.segmento\}/);
+    assert.match(graficos, /GraficoComparativoMensual/);
+  });
+  await t.test('resultado anterior sin cobertura permanece sin dato y la línea conserva el corte', async () => {
+    const sinCobertura = await new M7Controller().consultarHistoricoPanelGeneral({ anio: 2190, mes: 12, meses: 24 }, permisos);
+    const graficos = readFileSync(resolve('../Vistas/src/views/DashboardM7/graficos.tsx'), 'utf8');
+    assert.ok(sinCobertura.meses.every(fila => fila.resultadoGerencial === null));
+    assert.match(graficos, /dataKey="resultadoAnioAnterior"[^]*connectNulls=\{false\}/);
   });
   await t.test('filtro de ventas mantiene año mes y ofrece rango accionable', () => {
     const fuente = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8');
