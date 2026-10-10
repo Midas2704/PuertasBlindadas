@@ -89,7 +89,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'consultarCostoRemuneracionesM7' | 'descargarPdfDashboardM7' | 'descargarExcelDashboardM7'
   | 'consultarOrdenesTrabajoM7' | 'consultarCargaOperacionalM7' | 'consultarInstalacionesM7' | 'consultarAtrasosInstalacionesM7' | 'consultarIncidenciasRetrabajosM7'
   | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7' | 'crearProyeccionM7' | 'actualizarProyeccionM7' | 'desactivarProyeccionM7'
-  | 'registrarAjusteLiquidezM7' | 'consultarParametrosLiquidezM7' | 'configurarParametroLiquidezM7' | 'consultarCostosInstalacionM7' | 'configurarCostoInstalacionM7' | 'consultarParametroStockInmovilM7' | 'configurarParametroStockInmovilM7'
+  | 'registrarAjusteLiquidezM7' | 'crearCuentaBancariaM7' | 'actualizarCuentaBancariaM7' | 'crearSaldoInicialBancarioM7' | 'actualizarSaldoInicialBancarioM7' | 'consultarParametrosLiquidezM7' | 'configurarParametroLiquidezM7' | 'consultarCostosInstalacionM7' | 'configurarCostoInstalacionM7' | 'consultarParametroStockInmovilM7' | 'configurarParametroStockInmovilM7'
   | 'consultarExposicionCreditoM7' | 'consultarAlertasCreditoM7' | 'consultarResumenIvaM7' | 'consultarCostosFabricacionM7' | 'consultarBloqueosEconomicosM7' | 'consultarMargenInstalacionesM7'
   | 'consultarInventarioValorizadoM7' | 'consultarMaterialesProyectoOtM7' | 'consultarRiesgoStockM7' | 'consultarRotacionInventarioM7' | 'consultarComprasRecepcionesM7'
   | 'listarSolicitudesCreditoM8' | 'obtenerSolicitudCreditoM8' | 'crearSolicitudInicialM8' | 'crearSolicitudExcepcionM8' | 'enviarSolicitudCreditoM8' | 'cancelarSolicitudCreditoM8'
@@ -495,6 +495,10 @@ export class C_Finanzas {
       case 'consultarCuentasCobrarM7': return this.m7.consultarCuentasCobrar(solicitud.consulta || {}, actor.permisos);
       case 'consultarCuentasPagarM7': return this.m7.consultarCuentasPagar(solicitud.consulta || {}, actor.permisos);
       case 'consultarLiquidezM7': return this.m7.consultarLiquidez(solicitud.consulta || {}, actor.permisos);
+      case 'crearCuentaBancariaM7': return this.m7.guardarCuentaBancariaM7(cuerpo, actor.id);
+      case 'actualizarCuentaBancariaM7': return this.m7.guardarCuentaBancariaM7(cuerpo, actor.id, identificador(parametros.id));
+      case 'crearSaldoInicialBancarioM7': return this.m7.guardarSaldoInicialBancarioM7(cuerpo, actor.id);
+      case 'actualizarSaldoInicialBancarioM7': return this.m7.guardarSaldoInicialBancarioM7(cuerpo, actor.id, identificador(parametros.id));
       case 'crearProyeccionM7': return this.m7.guardarProyeccionM7(cuerpo, actor.id);
       case 'actualizarProyeccionM7': return this.m7.guardarProyeccionM7(cuerpo, actor.id, identificador(parametros.id));
       case 'desactivarProyeccionM7': return this.m7.desactivarProyeccionM7(identificador(parametros.id), actor.id);

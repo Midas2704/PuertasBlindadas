@@ -89,8 +89,8 @@ test('M7 cierre de hallazgos CU225 CU226 CU227 CU230 CU231 CU232 y navegación',
   await t.test('26 CU230 oculta id y ruta sin permiso owner', async () => { const r = await modulo.consultarLiquidez({ ...consulta, origen: 'pago_cliente' }, ['CU230']); const m = r.flujoHistorico.valor.movimientos[0]; assert.equal(Object.hasOwn(m, 'acciones'), false); assert.equal(Object.hasOwn(m.origenes[0], 'id'), false); });
 
   const liquidez = await modulo.consultarLiquidez(consulta, ['CU231']);
-  await t.test('27 CU231 no inventa saldo bancario inicial ni final', () => { assert.equal(Object.hasOwn(liquidez.proyeccion.valor, 'saldosFinales'), false); assert.equal(liquidez.saldoInicial.estado, 'FUENTE_NO_DISPONIBLE'); assert.equal(liquidez.saldoInicial.valor, null); });
-  await t.test('28 CU231 separa compromisos y liquidez proyectada', () => assert.ok(liquidez.proyeccion.valor.eventos.length > 0));
+  await t.test('27 CU231 no inventa ni expone saldo bancario sin CU228', () => { assert.equal(Object.hasOwn(liquidez.proyeccion.valor, 'saldosFinales'), false); assert.equal(liquidez.saldoInicial.estado, 'SIN_PERMISO'); assert.equal(liquidez.saldoInicial.valor, null); });
+  await t.test('28 CU231 separa compromisos y liquidez proyectada', () => { assert.ok(Array.isArray(liquidez.proyeccion.valor.eventos)); assert.equal(Object.hasOwn(liquidez.proyeccion.valor, 'saldoReconstruido'), false); });
   await t.test('29 CU231 no presenta compromisos futuros como realizados', () => assert.equal(liquidez.proyeccion.valor.eventos.some(f => Object.hasOwn(f, 'saldo')), false));
   const buscarParametrosOriginal = prisma.parametro_remuneracional.findMany;
   let riesgo;

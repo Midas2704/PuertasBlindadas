@@ -666,6 +666,7 @@ model moneda {
   documento_tributario       documento_tributario[]
   historial_precio_material  historial_precio_material[]
   movimiento_bancario        movimiento_bancario[]
+  cuenta_bancaria_m7         cuenta_bancaria_m7[]
   movimiento_financiero      movimiento_financiero[]
   nota_venta                 nota_venta[]
   pago_cliente               pago_cliente[]
@@ -681,19 +682,67 @@ model moneda {
 model movimiento_bancario {
   id_movimiento_bancario    Int            @id @default(autoincrement())
   id_moneda                 Int
+  id_cuenta_bancaria_m7     Int?
   fecha_movimiento_bancario DateTime       @db.Timestamp(6)
   monto_bancario            Decimal        @db.Decimal(14, 2)
   descripcion_bancaria      String?
   glosa_bancaria            String?
   tipo_movimiento_bancario  String?        @db.VarChar(50)
+  naturaleza_bancaria       String?        @db.VarChar(10)
   banco                     String?        @db.VarChar(100)
   cuenta_bancaria           String?        @db.VarChar(80)
   numero_operacion          String?        @db.VarChar(100)
   estado_conciliacion       String         @default("pendiente") @db.VarChar(30)
   conciliacion              conciliacion[]
   moneda                    moneda         @relation(fields: [id_moneda], references: [id_moneda], onUpdate: NoAction, map: "fk_movimiento_bancario_moneda")
+  cuenta_bancaria_m7        cuenta_bancaria_m7? @relation(fields: [id_cuenta_bancaria_m7], references: [id_cuenta_bancaria_m7], onDelete: Restrict, onUpdate: NoAction, map: "fk_movimiento_bancario_cuenta_m7")
 
   @@index([fecha_movimiento_bancario], map: "idx_movimiento_bancario_fecha")
+  @@index([id_cuenta_bancaria_m7, fecha_movimiento_bancario], map: "idx_movimiento_bancario_cuenta_fecha_m7")
+  @@schema("finanzas")
+}
+
+/// Catálogo bancario propio de M7. El identificador bancario sólo se expone enmascarado.
+model cuenta_bancaria_m7 {
+  id_cuenta_bancaria_m7 Int       @id @default(autoincrement())
+  banco                  String    @db.VarChar(100)
+  alias_cuenta           String    @db.VarChar(100)
+  identificador_bancario String    @db.VarChar(120)
+  id_moneda              Int
+  estado                  String    @default("activa") @db.VarChar(20)
+  creado_por              BigInt
+  fecha_creacion          DateTime  @default(now()) @db.Timestamptz(6)
+  actualizado_por         BigInt?
+  fecha_actualizacion     DateTime? @db.Timestamptz(6)
+  moneda                  moneda    @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_cuenta_bancaria_m7_moneda")
+  creador                 usuario   @relation("cuenta_bancaria_m7_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  actualizador            usuario?  @relation("cuenta_bancaria_m7_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  movimientos             movimiento_bancario[]
+  saldos_iniciales        saldo_inicial_bancario_m7[]
+
+  @@unique([banco, identificador_bancario, id_moneda], map: "uq_cuenta_bancaria_m7_identidad")
+  @@index([estado, id_moneda], map: "idx_cuenta_bancaria_m7_estado_moneda")
+  @@schema("finanzas")
+}
+
+/// Saldo declarado al cierre de la fecha de corte; no constituye un movimiento financiero.
+model saldo_inicial_bancario_m7 {
+  id_saldo_inicial_bancario_m7 Int                 @id @default(autoincrement())
+  id_cuenta_bancaria_m7        Int
+  fecha_corte                  DateTime             @db.Date
+  saldo_inicial                Decimal              @db.Decimal(14, 2)
+  observacion                  String
+  estado                       String               @default("activo") @db.VarChar(20)
+  creado_por                   BigInt
+  fecha_creacion               DateTime             @default(now()) @db.Timestamptz(6)
+  actualizado_por              BigInt?
+  fecha_actualizacion          DateTime?            @db.Timestamptz(6)
+  cuenta                       cuenta_bancaria_m7    @relation(fields: [id_cuenta_bancaria_m7], references: [id_cuenta_bancaria_m7], onDelete: Restrict, onUpdate: NoAction, map: "fk_saldo_inicial_bancario_m7_cuenta")
+  creador                      usuario               @relation("saldo_inicial_bancario_m7_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  actualizador                 usuario?              @relation("saldo_inicial_bancario_m7_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([id_cuenta_bancaria_m7, fecha_corte], map: "uq_saldo_inicial_bancario_m7_cuenta_corte")
+  @@index([fecha_corte, estado], map: "idx_saldo_inicial_bancario_m7_corte_estado")
   @@schema("finanzas")
 }
 
@@ -3290,6 +3339,10 @@ model usuario {
   empleado_seguridad empleado? @relation("empleado_m4", fields: [empleado_m4], references: [rut_empleado])
   particulares usuario_permiso_particular[]
   proyecciones_m7_creadas      proyeccion_financiera_m7[] @relation("proyeccion_m7_creador")
+  cuentas_bancarias_m7_creadas cuenta_bancaria_m7[] @relation("cuenta_bancaria_m7_creador")
+  cuentas_bancarias_m7_actualizadas cuenta_bancaria_m7[] @relation("cuenta_bancaria_m7_actualizador")
+  saldos_bancarios_m7_creados saldo_inicial_bancario_m7[] @relation("saldo_inicial_bancario_m7_creador")
+  saldos_bancarios_m7_actualizados saldo_inicial_bancario_m7[] @relation("saldo_inicial_bancario_m7_actualizador")
   proyecciones_m7_actualizadas proyeccion_financiera_m7[] @relation("proyeccion_m7_actualizador")
   seguridad estado_seguridad_usuario?
   sesiones sesion_usuario[]

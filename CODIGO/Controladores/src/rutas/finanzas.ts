@@ -57,6 +57,10 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/dashboard-m7/cuentas-cobrar', derivar('consultarCuentasCobrarM7'));
   rutas.get('/dashboard-m7/cuentas-pagar', derivar('consultarCuentasPagarM7'));
   rutas.get('/dashboard-m7/liquidez', derivar('consultarLiquidezM7'));
+  rutas.post('/dashboard-m7/liquidez/cuentas-bancarias', derivar('crearCuentaBancariaM7'));
+  rutas.put('/dashboard-m7/liquidez/cuentas-bancarias/:id', derivar('actualizarCuentaBancariaM7'));
+  rutas.post('/dashboard-m7/liquidez/saldos-iniciales', derivar('crearSaldoInicialBancarioM7'));
+  rutas.put('/dashboard-m7/liquidez/saldos-iniciales/:id', derivar('actualizarSaldoInicialBancarioM7'));
   rutas.post('/dashboard-m7/proyecciones', derivar('crearProyeccionM7'));
   rutas.put('/dashboard-m7/proyecciones/:id', derivar('actualizarProyeccionM7'));
   rutas.delete('/dashboard-m7/proyecciones/:id', derivar('desactivarProyeccionM7'));

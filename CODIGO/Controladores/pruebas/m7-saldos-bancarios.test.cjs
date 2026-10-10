@@ -1,0 +1,53 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
+const { calcularSaldoCuentaBancariaM7, calcularFlujoRealM7, validarCuentaBancariaM7, validarSaldoInicialBancarioM7 } = require('../dist/controladores/M7Controller');
+const { permiteOperacion } = require('../dist/validaciones/permisos');
+const { CATALOGO_PRODUCTORES_M9 } = require('../dist/m9/contratoProductor');
+
+const fecha = valor => new Date(`${valor}T12:00:00Z`);
+const movimiento = (id, dia, monto, naturaleza = 'ingreso', estado = 'conciliado', numeroOperacion = `OP-${id}`) => ({ id, fecha: fecha(dia), monto, naturaleza, estado, numeroOperacion });
+const calcular = (saldo, movimientos, corte = '2026-01-01', objetivo = '2026-01-31') => calcularSaldoCuentaBancariaM7(saldo, fecha(corte), fecha(objetivo), movimientos);
+
+test('M7 saldos bancarios iniciales y cobertura de disponibilidades', async t => {
+  const controlador = readFileSync(resolve('src/controladores/M7Controller.ts'), 'utf8');
+  const schema = readFileSync(resolve('prisma/schema.prisma'), 'utf8');
+  const migracion = readFileSync(resolve('prisma/migrations/053_m7_saldos_bancarios/migration.sql'), 'utf8');
+  const vista = readFileSync(resolve('../Vistas/src/views/DashboardM7/LiquidezM7.tsx'), 'utf8');
+  const panel = readFileSync(resolve('../Vistas/src/views/DashboardM7/PanelGeneralM7.tsx'), 'utf8');
+  const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8');
+
+  await t.test('01 cuenta bancaria válida', () => assert.deepEqual(validarCuentaBancariaM7({ banco:'Banco X', alias:'Principal', identificadorBancario:'12345', moneda:'clp' }), { banco:'Banco X', alias:'Principal', identificador:'12345', moneda:'CLP', estado:'activa' }));
+  await t.test('02 cuenta duplicada rechazada por identidad exacta', () => assert.match(migracion, /UNIQUE INDEX "uq_cuenta_bancaria_m7_identidad"/));
+  await t.test('03 moneda válida y propia de la cuenta', () => { assert.match(schema, /id_moneda\s+Int/); assert.match(controlador, /estado_moneda !== 'activo'/); });
+  await t.test('04 saldo inicial positivo', () => assert.equal(Number(validarSaldoInicialBancarioM7({ idCuenta:1, fechaCorte:'2026-01-01', saldoInicial:'25000000', observacion:'Cartola' }).saldo), 25000000));
+  await t.test('05 saldo inicial cero explícito', () => assert.equal(Number(validarSaldoInicialBancarioM7({ idCuenta:1, fechaCorte:'2026-01-01', saldoInicial:'0', observacion:'Apertura cero' }).saldo), 0));
+  await t.test('06 saldo inicial no registrado permanece null', () => assert.equal(calcular(null, []).saldoReconstruido, null));
+  await t.test('07 fecha de corte usa cierre del día', () => assert.equal(calcular(100, [movimiento(1,'2026-01-02',10)]).saldoReconstruido, 110));
+  await t.test('08 movimiento anterior no se suma', () => assert.equal(calcular(100, [movimiento(1,'2025-12-31',10)]).saldoReconstruido, 100));
+  await t.test('09 movimiento del día de cierre no se duplica', () => assert.equal(calcular(100, [movimiento(1,'2026-01-01',10)]).saldoReconstruido, 100));
+  await t.test('10 movimiento posterior sí se considera', () => assert.equal(calcular(100, [movimiento(1,'2026-01-15',10)]).movimientosIncluidos, 1));
+  await t.test('11 ingreso suma correctamente', () => assert.equal(calcular(100, [movimiento(1,'2026-01-02',25)]).saldoReconstruido, 125));
+  await t.test('12 egreso resta correctamente', () => assert.equal(calcular(100, [movimiento(1,'2026-01-02',25,'egreso')]).saldoReconstruido, 75));
+  await t.test('13 movimiento anulado queda excluido', () => assert.equal(calcular(100, [movimiento(1,'2026-01-02',25,'ingreso','anulado')]).saldoReconstruido, 100));
+  await t.test('14 movimiento sin cuenta identificada se informa', () => assert.match(vista, /movimientos sin cuenta identificada/i));
+  await t.test('15 movimiento no conciliado invalida reconstrucción', () => assert.equal(calcular(100, [movimiento(1,'2026-01-02',25,'ingreso','pendiente')]).saldoReconstruido, null));
+  await t.test('16 conciliación no genera un tercer importe', () => { assert.doesNotMatch(controlador, /monto_conciliado.*saldoReconstruido/); assert.match(controlador, /fuenteCanonica: 'movimiento_bancario'/); });
+  await t.test('17 dos cuentas CLP se calculan por separado', () => { assert.equal(calcular(100,[movimiento(1,'2026-01-02',10)]).saldoReconstruido,110); assert.equal(calcular(200,[movimiento(2,'2026-01-02',20)]).saldoReconstruido,220); });
+  await t.test('18 USD no se mezcla con CLP', () => { assert.match(controlador, /const monedas = \[\.\.\.new Set\(detalle\.map\(cuenta => cuenta\.moneda\)\)\]/); assert.doesNotMatch(controlador, /tipoCambio.*saldoReconstruido/i); });
+  await t.test('19 saldo negativo no se oculta', () => assert.equal(calcular(-100, []).saldoReconstruido, -100));
+  await t.test('20 fuente incompleta produce null', () => assert.equal(calcular(100, [movimiento(1,'2026-01-02',25,null)]).saldoReconstruido, null));
+  await t.test('21 saldo bancario no altera flujo ejecutado', () => assert.deepEqual(calcularFlujoRealM7([{ monto:120,naturaleza:'ingreso' },{ monto:20,naturaleza:'egreso' }]), { ingresosReales:120,egresosReales:20,ajustesEntrada:0,ajustesSalida:0,flujoReal:100 }));
+  await t.test('22 saldo inicial no se convierte en ingreso', () => { const bloque = controlador.slice(controlador.indexOf('async guardarSaldoInicialBancarioM7'), controlador.indexOf('async consultarDisponibilidadesBancariasM7')); assert.doesNotMatch(bloque, /movimiento_financiero\.create/); });
+  await t.test('23 presupuesto de flujo no afecta saldo real', () => { const bloque = controlador.slice(controlador.indexOf('async consultarDisponibilidadesBancariasM7'), controlador.indexOf('private async consultarLiquidezCompleto')); assert.doesNotMatch(bloque, /proyeccion_financiera_m7/); });
+  await t.test('24 presupuesto de resultados no afecta saldo', () => { const bloque = controlador.slice(controlador.indexOf('async consultarDisponibilidadesBancariasM7'), controlador.indexOf('private async consultarLiquidezCompleto')); assert.doesNotMatch(bloque, /ESTADO_RESULTADOS/); });
+  await t.test('25 filtro histórico no inventa saldos', () => { assert.match(controlador, /fechaObjetivo.*periodo\.hastaExclusiva/); assert.match(controlador, /saldoReconstruido: null/); });
+  await t.test('26 permiso de lectura bancaria', () => assert.equal(permiteOperacion('consultarLiquidezM7', ['CU228']), true));
+  await t.test('27 permiso de escritura bancario', () => { assert.equal(permiteOperacion('crearCuentaBancariaM7', ['CU228']), true); assert.equal(permiteOperacion('crearSaldoInicialBancarioM7', ['CU246']), false); });
+  await t.test('28 auditoría M9 de creación', () => { assert.equal(CATALOGO_PRODUCTORES_M9.crearCuentaBancariaM7.operacion, 'CUENTA_BANCARIA_CREADA'); assert.equal(CATALOGO_PRODUCTORES_M9.crearSaldoInicialBancarioM7.operacion, 'SALDO_INICIAL_BANCARIO_CREADO'); });
+  await t.test('29 auditoría M9 de modificación', () => { assert.equal(CATALOGO_PRODUCTORES_M9.actualizarCuentaBancariaM7.operacion, 'CUENTA_BANCARIA_ACTUALIZADA'); assert.equal(CATALOGO_PRODUCTORES_M9.actualizarSaldoInicialBancarioM7.operacion, 'SALDO_INICIAL_BANCARIO_ACTUALIZADO'); });
+  await t.test('30 navegación al detalle', () => { assert.match(panel, /dashboard-m7\/liquidez/); assert.match(rutas, /liquidez\/saldos-iniciales/); });
+  await t.test('31 estado de cobertura visible', () => { assert.match(vista, /Estado de cobertura|estadoCobertura/); assert.match(vista, /Saldos bancarios pendientes de configuración o conciliación/); });
+  await t.test('32 regresión de flujo existente', () => { assert.match(controlador, /Flujo ejecutado basado una sola vez en movimiento_financiero/); assert.equal(calcularFlujoRealM7([{ monto:40,naturaleza:'ingreso',ajuste:true }]).ajustesEntrada,40); });
+});

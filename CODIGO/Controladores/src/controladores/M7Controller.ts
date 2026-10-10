@@ -239,6 +239,55 @@ export function calcularFlujoRealM7(movimientos: Array<{ monto: number; naturale
   }
   return { ingresosReales: redondear(total.ingresosReales), egresosReales: redondear(total.egresosReales), ajustesEntrada: redondear(total.ajustesEntrada), ajustesSalida: redondear(total.ajustesSalida), flujoReal: redondear(total.ingresosReales + total.ajustesEntrada - total.egresosReales - total.ajustesSalida) };
 }
+
+export type MovimientoSaldoBancarioM7 = {
+  id: number;
+  fecha: Date;
+  monto: number;
+  naturaleza: string | null;
+  estado: string;
+  numeroOperacion?: string | null;
+};
+
+export function calcularSaldoCuentaBancariaM7(saldoInicial: number | null, fechaCorte: Date, fechaObjetivo: Date, movimientos: MovimientoSaldoBancarioM7[]) {
+  if (saldoInicial === null || !Number.isFinite(saldoInicial)) return { saldoReconstruido: null, ingresos: 0, egresos: 0, estado: 'SALDO_INICIAL_PENDIENTE' as const, movimientosIncluidos: 0 };
+  const desdeExclusivo = new Date(Date.UTC(fechaCorte.getUTCFullYear(), fechaCorte.getUTCMonth(), fechaCorte.getUTCDate() + 1));
+  const hastaExclusivo = new Date(Date.UTC(fechaObjetivo.getUTCFullYear(), fechaObjetivo.getUTCMonth(), fechaObjetivo.getUTCDate() + 1));
+  const posteriores = movimientos.filter(movimiento => movimiento.fecha >= desdeExclusivo && movimiento.fecha < hastaExclusivo);
+  const vigentes = posteriores.filter(movimiento => normalizarTexto(movimiento.estado) !== 'anulado');
+  const operaciones = new Set<string>();
+  const duplicado = vigentes.some(movimiento => {
+    const clave = String(movimiento.numeroOperacion || '').trim();
+    if (!clave) return false;
+    if (operaciones.has(clave)) return true;
+    operaciones.add(clave); return false;
+  });
+  const incompletos = vigentes.filter(movimiento => normalizarTexto(movimiento.estado) !== 'conciliado' || !['ingreso', 'egreso'].includes(normalizarTexto(movimiento.naturaleza)) || !Number.isFinite(movimiento.monto) || movimiento.monto < 0);
+  const validos = vigentes.filter(movimiento => normalizarTexto(movimiento.estado) === 'conciliado' && ['ingreso', 'egreso'].includes(normalizarTexto(movimiento.naturaleza)) && Number.isFinite(movimiento.monto) && movimiento.monto >= 0);
+  const ingresos = redondear(validos.filter(movimiento => normalizarTexto(movimiento.naturaleza) === 'ingreso').reduce((total, movimiento) => total + movimiento.monto, 0));
+  const egresos = redondear(validos.filter(movimiento => normalizarTexto(movimiento.naturaleza) === 'egreso').reduce((total, movimiento) => total + movimiento.monto, 0));
+  if (duplicado || incompletos.length) return { saldoReconstruido: null, ingresos, egresos, estado: 'COBERTURA_INCOMPLETA' as const, movimientosIncluidos: validos.length };
+  return { saldoReconstruido: redondear(saldoInicial + ingresos - egresos), ingresos, egresos, estado: 'RECONSTRUIDO' as const, movimientosIncluidos: validos.length };
+}
+
+export function validarCuentaBancariaM7(entrada: Record<string, unknown>) {
+  const banco = String(entrada.banco || '').trim(); const alias = String(entrada.alias || entrada.aliasCuenta || '').trim(); const identificador = String(entrada.identificadorBancario || '').trim(); const moneda = String(entrada.moneda || '').trim().toUpperCase();
+  if (!banco || banco.length > 100 || !alias || alias.length > 100 || !identificador || identificador.length > 120) throw new ErrorAplicacion(400, 'Banco, alias e identificador bancario válidos son obligatorios');
+  if (!/^[A-Z0-9]{2,10}$/.test(moneda)) throw new ErrorAplicacion(400, 'Moneda inválida');
+  const estado = String(entrada.estado || 'activa').trim().toLowerCase(); if (!['activa', 'inactiva'].includes(estado)) throw new ErrorAplicacion(400, 'Estado de cuenta inválido');
+  return { banco, alias, identificador, moneda, estado };
+}
+
+export function validarSaldoInicialBancarioM7(entrada: Record<string, unknown>) {
+  const idCuenta = Number(entrada.idCuenta); if (!Number.isSafeInteger(idCuenta) || idCuenta <= 0) throw new ErrorAplicacion(400, 'Cuenta bancaria inválida');
+  const fechaCorte = fechaUtc(entrada.fechaCorte, 'Fecha de corte');
+  let saldo: Prisma.Decimal; try { saldo = new Prisma.Decimal(String(entrada.saldoInicial ?? '')); } catch { throw new ErrorAplicacion(400, 'Saldo inicial inválido'); }
+  if (!saldo.isFinite()) throw new ErrorAplicacion(400, 'Saldo inicial inválido');
+  const observacion = String(entrada.observacion || '').trim(); if (!observacion || observacion.length > 1000) throw new ErrorAplicacion(400, 'La observación es obligatoria y admite hasta 1000 caracteres');
+  return { idCuenta, fechaCorte, saldo: saldo.toDecimalPlaces(2), observacion };
+}
+
+const enmascararIdentificadorBancarioM7 = (identificador: string) => identificador.length <= 4 ? `••••${identificador}` : `•••• ${identificador.slice(-4)}`;
 export const calcularDesviacionFlujoM7 = (real: number, proyectado: number) => ({ diferencia: redondear(real - proyectado), diferenciaPorcentual: proyectado === 0 ? null : redondear((real - proyectado) / Math.abs(proyectado) * 100) });
 const slugParametro = (valor: unknown) => String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 22);
 const claveMes = (fecha: Date) => `${fecha.getUTCFullYear()}-${String(fecha.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -838,9 +887,87 @@ export class M7Controller {
     const salida = this.presentarProyeccionM7(fila); Object.defineProperty(salida, '__auditoriaM9', { value: { anterior: this.presentarProyeccionM7(anterior), nuevo: salida }, enumerable: false }); return salida;
   }
 
+  private presentarCuentaBancariaM7(fila: { id_cuenta_bancaria_m7: number; banco: string; alias_cuenta: string; identificador_bancario: string; estado: string; creado_por: bigint; fecha_creacion: Date; actualizado_por: bigint | null; fecha_actualizacion: Date | null; moneda: { codigo_moneda: string } }) {
+    return { id: fila.id_cuenta_bancaria_m7, banco: fila.banco, alias: fila.alias_cuenta, identificadorEnmascarado: enmascararIdentificadorBancarioM7(fila.identificador_bancario), moneda: fila.moneda.codigo_moneda, estado: fila.estado, responsable: (fila.actualizado_por || fila.creado_por).toString(), fechaRegistro: fila.fecha_creacion, fechaActualizacion: fila.fecha_actualizacion };
+  }
+
+  private presentarSaldoInicialBancarioM7(fila: { id_saldo_inicial_bancario_m7: number; id_cuenta_bancaria_m7: number; fecha_corte: Date; saldo_inicial: Prisma.Decimal; observacion: string; estado: string; creado_por: bigint; fecha_creacion: Date; actualizado_por: bigint | null; fecha_actualizacion: Date | null; cuenta: { banco: string; alias_cuenta: string; identificador_bancario: string; moneda: { codigo_moneda: string } } }) {
+    return { id: fila.id_saldo_inicial_bancario_m7, idCuenta: fila.id_cuenta_bancaria_m7, cuenta: fila.cuenta.alias_cuenta, banco: fila.cuenta.banco, identificadorEnmascarado: enmascararIdentificadorBancarioM7(fila.cuenta.identificador_bancario), moneda: fila.cuenta.moneda.codigo_moneda, fechaCorte: fechaIso(fila.fecha_corte), saldoInicial: Number(fila.saldo_inicial), observacion: fila.observacion, estado: fila.estado, responsable: (fila.actualizado_por || fila.creado_por).toString(), fechaRegistro: fila.fecha_creacion, fechaActualizacion: fila.fecha_actualizacion };
+  }
+
+  async guardarCuentaBancariaM7(entrada: Record<string, unknown>, actorId: bigint, id?: number) {
+    const datos = validarCuentaBancariaM7(entrada);
+    const moneda = await prisma.moneda.findUnique({ where: { codigo_moneda: datos.moneda } });
+    if (!moneda || moneda.estado_moneda !== 'activo') throw new ErrorAplicacion(400, 'Moneda no disponible');
+    try {
+      return await prisma.$transaction(async tx => {
+        const anterior = id ? await tx.cuenta_bancaria_m7.findUnique({ where: { id_cuenta_bancaria_m7: id }, include: { moneda: true } }) : null;
+        if (id && !anterior) throw new ErrorAplicacion(404, 'Cuenta bancaria no encontrada');
+        const conflicto = await tx.cuenta_bancaria_m7.findFirst({ where: { banco: datos.banco, identificador_bancario: datos.identificador, id_moneda: moneda.id_moneda, ...(id ? { id_cuenta_bancaria_m7: { not: id } } : {}) } });
+        if (conflicto) throw new ErrorAplicacion(409, 'Ya existe una cuenta bancaria con la misma identidad exacta');
+        const fila = id
+          ? await tx.cuenta_bancaria_m7.update({ where: { id_cuenta_bancaria_m7: id }, data: { banco: datos.banco, alias_cuenta: datos.alias, identificador_bancario: datos.identificador, id_moneda: moneda.id_moneda, estado: datos.estado, actualizado_por: actorId, fecha_actualizacion: new Date() }, include: { moneda: true } })
+          : await tx.cuenta_bancaria_m7.create({ data: { banco: datos.banco, alias_cuenta: datos.alias, identificador_bancario: datos.identificador, id_moneda: moneda.id_moneda, estado: datos.estado, creado_por: actorId }, include: { moneda: true } });
+        const salida = this.presentarCuentaBancariaM7(fila);
+        Object.defineProperty(salida, '__auditoriaM9', { value: { anterior: anterior ? this.presentarCuentaBancariaM7(anterior) : undefined, nuevo: salida }, enumerable: false });
+        return salida;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'La cuenta bancaria ya existe o cambió concurrentemente'); throw error; }
+  }
+
+  async guardarSaldoInicialBancarioM7(entrada: Record<string, unknown>, actorId: bigint, id?: number) {
+    const datos = validarSaldoInicialBancarioM7(entrada);
+    try {
+      return await prisma.$transaction(async tx => {
+        const cuenta = await tx.cuenta_bancaria_m7.findUnique({ where: { id_cuenta_bancaria_m7: datos.idCuenta }, include: { moneda: true } });
+        if (!cuenta || cuenta.estado !== 'activa') throw new ErrorAplicacion(404, 'Cuenta bancaria activa no encontrada');
+        const anterior = id ? await tx.saldo_inicial_bancario_m7.findUnique({ where: { id_saldo_inicial_bancario_m7: id }, include: { cuenta: { include: { moneda: true } } } }) : null;
+        if (id && !anterior) throw new ErrorAplicacion(404, 'Saldo inicial no encontrado');
+        const conflicto = await tx.saldo_inicial_bancario_m7.findFirst({ where: { id_cuenta_bancaria_m7: datos.idCuenta, fecha_corte: datos.fechaCorte, ...(id ? { id_saldo_inicial_bancario_m7: { not: id } } : {}) } });
+        if (conflicto) throw new ErrorAplicacion(409, 'Ya existe un saldo inicial para la cuenta y fecha de corte; edita el registro existente');
+        const fila = id
+          ? await tx.saldo_inicial_bancario_m7.update({ where: { id_saldo_inicial_bancario_m7: id }, data: { id_cuenta_bancaria_m7: datos.idCuenta, fecha_corte: datos.fechaCorte, saldo_inicial: datos.saldo, observacion: datos.observacion, estado: 'activo', actualizado_por: actorId, fecha_actualizacion: new Date() }, include: { cuenta: { include: { moneda: true } } } })
+          : await tx.saldo_inicial_bancario_m7.create({ data: { id_cuenta_bancaria_m7: datos.idCuenta, fecha_corte: datos.fechaCorte, saldo_inicial: datos.saldo, observacion: datos.observacion, creado_por: actorId }, include: { cuenta: { include: { moneda: true } } } });
+        const salida = this.presentarSaldoInicialBancarioM7(fila);
+        Object.defineProperty(salida, '__auditoriaM9', { value: { anterior: anterior ? this.presentarSaldoInicialBancarioM7(anterior) : undefined, nuevo: salida }, enumerable: false });
+        return salida;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'El saldo inicial ya existe o cambió concurrentemente'); throw error; }
+  }
+
+  async consultarDisponibilidadesBancariasM7(consulta: Consulta = {}) {
+    const periodo = resolverPeriodoM7(consulta); const fechaObjetivo = new Date(periodo.hastaExclusiva); fechaObjetivo.setUTCDate(fechaObjetivo.getUTCDate() - 1);
+    const cuentas = await prisma.cuenta_bancaria_m7.findMany({ where: { estado: 'activa' }, include: { moneda: true, saldos_iniciales: { where: { estado: 'activo', fecha_corte: { lte: fechaObjetivo } }, orderBy: [{ fecha_corte: 'desc' }, { id_saldo_inicial_bancario_m7: 'desc' }] } }, orderBy: [{ banco: 'asc' }, { alias_cuenta: 'asc' }] });
+    const movimientos = await prisma.movimiento_bancario.findMany({ where: { fecha_movimiento_bancario: { lt: periodo.hastaExclusiva } }, orderBy: [{ fecha_movimiento_bancario: 'asc' }, { id_movimiento_bancario: 'asc' }] });
+    const cuentasPorId = new Map(cuentas.map(cuenta => [cuenta.id_cuenta_bancaria_m7, cuenta]));
+    const coincidenciasExactas = new Map<string, number[]>();
+    for (const cuenta of cuentas) { const clave = `${cuenta.banco}\u0000${cuenta.identificador_bancario}\u0000${cuenta.id_moneda}`; coincidenciasExactas.set(clave, [...(coincidenciasExactas.get(clave) || []), cuenta.id_cuenta_bancaria_m7]); }
+    const asignados = new Map<number, typeof movimientos>(); const noAsignados: typeof movimientos = [];
+    for (const movimiento of movimientos) {
+      let idCuenta = movimiento.id_cuenta_bancaria_m7 && cuentasPorId.has(movimiento.id_cuenta_bancaria_m7) ? movimiento.id_cuenta_bancaria_m7 : null;
+      if (!idCuenta && movimiento.banco && movimiento.cuenta_bancaria) { const ids = coincidenciasExactas.get(`${movimiento.banco}\u0000${movimiento.cuenta_bancaria}\u0000${movimiento.id_moneda}`) || []; if (ids.length === 1) idCuenta = ids[0]; }
+      if (!idCuenta) noAsignados.push(movimiento); else { const lista = asignados.get(idCuenta) || []; lista.push(movimiento); asignados.set(idCuenta, lista); }
+    }
+    const detalle = cuentas.map(cuenta => {
+      const saldo = cuenta.saldos_iniciales[0] || null;
+      const actividad = (asignados.get(cuenta.id_cuenta_bancaria_m7) || []).map(movimiento => ({ id: movimiento.id_movimiento_bancario, fecha: movimiento.fecha_movimiento_bancario, monto: Number(movimiento.monto_bancario), naturaleza: movimiento.naturaleza_bancaria, estado: movimiento.estado_conciliacion, numeroOperacion: movimiento.numero_operacion }));
+      const calculo = calcularSaldoCuentaBancariaM7(saldo ? Number(saldo.saldo_inicial) : null, saldo?.fecha_corte || fechaObjetivo, fechaObjetivo, actividad);
+      return { ...this.presentarCuentaBancariaM7(cuenta), idSaldoInicial: saldo?.id_saldo_inicial_bancario_m7 || null, saldoInicial: saldo ? Number(saldo.saldo_inicial) : null, fechaCorte: saldo ? fechaIso(saldo.fecha_corte) : null, observacionSaldo: saldo?.observacion || null, ingresosPosteriores: calculo.ingresos, egresosPosteriores: calculo.egresos, saldoReconstruido: calculo.saldoReconstruido, estadoCobertura: calculo.estado, movimientosPosterioresIncluidos: calculo.movimientosIncluidos };
+    });
+    const inicioCobertura = cuentas.flatMap(cuenta => cuenta.saldos_iniciales[0]?.fecha_corte ? [cuenta.saldos_iniciales[0].fecha_corte] : []).sort((a, b) => a.getTime() - b.getTime())[0] || null;
+    const noAsignadosRelevantes = noAsignados.filter(movimiento => normalizarTexto(movimiento.estado_conciliacion) !== 'anulado' && (!inicioCobertura || movimiento.fecha_movimiento_bancario > inicioCobertura));
+    const monedas = [...new Set(detalle.map(cuenta => cuenta.moneda))];
+    const resumenPorMoneda = monedas.map(moneda => { const filas = detalle.filter(cuenta => cuenta.moneda === moneda); const coberturaCompleta = filas.length > 0 && filas.every(cuenta => cuenta.saldoReconstruido !== null) && noAsignadosRelevantes.length === 0; return { moneda, cuentas: filas.length, saldoReconstruido: coberturaCompleta ? redondear(filas.reduce((total, cuenta) => total + Number(cuenta.saldoReconstruido), 0)) : null, estadoCobertura: coberturaCompleta ? 'VALIDO' : 'PARCIALMENTE_DISPONIBLE' }; });
+    const movimientosPosteriores = detalle.flatMap(cuenta => (asignados.get(cuenta.id) || []).filter(movimiento => cuenta.fechaCorte && fechaIso(movimiento.fecha_movimiento_bancario) > cuenta.fechaCorte).map(movimiento => ({ id: movimiento.id_movimiento_bancario, idCuenta: cuenta.id, cuenta: cuenta.alias, banco: cuenta.banco, fecha: fechaIso(movimiento.fecha_movimiento_bancario), moneda: cuenta.moneda, monto: Number(movimiento.monto_bancario), naturaleza: movimiento.naturaleza_bancaria, estado: movimiento.estado_conciliacion })));
+    const estado: EstadoIndicadorM7 = !cuentas.length ? 'CONFIGURACION_PENDIENTE' : detalle.every(cuenta => cuenta.saldoReconstruido !== null) && noAsignadosRelevantes.length === 0 ? 'VALIDO' : 'PARCIALMENTE_DISPONIBLE';
+    return indicador(estado, { fechaObjetivo: fechaIso(fechaObjetivo), cuentas: detalle, saldosIniciales: detalle.filter(cuenta => cuenta.fechaCorte !== null).map(cuenta => ({ id: cuenta.idSaldoInicial, idCuenta: cuenta.id, cuenta: cuenta.alias, banco: cuenta.banco, moneda: cuenta.moneda, fechaCorte: cuenta.fechaCorte, saldoInicial: cuenta.saldoInicial, observacion: cuenta.observacionSaldo, responsable: cuenta.responsable })), movimientosPosteriores, resumenPorMoneda, cobertura: { cuentasRegistradas: cuentas.length, cuentasConSaldoInicial: detalle.filter(cuenta => cuenta.saldoInicial !== null).length, cuentasReconstruibles: detalle.filter(cuenta => cuenta.saldoReconstruido !== null).length, movimientosSinCuentaIdentificada: noAsignadosRelevantes.length, fuenteCanonica: 'movimiento_bancario', saldoConfirmadoPorBanco: false } }, estado === 'VALIDO' ? 'Saldos reconstruidos desde apertura declarada y movimientos bancarios conciliados posteriores al cierre' : 'Saldos bancarios pendientes de configuración o conciliación');
+  }
+
   private async consultarLiquidezCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
-    let liquidezActual = indicador<unknown>('FUENTE_NO_DISPONIBLE', null, 'La fuente de movimientos financieros no está disponible');
+    let liquidezActual = indicador<unknown>('FUENTE_NO_DISPONIBLE', null, 'La fuente bancaria no está disponible');
+    let disponibilidadesBancarias = indicador<unknown>('FUENTE_NO_DISPONIBLE', null, 'La fuente bancaria no está disponible');
+    try { disponibilidadesBancarias = await this.consultarDisponibilidadesBancariasM7(consulta); liquidezActual = disponibilidadesBancarias; } catch { /* migración pendiente o fuente temporalmente no disponible */ }
     let flujoHistorico;
     try {
       const [movimientos, gastosCajaAprobados] = await Promise.all([
@@ -862,7 +989,6 @@ export class M7Controller {
       const presentar = (m: typeof filtrados[number]) => ({ idMovimiento: m.id_movimiento_financiero, fecha: fechaIso(m.fecha_movimiento), categoria: m.tipo_movimiento_financiero || null, naturaleza: m.naturaleza_movimiento, esAjuste: esAjuste(m), moneda: m.moneda.codigo_moneda, monto: Number(m.monto_movimiento), origenes: m.origen_movimiento_financiero.map(o => ({ entidad: o.entidad_origen, id: o.id_registro_origen, descripcion: o.descripcion_origen })) });
       const idsCajaConMovimiento = new Set(movimientos.flatMap(m => m.origen_movimiento_financiero.filter(o => normalizarTexto(o.entidad_origen).includes('caja chica')).map(o => o.id_registro_origen)));
       const cajaSinMovimiento = gastosCajaAprobados.filter(gasto => !idsCajaConMovimiento.has(gasto.id_gasto_caja_chica_m5)).length;
-      liquidezActual = indicador('DATOS_INSUFICIENTES', null, 'No existe saldo inicial registrado por cuenta bancaria y moneda; la suma histórica de movimientos no se presenta como saldo real');
       flujoHistorico = actuales.length ? indicador(cajaSinMovimiento ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO', { granularidad, filtros: { categoria: categoria || null, origen: origen || null }, serie: serie(actuales), totales: actualesTotales, comparacion, movimientos: actuales.map(presentar), cajaChica: { aprobados: gastosCajaAprobados.length, conMovimiento: gastosCajaAprobados.length - cajaSinMovimiento, sinMovimiento: cajaSinMovimiento } }, `Flujo ejecutado basado una sola vez en movimiento_financiero; ${cajaSinMovimiento} gasto(s) de Caja Chica aprobado(s) sin movimiento inequívoco fueron excluidos`) : indicador('SIN_RESULTADOS', { granularidad, filtros: { categoria: categoria || null, origen: origen || null }, serie: [], totales: [], comparacion: [], movimientos: [], cajaChica: { aprobados: gastosCajaAprobados.length, conMovimiento: 0, sinMovimiento: gastosCajaAprobados.length } }, 'No existen movimientos financieros para los filtros del período');
     } catch { flujoHistorico = indicador('FUENTE_NO_DISPONIBLE', null, 'La fuente de movimientos financieros no está disponible'); }
     try {
@@ -894,9 +1020,10 @@ export class M7Controller {
       const proyectadosYtd = new Map(presupuestoYtd.totales.map(fila => [fila.moneda, fila.flujoProyectado]));
       const monedasComparables = [...new Set([...reales.map(fila => fila.moneda), ...proyectados.keys(), ...realesYtd.keys(), ...proyectadosYtd.keys()])];
       const comparacionRealProyectado = monedasComparables.map(moneda => { const real = reales.find(fila => fila.moneda === moneda)?.flujoReal ?? 0; const proyectado = proyectados.get(moneda) ?? 0; const realAcumuladoYtd = realesYtd.get(moneda) ?? 0; const proyectadoAcumuladoYtd = proyectadosYtd.get(moneda) ?? 0; return { moneda, real, proyectado, ...calcularDesviacionFlujoM7(real, proyectado), realAcumuladoYtd, proyectadoAcumuladoYtd, desviacionAcumuladaYtd: calcularDesviacionFlujoM7(realAcumuladoYtd, proyectadoAcumuladoYtd).diferencia }; });
-      return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, liquidezActual, flujoHistorico, proyeccion, presupuesto: indicador(presupuesto.estado, { categorias: presupuesto.categorias, proyecciones: presupuesto.proyecciones, totales: presupuesto.totales }, 'Presupuesto gerencial manual; permanece separado del flujo ejecutado y de los compromisos registrados'), realVsProyectado: indicador(comparacionRealProyectado.length ? 'VALIDO' : 'SIN_RESULTADOS', comparacionRealProyectado, 'Real menos presupuesto por moneda; porcentaje N/A cuando la base proyectada es cero'), ivaFlujo: indicador('NO_APLICA', null, 'El IVA documental no se convierte en caja ni compromiso sin movimiento u obligación tributaria fechada'), saldoInicial: indicador('FUENTE_NO_DISPONIBLE', null, 'No existe una fuente registrada de saldo inicial por cuenta bancaria, fecha de corte y moneda'), capaEstimada: indicador('NO_APLICA', null, 'Los compromisos registrados y el presupuesto manual se mantienen como capas independientes') };
+      const saldos = disponibilidadesBancarias.valor && typeof disponibilidadesBancarias.valor === 'object' ? (disponibilidadesBancarias.valor as { saldosIniciales?: unknown[] }).saldosIniciales || [] : null;
+      return { periodo: periodoSalida(periodo), estado: 'VALIDO' as const, liquidezActual, disponibilidadesBancarias, flujoHistorico, proyeccion, presupuesto: indicador(presupuesto.estado, { categorias: presupuesto.categorias, proyecciones: presupuesto.proyecciones, totales: presupuesto.totales }, 'Presupuesto gerencial manual; permanece separado del flujo ejecutado y de los compromisos registrados'), realVsProyectado: indicador(comparacionRealProyectado.length ? 'VALIDO' : 'SIN_RESULTADOS', comparacionRealProyectado, 'Real menos presupuesto por moneda; porcentaje N/A cuando la base proyectada es cero'), ivaFlujo: indicador('NO_APLICA', null, 'El IVA documental no se convierte en caja ni compromiso sin movimiento u obligación tributaria fechada'), saldoInicial: indicador(disponibilidadesBancarias.estado, saldos, 'Saldo declarado al cierre de la fecha indicada; no constituye ingreso ni flujo del período'), capaEstimada: indicador('NO_APLICA', null, 'Los compromisos registrados y el presupuesto manual se mantienen como capas independientes') };
     } catch {
-      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, liquidezActual, flujoHistorico, proyeccion: indicador('FUENTE_NO_DISPONIBLE', null, 'No fue posible consultar compromisos futuros'), capaEstimada: indicador('NO_APLICA', null, 'No existe una estimación propietaria válida') };
+      return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, liquidezActual, disponibilidadesBancarias, flujoHistorico, proyeccion: indicador('FUENTE_NO_DISPONIBLE', null, 'No fue posible consultar compromisos futuros'), capaEstimada: indicador('NO_APLICA', null, 'No existe una estimación propietaria válida') };
     }
   }
 
@@ -1160,7 +1287,7 @@ export class M7Controller {
     const datos = await this.consultarLiquidezCompleto(consulta) as Record<string, unknown>;
     if (!permisos) return datos;
     const salida: Record<string, unknown> = { periodo: datos.periodo, estado: datos.estado };
-    if (permisos.includes('CU228')) salida.liquidezActual = datos.liquidezActual;
+    if (permisos.includes('CU228')) { salida.liquidezActual = datos.liquidezActual; salida.disponibilidadesBancarias = datos.disponibilidadesBancarias; salida.saldoInicial = datos.saldoInicial; }
     if (permisos.includes('CU229') || permisos.includes('CU230')) {
       const flujo = { ...(datos.flujoHistorico as Record<string, unknown>) }; const valor = flujo.valor;
       if (valor && typeof valor === 'object') { const contenido = { ...(valor as Record<string, unknown>) }; if (Array.isArray(contenido.movimientos)) contenido.movimientos = contenido.movimientos.map(filaEntrada => { const fila = filaEntrada as Record<string, unknown>; const acciones: AccionNavegacion[] = []; const origenes = Array.isArray(fila.origenes) ? fila.origenes as Array<Record<string, unknown>> : []; const visibles = origenes.map(origen => { const entidad = String(origen.entidad || ''); let permitido = false; if (entidad === 'pago_cliente' && permisos.includes('CU42')) { permitido = true; acciones.push(accion('Abrir pagos de Cliente', '/pagos')); } if (entidad === 'pago_proveedor' && permisos.includes('CU111')) { permitido = true; acciones.push(accion('Abrir pagos a Proveedores', '/pagos-proveedores')); } if (entidad === 'gasto_caja_chica' && permisos.includes('CU149')) { permitido = true; acciones.push(accion('Abrir Caja Chica', '/caja-chica')); } if (entidad === 'liquidacion_remuneracion' && permisos.includes('CU187')) { permitido = true; acciones.push(accion('Abrir pagos de remuneraciones', '/pagos-remuneraciones')); } return permitido ? origen : { entidad, descripcion: origen.descripcion ?? null, navegacionDisponible: false }; }); return { ...fila, origenes: visibles, ...(acciones.length ? { acciones: [...new Map(acciones.map(a => [a.destino, a])).values()] } : {}) }; }); flujo.valor = contenido; } salida.flujoHistorico = flujo;
@@ -1168,7 +1295,8 @@ export class M7Controller {
     if (permisos.includes('CU231')) {
       const proyeccion = { ...(datos.proyeccion as Record<string, unknown>) }; const valor = proyeccion.valor;
       if (valor && typeof valor === 'object') { const contenido = { ...(valor as Record<string, unknown>) }; if (Array.isArray(contenido.eventos)) contenido.eventos = contenido.eventos.map(entrada => { const evento = entrada as Record<string, unknown>; const acciones: AccionNavegacion[] = []; if (evento.owner === 'M3' && permisos.includes('CU222')) acciones.push(accion('Abrir cuentas por cobrar', '/dashboard-m7/cuentas-cobrar')); if (evento.owner === 'M5' && permisos.includes('CU226')) acciones.push(accion('Abrir cuentas por pagar', '/dashboard-m7/cuentas-pagar')); return { ...evento, ...(acciones.length ? { acciones } : {}) }; }); proyeccion.valor = contenido; }
-      salida.proyeccion = proyeccion; for (const clave of ['presupuesto', 'realVsProyectado', 'ivaFlujo', 'saldoInicial', 'capaEstimada']) salida[clave] = datos[clave];
+      salida.proyeccion = proyeccion; for (const clave of ['presupuesto', 'realVsProyectado', 'ivaFlujo', 'capaEstimada']) salida[clave] = datos[clave];
+      if (!permisos.includes('CU228')) salida.saldoInicial = indicador('SIN_PERMISO', null, 'CU228 es requerido para consultar saldos bancarios');
     }
     return salida;
   }
