@@ -15,6 +15,7 @@ const GRIS = '#676767';
 const VERDE = '#15803d';
 const ROJO = '#b91c1c';
 const COLORES = [NARANJA, GRIS, '#9ca3af', VERDE, ROJO, '#d97706'];
+type DatoDonut = { nombre: string; valor: number; color?: string; porcentaje?: number | null };
 
 const abreviar = (valor: number) => new Intl.NumberFormat('es-CL', { notation: 'compact', maximumFractionDigits: 1 }).format(valor);
 const fechaCorta = (valor: unknown) => {
@@ -97,10 +98,24 @@ export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', 
   </ComposedChart></ResponsiveContainer></div></div>;
 }
 
-export function GraficoDonut({ datos, centro }: { datos: Array<{ nombre: string; valor: number; color?: string }>; centro?: string }) {
+function TooltipDonut({ active, payload, metrica, total }: { active?: boolean; payload?: Array<{ payload?: DatoDonut }>; metrica: 'VALOR' | 'UNIDADES' | 'GENERICO'; total: number }) {
+  const dato = payload?.[0]?.payload;
+  if (!active || !dato) return null;
+  const participacion = dato.porcentaje ?? (total > 0 ? dato.valor / total * 100 : null);
+  const valor = metrica === 'VALOR' ? formatearDato(dato.valor, 'monto') : metrica === 'UNIDADES' ? `${formatearDato(dato.valor)} unidades` : formatearDato(dato.valor);
+  return <div className="max-w-72 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-xs shadow-xl">
+    <p className="flex items-start gap-2 font-bold leading-5 text-gray-950"><i aria-hidden="true" className="mt-1 h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ backgroundColor: dato.color }} /><span>{dato.nombre}</span></p>
+    <p className="mt-1.5 text-sm font-black text-black">{valor}</p>
+    {participacion !== null && <p className="mt-0.5 text-gray-600">{participacion.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}% {metrica === 'VALOR' ? 'de las ventas' : 'del total'}</p>}
+  </div>;
+}
+
+export function GraficoDonut({ datos, centro, centroEtiqueta, centroValor, metrica = 'GENERICO', mostrarLeyenda = true, alto = 190, radioInterior = 54, radioExterior = 78 }: { datos: DatoDonut[]; centro?: string; centroEtiqueta?: string; centroValor?: string; metrica?: 'VALOR' | 'UNIDADES' | 'GENERICO'; mostrarLeyenda?: boolean; alto?: number; radioInterior?: number; radioExterior?: number }) {
   const validos = datos.filter(dato => Number.isFinite(dato.valor) && dato.valor >= 0);
   if (!validos.length || validos.every(dato => dato.valor === 0)) return <EstadoSinDatos texto="No hay composición suficiente para graficar." />;
-  return <MarcoGrafico><div className="relative h-full"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={validos} dataKey="valor" nameKey="nombre" innerRadius={54} outerRadius={78} paddingAngle={2} stroke="none">{validos.map((dato, indice) => <Cell key={dato.nombre} fill={dato.color || COLORES[indice % COLORES.length]} />)}</Pie><Tooltip content={<TooltipGrafico />} /><Legend wrapperStyle={{ fontSize: 11 }} /></PieChart></ResponsiveContainer>{centro && <div className="pointer-events-none absolute inset-0 flex items-center justify-center pb-6"><strong className="text-lg text-gray-950">{centro}</strong></div>}</div></MarcoGrafico>;
+  const coloreados = validos.map((dato, indice) => ({ ...dato, color: dato.color || COLORES[indice % COLORES.length] }));
+  const total = coloreados.reduce((suma, dato) => suma + dato.valor, 0);
+  return <MarcoGrafico alto={alto}><div className="relative h-full overflow-visible"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={coloreados} dataKey="valor" nameKey="nombre" innerRadius={radioInterior} outerRadius={radioExterior} paddingAngle={2} stroke="#FFFFFF" strokeWidth={2}>{coloreados.map(dato => <Cell key={dato.nombre} fill={dato.color} />)}</Pie><Tooltip content={<TooltipDonut metrica={metrica} total={total} />} wrapperStyle={{ zIndex: 40, outline: 'none' }} allowEscapeViewBox={{ x: false, y: true }} />{mostrarLeyenda && <Legend wrapperStyle={{ fontSize: 11 }} />}</PieChart></ResponsiveContainer>{(centro || centroValor) && <div className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center ${mostrarLeyenda ? 'pb-6' : ''}`}><span className="max-w-32 text-[10px] font-black uppercase tracking-[0.14em] text-gray-500">{centroEtiqueta}</span><strong className="mt-1 max-w-40 break-words text-xl font-black leading-tight text-gray-950 sm:text-2xl">{centroValor || centro}</strong></div>}</div></MarcoGrafico>;
 }
 
 export function GraficoProgreso({ utilizado, disponible }: { utilizado: number; disponible: number }) {
