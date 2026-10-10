@@ -60,23 +60,50 @@ export function calcularComparacionPeriodosVentasM7(valorA: number | null, valor
   };
 }
 
-const mesesTocadosPeriodoM7 = (periodo: Periodo) => {
-  const meses: string[] = [];
-  const cursor = new Date(Date.UTC(periodo.desde.getUTCFullYear(), periodo.desde.getUTCMonth(), 1));
+export type GranularidadVentasM7 = 'dia' | 'mes';
+
+const diasPeriodoM7 = (periodo: Periodo) => diasCalendario(periodo.desde, periodo.hastaExclusiva);
+const granularidadPeriodoM7 = (periodo: Periodo, forzada?: unknown): GranularidadVentasM7 => forzada === 'mes' || diasPeriodoM7(periodo) > 62 ? 'mes' : 'dia';
+export function seleccionarGranularidadVentasM7(desde: string, hasta: string): GranularidadVentasM7 {
+  return granularidadPeriodoM7(resolverPeriodoM7({ desde, hasta }));
+}
+
+const clavesPeriodoM7 = (periodo: Periodo, granularidad: GranularidadVentasM7) => {
+  const claves: string[] = [];
+  const cursor = granularidad === 'dia' ? new Date(periodo.desde) : new Date(Date.UTC(periodo.desde.getUTCFullYear(), periodo.desde.getUTCMonth(), 1));
   while (cursor < periodo.hastaExclusiva) {
-    meses.push(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`);
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    claves.push(granularidad === 'dia' ? fechaIso(cursor) : `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`);
+    if (granularidad === 'dia') cursor.setUTCDate(cursor.getUTCDate() + 1); else cursor.setUTCMonth(cursor.getUTCMonth() + 1);
   }
-  return meses;
+  return claves;
 };
 
-export function alinearSeriesPeriodosVentasM7(serieA: Array<Record<string, unknown>>, serieB: Array<Record<string, unknown>>) {
+export function generarClavesTemporalesVentasM7(desde: string, hasta: string, granularidad?: GranularidadVentasM7) {
+  const periodo = resolverPeriodoM7({ desde, hasta });
+  return clavesPeriodoM7(periodo, granularidad || granularidadPeriodoM7(periodo));
+}
+
+export function consolidarBucketVentasM7(montos: Array<number | null>) {
+  const incluidos = montos.filter((monto): monto is number => typeof monto === 'number' && Number.isFinite(monto));
+  return {
+    ventaNetaClp: incluidos.length ? redondear(incluidos.reduce((total, monto) => total + monto, 0)) : montos.length ? null : 0,
+    ventasIncluidasClp: incluidos.length,
+    ventasExcluidasSinTipoCambio: montos.length - incluidos.length,
+  };
+}
+
+export function calcularPromedioTemporalVentasM7(total: number | null, unidades: number) {
+  return total === null || !Number.isInteger(unidades) || unidades <= 0 ? null : redondear(total / unidades);
+}
+
+export function alinearSeriesPeriodosVentasM7(serieA: Array<Record<string, unknown>>, serieB: Array<Record<string, unknown>>, granularidad: GranularidadVentasM7 = 'mes') {
   return Array.from({ length: Math.max(serieA.length, serieB.length) }, (_, indice) => ({
-    posicion: `Mes ${indice + 1}`,
+    posicion: granularidad === 'dia' ? `Día ${indice + 1}` : `Posición ${indice + 1}`,
     periodoA: serieA[indice]?.periodo ?? null,
     ventaA: serieA[indice]?.ventaNetaClp ?? null,
     periodoB: serieB[indice]?.periodo ?? null,
     ventaB: serieB[indice]?.ventaNetaClp ?? null,
+    variacionPorcentual: calcularComparacionPeriodosVentasM7(typeof serieA[indice]?.ventaNetaClp === 'number' ? serieA[indice].ventaNetaClp as number : null, typeof serieB[indice]?.ventaNetaClp === 'number' ? serieB[indice].ventaNetaClp as number : null).variacionPorcentual,
   }));
 }
 
@@ -486,6 +513,7 @@ export class M7Controller {
   private async consultarAnalisisVentasCompleto(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
     const segmento = resolverSegmentoComercialM7(consulta.segmento);
+    const granularidad = granularidadPeriodoM7(periodo, consulta._granularidad);
     try {
       const incluir = { moneda: true, ficha_cliente: { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } }, cotizacion: { include: { detalle_cotizacion: { include: { item_comercial: true } } } } } as const;
       const [universoActual, universoAnterior, cohorteCompleta, costosPeriodo, tareasPeriodo] = await Promise.all([
@@ -552,18 +580,19 @@ export class M7Controller {
       const participacionBase = universoActual.reduce((mapa, nota) => { const nombre = nombreSegmentoClienteM7(nota.ficha_cliente.cliente_financiero); const monto = convertir(nota); if (!nombre) return mapa; const actual = mapa.get(nombre) || { segmento: nombre, montoClp: 0, ventas: 0, excluidasSinTipoCambio: 0 }; actual.ventas += 1; if (monto === null) actual.excluidasSinTipoCambio += 1; else actual.montoClp = redondear(actual.montoClp + monto.toNumber()); mapa.set(nombre, actual); return mapa; }, new Map<string, { segmento: string; montoClp: number; ventas: number; excluidasSinTipoCambio: number }>()) ;
       const totalParticipacion = [...participacionBase.values()].reduce((total, fila) => total + fila.montoClp, 0);
       const participacionSegmentos = [...participacionBase.values()].map(fila => ({ ...fila, participacionPorcentual: totalParticipacion > 0 ? redondear(fila.montoClp / totalParticipacion * 100) : null })).sort((a, b) => b.montoClp - a.montoClp);
-      const mesesPeriodo = mesesTocadosPeriodoM7(periodo);
-      const serieMensual = mesesPeriodo.map(clave => {
-        const ventasMes = actuales.filter(nota => claveMes(nota.fecha_emision) === clave);
-        const montosMes = ventasMes.map(convertir); const cubiertosMes = montosMes.filter((monto): monto is Prisma.Decimal => monto !== null);
-        const cotizacionesMes = cohorteCompleta.filter(cotizacion => claveMes(cotizacion.fecha_emision) === clave && perteneceSegmentoM7(cotizacion.ficha_cliente.cliente_financiero, segmento));
-        const convertidasMes = cotizacionesMes.filter(cotizacion => cotizacion.nota_venta && !['anulada', 'revertida', 'revertida_total'].includes(normalizarTexto(cotizacion.nota_venta.estado_nota_venta))).length;
-        const costosClpMes = costosPeriodo.filter(costo => claveMes(costo.fecha_costo) === clave && costo.moneda.codigo_moneda === 'CLP').reduce((total, costo) => total + Number(costo.monto_costo), 0)
-          + tareasPeriodo.filter(tarea => claveMes(tarea.fecha_tarea) === clave).reduce((total, tarea) => total + Number(tarea.monto_calculado), 0);
-        const hayCostosMes = costosPeriodo.some(costo => claveMes(costo.fecha_costo) === clave) || tareasPeriodo.some(tarea => claveMes(tarea.fecha_tarea) === clave);
-        const costoComparable = segmento === 'TODOS' && hayCostosMes && costosPeriodo.filter(costo => claveMes(costo.fecha_costo) === clave).every(costo => costo.moneda.codigo_moneda === 'CLP') ? redondear(costosClpMes) : null;
-        const ventaNetaClp = cubiertosMes.length ? redondear(cubiertosMes.reduce((total, monto) => total.plus(monto), new Prisma.Decimal(0)).toNumber()) : ventasMes.length ? null : 0;
-        return { periodo: clave, ventaNetaClp, cantidadVentas: ventasMes.length, cotizaciones: cotizacionesMes.length, conversiones: convertidasMes, tasaConversion: cotizacionesMes.length ? redondear(convertidasMes / cotizacionesMes.length * 100) : null, costosDirectos: costoComparable, resultadoGerencial: ventaNetaClp !== null && costoComparable !== null && montosMes.every(monto => monto !== null) ? redondear(ventaNetaClp - costoComparable) : null };
+      const claveTemporal = (fecha: Date) => granularidad === 'dia' ? fechaIso(fecha) : claveMes(fecha);
+      const serieTemporal = clavesPeriodoM7(periodo, granularidad).map(clave => {
+        const ventasBucket = actuales.filter(nota => claveTemporal(nota.fecha_emision) === clave);
+        const montosBucket = ventasBucket.map(convertir);
+        const cotizacionesBucket = cohorteCompleta.filter(cotizacion => claveTemporal(cotizacion.fecha_emision) === clave && perteneceSegmentoM7(cotizacion.ficha_cliente.cliente_financiero, segmento));
+        const convertidasBucket = cotizacionesBucket.filter(cotizacion => cotizacion.nota_venta && !['anulada', 'revertida', 'revertida_total'].includes(normalizarTexto(cotizacion.nota_venta.estado_nota_venta))).length;
+        const costosBucket = costosPeriodo.filter(costo => claveTemporal(costo.fecha_costo) === clave);
+        const tareasBucket = tareasPeriodo.filter(tarea => claveTemporal(tarea.fecha_tarea) === clave);
+        const costosClpBucket = costosBucket.filter(costo => costo.moneda.codigo_moneda === 'CLP').reduce((total, costo) => total + Number(costo.monto_costo), 0) + tareasBucket.reduce((total, tarea) => total + Number(tarea.monto_calculado), 0);
+        const hayCostosBucket = costosBucket.length > 0 || tareasBucket.length > 0;
+        const costoComparable = segmento === 'TODOS' && hayCostosBucket && costosBucket.every(costo => costo.moneda.codigo_moneda === 'CLP') ? redondear(costosClpBucket) : null;
+        const consolidado = consolidarBucketVentasM7(montosBucket.map(monto => monto?.toNumber() ?? null));
+        return { periodo: clave, ...consolidado, cantidadVentas: ventasBucket.length, ticketPromedio: consolidado.ventasIncluidasClp && consolidado.ventaNetaClp !== null ? redondear(consolidado.ventaNetaClp / consolidado.ventasIncluidasClp) : null, cotizaciones: cotizacionesBucket.length, conversiones: convertidasBucket, tasaConversion: cotizacionesBucket.length ? redondear(convertidasBucket / cotizacionesBucket.length * 100) : null, costosDirectos: costoComparable, resultadoGerencial: consolidado.ventaNetaClp !== null && costoComparable !== null && consolidado.ventasExcluidasSinTipoCambio === 0 ? redondear(consolidado.ventaNetaClp - costoComparable) : null };
       });
       const costosClp = costosPeriodo.filter(costo => costo.moneda.codigo_moneda === 'CLP').reduce((total, costo) => total + Number(costo.monto_costo), 0) + tareasPeriodo.reduce((total, tarea) => total + Number(tarea.monto_calculado), 0);
       const costosComparables = segmento === 'TODOS' && (costosPeriodo.length > 0 || tareasPeriodo.length > 0) && costosPeriodo.every(costo => costo.moneda.codigo_moneda === 'CLP');
@@ -580,7 +609,7 @@ export class M7Controller {
         concentracionClientes: indicador(totalClientesClp > 0 ? (excluidosSinTipoCambio ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO') : 'NO_APLICA', concentracionClientes, totalClientesClp > 0 ? 'Participación sobre ventas netas comparables consolidadas en CLP' : 'No existe total comparable para calcular participación'),
         productos: indicador(productosVendidos.length ? (ventasSinDetalle || ventasSinTipoCambio ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO') : actuales.length ? 'DATOS_INSUFICIENTES' : 'SIN_RESULTADOS', productosVendidos, detalleFamilias),
         productosVendidos, ventasPorFamilia, participacionSegmentos,
-        serieMensual,
+        granularidad, serieTemporal,
         costosDirectos: indicador(costoDirecto === null ? 'DATOS_INSUFICIENTES' : 'VALIDO', costoDirecto, segmento === 'TODOS' ? 'Costos directos atribuibles del período; monedas sin equivalencia histórica impiden consolidar' : 'Los costos directos no se distribuyen artificialmente por segmento'),
         resultadoGerencial: indicador(resultadoPeriodo === null ? 'DATOS_INSUFICIENTES' : 'VALIDO', resultadoPeriodo, 'Venta neta comparable menos costos directos atribuibles; no es un Estado de Resultados contable'),
         brechaTaxonomiaB2B: 'Clasificación detallada B2B pendiente de taxonomía; se muestran productos reales sin inferir categorías desde texto libre.',
@@ -903,15 +932,17 @@ export class M7Controller {
   async consultarAnalisisVentas(consulta: Consulta, permisos?: string[]) {
     if (String(consulta.modo || '').toLowerCase() === 'comparar') {
       const segmento = resolverSegmentoComercialM7(consulta.segmento);
-      const consultaA = { desde: consulta.desdeA, hasta: consulta.hastaA, segmento };
-      const consultaB = { desde: consulta.desdeB, hasta: consulta.hastaB, segmento };
-      const periodoA = resolverPeriodoM7(consultaA); const periodoB = resolverPeriodoM7(consultaB);
+      const periodoA = resolverPeriodoM7({ desde: consulta.desdeA, hasta: consulta.hastaA }); const periodoB = resolverPeriodoM7({ desde: consulta.desdeB, hasta: consulta.hastaB });
+      const diasA = diasPeriodoM7(periodoA); const diasB = diasPeriodoM7(periodoB);
+      const granularidad: GranularidadVentasM7 = diasA <= 62 && diasB <= 62 ? 'dia' : 'mes';
+      const consultaA = { desde: consulta.desdeA, hasta: consulta.hastaA, segmento, _granularidad: granularidad };
+      const consultaB = { desde: consulta.desdeB, hasta: consulta.hastaB, segmento, _granularidad: granularidad };
       const [datosA, datosB] = await Promise.all([this.consultarAnalisisVentasCompleto(consultaA), this.consultarAnalisisVentasCompleto(consultaB)]);
       const filtrar = (datos: Record<string, unknown>) => {
         if (!permisos) return datos;
         const salida: Record<string, unknown> = { periodo: datos.periodo, segmento: datos.segmento, estado: datos.estado };
         if (permisos.includes('CU218')) for (const clave of ['conversion', 'conversionSegmentos']) salida[clave] = datos[clave];
-        if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'serieMensual']) salida[clave] = datos[clave];
+        if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'granularidad', 'serieTemporal']) salida[clave] = datos[clave];
         if (permisos.includes('CU220')) for (const clave of ['clientes', 'concentracionClientes', 'productos', 'productosVendidos']) salida[clave] = datos[clave];
         if (permisos.includes('CU238')) for (const clave of ['costosDirectos', 'resultadoGerencial']) salida[clave] = datos[clave];
         return salida;
@@ -920,24 +951,25 @@ export class M7Controller {
       const monto = (datos: Record<string, unknown>) => ((datos.montoNeto as any)?.valor || {}).totalClp;
       const montoA = monto(a); const montoB = monto(b);
       const valorA = typeof montoA === 'number' && Number.isFinite(montoA) ? montoA : null; const valorB = typeof montoB === 'number' && Number.isFinite(montoB) ? montoB : null;
-      const mesesA = mesesTocadosPeriodoM7(periodoA).length; const mesesB = mesesTocadosPeriodoM7(periodoB).length;
-      const promedioA = valorA === null ? null : redondear(valorA / mesesA); const promedioB = valorB === null ? null : redondear(valorB / mesesB);
+      const mesesA = clavesPeriodoM7(periodoA, 'mes').length; const mesesB = clavesPeriodoM7(periodoB, 'mes').length;
+      const unidadesA = granularidad === 'dia' ? diasA : mesesA; const unidadesB = granularidad === 'dia' ? diasB : mesesB;
+      const promedioA = calcularPromedioTemporalVentasM7(valorA, unidadesA); const promedioB = calcularPromedioTemporalVentasM7(valorB, unidadesB);
       return {
         modo: 'comparar', segmento, direccion: 'Período B vs Período A', periodoA: a, periodoB: b,
         resumen: {
-          diasA: diasCalendario(periodoA.desde, periodoA.hastaExclusiva), diasB: diasCalendario(periodoB.desde, periodoB.hastaExclusiva), mesesA, mesesB,
-          promedioMensualA: promedioA, promedioMensualB: promedioB,
-          total: calcularComparacionPeriodosVentasM7(valorA, valorB), promedioMensual: calcularComparacionPeriodosVentasM7(promedioA, promedioB),
-          duracionComparable: diasCalendario(periodoA.desde, periodoA.hastaExclusiva) === diasCalendario(periodoB.desde, periodoB.hastaExclusiva),
+          diasA, diasB, mesesA, mesesB, granularidad,
+          promedioA, promedioB,
+          total: calcularComparacionPeriodosVentasM7(valorA, valorB), promedio: calcularComparacionPeriodosVentasM7(promedioA, promedioB),
+          duracionComparable: diasA === diasB,
         },
-        serieComparativa: alinearSeriesPeriodosVentasM7((a.serieMensual || []) as Array<Record<string, unknown>>, (b.serieMensual || []) as Array<Record<string, unknown>>),
+        granularidad, serieComparativa: alinearSeriesPeriodosVentasM7((a.serieTemporal || []) as Array<Record<string, unknown>>, (b.serieTemporal || []) as Array<Record<string, unknown>>, granularidad),
       };
     }
     const datos = await this.consultarAnalisisVentasCompleto(consulta) as Record<string, unknown>;
     if (!permisos) return datos;
     const salida: Record<string, unknown> = { periodo: datos.periodo, segmento: datos.segmento, estado: datos.estado };
     if (permisos.includes('CU218')) for (const clave of ['conversion', 'conversionSegmentos']) salida[clave] = datos[clave];
-    if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'evolucion', 'comparacion', 'serieMensual']) salida[clave] = datos[clave];
+    if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'evolucion', 'comparacion', 'granularidad', 'serieTemporal']) salida[clave] = datos[clave];
     if (permisos.includes('CU219') && !consulta.desde && !consulta.hasta) {
       const historico = await this.consultarHistoricoPanelGeneral({ ...consulta, meses: 24 }, ['CU218', 'CU219', 'CU220']);
       salida.resumenTemporal = historico.resumenVentas;

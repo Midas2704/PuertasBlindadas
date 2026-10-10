@@ -28,7 +28,8 @@ const fechaCorta = (valor: unknown) => {
 const fechaCompleta = (valor: unknown) => {
   const texto = String(valor ?? '');
   if (/^\d{4}-\d{2}$/.test(texto)) return new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${texto}-01T00:00:00Z`));
-  return fechaCorta(valor);
+  if (/^\d{4}-\d{2}-\d{2}/.test(texto)) return new Intl.DateTimeFormat('es-CL', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(texto));
+  return texto;
 };
 
 const TooltipGrafico = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name?: string; value?: unknown; color?: string; dataKey?: string }>; label?: unknown }) => {
@@ -153,12 +154,31 @@ export function GraficoComparativoMensual({ datos, alto = 340 }: { datos: DatoGr
 function TooltipPeriodosVentas({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: DatoGrafico }>; label?: unknown }) {
   const fila = payload?.[0]?.payload; if (!active || !fila) return null;
   const item = (nombre: string, periodo: unknown, valor: unknown, color: string) => periodo ? <div className="mt-2 flex items-start justify-between gap-5"><span className="flex items-center gap-2 text-gray-600"><i className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: color }}/>{nombre}<small className="block text-gray-400">{fechaCompleta(String(periodo))}</small></span><strong>{formatearDato(valor, 'monto')}</strong></div> : null;
-  return <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-xl"><p className="font-black">{String(label)}</p>{item('Período A', fila.periodoA, fila.ventaA, '#676767')}{item('Período B', fila.periodoB, fila.ventaB, '#FE8F01')}</div>;
+  return <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-xl"><p className="font-black uppercase">{String(label)}</p>{item('Período A', fila.periodoA, fila.ventaA, '#676767')}{item('Período B', fila.periodoB, fila.ventaB, '#FE8F01')}{typeof fila.variacionPorcentual === 'number' && <p className="mt-2 border-t border-gray-100 pt-2 text-gray-600">Variación B vs A <strong className="float-right text-gray-950">{porcentajeComparativo(fila.variacionPorcentual)}</strong></p>}</div>;
 }
+
+const contextoSerie = (datos: DatoGrafico[], clave: 'periodoA' | 'periodoB') => {
+  const periodos = datos.map(fila => fila[clave]).filter((valor): valor is string => typeof valor === 'string');
+  if (!periodos.length) return clave === 'periodoA' ? 'Período A' : 'Período B';
+  return `${clave === 'periodoA' ? 'Período A' : 'Período B'} · ${fechaCorta(periodos[0])}–${fechaCorta(periodos.at(-1))}`;
+};
 
 export function GraficoPeriodosVentas({ datos }: { datos: DatoGrafico[] }) {
   if (!datos.length) return <EstadoSinDatos texto="No hay ventas comparables en los períodos seleccionados."/>;
-  return <div className="w-full overflow-x-auto"><div className="min-w-[620px]" style={{ height: 300 }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}><CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="posicion" tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip content={<TooltipPeriodosVentas/>}/><Legend wrapperStyle={{ fontSize: 11 }}/><Bar dataKey="ventaA" name="Período A" fill="#676767" radius={[3,3,0,0]} maxBarSize={30}/><Line type="monotone" dataKey="ventaB" name="Período B" stroke="#FE8F01" strokeWidth={3} dot={{ r: 3 }} connectNulls={false}/></ComposedChart></ResponsiveContainer></div></div>;
+  const intervalo = Math.max(0, Math.ceil(datos.length / 8) - 1);
+  return <div className="w-full overflow-x-auto"><div className="min-w-[680px]" style={{ height: 320 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}><CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="posicion" interval={intervalo} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip content={<TooltipPeriodosVentas/>}/><Legend wrapperStyle={{ fontSize: 11 }}/><Line type="monotone" dataKey="ventaA" name={contextoSerie(datos, 'periodoA')} stroke="#676767" strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false}/><Line type="monotone" dataKey="ventaB" name={contextoSerie(datos, 'periodoB')} stroke="#FE8F01" strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false}/></LineChart></ResponsiveContainer></div></div>;
+}
+
+function TooltipRangoVentas({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: DatoGrafico }>; label?: unknown }) {
+  const fila = payload?.[0]?.payload; if (!active || !fila) return null;
+  const valor = (etiqueta: string, dato: unknown, tipo: 'monto' | 'numero' = 'monto') => dato === null || dato === undefined ? null : <div className="flex justify-between gap-5"><span className="text-gray-600">{etiqueta}</span><strong>{tipo === 'monto' ? formatearDato(dato, 'monto') : formatearDato(dato)}</strong></div>;
+  return <div className="min-w-60 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-xl"><p className="mb-2 font-black capitalize">{fechaCompleta(fila.periodo || label)}</p><div className="space-y-1.5">{valor('Venta neta', fila.ventaNetaClp)}{valor('Cantidad de ventas', fila.cantidadVentas, 'numero')}{valor('Ticket promedio', fila.ticketPromedio)}{valor('Costos directos', fila.costosDirectos)}{valor('Resultado', fila.resultadoGerencial)}</div>{typeof fila.ventasExcluidasSinTipoCambio === 'number' && fila.ventasExcluidasSinTipoCambio > 0 && <p className="mt-2 border-t border-amber-100 pt-2 text-amber-800">{fila.ventasExcluidasSinTipoCambio} venta(s) excluida(s) por falta de FX histórico.</p>}</div>;
+}
+
+export function GraficoRangoVentas({ datos, granularidad }: { datos: DatoGrafico[]; granularidad: 'dia' | 'mes' }) {
+  if (!datos.length) return <EstadoSinDatos texto="No hay evolución temporal disponible para el rango."/>;
+  const intervalo = granularidad === 'dia' ? Math.max(0, Math.ceil(datos.length / 8) - 1) : 0;
+  return <div className="w-full overflow-x-auto"><div className="min-w-[680px]" style={{ height: 310 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}><CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="periodo" interval={intervalo} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip content={<TooltipRangoVentas/>}/><Line type="monotone" dataKey="ventaNetaClp" name="Venta neta" stroke="#FE8F01" strokeWidth={2.5} dot={{ r: granularidad === 'dia' ? 2 : 3 }} activeDot={{ r: 5 }} connectNulls={false}/></LineChart></ResponsiveContainer></div></div>;
 }
 
 function TooltipDonut({ active, payload, metrica, total }: { active?: boolean; payload?: Array<{ payload?: DatoDonut }>; metrica: 'VALOR' | 'UNIDADES' | 'GENERICO'; total: number }) {

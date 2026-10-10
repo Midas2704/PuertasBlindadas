@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const { M7Controller, alinearSeriesPeriodosVentasM7, calcularComparacionPeriodosVentasM7, calcularConversionSegmentadaM7, calcularDesviacionFlujoM7, calcularEstadoResultadosM7, calcularFlujoRealM7, calcularVariacionVentasM7, convertirVentaClpM7, distribuirVentaPorProductoM7, resolverPeriodoM7, resolverSegmentoComercialM7, resumirVentasHistoricasM7 } = require('../dist/controladores/M7Controller');
+const { M7Controller, alinearSeriesPeriodosVentasM7, calcularComparacionPeriodosVentasM7, calcularConversionSegmentadaM7, calcularDesviacionFlujoM7, calcularEstadoResultadosM7, calcularFlujoRealM7, calcularPromedioTemporalVentasM7, calcularVariacionVentasM7, consolidarBucketVentasM7, convertirVentaClpM7, distribuirVentaPorProductoM7, generarClavesTemporalesVentasM7, resolverPeriodoM7, resolverSegmentoComercialM7, seleccionarGranularidadVentasM7, resumirVentasHistoricasM7 } = require('../dist/controladores/M7Controller');
 const { operacionesPermiso } = require('../dist/validaciones/permisos');
 const { CATALOGO_PRODUCTORES_M9 } = require('../dist/m9/contratoProductor');
 const { crearInformeVentasExcelM7 } = require('../dist/m7/informeVentasExcel');
@@ -97,16 +97,32 @@ test('M7 comparación flexible entre períodos de ventas', async t => {
   const controlador = readFileSync(resolve('src/controladores/M7Controller.ts'), 'utf8');
   const filtros = readFileSync(resolve('../Vistas/src/views/DashboardM7/filtrosTemporalesVentas.tsx'), 'utf8');
   const analisis = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8');
-  const marzoJunio = alinearSeriesPeriodosVentasM7([{ periodo: '2026-03', ventaNetaClp: 100 }], [{ periodo: '2026-06', ventaNetaClp: 140 }]);
-  await t.test('marzo vs junio conserva los meses reales y la posición relativa', () => assert.deepEqual(marzoJunio, [{ posicion: 'Mes 1', periodoA: '2026-03', ventaA: 100, periodoB: '2026-06', ventaB: 140 }]));
+  const marzoJunio = alinearSeriesPeriodosVentasM7([{ periodo: '2026-03-01', ventaNetaClp: 100 }], [{ periodo: '2026-06-01', ventaNetaClp: 140 }], 'dia');
+  await t.test('marzo vs junio conserva los días reales y la posición relativa', () => assert.deepEqual(marzoJunio, [{ posicion: 'Día 1', periodoA: '2026-03-01', ventaA: 100, periodoB: '2026-06-01', ventaB: 140, variacionPorcentual: 40 }]));
   await t.test('rango abril-mayo conserva fechas inclusivas', () => { const periodo = resolverPeriodoM7({ desde: '2026-04-01', hasta: '2026-05-31' }); assert.deepEqual([periodo.etiquetaDesde, periodo.etiquetaHasta], ['2026-04-01', '2026-05-31']); });
   await t.test('rango puede cruzar el cambio de año', () => { const periodo = resolverPeriodoM7({ desde: '2025-11-15', hasta: '2026-02-10' }); assert.equal(periodo.etiquetaDesde, '2025-11-15'); assert.equal(periodo.etiquetaHasta, '2026-02-10'); });
-  await t.test('períodos de distinta duración publican total y promedio por separado', () => { assert.match(controlador, /duracionComparable/); assert.match(controlador, /promedioMensualA/); assert.match(analisis, /distinta duración/); });
+  await t.test('períodos de distinta duración publican total y promedio por separado', () => { assert.match(controlador, /duracionComparable/); assert.match(controlador, /promedioA/); assert.match(analisis, /distinta duración/); });
   await t.test('base A cero devuelve variación N/A como null', () => assert.deepEqual(calcularComparacionPeriodosVentasM7(0, 200), { diferenciaAbsoluta: 200, variacionPorcentual: null }));
-  await t.test('segmento B2B se aplica a ambos períodos con la función owner', () => { assert.equal(resolverSegmentoComercialM7('B2B'), 'B2B'); assert.match(controlador, /const consultaA = \{ desde: consulta\.desdeA, hasta: consulta\.hastaA, segmento \}/); });
+  await t.test('segmento B2B se aplica a ambos períodos con la función owner', () => { assert.equal(resolverSegmentoComercialM7('B2B'), 'B2B'); assert.match(controlador, /const consultaA = \{ desde: consulta\.desdeA, hasta: consulta\.hastaA, segmento, _granularidad: granularidad \}/); });
   await t.test('FX faltante continúa excluido sin usar tasa actual', () => { assert.equal(convertirVentaClpM7(100, 'USD', null), null); assert.match(controlador, /ventasExcluidasSinTipoCambio/); });
   await t.test('URL persiste modo rangos A B y segmento', () => { for (const clave of ['modo', 'desdeA', 'hastaA', 'desdeB', 'hastaB']) assert.match(filtros, new RegExp(clave)); assert.match(analisis, /reemplazarParametros/); assert.match(analisis, /regreso=\{q\.global\}/); });
   await t.test('mes sobrante queda ausente y nunca se rellena con cero', () => { const serie = alinearSeriesPeriodosVentasM7([{ periodo: '2026-01', ventaNetaClp: 10 }, { periodo: '2026-02', ventaNetaClp: 20 }], [{ periodo: '2026-06', ventaNetaClp: 30 }]); assert.equal(serie[1].periodoB, null); assert.equal(serie[1].ventaB, null); });
+});
+
+test('M7 granularidad temporal adaptable', async t => {
+  const graficos = readFileSync(resolve('../Vistas/src/views/DashboardM7/graficos.tsx'), 'utf8');
+  await t.test('13 rango octubre completo selecciona granularidad diaria', () => assert.equal(seleccionarGranularidadVentasM7('2026-10-01', '2026-10-31'), 'dia'));
+  await t.test('14 rango de 31 días produce 31 puntos y no una barra mensual', () => { const claves = generarClavesTemporalesVentasM7('2026-10-01', '2026-10-31'); assert.equal(claves.length, 31); assert.deepEqual([claves[0], claves.at(-1)], ['2026-10-01', '2026-10-31']); });
+  await t.test('15 rango 15 abril a 20 mayo mantiene secuencia diaria continua', () => { const claves = generarClavesTemporalesVentasM7('2026-04-15', '2026-05-20'); assert.equal(claves.length, 36); assert.equal(claves[15], '2026-04-30'); assert.equal(claves[16], '2026-05-01'); });
+  await t.test('16 rango que cruza año conserva todos los días y el año real', () => { const claves = generarClavesTemporalesVentasM7('2025-12-15', '2026-01-15'); assert.equal(claves.length, 32); assert.deepEqual([claves[16], claves[17]], ['2025-12-31', '2026-01-01']); });
+  await t.test('17 septiembre vs octubre se alinea día contra día', () => { const serie = alinearSeriesPeriodosVentasM7([{ periodo: '2026-09-01', ventaNetaClp: 10 }], [{ periodo: '2026-10-01', ventaNetaClp: 20 }], 'dia'); assert.equal(serie[0].posicion, 'Día 1'); });
+  await t.test('18 septiembre 30 días vs octubre 31 deja el día sobrante como null', () => { const a = generarClavesTemporalesVentasM7('2026-09-01', '2026-09-30').map(periodo => ({ periodo, ventaNetaClp: 1 })); const b = generarClavesTemporalesVentasM7('2026-10-01', '2026-10-31').map(periodo => ({ periodo, ventaNetaClp: 1 })); const serie = alinearSeriesPeriodosVentasM7(a, b, 'dia'); assert.equal(serie.length, 31); assert.equal(serie[30].periodoA, null); assert.equal(serie[30].ventaA, null); });
+  await t.test('19 comparación A B usa dos líneas del mismo tipo', () => { const bloque = graficos.slice(graficos.indexOf('export function GraficoPeriodosVentas'), graficos.indexOf('function TooltipRangoVentas')); assert.equal((bloque.match(/<Line /g) || []).length, 2); assert.doesNotMatch(bloque, /<Bar /); });
+  await t.test('20 tooltip comparativo muestra ambas fechas reales', () => { assert.match(graficos, /fechaCompleta\(String\(periodo\)\)/); assert.match(graficos, /item\('Período A', fila\.periodoA/); assert.match(graficos, /item\('Período B', fila\.periodoB/); });
+  await t.test('21 períodos mayores a 62 días cambian a granularidad mensual', () => { assert.equal(seleccionarGranularidadVentasM7('2026-01-01', '2026-09-30'), 'mes'); assert.equal(generarClavesTemporalesVentasM7('2026-01-01', '2026-09-30').length, 9); });
+  await t.test('22 distinta duración calcula el promedio diario o mensual correcto', () => { assert.equal(calcularPromedioTemporalVentasM7(300, 30), 10); assert.equal(calcularPromedioTemporalVentasM7(700, 7), 100); });
+  await t.test('23 ausencia real de ventas se representa como cero', () => assert.deepEqual(consolidarBucketVentasM7([]), { ventaNetaClp: 0, ventasIncluidasClp: 0, ventasExcluidasSinTipoCambio: 0 }));
+  await t.test('24 falta de cobertura FX permanece null y no se transforma en cero', () => assert.deepEqual(consolidarBucketVentasM7([null]), { ventaNetaClp: null, ventasIncluidasClp: 0, ventasExcluidasSinTipoCambio: 1 }));
 });
 
 test('M7 segmentación comercial y productos', async t => {
