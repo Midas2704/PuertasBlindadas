@@ -19,6 +19,8 @@ const tipoUmbralMargen = 'DASHBOARD';
 const unidadUmbralMargen = 'PORCENTAJE';
 const categoriasFlujoProyectadoM7 = ['INGRESOS_OPERACIONALES', 'OTROS_INGRESOS', 'PROVEEDORES', 'REMUNERACIONES', 'IMPUESTOS', 'OTROS_EGRESOS'] as const;
 const categoriasEntradaProyeccionM7 = new Set<string>(['INGRESOS_OPERACIONALES', 'OTROS_INGRESOS']);
+export const categoriasEstadoResultadosM7 = ['VENTAS_NETAS', 'COSTOS_DIRECTOS', 'GASTOS_OPERACIONALES'] as const;
+type CategoriaEstadoResultadosM7 = typeof categoriasEstadoResultadosM7[number];
 
 const fechaIso = (fecha: Date) => fecha.toISOString().slice(0, 10);
 const fechaUtc = (valor: unknown, nombre: string) => {
@@ -176,6 +178,15 @@ export function calcularEstadoResultadosM7(partidas: { ventasNetas: number | nul
   const ebitdaMonto = margenBruto === null || partidas.gastosOperacionales === null ? null : redondear(margenBruto - partidas.gastosOperacionales);
   const ebitdaPorcentaje = ebitdaMonto === null || partidas.ventasNetas === null || partidas.ventasNetas === 0 ? null : redondear(ebitdaMonto / partidas.ventasNetas * 100);
   return { ...partidas, margenBruto, ebitdaMonto, ebitdaPorcentaje };
+}
+export function calcularPresupuestoResultadosM7(partidas: { ventasNetas: number | null; costosDirectos: number | null; gastosOperacionales: number | null }) {
+  const margenBruto = partidas.ventasNetas === null || partidas.costosDirectos === null ? null : redondear(partidas.ventasNetas - partidas.costosDirectos);
+  const resultadoOperativo = margenBruto === null || partidas.gastosOperacionales === null ? null : redondear(margenBruto - partidas.gastosOperacionales);
+  const margenOperativoPorcentaje = resultadoOperativo === null || partidas.ventasNetas === null || partidas.ventasNetas === 0 ? null : redondear(resultadoOperativo / partidas.ventasNetas * 100);
+  return { ...partidas, margenBruto, resultadoOperativo, margenOperativoPorcentaje };
+}
+export function calcularDesviacionResultadosM7(real: number | null, presupuesto: number | null) {
+  return { diferencia: real === null || presupuesto === null ? null : redondear(real - presupuesto), variacionPorcentual: real === null || presupuesto === null || presupuesto === 0 ? null : redondear((real - presupuesto) / Math.abs(presupuesto) * 100) };
 }
 export function calcularFlujoRealM7(movimientos: Array<{ monto: number; naturaleza: string; ajuste?: boolean }>) {
   const total = { ingresosReales: 0, egresosReales: 0, ajustesEntrada: 0, ajustesSalida: 0 };
@@ -727,29 +738,58 @@ export class M7Controller {
 
   async consultarProyeccionesM7(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
-    const filas = await prisma.proyeccion_financiera_m7.findMany({ where: { estado: 'activo', anio: { gte: periodo.desde.getUTCFullYear(), lte: new Date(periodo.hastaExclusiva.getTime() - 1).getUTCFullYear() } }, include: { moneda: true }, orderBy: [{ anio: 'asc' }, { mes: 'asc' }, { categoria: 'asc' }] });
-    const activas = filas.filter(fila => { const mes = new Date(Date.UTC(fila.anio, fila.mes - 1, 1)); return mes < periodo.hastaExclusiva && new Date(Date.UTC(fila.anio, fila.mes, 1)) > periodo.desde; }).map(fila => this.presentarProyeccionM7(fila));
-    const totales = [...activas.reduce((mapa, fila) => { const actual = mapa.get(fila.moneda) || { moneda: fila.moneda, ingresosProyectados: 0, egresosProyectados: 0 }; if (categoriasEntradaProyeccionM7.has(fila.categoria)) actual.ingresosProyectados += fila.montoProyectado; else actual.egresosProyectados += fila.montoProyectado; mapa.set(fila.moneda, actual); return mapa; }, new Map<string, { moneda: string; ingresosProyectados: number; egresosProyectados: number }>()).values()].map(fila => ({ ...fila, ingresosProyectados: redondear(fila.ingresosProyectados), egresosProyectados: redondear(fila.egresosProyectados), flujoProyectado: redondear(fila.ingresosProyectados - fila.egresosProyectados) }));
-    return { periodo: periodoSalida(periodo), estado: activas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, categorias: categoriasFlujoProyectadoM7, proyecciones: activas, totales };
+    const tipo = String(consulta.tipo || 'FLUJO_CAJA').trim().toUpperCase();
+    if (!['FLUJO_CAJA', 'ESTADO_RESULTADOS'].includes(tipo)) throw new ErrorAplicacion(400, 'Tipo de proyección inválido');
+    const filas = await prisma.proyeccion_financiera_m7.findMany({ where: { tipo, estado: 'activo', anio: { gte: periodo.desde.getUTCFullYear(), lte: new Date(periodo.hastaExclusiva.getTime() - 1).getUTCFullYear() } }, include: { moneda: true }, orderBy: [{ anio: 'asc' }, { mes: 'asc' }, { categoria: 'asc' }, { id_proyeccion_financiera_m7: 'asc' }] });
+    const enPeriodo = filas.filter(fila => { const inicioMes = new Date(Date.UTC(fila.anio, fila.mes - 1, 1)); return inicioMes < periodo.hastaExclusiva && new Date(Date.UTC(fila.anio, fila.mes, 1)) > periodo.desde; });
+    const permitidas = new Set<string>(tipo === 'FLUJO_CAJA' ? categoriasFlujoProyectadoM7 : categoriasEstadoResultadosM7);
+    const pendientesClasificacion = enPeriodo.filter(fila => !permitidas.has(fila.categoria)).map(fila => this.presentarProyeccionM7(fila));
+    const candidatas = enPeriodo.filter(fila => permitidas.has(fila.categoria));
+    const porIdentidad = candidatas.reduce((mapa, fila) => { const clave = `${fila.tipo}|${fila.anio}|${fila.mes}|${fila.id_moneda}|${fila.categoria}`; mapa.set(clave, [...(mapa.get(clave) || []), fila]); return mapa; }, new Map<string, typeof candidatas>());
+    const duplicadas = [...porIdentidad.values()].filter(grupo => grupo.length > 1).flat();
+    const idsDuplicadas = new Set(duplicadas.map(fila => fila.id_proyeccion_financiera_m7));
+    const activas = candidatas.filter(fila => !idsDuplicadas.has(fila.id_proyeccion_financiera_m7)).map(fila => this.presentarProyeccionM7(fila));
+    const estado = duplicadas.length ? 'ERROR_CALCULO' as const : pendientesClasificacion.length ? 'PARCIALMENTE_DISPONIBLE' as const : activas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const;
+    if (tipo === 'FLUJO_CAJA') {
+      const totales = [...activas.reduce((mapa, fila) => { const actual = mapa.get(fila.moneda) || { moneda: fila.moneda, ingresosProyectados: 0, egresosProyectados: 0 }; if (categoriasEntradaProyeccionM7.has(fila.categoria)) actual.ingresosProyectados += fila.montoProyectado; else actual.egresosProyectados += fila.montoProyectado; mapa.set(fila.moneda, actual); return mapa; }, new Map<string, { moneda: string; ingresosProyectados: number; egresosProyectados: number }>()).values()].map(fila => ({ ...fila, ingresosProyectados: redondear(fila.ingresosProyectados), egresosProyectados: redondear(fila.egresosProyectados), flujoProyectado: redondear(fila.ingresosProyectados - fila.egresosProyectados) }));
+      return { tipo, periodo: periodoSalida(periodo), estado, categorias: categoriasFlujoProyectadoM7, proyecciones: activas, totales, pendientesClasificacion, inconsistencias: duplicadas.map(fila => this.presentarProyeccionM7(fila)) };
+    }
+    const mesesPeriodo: Array<{ anio: number; mes: number }> = []; const cursor = new Date(Date.UTC(periodo.desde.getUTCFullYear(), periodo.desde.getUTCMonth(), 1));
+    while (cursor < periodo.hastaExclusiva) { mesesPeriodo.push({ anio: cursor.getUTCFullYear(), mes: cursor.getUTCMonth() + 1 }); cursor.setUTCMonth(cursor.getUTCMonth() + 1); }
+    const clp = activas.filter(fila => fila.moneda === 'CLP');
+    const leer = (anio: number, mes: number, categoria: CategoriaEstadoResultadosM7) => clp.find(fila => fila.anio === anio && fila.mes === mes && fila.categoria === categoria)?.montoProyectado ?? null;
+    const meses = mesesPeriodo.map(periodoMes => ({ ...periodoMes, ...calcularPresupuestoResultadosM7({ ventasNetas: leer(periodoMes.anio, periodoMes.mes, 'VENTAS_NETAS'), costosDirectos: leer(periodoMes.anio, periodoMes.mes, 'COSTOS_DIRECTOS'), gastosOperacionales: leer(periodoMes.anio, periodoMes.mes, 'GASTOS_OPERACIONALES') }) }));
+    const cobertura = Object.fromEntries(categoriasEstadoResultadosM7.map(categoria => [categoria, clp.filter(fila => fila.categoria === categoria).length]));
+    const totalCategoria = (categoria: CategoriaEstadoResultadosM7) => cobertura[categoria] === mesesPeriodo.length && mesesPeriodo.length > 0 ? redondear(clp.filter(fila => fila.categoria === categoria).reduce((total, fila) => total + fila.montoProyectado, 0)) : null;
+    const totales = calcularPresupuestoResultadosM7({ ventasNetas: totalCategoria('VENTAS_NETAS'), costosDirectos: totalCategoria('COSTOS_DIRECTOS'), gastosOperacionales: totalCategoria('GASTOS_OPERACIONALES') });
+    return { tipo, monedaComparable: 'CLP', periodo: periodoSalida(periodo), estado, categorias: categoriasEstadoResultadosM7, proyecciones: activas, meses, totales, cobertura: { mesesEsperados: mesesPeriodo.length, mesesCompletos: meses.filter(mes => mes.resultadoOperativo !== null).length, porCategoria: cobertura }, pendientesClasificacion, monedasNoConsolidables: [...new Set(activas.filter(fila => fila.moneda !== 'CLP').map(fila => fila.moneda))], inconsistencias: duplicadas.map(fila => this.presentarProyeccionM7(fila)) };
   }
 
   async guardarProyeccionM7(entrada: Record<string, unknown>, actorId: bigint, id?: number) {
     const tipo = String(entrada.tipo || 'FLUJO_CAJA').toUpperCase(); const anio = Number(entrada.anio); const mes = Number(entrada.mes);
-    const categoria = String(entrada.categoria || '').toUpperCase(); const moneda = String(entrada.moneda || '').toUpperCase(); const monto = new Prisma.Decimal(String(entrada.montoProyectado ?? ''));
+    const categoria = String(entrada.categoria || '').toUpperCase(); const moneda = String(entrada.moneda || '').toUpperCase(); let monto: Prisma.Decimal;
+    try { monto = new Prisma.Decimal(String(entrada.montoProyectado ?? '')); } catch { throw new ErrorAplicacion(400, 'Monto proyectado inválido'); }
     if (!['FLUJO_CAJA', 'ESTADO_RESULTADOS'].includes(tipo)) throw new ErrorAplicacion(400, 'Tipo de proyección inválido');
     if (!Number.isInteger(anio) || anio < 2000 || anio > 2200 || !Number.isInteger(mes) || mes < 1 || mes > 12) throw new ErrorAplicacion(400, 'Período de proyección inválido');
     if (tipo === 'FLUJO_CAJA' && !categoriasFlujoProyectadoM7.includes(categoria as typeof categoriasFlujoProyectadoM7[number])) throw new ErrorAplicacion(400, 'Categoría de flujo inválida');
+    if (tipo === 'ESTADO_RESULTADOS' && !categoriasEstadoResultadosM7.includes(categoria as CategoriaEstadoResultadosM7)) throw new ErrorAplicacion(400, 'Categoría de Estado de Resultados inválida');
     if (!moneda || !monto.isFinite() || monto.lt(0)) throw new ErrorAplicacion(400, 'Moneda y monto no negativo son obligatorios');
     const monedaOwner = await prisma.moneda.findUnique({ where: { codigo_moneda: moneda } }); if (!monedaOwner || monedaOwner.estado_moneda !== 'activo') throw new ErrorAplicacion(400, 'Moneda no disponible');
-    const observacion = String(entrada.observacion || '').trim().slice(0, 1000) || null;
-    const anterior = id ? await prisma.proyeccion_financiera_m7.findUnique({ where: { id_proyeccion_financiera_m7: id }, include: { moneda: true } }) : null;
-    if (id && !anterior) throw new ErrorAplicacion(404, 'Proyección no encontrada');
-    const fila = id
-      ? await prisma.proyeccion_financiera_m7.update({ where: { id_proyeccion_financiera_m7: id }, data: { tipo, anio, mes, id_moneda: monedaOwner.id_moneda, categoria, monto_proyectado: monto, observacion, estado: 'activo', actualizado_por: actorId, fecha_actualizacion: new Date() }, include: { moneda: true } })
-      : await prisma.proyeccion_financiera_m7.create({ data: { tipo, anio, mes, id_moneda: monedaOwner.id_moneda, categoria, monto_proyectado: monto, observacion, creado_por: actorId }, include: { moneda: true } });
-    const salida = this.presentarProyeccionM7(fila);
-    Object.defineProperty(salida, '__auditoriaM9', { value: { anterior: anterior ? this.presentarProyeccionM7(anterior) : undefined, nuevo: salida }, enumerable: false });
-    return salida;
+    const observacionEntrada = String(entrada.observacion || '').trim(); if (observacionEntrada.length > 1000) throw new ErrorAplicacion(400, 'La observación supera el máximo de 1000 caracteres'); const observacion = observacionEntrada || null;
+    try {
+      return await prisma.$transaction(async tx => {
+        const anterior = id ? await tx.proyeccion_financiera_m7.findUnique({ where: { id_proyeccion_financiera_m7: id }, include: { moneda: true } }) : null;
+        if (id && !anterior) throw new ErrorAplicacion(404, 'Proyección no encontrada');
+        const conflicto = await tx.proyeccion_financiera_m7.findFirst({ where: { tipo, anio, mes, id_moneda: monedaOwner.id_moneda, categoria, estado: 'activo', ...(id ? { id_proyeccion_financiera_m7: { not: id } } : {}) } });
+        if (conflicto) throw new ErrorAplicacion(409, 'Ya existe una partida activa equivalente; edita el registro existente');
+        const fila = id
+          ? await tx.proyeccion_financiera_m7.update({ where: { id_proyeccion_financiera_m7: id }, data: { tipo, anio, mes, id_moneda: monedaOwner.id_moneda, categoria, monto_proyectado: monto, observacion, estado: 'activo', actualizado_por: actorId, fecha_actualizacion: new Date() }, include: { moneda: true } })
+          : await tx.proyeccion_financiera_m7.create({ data: { tipo, anio, mes, id_moneda: monedaOwner.id_moneda, categoria, monto_proyectado: monto, observacion, creado_por: actorId }, include: { moneda: true } });
+        const salida = this.presentarProyeccionM7(fila);
+        Object.defineProperty(salida, '__auditoriaM9', { value: { anterior: anterior ? this.presentarProyeccionM7(anterior) : undefined, nuevo: salida }, enumerable: false });
+        return salida;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'La partida presupuestaria cambió concurrentemente; vuelve a cargarla'); throw error; }
   }
 
   async desactivarProyeccionM7(id: number, actorId: bigint) {
@@ -801,14 +841,15 @@ export class M7Controller {
       const serieCompromisos = compromisos.map(fila => { const moneda = String(fila.moneda); const cambio = fila.direccion === 'ENTRADA' ? Number(fila.monto) : -Number(fila.monto); acumulados.set(moneda, redondear((acumulados.get(moneda) || 0) + cambio)); return { ...fila, tipo: fila.direccion === 'ENTRADA' ? 'COBRO_CXC' : 'PAGO_CXP', referencia: fila.id, cambio, flujoComprometidoAcumulado: acumulados.get(moneda) }; });
       const totalesCompromisos = [...compromisos.reduce((mapa, fila) => { const moneda = String(fila.moneda); const actual = mapa.get(moneda) || { moneda, ingresosProyectados: 0, egresosProyectados: 0 }; if (fila.direccion === 'ENTRADA') actual.ingresosProyectados += Number(fila.monto); else actual.egresosProyectados += Number(fila.monto); mapa.set(moneda, actual); return mapa; }, new Map<string, { moneda: string; ingresosProyectados: number; egresosProyectados: number }>()).values()].map(fila => ({ ...fila, flujoProyectadoNeto: redondear(fila.ingresosProyectados - fila.egresosProyectados) }));
       const proyeccion = indicador(compromisos.length ? 'VALIDO' : 'SIN_RESULTADOS', { horizonteDias: horizonte, desde: fechaIso(inicio), hasta: fechaIso(new Date(fin.getTime() - 86400000)), ingresos, egresos, eventos: serieCompromisos, totales: totalesCompromisos }, 'Cobros y pagos comprometidos con saldo, monto, moneda y vencimiento reales; no se presenta saldo final porque falta un saldo inicial registrado');
-      const presupuesto = await this.consultarProyeccionesM7(consulta);
+      const presupuesto = await this.consultarProyeccionesM7({ ...consulta, tipo: 'FLUJO_CAJA' }) as unknown as { estado: EstadoIndicadorM7; categorias: readonly string[]; proyecciones: unknown[]; totales: Array<{ moneda: string; flujoProyectado: number }> };
       const reales = ((flujoHistorico as { valor?: { totales?: Array<{ moneda: string; flujoReal: number }> } }).valor?.totales || []);
       const proyectados = new Map(presupuesto.totales.map(fila => [fila.moneda, fila.flujoProyectado]));
       const finPeriodo = new Date(periodo.hastaExclusiva); finPeriodo.setUTCDate(finPeriodo.getUTCDate() - 1); const inicioYtd = new Date(Date.UTC(finPeriodo.getUTCFullYear(), 0, 1));
-      const [movimientosYtd, presupuestoYtd] = await Promise.all([
+      const [movimientosYtd, presupuestoYtdBase] = await Promise.all([
         prisma.movimiento_financiero.findMany({ where: { fecha_movimiento: { gte: inicioYtd, lt: periodo.hastaExclusiva }, estado_movimiento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true, origen_movimiento_financiero: true } }),
-        this.consultarProyeccionesM7({ desde: fechaIso(inicioYtd), hasta: fechaIso(finPeriodo) }),
+        this.consultarProyeccionesM7({ desde: fechaIso(inicioYtd), hasta: fechaIso(finPeriodo), tipo: 'FLUJO_CAJA' }),
       ]);
+      const presupuestoYtd = presupuestoYtdBase as unknown as { totales: Array<{ moneda: string; flujoProyectado: number }> };
       const realesYtd = new Map<string, number>(); for (const codigo of new Set(movimientosYtd.map(fila => fila.moneda.codigo_moneda))) { const items = movimientosYtd.filter(fila => fila.moneda.codigo_moneda === codigo).map(fila => ({ monto: Number(fila.monto_movimiento), naturaleza: fila.naturaleza_movimiento, ajuste: normalizarTexto(fila.tipo_movimiento_financiero).includes('ajuste') || fila.origen_movimiento_financiero.some(origen => normalizarTexto(origen.entidad_origen).includes('ajuste')) })); realesYtd.set(codigo, calcularFlujoRealM7(items).flujoReal); }
       const proyectadosYtd = new Map(presupuestoYtd.totales.map(fila => [fila.moneda, fila.flujoProyectado]));
       const monedasComparables = [...new Set([...reales.map(fila => fila.moneda), ...proyectados.keys(), ...realesYtd.keys(), ...proyectadosYtd.keys()])];
@@ -1546,12 +1587,16 @@ export class M7Controller {
     const segmento = resolverSegmentoComercialM7(consulta.segmento);
     const consultaGeneral = { ...consulta, segmento };
     const hastaYtd = new Date(periodo.hastaExclusiva); hastaYtd.setUTCDate(hastaYtd.getUTCDate() - 1);
+    const anioPresupuesto = hastaYtd.getUTCFullYear();
     const consultaYtd = { desde: `${hastaYtd.getUTCFullYear()}-01-01`, hasta: fechaIso(hastaYtd), segmento };
-    const [ventas, margen, ventasYtd, margenYtd, iva, historico] = await Promise.all([
+    const [ventas, margen, ventasYtd, margenYtd, iva, historico, presupuestoPeriodo, presupuestoAnual, historicoAnual] = await Promise.all([
       this.consultarAnalisisVentas(consultaGeneral), this.consultarMargenProyectos(consulta),
       this.consultarAnalisisVentas(consultaYtd), this.consultarMargenProyectos(consultaYtd),
       this.consultarResumenIva(consulta),
-      this.consultarHistoricoPanelGeneral({ anio: hastaYtd.getUTCFullYear(), mes: hastaYtd.getUTCMonth() + 1, meses: 12 }, ['CU219', 'CU238']),
+      this.consultarHistoricoPanelGeneral({ anio: hastaYtd.getUTCFullYear(), mes: hastaYtd.getUTCMonth() + 1, meses: 12, segmento }, ['CU219', 'CU238']),
+      this.consultarProyeccionesM7({ ...consulta, tipo: 'ESTADO_RESULTADOS' }),
+      this.consultarProyeccionesM7({ desde: `${anioPresupuesto}-01-01`, hasta: `${anioPresupuesto}-12-31`, tipo: 'ESTADO_RESULTADOS' }),
+      this.consultarHistoricoPanelGeneral({ anio: anioPresupuesto, mes: 12, meses: 12, segmento }, ['CU219', 'CU238']),
     ]);
     const ingresos = (ventas as any).montoNeto?.valor?.porMoneda as Array<{ moneda: string; monto: number }> | undefined;
     const costos = sumarPorMoneda(((margen as any).proyectos || []).flatMap((proyecto: any) => (proyecto.desgloseCostos || []).map((costo: any) => ({ moneda: costo.moneda, monto: costo.monto }))));
@@ -1569,6 +1614,41 @@ export class M7Controller {
     const estadoResultados = consolidar(ventas, margen);
     const acumuladoYtd = consolidar(ventasYtd, margenYtd);
     const serieMensual = ((historico as any).meses || []).map((mes: any) => ({ periodo: mes.periodo, ...calcularEstadoResultadosM7({ ventasNetas: mes.ventasNetas, costoVenta: mes.costosDirectos, gastosOperacionales: null }) }));
+    const presupuestoPeriodoDato = presupuestoPeriodo as any; const presupuestoAnualDato = presupuestoAnual as any;
+    const mesesRealesAnuales = new Map(((historicoAnual as any).meses || []).map((mes: any) => [mes.periodo, mes]));
+    const periodoActual = fechaNegocio().slice(0, 7);
+    const seriePresupuestoReal = (presupuestoAnualDato.meses || []).map((mes: any) => {
+      const clave = `${mes.anio}-${String(mes.mes).padStart(2, '0')}`; const real = mesesRealesAnuales.get(clave) as any;
+      const futuro = clave > periodoActual;
+      const realVentasNetas = futuro ? null : typeof real?.ventasNetas === 'number' ? real.ventasNetas : null;
+      const realCostosDirectos = futuro ? null : typeof real?.costosDirectos === 'number' ? real.costosDirectos : null;
+      const realCalculado = calcularPresupuestoResultadosM7({ ventasNetas: realVentasNetas, costosDirectos: realCostosDirectos, gastosOperacionales: null });
+      return { periodo: clave, mes: mes.mes, presupuestoVentasNetas: mes.ventasNetas, realVentasNetas, presupuestoCostosDirectos: mes.costosDirectos, realCostosDirectos, presupuestoMargenBruto: mes.margenBruto, realMargenBruto: realCalculado.margenBruto, presupuestoResultadoOperativo: mes.resultadoOperativo, realResultadoOperativo: null };
+    });
+    const periodoMesesCompletos = periodo.desde.getUTCDate() === 1 && periodo.hastaExclusiva.getUTCDate() === 1;
+    const comparableDirecto = periodoMesesCompletos && segmento === 'TODOS' && String(consulta.modo || '').toLowerCase() !== 'comparar';
+    const naturaleza = (concepto: string, diferencia: number | null) => diferencia === null ? 'NO_APLICA' : ['COSTOS_DIRECTOS', 'GASTOS_OPERACIONALES'].includes(concepto) ? diferencia <= 0 ? 'FAVORABLE' : 'DESFAVORABLE' : diferencia >= 0 ? 'FAVORABLE' : 'DESFAVORABLE';
+    const comparar = (concepto: string, presupuesto: number | null, real: number | null) => { const desviacion = calcularDesviacionResultadosM7(comparableDirecto ? real : null, comparableDirecto ? presupuesto : null); return { concepto, presupuesto: comparableDirecto ? presupuesto : null, real: comparableDirecto ? real : null, ...desviacion, interpretacion: naturaleza(concepto, desviacion.diferencia) }; };
+    const totalesPresupuesto = presupuestoPeriodoDato.totales || {};
+    const comparacionPeriodo = [
+      comparar('VENTAS_NETAS', totalesPresupuesto.ventasNetas ?? null, estadoResultados.ventasNetas),
+      comparar('COSTOS_DIRECTOS', totalesPresupuesto.costosDirectos ?? null, estadoResultados.costoVenta),
+      comparar('MARGEN_BRUTO', totalesPresupuesto.margenBruto ?? null, estadoResultados.margenBruto),
+      comparar('GASTOS_OPERACIONALES', totalesPresupuesto.gastosOperacionales ?? null, estadoResultados.gastosOperacionales),
+      comparar('RESULTADO_OPERATIVO', totalesPresupuesto.resultadoOperativo ?? null, estadoResultados.ebitdaMonto),
+    ];
+    const mesesYtdPresupuesto = (presupuestoAnualDato.meses || []).filter((mes: any) => mes.mes <= hastaYtd.getUTCMonth() + 1);
+    const sumarCompleto = (clave: string) => mesesYtdPresupuesto.length === hastaYtd.getUTCMonth() + 1 && mesesYtdPresupuesto.every((mes: any) => typeof mes[clave] === 'number') ? redondear(mesesYtdPresupuesto.reduce((total: number, mes: any) => total + mes[clave], 0)) : null;
+    const presupuestoYtd = calcularPresupuestoResultadosM7({ ventasNetas: sumarCompleto('ventasNetas'), costosDirectos: sumarCompleto('costosDirectos'), gastosOperacionales: sumarCompleto('gastosOperacionales') });
+    const comparacionYtd = [
+      comparar('VENTAS_NETAS', presupuestoYtd.ventasNetas, acumuladoYtd.ventasNetas),
+      comparar('COSTOS_DIRECTOS', presupuestoYtd.costosDirectos, acumuladoYtd.costoVenta),
+      comparar('MARGEN_BRUTO', presupuestoYtd.margenBruto, acumuladoYtd.margenBruto),
+      comparar('GASTOS_OPERACIONALES', presupuestoYtd.gastosOperacionales, acumuladoYtd.gastosOperacionales),
+      comparar('RESULTADO_OPERATIVO', presupuestoYtd.resultadoOperativo, acumuladoYtd.ebitdaMonto),
+    ];
+    const advertencias = [...(!periodoMesesCompletos ? ['El presupuesto es mensual. La comparación directa requiere meses completos.'] : []), ...(segmento !== 'TODOS' ? ['El presupuesto de resultados no posee dimensión por segmento; se muestra como contexto y no se compara con ventas segmentadas.'] : []), ...(presupuestoAnualDato.pendientesClasificacion?.length ? ['Existen partidas pendientes de clasificación excluidas de los agregados.'] : []), ...(presupuestoAnualDato.inconsistencias?.length ? ['Existen duplicados activos heredados; fueron excluidos hasta resolver la inconsistencia.'] : [])];
+    const presupuestoResultados = { anio: anioPresupuesto, moneda: 'CLP', categorias: categoriasEstadoResultadosM7, proyecciones: presupuestoAnualDato.proyecciones || [], meses: presupuestoAnualDato.meses || [], totalAnual: presupuestoAnualDato.totales || calcularPresupuestoResultadosM7({ ventasNetas: null, costosDirectos: null, gastosOperacionales: null }), cobertura: presupuestoAnualDato.cobertura, seriePresupuestoReal, comparacionPeriodo, presupuestoYtd, comparacionYtd, comparableDirecto, advertencias, pendientesClasificacion: presupuestoAnualDato.pendientesClasificacion || [], monedasNoConsolidables: presupuestoAnualDato.monedasNoConsolidables || [], inconsistencias: presupuestoAnualDato.inconsistencias || [] };
     return {
       titulo: 'Resumen gerencial de resultados', tituloEstadoResultados: 'Estado de Resultados gerencial', periodo: periodoSalida(periodo), estado: ingresos?.length ? 'PARCIALMENTE_DISPONIBLE' as const : 'DATOS_INSUFICIENTES' as const,
       estadoResultados: indicador('PARCIALMENTE_DISPONIBLE', estadoResultados, 'Ventas y costos directos netos de IVA; EBITDA no calculable mientras falte una fuente completa de gastos operacionales'),
@@ -1578,6 +1658,7 @@ export class M7Controller {
       costosDirectos: costos.length ? indicador('VALIDO', costos, 'Costos directamente atribuidos a proyectos, sin prorrateos') : indicador('DATOS_INSUFICIENTES', null, 'No hay costos directos reconstruibles; no se reemplazan por cero'),
       gastosRegistrados: indicador('DATOS_INSUFICIENTES', null, 'No existe una fuente estructurada completa que permita separar gastos operacionales netos del período sin duplicar costos directos o pagos de caja'),
       resultadoGerencial: resultado.length ? indicador('VALIDO', resultado, 'Diferencia gerencial entre ingresos y costos directos comparables por moneda') : indicador('DATOS_INSUFICIENTES', null, 'Faltan partidas comparables para derivar un resultado'),
+      presupuestoResultados: indicador(presupuestoAnualDato.estado, presupuestoResultados, 'Presupuesto económico mensual en CLP; no se mezcla con flujo de caja, no prorratea rangos parciales y no completa meses ausentes con cero'),
       iva,
       devengado: indicador('FUENTE_NO_DISPONIBLE', null, 'DEVENGADO: FUENTE/DEFINICIÓN PENDIENTE; no se deriva de ventas, OT ni proyectos'),
       cobertura: indicador('DATOS_INSUFICIENTES', { completa: false, incluye: ['ventas definitivas netas', 'costos de proyecto atribuibles', 'mano de obra atribuible validada'], noDisponibles: ['gastos operacionales clasificados sin duplicación', 'devengado'], noIncluyeEbitda: ['intereses', 'impuestos', 'depreciaciones', 'amortizaciones'], costosExcluidosSinConversion: estadoResultados.costosExcluidosSinConversion }, 'Síntesis gerencial parcial; no es un Estado de Resultados contable oficial. Los egresos de caja no se usan como gastos.'),
