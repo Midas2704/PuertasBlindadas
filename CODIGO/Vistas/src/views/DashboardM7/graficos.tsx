@@ -150,6 +150,17 @@ export function GraficoComparativoMensual({ datos, alto = 340 }: { datos: DatoGr
   </ComposedChart></ResponsiveContainer></div></div></div>;
 }
 
+function TooltipPeriodosVentas({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: DatoGrafico }>; label?: unknown }) {
+  const fila = payload?.[0]?.payload; if (!active || !fila) return null;
+  const item = (nombre: string, periodo: unknown, valor: unknown, color: string) => periodo ? <div className="mt-2 flex items-start justify-between gap-5"><span className="flex items-center gap-2 text-gray-600"><i className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: color }}/>{nombre}<small className="block text-gray-400">{fechaCompleta(String(periodo))}</small></span><strong>{formatearDato(valor, 'monto')}</strong></div> : null;
+  return <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-xl"><p className="font-black">{String(label)}</p>{item('Período A', fila.periodoA, fila.ventaA, '#676767')}{item('Período B', fila.periodoB, fila.ventaB, '#FE8F01')}</div>;
+}
+
+export function GraficoPeriodosVentas({ datos }: { datos: DatoGrafico[] }) {
+  if (!datos.length) return <EstadoSinDatos texto="No hay ventas comparables en los períodos seleccionados."/>;
+  return <div className="w-full overflow-x-auto"><div className="min-w-[620px]" style={{ height: 300 }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}><CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="posicion" tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip content={<TooltipPeriodosVentas/>}/><Legend wrapperStyle={{ fontSize: 11 }}/><Bar dataKey="ventaA" name="Período A" fill="#676767" radius={[3,3,0,0]} maxBarSize={30}/><Line type="monotone" dataKey="ventaB" name="Período B" stroke="#FE8F01" strokeWidth={3} dot={{ r: 3 }} connectNulls={false}/></ComposedChart></ResponsiveContainer></div></div>;
+}
+
 function TooltipDonut({ active, payload, metrica, total }: { active?: boolean; payload?: Array<{ payload?: DatoDonut }>; metrica: 'VALOR' | 'UNIDADES' | 'GENERICO'; total: number }) {
   const dato = payload?.[0]?.payload;
   if (!active || !dato) return null;

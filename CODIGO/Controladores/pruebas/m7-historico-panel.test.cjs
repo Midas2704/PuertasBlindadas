@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const { M7Controller, calcularConversionSegmentadaM7, calcularDesviacionFlujoM7, calcularEstadoResultadosM7, calcularFlujoRealM7, calcularVariacionVentasM7, convertirVentaClpM7, distribuirVentaPorProductoM7, resolverSegmentoComercialM7, resumirVentasHistoricasM7 } = require('../dist/controladores/M7Controller');
+const { M7Controller, alinearSeriesPeriodosVentasM7, calcularComparacionPeriodosVentasM7, calcularConversionSegmentadaM7, calcularDesviacionFlujoM7, calcularEstadoResultadosM7, calcularFlujoRealM7, calcularVariacionVentasM7, convertirVentaClpM7, distribuirVentaPorProductoM7, resolverPeriodoM7, resolverSegmentoComercialM7, resumirVentasHistoricasM7 } = require('../dist/controladores/M7Controller');
 const { operacionesPermiso } = require('../dist/validaciones/permisos');
 const { CATALOGO_PRODUCTORES_M9 } = require('../dist/m9/contratoProductor');
 const { crearInformeVentasExcelM7 } = require('../dist/m7/informeVentasExcel');
@@ -75,7 +75,7 @@ test('M7 ventas comparativas de panel', async t => {
     assert.match(panel, /resultadoAnioAnterior: numero\(anual\?\.resultadoGerencial\)/);
     assert.match(panel, /mom: variacionPorcentual/);
     assert.match(panel, /yoy: variacionPorcentual/);
-    assert.match(panel, /resumenes\?anio=\$\{consulta\.anio\}&mes=\$\{consulta\.mes\}&segmento=\$\{consulta\.segmento\}/);
+    assert.match(panel, /dashboard-m7\/ventas\?\$\{queryComercial\}/);
     assert.match(graficos, /GraficoComparativoMensual/);
   });
   await t.test('resultado anterior sin cobertura permanece sin dato y la línea conserva el corte', async () => {
@@ -89,8 +89,24 @@ test('M7 ventas comparativas de panel', async t => {
     assert.match(fuente, /<Periodo anio=\{q\.anio\} mes=\{q\.mes\}/);
     assert.match(fuente, /Aplicar rango/);
     assert.match(fuente, /Rango activo:/);
-    assert.match(fuente, /Usar mes seleccionado/);
+    assert.match(readFileSync(resolve('../Vistas/src/views/DashboardM7/filtrosTemporalesVentas.tsx'), 'utf8'), /Limpiar \/ Volver a vista mensual/);
   });
+});
+
+test('M7 comparación flexible entre períodos de ventas', async t => {
+  const controlador = readFileSync(resolve('src/controladores/M7Controller.ts'), 'utf8');
+  const filtros = readFileSync(resolve('../Vistas/src/views/DashboardM7/filtrosTemporalesVentas.tsx'), 'utf8');
+  const analisis = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8');
+  const marzoJunio = alinearSeriesPeriodosVentasM7([{ periodo: '2026-03', ventaNetaClp: 100 }], [{ periodo: '2026-06', ventaNetaClp: 140 }]);
+  await t.test('marzo vs junio conserva los meses reales y la posición relativa', () => assert.deepEqual(marzoJunio, [{ posicion: 'Mes 1', periodoA: '2026-03', ventaA: 100, periodoB: '2026-06', ventaB: 140 }]));
+  await t.test('rango abril-mayo conserva fechas inclusivas', () => { const periodo = resolverPeriodoM7({ desde: '2026-04-01', hasta: '2026-05-31' }); assert.deepEqual([periodo.etiquetaDesde, periodo.etiquetaHasta], ['2026-04-01', '2026-05-31']); });
+  await t.test('rango puede cruzar el cambio de año', () => { const periodo = resolverPeriodoM7({ desde: '2025-11-15', hasta: '2026-02-10' }); assert.equal(periodo.etiquetaDesde, '2025-11-15'); assert.equal(periodo.etiquetaHasta, '2026-02-10'); });
+  await t.test('períodos de distinta duración publican total y promedio por separado', () => { assert.match(controlador, /duracionComparable/); assert.match(controlador, /promedioMensualA/); assert.match(analisis, /distinta duración/); });
+  await t.test('base A cero devuelve variación N/A como null', () => assert.deepEqual(calcularComparacionPeriodosVentasM7(0, 200), { diferenciaAbsoluta: 200, variacionPorcentual: null }));
+  await t.test('segmento B2B se aplica a ambos períodos con la función owner', () => { assert.equal(resolverSegmentoComercialM7('B2B'), 'B2B'); assert.match(controlador, /const consultaA = \{ desde: consulta\.desdeA, hasta: consulta\.hastaA, segmento \}/); });
+  await t.test('FX faltante continúa excluido sin usar tasa actual', () => { assert.equal(convertirVentaClpM7(100, 'USD', null), null); assert.match(controlador, /ventasExcluidasSinTipoCambio/); });
+  await t.test('URL persiste modo rangos A B y segmento', () => { for (const clave of ['modo', 'desdeA', 'hastaA', 'desdeB', 'hastaB']) assert.match(filtros, new RegExp(clave)); assert.match(analisis, /reemplazarParametros/); assert.match(analisis, /regreso=\{q\.global\}/); });
+  await t.test('mes sobrante queda ausente y nunca se rellena con cero', () => { const serie = alinearSeriesPeriodosVentasM7([{ periodo: '2026-01', ventaNetaClp: 10 }, { periodo: '2026-02', ventaNetaClp: 20 }], [{ periodo: '2026-06', ventaNetaClp: 30 }]); assert.equal(serie[1].periodoB, null); assert.equal(serie[1].ventaB, null); });
 });
 
 test('M7 segmentación comercial y productos', async t => {
@@ -106,7 +122,7 @@ test('M7 segmentación comercial y productos', async t => {
   await t.test('participaciones del prorrateo suman aproximadamente 100%', () => { const filas = distribuirVentaPorProductoM7(1000, detalles); assert.equal(filas.reduce((total, fila) => total + fila.ventaNetaClp / 1000 * 100, 0), 100); });
   await t.test('valor extranjero usa exclusivamente FX histórico', () => assert.equal(convertirVentaClpM7(100, 'USD', 925), 92500));
   await t.test('sin FX se excluye valor pero se conservan unidades', () => { const filas = distribuirVentaPorProductoM7(null, detalles); assert.equal(filas.reduce((total, fila) => total + fila.cantidad, 0), 5); assert.ok(filas.every(fila => fila.ventaNetaClp === null)); });
-  await t.test('segmento sin resultados y rango combinado permanecen accionables', () => { assert.deepEqual(calcularConversionSegmentadaM7([], 'B2C'), { totalCotizaciones: 0, convertidas: 0, tasaPorcentual: null }); const vista = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8'); assert.match(vista, /cambiarSegmento/); assert.match(vista, /rango \|\| \{\}/); });
+  await t.test('segmento sin resultados y rango combinado permanecen accionables', () => { assert.deepEqual(calcularConversionSegmentadaM7([], 'B2C'), { totalCotizaciones: 0, convertidas: 0, tasaPorcentual: null }); const vista = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8'); assert.match(vista, /cambiarSegmento/); assert.match(vista, /parametrosTemporalesVentas\(filtros\)/); });
 });
 
 test('M7 exportación Excel detallada', async t => {

@@ -53,6 +53,33 @@ export function resolverPeriodoM7(consulta: Consulta = {}): Periodo {
   return { desde, hastaExclusiva, anteriorDesde, anteriorHastaExclusiva, etiquetaDesde: fechaIso(desde), etiquetaHasta: fechaIso(hasta) };
 }
 
+export function calcularComparacionPeriodosVentasM7(valorA: number | null, valorB: number | null) {
+  return {
+    diferenciaAbsoluta: valorA === null || valorB === null ? null : redondear(valorB - valorA),
+    variacionPorcentual: valorA === null || valorB === null || valorA === 0 ? null : redondear((valorB - valorA) / Math.abs(valorA) * 100),
+  };
+}
+
+const mesesTocadosPeriodoM7 = (periodo: Periodo) => {
+  const meses: string[] = [];
+  const cursor = new Date(Date.UTC(periodo.desde.getUTCFullYear(), periodo.desde.getUTCMonth(), 1));
+  while (cursor < periodo.hastaExclusiva) {
+    meses.push(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`);
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+  return meses;
+};
+
+export function alinearSeriesPeriodosVentasM7(serieA: Array<Record<string, unknown>>, serieB: Array<Record<string, unknown>>) {
+  return Array.from({ length: Math.max(serieA.length, serieB.length) }, (_, indice) => ({
+    posicion: `Mes ${indice + 1}`,
+    periodoA: serieA[indice]?.periodo ?? null,
+    ventaA: serieA[indice]?.ventaNetaClp ?? null,
+    periodoB: serieB[indice]?.periodo ?? null,
+    ventaB: serieB[indice]?.ventaNetaClp ?? null,
+  }));
+}
+
 const indicador = <T>(estado: EstadoIndicadorM7, valor: T | null, detalle: string, actualizadoEn: Date | null = new Date()) => ({ estado, valor, detalle, actualizadoEn });
 const agruparMonto = (filas: Array<{ moneda: string; monto: number }>) => [...filas.reduce((mapa, fila) => mapa.set(fila.moneda, (mapa.get(fila.moneda) || 0) + fila.monto), new Map<string, number>())].map(([moneda, monto]) => ({ moneda, monto }));
 const periodoSalida = (periodo: Periodo) => ({ desde: periodo.etiquetaDesde, hasta: periodo.etiquetaHasta });
@@ -461,10 +488,12 @@ export class M7Controller {
     const segmento = resolverSegmentoComercialM7(consulta.segmento);
     try {
       const incluir = { moneda: true, ficha_cliente: { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } }, cotizacion: { include: { detalle_cotizacion: { include: { item_comercial: true } } } } } as const;
-      const [universoActual, universoAnterior, cohorteCompleta] = await Promise.all([
+      const [universoActual, universoAnterior, cohorteCompleta, costosPeriodo, tareasPeriodo] = await Promise.all([
         prisma.nota_venta.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_nota_venta: { in: estadosVentaDefinitiva } }, include: incluir, orderBy: { fecha_emision: 'asc' } }),
         prisma.nota_venta.findMany({ where: { fecha_emision: { gte: periodo.anteriorDesde, lt: periodo.anteriorHastaExclusiva }, estado_nota_venta: { in: estadosVentaDefinitiva } }, include: incluir }),
         prisma.cotizacion.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva } }, include: { nota_venta: true, ficha_cliente: { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } } }, orderBy: { fecha_emision: 'asc' } }),
+        prisma.costo_proyecto.findMany({ where: { fecha_costo: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_costo: { not: 'anulado' } }, select: { fecha_costo: true, monto_costo: true, moneda: { select: { codigo_moneda: true } } } }),
+        prisma.tarea_remunerable.findMany({ where: { fecha_tarea: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_validacion: 'validada', id_proyecto_financiero: { not: null } }, select: { fecha_tarea: true, monto_calculado: true } }),
       ]);
       const actuales = universoActual.filter(nota => perteneceSegmentoM7(nota.ficha_cliente.cliente_financiero, segmento));
       const anteriores = universoAnterior.filter(nota => perteneceSegmentoM7(nota.ficha_cliente.cliente_financiero, segmento));
@@ -523,6 +552,23 @@ export class M7Controller {
       const participacionBase = universoActual.reduce((mapa, nota) => { const nombre = nombreSegmentoClienteM7(nota.ficha_cliente.cliente_financiero); const monto = convertir(nota); if (!nombre) return mapa; const actual = mapa.get(nombre) || { segmento: nombre, montoClp: 0, ventas: 0, excluidasSinTipoCambio: 0 }; actual.ventas += 1; if (monto === null) actual.excluidasSinTipoCambio += 1; else actual.montoClp = redondear(actual.montoClp + monto.toNumber()); mapa.set(nombre, actual); return mapa; }, new Map<string, { segmento: string; montoClp: number; ventas: number; excluidasSinTipoCambio: number }>()) ;
       const totalParticipacion = [...participacionBase.values()].reduce((total, fila) => total + fila.montoClp, 0);
       const participacionSegmentos = [...participacionBase.values()].map(fila => ({ ...fila, participacionPorcentual: totalParticipacion > 0 ? redondear(fila.montoClp / totalParticipacion * 100) : null })).sort((a, b) => b.montoClp - a.montoClp);
+      const mesesPeriodo = mesesTocadosPeriodoM7(periodo);
+      const serieMensual = mesesPeriodo.map(clave => {
+        const ventasMes = actuales.filter(nota => claveMes(nota.fecha_emision) === clave);
+        const montosMes = ventasMes.map(convertir); const cubiertosMes = montosMes.filter((monto): monto is Prisma.Decimal => monto !== null);
+        const cotizacionesMes = cohorteCompleta.filter(cotizacion => claveMes(cotizacion.fecha_emision) === clave && perteneceSegmentoM7(cotizacion.ficha_cliente.cliente_financiero, segmento));
+        const convertidasMes = cotizacionesMes.filter(cotizacion => cotizacion.nota_venta && !['anulada', 'revertida', 'revertida_total'].includes(normalizarTexto(cotizacion.nota_venta.estado_nota_venta))).length;
+        const costosClpMes = costosPeriodo.filter(costo => claveMes(costo.fecha_costo) === clave && costo.moneda.codigo_moneda === 'CLP').reduce((total, costo) => total + Number(costo.monto_costo), 0)
+          + tareasPeriodo.filter(tarea => claveMes(tarea.fecha_tarea) === clave).reduce((total, tarea) => total + Number(tarea.monto_calculado), 0);
+        const hayCostosMes = costosPeriodo.some(costo => claveMes(costo.fecha_costo) === clave) || tareasPeriodo.some(tarea => claveMes(tarea.fecha_tarea) === clave);
+        const costoComparable = segmento === 'TODOS' && hayCostosMes && costosPeriodo.filter(costo => claveMes(costo.fecha_costo) === clave).every(costo => costo.moneda.codigo_moneda === 'CLP') ? redondear(costosClpMes) : null;
+        const ventaNetaClp = cubiertosMes.length ? redondear(cubiertosMes.reduce((total, monto) => total.plus(monto), new Prisma.Decimal(0)).toNumber()) : ventasMes.length ? null : 0;
+        return { periodo: clave, ventaNetaClp, cantidadVentas: ventasMes.length, cotizaciones: cotizacionesMes.length, conversiones: convertidasMes, tasaConversion: cotizacionesMes.length ? redondear(convertidasMes / cotizacionesMes.length * 100) : null, costosDirectos: costoComparable, resultadoGerencial: ventaNetaClp !== null && costoComparable !== null && montosMes.every(monto => monto !== null) ? redondear(ventaNetaClp - costoComparable) : null };
+      });
+      const costosClp = costosPeriodo.filter(costo => costo.moneda.codigo_moneda === 'CLP').reduce((total, costo) => total + Number(costo.monto_costo), 0) + tareasPeriodo.reduce((total, tarea) => total + Number(tarea.monto_calculado), 0);
+      const costosComparables = segmento === 'TODOS' && (costosPeriodo.length > 0 || tareasPeriodo.length > 0) && costosPeriodo.every(costo => costo.moneda.codigo_moneda === 'CLP');
+      const costoDirecto = costosComparables ? redondear(costosClp) : null;
+      const resultadoPeriodo = totalClp !== null && costoDirecto !== null && excluidosSinTipoCambio === 0 ? redondear(totalClp - costoDirecto) : null;
       return {
         periodo: periodoSalida(periodo), segmento, estado: actuales.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const,
         montoNeto: !actuales.length ? indicador('SIN_RESULTADOS', { porMoneda: [], totalClp: null, ventasIncluidasClp: 0, ventasExcluidasSinTipoCambio: 0 }, `No existen ventas definitivas para ${segmento} en el período`) : totalClp === null ? indicador('DATOS_INSUFICIENTES', { porMoneda, totalClp: null, ventasIncluidasClp: 0, ventasExcluidasSinTipoCambio: excluidosSinTipoCambio }, 'No hay ventas con conversión histórica válida para consolidar CLP') : indicador(excluidosSinTipoCambio ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO', { porMoneda, totalClp, ventasIncluidasClp: cubiertos.length, ventasExcluidasSinTipoCambio: excluidosSinTipoCambio }, `Monto neto de ventas confirmadas o cerradas; ${excluidosSinTipoCambio} venta(s) en moneda extranjera excluida(s) por falta de tipo de cambio histórico válido`),
@@ -534,6 +580,9 @@ export class M7Controller {
         concentracionClientes: indicador(totalClientesClp > 0 ? (excluidosSinTipoCambio ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO') : 'NO_APLICA', concentracionClientes, totalClientesClp > 0 ? 'Participación sobre ventas netas comparables consolidadas en CLP' : 'No existe total comparable para calcular participación'),
         productos: indicador(productosVendidos.length ? (ventasSinDetalle || ventasSinTipoCambio ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO') : actuales.length ? 'DATOS_INSUFICIENTES' : 'SIN_RESULTADOS', productosVendidos, detalleFamilias),
         productosVendidos, ventasPorFamilia, participacionSegmentos,
+        serieMensual,
+        costosDirectos: indicador(costoDirecto === null ? 'DATOS_INSUFICIENTES' : 'VALIDO', costoDirecto, segmento === 'TODOS' ? 'Costos directos atribuibles del período; monedas sin equivalencia histórica impiden consolidar' : 'Los costos directos no se distribuyen artificialmente por segmento'),
+        resultadoGerencial: indicador(resultadoPeriodo === null ? 'DATOS_INSUFICIENTES' : 'VALIDO', resultadoPeriodo, 'Venta neta comparable menos costos directos atribuibles; no es un Estado de Resultados contable'),
         brechaTaxonomiaB2B: 'Clasificación detallada B2B pendiente de taxonomía; se muestran productos reales sin inferir categorías desde texto libre.',
         comparacion,
       };
@@ -852,16 +901,49 @@ export class M7Controller {
   }
 
   async consultarAnalisisVentas(consulta: Consulta, permisos?: string[]) {
+    if (String(consulta.modo || '').toLowerCase() === 'comparar') {
+      const segmento = resolverSegmentoComercialM7(consulta.segmento);
+      const consultaA = { desde: consulta.desdeA, hasta: consulta.hastaA, segmento };
+      const consultaB = { desde: consulta.desdeB, hasta: consulta.hastaB, segmento };
+      const periodoA = resolverPeriodoM7(consultaA); const periodoB = resolverPeriodoM7(consultaB);
+      const [datosA, datosB] = await Promise.all([this.consultarAnalisisVentasCompleto(consultaA), this.consultarAnalisisVentasCompleto(consultaB)]);
+      const filtrar = (datos: Record<string, unknown>) => {
+        if (!permisos) return datos;
+        const salida: Record<string, unknown> = { periodo: datos.periodo, segmento: datos.segmento, estado: datos.estado };
+        if (permisos.includes('CU218')) for (const clave of ['conversion', 'conversionSegmentos']) salida[clave] = datos[clave];
+        if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'serieMensual']) salida[clave] = datos[clave];
+        if (permisos.includes('CU220')) for (const clave of ['clientes', 'concentracionClientes', 'productos', 'productosVendidos']) salida[clave] = datos[clave];
+        if (permisos.includes('CU238')) for (const clave of ['costosDirectos', 'resultadoGerencial']) salida[clave] = datos[clave];
+        return salida;
+      };
+      const a = filtrar(datosA as Record<string, unknown>); const b = filtrar(datosB as Record<string, unknown>);
+      const monto = (datos: Record<string, unknown>) => ((datos.montoNeto as any)?.valor || {}).totalClp;
+      const montoA = monto(a); const montoB = monto(b);
+      const valorA = typeof montoA === 'number' && Number.isFinite(montoA) ? montoA : null; const valorB = typeof montoB === 'number' && Number.isFinite(montoB) ? montoB : null;
+      const mesesA = mesesTocadosPeriodoM7(periodoA).length; const mesesB = mesesTocadosPeriodoM7(periodoB).length;
+      const promedioA = valorA === null ? null : redondear(valorA / mesesA); const promedioB = valorB === null ? null : redondear(valorB / mesesB);
+      return {
+        modo: 'comparar', segmento, direccion: 'Período B vs Período A', periodoA: a, periodoB: b,
+        resumen: {
+          diasA: diasCalendario(periodoA.desde, periodoA.hastaExclusiva), diasB: diasCalendario(periodoB.desde, periodoB.hastaExclusiva), mesesA, mesesB,
+          promedioMensualA: promedioA, promedioMensualB: promedioB,
+          total: calcularComparacionPeriodosVentasM7(valorA, valorB), promedioMensual: calcularComparacionPeriodosVentasM7(promedioA, promedioB),
+          duracionComparable: diasCalendario(periodoA.desde, periodoA.hastaExclusiva) === diasCalendario(periodoB.desde, periodoB.hastaExclusiva),
+        },
+        serieComparativa: alinearSeriesPeriodosVentasM7((a.serieMensual || []) as Array<Record<string, unknown>>, (b.serieMensual || []) as Array<Record<string, unknown>>),
+      };
+    }
     const datos = await this.consultarAnalisisVentasCompleto(consulta) as Record<string, unknown>;
     if (!permisos) return datos;
     const salida: Record<string, unknown> = { periodo: datos.periodo, segmento: datos.segmento, estado: datos.estado };
     if (permisos.includes('CU218')) for (const clave of ['conversion', 'conversionSegmentos']) salida[clave] = datos[clave];
-    if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'evolucion', 'comparacion']) salida[clave] = datos[clave];
+    if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'evolucion', 'comparacion', 'serieMensual']) salida[clave] = datos[clave];
     if (permisos.includes('CU219') && !consulta.desde && !consulta.hasta) {
       const historico = await this.consultarHistoricoPanelGeneral({ ...consulta, meses: 24 }, ['CU218', 'CU219', 'CU220']);
       salida.resumenTemporal = historico.resumenVentas;
     }
     if (permisos.includes('CU220')) for (const clave of ['clientes', 'tiposCliente', 'concentracionClientes', 'productos', 'productosVendidos', 'ventasPorFamilia', 'participacionSegmentos', 'brechaTaxonomiaB2B']) salida[clave] = datos[clave];
+    if (permisos.includes('CU238')) for (const clave of ['costosDirectos', 'resultadoGerencial']) salida[clave] = datos[clave];
     return salida;
   }
 
