@@ -21,6 +21,18 @@ const categoriasFlujoProyectadoM7 = ['INGRESOS_OPERACIONALES', 'OTROS_INGRESOS',
 const categoriasEntradaProyeccionM7 = new Set<string>(['INGRESOS_OPERACIONALES', 'OTROS_INGRESOS']);
 export const categoriasEstadoResultadosM7 = ['VENTAS_NETAS', 'COSTOS_DIRECTOS', 'GASTOS_OPERACIONALES'] as const;
 type CategoriaEstadoResultadosM7 = typeof categoriasEstadoResultadosM7[number];
+export type AptitudFuenteEerrM7 = 'APTA' | 'PARCIALMENTE_APTA' | 'NO_APTA' | 'POR_CONFIRMAR';
+export const matrizCoberturaFuentesEerrM7 = [
+  { fuente: 'nota_venta', campoMonto: 'monto_neto', fecha: 'fecha_emision', estadoValido: 'confirmada o cerrada', clasificacion: 'Venta definitiva', proyectoAsociado: 'Disponible sólo cuando la Nota de Venta está vinculada inequívocamente', posibleDuplicacion: 'Documentos tributarios y pagos representan otras etapas y no se suman', tratamientoTributario: 'Monto neto; IVA débito permanece separado', moneda: 'CLP directo o moneda extranjera con tipo_cambio_usado histórico', aptitud: 'APTA' as AptitudFuenteEerrM7, motivo: 'Fuente owner de ventas netas definitivas', datoFaltante: null },
+  { fuente: 'costo_proyecto', campoMonto: 'monto_costo', fecha: 'fecha_costo', estadoValido: 'distinto de anulado', clasificacion: 'categoria_costo y origen_costo sin catálogo contable cerrado', proyectoAsociado: 'Sí, id_proyecto_financiero obligatorio', posibleDuplicacion: 'Puede vincularse a documento de proveedor y coexistir con tareas remunerables', tratamientoTributario: 'El modelo no identifica inequívocamente neto e IVA por cada costo', moneda: 'Moneda explícita; no existe FX histórico propio obligatorio', aptitud: 'PARCIALMENTE_APTA' as AptitudFuenteEerrM7, motivo: 'Apta para margen directo atribuido, no para afirmar cobertura contable completa', datoFaltante: 'Regla de IVA, FX e identidad transversal con documentos y remuneraciones' },
+  { fuente: 'tarea_remunerable', campoMonto: 'monto_calculado', fecha: 'fecha_tarea', estadoValido: 'validada y vinculada a proyecto', clasificacion: 'Mano de obra productiva atribuible', proyectoAsociado: 'Sí, cuando id_proyecto_financiero no es null', posibleDuplicacion: 'Puede estar incorporada posteriormente en liquidación/remuneración', tratamientoTributario: 'No corresponde a IVA', moneda: 'CLP en el contrato actual', aptitud: 'PARCIALMENTE_APTA' as AptitudFuenteEerrM7, motivo: 'Útil como costo directo atribuible, sin conciliación completa contra remuneración oficial', datoFaltante: 'Identidad que impida duplicarla con el costo laboral cerrado' },
+  { fuente: 'documento_compra_proveedor', campoMonto: 'monto_neto', fecha: 'fecha_emision', estadoValido: 'distinto de anulado o rechazado', clasificacion: 'Detalle material y vínculo opcional a costo de proyecto', proyectoAsociado: 'Parcial mediante detalle_costo_proyecto_documento_proveedor', posibleDuplicacion: 'Documento, costo de proyecto, obligación y pago pueden representar el mismo hecho', tratamientoTributario: 'Separa monto_neto y monto_impuesto', moneda: 'Moneda y tipo_cambio_usado histórico disponibles', aptitud: 'PARCIALMENTE_APTA' as AptitudFuenteEerrM7, motivo: 'Tiene base tributaria, pero no clasifica por sí sola gasto operacional versus inventario/costo', datoFaltante: 'Clasificación económica aprobada y conciliación única con M5/costos/inventario' },
+  { fuente: 'documento_proveedor_m5', campoMonto: 'monto_total', fecha: 'fecha_emision', estadoValido: 'confirmado', clasificacion: 'Categoría de egreso e imputación confirmada', proyectoAsociado: 'Opcional mediante detalle_imputacion_m5', posibleDuplicacion: 'Obligación, pago, costo de proyecto, documento legacy o inventario', tratamientoTributario: 'No separa neto e IVA en el modelo', moneda: 'Moneda explícita y FX confirmado cuando corresponde', aptitud: 'POR_CONFIRMAR' as AptitudFuenteEerrM7, motivo: 'La clasificación existe, pero el monto disponible es total y no asegura naturaleza EBITDA', datoFaltante: 'Monto neto, tratamiento tributario y taxonomía contable de categorías' },
+  { fuente: 'remuneracion', campoMonto: 'costo_empresa / total_haberes + total_aportes_empleador', fecha: 'periodo_remuneracion.fecha_inicio/fecha_fin', estadoValido: 'cerrada', clasificacion: 'Sin separación inequívoca entre producción, proyecto y administración', proyectoAsociado: 'No en la remuneración; sólo algunas tareas remunerables tienen proyecto', posibleDuplicacion: 'Las tareas remunerables productivas pueden formar parte de la remuneración oficial', tratamientoTributario: 'No corresponde a IVA; impuestos y descuentos no equivalen automáticamente a gasto EBITDA', moneda: 'CLP', aptitud: 'POR_CONFIRMAR' as AptitudFuenteEerrM7, motivo: 'Costo laboral oficial disponible, pero sin distribución económica completa', datoFaltante: 'Clasificación laboral aprobada y conciliación con tareas productivas' },
+  { fuente: 'gasto_caja_chica_m5 / gasto_caja_chica', campoMonto: 'monto / monto_gasto', fecha: 'fecha_gasto', estadoValido: 'aprobado / validación aprobada', clasificacion: 'Descripción libre; sin destino económico estructurado suficiente', proyectoAsociado: 'No inequívoco', posibleDuplicacion: 'Puede corresponder a documento, material, costo de instalación o movimiento financiero', tratamientoTributario: 'No separa monto neto e IVA de forma inequívoca', moneda: 'No explícita en los modelos revisados', aptitud: 'POR_CONFIRMAR' as AptitudFuenteEerrM7, motivo: 'La aprobación no demuestra que sea gasto operacional ni evita duplicación', datoFaltante: 'Moneda, IVA, categoría contable, proyecto y vínculo documental único' },
+  { fuente: 'movimiento_financiero / pagos', campoMonto: 'monto_movimiento / monto pagado', fecha: 'fecha_movimiento / fecha_pago', estadoValido: 'vigente, no anulado ni rechazado', clasificacion: 'Naturaleza de caja', proyectoAsociado: 'Sólo mediante orígenes, no reconocimiento económico', posibleDuplicacion: 'Es la liquidación de obligaciones o hechos ya reconocidos', tratamientoTributario: 'No determina neto ni IVA del hecho económico', moneda: 'Moneda explícita; FX no convierte el pago en gasto', aptitud: 'NO_APTA' as AptitudFuenteEerrM7, motivo: 'Un movimiento de efectivo no equivale a gasto devengado', datoFaltante: 'No aplica como fuente primaria de EERR' },
+  { fuente: 'inventario_bodega / movimiento_inventario', campoMonto: 'cantidad física o salida; valorización parcial', fecha: 'fecha de movimiento cuando existe', estadoValido: 'movimiento/stock vigente', clasificacion: 'Material, lote y tipo de movimiento', proyectoAsociado: 'Parcial mediante lote, reserva u orden de trabajo', posibleDuplicacion: 'Compra, documento y costo de proyecto pueden representar adquisición/consumo relacionado', tratamientoTributario: 'La compra no es gasto mientras permanezca como inventario', moneda: 'Costo histórico completo no asegurado para cada consumo', aptitud: 'POR_CONFIRMAR' as AptitudFuenteEerrM7, motivo: 'No existe conciliación completa de consumo valorizado hacia costo del período', datoFaltante: 'Costo de salida histórico, consumo real y conciliación con compra/proyecto' },
+] as const;
 
 const fechaIso = (fecha: Date) => fecha.toISOString().slice(0, 10);
 const fechaUtc = (valor: unknown, nombre: string) => {
@@ -178,6 +190,34 @@ export function calcularEstadoResultadosM7(partidas: { ventasNetas: number | nul
   const ebitdaMonto = margenBruto === null || partidas.gastosOperacionales === null ? null : redondear(margenBruto - partidas.gastosOperacionales);
   const ebitdaPorcentaje = ebitdaMonto === null || partidas.ventasNetas === null || partidas.ventasNetas === 0 ? null : redondear(ebitdaMonto / partidas.ventasNetas * 100);
   return { ...partidas, margenBruto, ebitdaMonto, ebitdaPorcentaje };
+}
+export function evaluarCoberturaEstadoResultadosM7(entrada: {
+  ventasNetas: number | null;
+  costosDirectos: number | null;
+  gastosOperacionales: number | null;
+  ventasExcluidasSinFx?: number;
+  costosExcluidosSinFx?: number;
+  coberturaCostosCompleta?: boolean;
+  clasificacionGastosCompleta?: boolean;
+  clasificacionExclusionesCompleta?: boolean;
+  controlDuplicadosCompleto?: boolean;
+  segmento?: SegmentoComercialM7;
+}) {
+  const segmento = entrada.segmento || 'TODOS';
+  const gastosEstado: EstadoIndicadorM7 = entrada.gastosOperacionales === null ? 'DATOS_INSUFICIENTES' : entrada.clasificacionGastosCompleta ? 'VALIDO' : 'PARCIALMENTE_DISPONIBLE';
+  const conversionCompleta = (entrada.ventasExcluidasSinFx || 0) === 0 && (entrada.costosExcluidosSinFx || 0) === 0;
+  const ventasEstado: EstadoIndicadorM7 = entrada.ventasNetas === null ? 'DATOS_INSUFICIENTES' : (entrada.ventasExcluidasSinFx || 0) > 0 ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO';
+  const costosEstado: EstadoIndicadorM7 = segmento !== 'TODOS' || entrada.costosDirectos === null ? 'DATOS_INSUFICIENTES' : entrada.coberturaCostosCompleta ? 'VALIDO' : 'PARCIALMENTE_DISPONIBLE';
+  const partidas = {
+    ventasNetas: { estado: ventasEstado, valor: entrada.ventasNetas, detalle: 'Ventas definitivas netas de IVA; moneda extranjera sólo con FX histórico' },
+    costosDirectos: { estado: costosEstado, valor: segmento === 'TODOS' ? entrada.costosDirectos : null, detalle: segmento === 'TODOS' ? 'Costos y mano de obra directamente atribuibles; cobertura no contable completa' : 'Costos no segmentables con cobertura actual' },
+    gastosOperacionales: { estado: gastosEstado, valor: gastosEstado === 'VALIDO' ? entrada.gastosOperacionales : null, detalle: 'Requiere clasificación económica completa, monto neto y control de duplicados' },
+    gastosExcluidos: { estado: entrada.clasificacionExclusionesCompleta ? 'VALIDO' as const : 'DATOS_INSUFICIENTES' as const, valor: null, detalle: 'Intereses, impuestos sobre resultados, depreciaciones y amortizaciones requieren clasificación inequívoca' },
+    conversionMonetaria: { estado: conversionCompleta ? 'VALIDO' as const : 'PARCIALMENTE_DISPONIBLE' as const, valor: { ventasExcluidasSinFx: entrada.ventasExcluidasSinFx || 0, costosExcluidosSinFx: entrada.costosExcluidosSinFx || 0 }, detalle: conversionCompleta ? 'No hay partidas detectadas sin conversión histórica válida' : 'Las partidas sin FX histórico quedan fuera del consolidado CLP' },
+    duplicados: { estado: entrada.controlDuplicadosCompleto ? 'VALIDO' as const : 'DATOS_INSUFICIENTES' as const, valor: null, detalle: 'No existe identidad transversal completa entre documento, obligación, pago, costo, remuneración e inventario' },
+  };
+  const calculable = segmento === 'TODOS' && Object.values(partidas).every(partida => partida.estado === 'VALIDO');
+  return { estado: calculable ? 'VALIDO' as const : 'DATOS_INSUFICIENTES' as const, calculable, partidas, motivo: calculable ? 'Cobertura completa y conciliada para el período' : segmento !== 'TODOS' ? 'Los costos y gastos no son segmentables con la cobertura actual' : 'Falta cobertura completa de gastos operacionales, exclusiones EBITDA y control transversal de duplicados' };
 }
 export function calcularPresupuestoResultadosM7(partidas: { ventasNetas: number | null; costosDirectos: number | null; gastosOperacionales: number | null }) {
   const margenBruto = partidas.ventasNetas === null || partidas.costosDirectos === null ? null : redondear(partidas.ventasNetas - partidas.costosDirectos);
@@ -964,6 +1004,7 @@ export class M7Controller {
           margenDirecto: margen,
           porcentajeMargen: porcentaje,
           clasificacion,
+          ebitdaProyecto: indicador('DATOS_INSUFICIENTES', null, 'EBITDA por proyecto no calculable con las fuentes actuales; no se distribuyen gastos generales sin atribución inequívoca'),
           desgloseIngresos: ingresos,
           desgloseCostos: costos,
           estado: margen === null ? 'DATOS_INSUFICIENTES' as const : 'VALIDO' as const,
@@ -1167,7 +1208,7 @@ export class M7Controller {
     if (!permisos) return datos;
     const proyectos = (datos.proyectos as Array<Record<string, unknown>> || []).map(proyecto => {
       const salida: Record<string, unknown> = { idProyecto: proyecto.idProyecto, codigo: proyecto.codigo, proyectoTerreno: proyecto.proyectoTerreno, nombre: proyecto.nombre, moneda: proyecto.moneda, estado: proyecto.estado };
-      if (permisos.includes('CU233')) for (const clave of ['margenDirecto', 'porcentajeMargen', 'clasificacion']) salida[clave] = proyecto[clave];
+      if (permisos.includes('CU233')) for (const clave of ['margenDirecto', 'porcentajeMargen', 'clasificacion', 'ebitdaProyecto']) salida[clave] = proyecto[clave];
       if (permisos.includes('CU234')) for (const clave of ['ingresosAtribuibles', 'desgloseIngresos']) salida[clave] = proyecto[clave];
       if (permisos.includes('CU235')) for (const clave of ['costosDirectosAtribuibles', 'desgloseCostos']) salida[clave] = proyecto[clave];
       if (permisos.includes('CU233') || permisos.includes('CU235')) salida.cobertura = proyecto.cobertura;
@@ -1613,6 +1654,19 @@ export class M7Controller {
     };
     const estadoResultados = consolidar(ventas, margen);
     const acumuladoYtd = consolidar(ventasYtd, margenYtd);
+    const ventasExcluidasSinFx = Number((ventas as any).montoNeto?.valor?.ventasExcluidasSinTipoCambio || 0);
+    const coberturaEstadoResultados = evaluarCoberturaEstadoResultadosM7({
+      ventasNetas: estadoResultados.ventasNetas,
+      costosDirectos: estadoResultados.costoVenta,
+      gastosOperacionales: estadoResultados.gastosOperacionales,
+      ventasExcluidasSinFx,
+      costosExcluidosSinFx: estadoResultados.costosExcluidosSinConversion,
+      coberturaCostosCompleta: false,
+      clasificacionGastosCompleta: false,
+      clasificacionExclusionesCompleta: false,
+      controlDuplicadosCompleto: false,
+      segmento,
+    });
     const serieMensual = ((historico as any).meses || []).map((mes: any) => ({ periodo: mes.periodo, ...calcularEstadoResultadosM7({ ventasNetas: mes.ventasNetas, costoVenta: mes.costosDirectos, gastosOperacionales: null }) }));
     const presupuestoPeriodoDato = presupuestoPeriodo as any; const presupuestoAnualDato = presupuestoAnual as any;
     const mesesRealesAnuales = new Map(((historicoAnual as any).meses || []).map((mes: any) => [mes.periodo, mes]));
@@ -1651,17 +1705,18 @@ export class M7Controller {
     const presupuestoResultados = { anio: anioPresupuesto, moneda: 'CLP', categorias: categoriasEstadoResultadosM7, proyecciones: presupuestoAnualDato.proyecciones || [], meses: presupuestoAnualDato.meses || [], totalAnual: presupuestoAnualDato.totales || calcularPresupuestoResultadosM7({ ventasNetas: null, costosDirectos: null, gastosOperacionales: null }), cobertura: presupuestoAnualDato.cobertura, seriePresupuestoReal, comparacionPeriodo, presupuestoYtd, comparacionYtd, comparableDirecto, advertencias, pendientesClasificacion: presupuestoAnualDato.pendientesClasificacion || [], monedasNoConsolidables: presupuestoAnualDato.monedasNoConsolidables || [], inconsistencias: presupuestoAnualDato.inconsistencias || [] };
     return {
       titulo: 'Resumen gerencial de resultados', tituloEstadoResultados: 'Estado de Resultados gerencial', periodo: periodoSalida(periodo), estado: ingresos?.length ? 'PARCIALMENTE_DISPONIBLE' as const : 'DATOS_INSUFICIENTES' as const,
-      estadoResultados: indicador('PARCIALMENTE_DISPONIBLE', estadoResultados, 'Ventas y costos directos netos de IVA; EBITDA no calculable mientras falte una fuente completa de gastos operacionales'),
+      estadoResultados: indicador(coberturaEstadoResultados.calculable ? 'VALIDO' : 'PARCIALMENTE_DISPONIBLE', estadoResultados, coberturaEstadoResultados.calculable ? 'Estado de Resultados con cobertura completa para el período' : 'Ventas y margen directo disponibles parcialmente; EBITDA no calculable por falta de cobertura completa de gastos operacionales'),
       acumuladoYtd: indicador('PARCIALMENTE_DISPONIBLE', acumuladoYtd, `Acumulado enero–${hastaYtd.getUTCMonth() + 1} de ${hastaYtd.getUTCFullYear()}, con la misma cobertura parcial`),
       serieMensual,
       ingresos: ingresos?.length ? indicador('VALIDO', ingresos, 'Ventas definitivas netas del período') : indicador((ventas as any).montoNeto?.estado || 'DATOS_INSUFICIENTES', null, 'No hay ingresos reconstruibles para el período'),
       costosDirectos: costos.length ? indicador('VALIDO', costos, 'Costos directamente atribuidos a proyectos, sin prorrateos') : indicador('DATOS_INSUFICIENTES', null, 'No hay costos directos reconstruibles; no se reemplazan por cero'),
       gastosRegistrados: indicador('DATOS_INSUFICIENTES', null, 'No existe una fuente estructurada completa que permita separar gastos operacionales netos del período sin duplicar costos directos o pagos de caja'),
+      coberturaEstadoResultados: indicador(coberturaEstadoResultados.estado, { ...coberturaEstadoResultados, matrizFuentes: matrizCoberturaFuentesEerrM7 }, 'Cobertura técnica agregada; no expone documentos, proveedores, empleados ni información tributaria individual'),
       resultadoGerencial: resultado.length ? indicador('VALIDO', resultado, 'Diferencia gerencial entre ingresos y costos directos comparables por moneda') : indicador('DATOS_INSUFICIENTES', null, 'Faltan partidas comparables para derivar un resultado'),
       presupuestoResultados: indicador(presupuestoAnualDato.estado, presupuestoResultados, 'Presupuesto económico mensual en CLP; no se mezcla con flujo de caja, no prorratea rangos parciales y no completa meses ausentes con cero'),
       iva,
       devengado: indicador('FUENTE_NO_DISPONIBLE', null, 'DEVENGADO: FUENTE/DEFINICIÓN PENDIENTE; no se deriva de ventas, OT ni proyectos'),
-      cobertura: indicador('DATOS_INSUFICIENTES', { completa: false, incluye: ['ventas definitivas netas', 'costos de proyecto atribuibles', 'mano de obra atribuible validada'], noDisponibles: ['gastos operacionales clasificados sin duplicación', 'devengado'], noIncluyeEbitda: ['intereses', 'impuestos', 'depreciaciones', 'amortizaciones'], costosExcluidosSinConversion: estadoResultados.costosExcluidosSinConversion }, 'Síntesis gerencial parcial; no es un Estado de Resultados contable oficial. Los egresos de caja no se usan como gastos.'),
+      cobertura: indicador('DATOS_INSUFICIENTES', { completa: false, incluye: ['ventas definitivas netas', 'costos de proyecto atribuibles', 'mano de obra atribuible validada'], noDisponibles: ['gastos operacionales clasificados sin duplicación', 'devengado'], noIncluyeEbitda: ['intereses', 'impuestos', 'depreciaciones', 'amortizaciones'], ventasExcluidasSinConversion: ventasExcluidasSinFx, costosExcluidosSinConversion: estadoResultados.costosExcluidosSinConversion }, 'Síntesis gerencial parcial; no es un Estado de Resultados contable oficial. Los egresos de caja no se usan como gastos.'),
     };
   }
 
