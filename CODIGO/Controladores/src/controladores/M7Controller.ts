@@ -248,7 +248,20 @@ export interface ProveedorBloqueosOperacionales {
 export class M7Controller {
   constructor(private creditoM8?: ProveedorCreditoM8, private readonly bloqueosOwner?: ProveedorBloqueosOperacionales) {}
   conectarCreditoM8(proveedor: ProveedorCreditoM8) { this.creditoM8 = proveedor; }
-  async consultarPanelGeneral(consulta: Consulta, permisos: string[]) {
+  async consultarPanelGeneral(consulta: Consulta, permisos: string[]): Promise<any> {
+    if (String(consulta.modo || '').toLowerCase() === 'comparar') {
+      const segmento = resolverSegmentoComercialM7(consulta.segmento);
+      const periodoA = resolverPeriodoM7({ desde: consulta.desdeA, hasta: consulta.hastaA });
+      const periodoB = resolverPeriodoM7({ desde: consulta.desdeB, hasta: consulta.hastaB });
+      const consultaA = { desde: periodoA.etiquetaDesde, hasta: periodoA.etiquetaHasta, segmento, modo: 'rango' };
+      const consultaB = { desde: periodoB.etiquetaDesde, hasta: periodoB.etiquetaHasta, segmento, modo: 'rango' };
+      const [datosA, datosB] = await Promise.all([this.consultarPanelGeneral(consultaA, permisos), this.consultarPanelGeneral(consultaB, permisos)]);
+      return {
+        modo: 'comparar', segmento, direccion: 'Período B vs Período A',
+        periodoA: datosA, periodoB: datosB,
+        resumen: { diasA: diasPeriodoM7(periodoA), diasB: diasPeriodoM7(periodoB), duracionComparable: diasPeriodoM7(periodoA) === diasPeriodoM7(periodoB) },
+      };
+    }
     const periodo = resolverPeriodoM7(consulta);
     const definiciones = [
       ['centroAtencion', ['CU216'], () => this.consultarCentroAtencion(consulta, permisos)],
@@ -1530,9 +1543,10 @@ export class M7Controller {
 
   async consultarResumenResultados(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
-    const consultaGeneral = { ...consulta, segmento: 'TODOS' };
+    const segmento = resolverSegmentoComercialM7(consulta.segmento);
+    const consultaGeneral = { ...consulta, segmento };
     const hastaYtd = new Date(periodo.hastaExclusiva); hastaYtd.setUTCDate(hastaYtd.getUTCDate() - 1);
-    const consultaYtd = { desde: `${hastaYtd.getUTCFullYear()}-01-01`, hasta: fechaIso(hastaYtd) };
+    const consultaYtd = { desde: `${hastaYtd.getUTCFullYear()}-01-01`, hasta: fechaIso(hastaYtd), segmento };
     const [ventas, margen, ventasYtd, margenYtd, iva, historico] = await Promise.all([
       this.consultarAnalisisVentas(consultaGeneral), this.consultarMargenProyectos(consulta),
       this.consultarAnalisisVentas(consultaYtd), this.consultarMargenProyectos(consultaYtd),
@@ -1549,7 +1563,7 @@ export class M7Controller {
       const ventasNetas = typeof ventasFuente?.montoNeto?.valor?.totalClp === 'number' ? ventasFuente.montoNeto.valor.totalClp as number : null;
       const desglose = (margenFuente?.proyectos || []).flatMap((proyecto: any) => proyecto.desgloseCostos || []);
       const costosClp = desglose.filter((costo: any) => costo.moneda === 'CLP');
-      const costoVenta = costosClp.length ? redondear(costosClp.reduce((total: number, costo: any) => total + Number(costo.monto), 0)) : null;
+      const costoVenta = segmento === 'TODOS' && costosClp.length ? redondear(costosClp.reduce((total: number, costo: any) => total + Number(costo.monto), 0)) : null;
       return { ...calcularEstadoResultadosM7({ ventasNetas, costoVenta, gastosOperacionales: null }), costosExcluidosSinConversion: desglose.filter((costo: any) => costo.moneda !== 'CLP').length };
     };
     const estadoResultados = consolidar(ventas, margen);
@@ -1585,7 +1599,7 @@ export class M7Controller {
     };
   }
 
-  async descargarExcelVentas(entrada: Record<string, unknown>, permisos: string[]) {
+  async descargarExcelVentas(entrada: Record<string, unknown>, permisos: string[]): Promise<Record<string, unknown>> {
     if (!permisos.includes('CU245')) throw new ErrorAplicacion(403, 'No tienes permiso para exportar información del Dashboard');
     const tipo = String(entrada.tipo || '').trim().toUpperCase() as TipoInformeVentasExcelM7;
     if (tipo !== 'VENTAS' && tipo !== 'COTIZACIONES') throw new ErrorAplicacion(400, 'Tipo de exportación inválido');
@@ -1593,6 +1607,28 @@ export class M7Controller {
     if (!permisosLectura.every(permiso => permisos.includes(permiso))) throw new ErrorAplicacion(403, 'No tienes permiso para consultar el detalle solicitado');
 
     const consulta = entrada.consulta && typeof entrada.consulta === 'object' && !Array.isArray(entrada.consulta) ? entrada.consulta as Consulta : {};
+    if (String(consulta.modo || '').toLowerCase() === 'comparar') {
+      const segmento = resolverSegmentoComercialM7(consulta.segmento);
+      const periodoA = resolverPeriodoM7({ desde: consulta.desdeA, hasta: consulta.hastaA });
+      const periodoB = resolverPeriodoM7({ desde: consulta.desdeB, hasta: consulta.hastaB });
+      const [archivoA, archivoB] = await Promise.all([
+        this.descargarExcelVentas({ tipo, consulta: { desde: periodoA.etiquetaDesde, hasta: periodoA.etiquetaHasta, segmento } }, permisos),
+        this.descargarExcelVentas({ tipo, consulta: { desde: periodoB.etiquetaDesde, hasta: periodoB.etiquetaHasta, segmento } }, permisos),
+      ]) as Array<Record<string, unknown>>;
+      const filasA = archivoA.__filasExcel as FilaVentaExcelM7[] | FilaCotizacionExcelM7[];
+      const filasB = archivoB.__filasExcel as FilaVentaExcelM7[] | FilaCotizacionExcelM7[];
+      const nombreArchivo = `PuertasBlindadas_${tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones'}_Comparacion_${periodoA.etiquetaDesde}_${periodoB.etiquetaHasta}_${segmento}.xlsx`.replace(/[^A-Za-z0-9_.-]+/g, '_');
+      const resultado = await crearInformeVentasExcelM7({
+        tipo, periodo: `${periodoA.etiquetaDesde} al ${periodoA.etiquetaHasta} vs ${periodoB.etiquetaDesde} al ${periodoB.etiquetaHasta}`,
+        segmento, generadoEn: new Date(), filas: [], nombreArchivo,
+        hojas: [
+          { nombre: 'Período A', periodo: `${periodoA.etiquetaDesde} al ${periodoA.etiquetaHasta}`, filas: filasA },
+          { nombre: 'Período B', periodo: `${periodoB.etiquetaDesde} al ${periodoB.etiquetaHasta}`, filas: filasB },
+        ],
+      });
+      Object.defineProperty(resultado, '__auditoriaM9', { enumerable: false, value: { nuevo: { tipo, modo: 'comparar', periodoA: periodoSalida(periodoA), periodoB: periodoSalida(periodoB), segmento, filasA: filasA.length, filasB: filasB.length } } });
+      return resultado;
+    }
     const periodo = resolverPeriodoM7(consulta);
     const segmento = resolverSegmentoComercialM7(consulta.segmento);
     const generadoEn = new Date();
@@ -1709,6 +1745,7 @@ export class M7Controller {
       nombreArchivo,
     });
     Object.defineProperty(resultado, '__auditoriaM9', { enumerable: false, value: { nuevo: { tipo, periodo: periodoSalida(periodo), segmento, filas: filas.length } } });
+    Object.defineProperty(resultado, '__filasExcel', { enumerable: false, value: filas });
     return resultado;
   }
 
@@ -1730,14 +1767,18 @@ export class M7Controller {
     if (!fuente) throw new ErrorAplicacion(400, 'Origen de Dashboard inválido');
     if (!fuente.permisos.some(permiso => permisos.includes(permiso))) throw new ErrorAplicacion(403, 'No tienes permiso para consultar el análisis de origen');
     const datos = await fuente.cargar();
-    const periodo = resolverPeriodoM7(consulta);
+    const esComparacion = String(consulta.modo || '').toLowerCase() === 'comparar';
+    if (esComparacion && !['panel', 'ventas'].includes(origen)) throw new ErrorAplicacion(400, 'La exportación comparativa no está disponible para este origen');
+    const periodoA = esComparacion ? resolverPeriodoM7({ desde: consulta.desdeA, hasta: consulta.hastaA }) : null;
+    const periodoB = esComparacion ? resolverPeriodoM7({ desde: consulta.desdeB, hasta: consulta.hastaB }) : null;
+    const periodo = periodoB || resolverPeriodoM7(consulta);
     const generado = new Date();
-    const etiquetasFiltro: Record<string, string> = { anio: 'Año', mes: 'Mes', desde: 'Desde', hasta: 'Hasta' };
+    const etiquetasFiltro: Record<string, string> = { modo: 'Modo', anio: 'Año', mes: 'Mes', desde: 'Desde', hasta: 'Hasta', desdeA: 'Desde A', hastaA: 'Hasta A', desdeB: 'Desde B', hastaB: 'Hasta B', segmento: 'Segmento' };
     const filtros = Object.entries(consulta)
       .filter(([clave]) => clave in etiquetasFiltro)
       .map(([clave, valor]) => `${etiquetasFiltro[clave]}: ${String(valor)}`)
       .join(' | ') || 'Período vigente de la consulta';
-    const historico = ['panel', 'ventas', 'liquidez'].includes(origen) ? await this.consultarHistoricoPanelGeneral({ ...consulta, meses: 12 }, permisos) : undefined;
-    return crearInformeDashboardM7({ origen, tituloContextual: fuente.titulo, periodo, filtros, generadoEn: generado, datos, panel: origen === 'panel' ? datos : undefined, historico });
+    const historico = !esComparacion && ['panel', 'ventas', 'liquidez'].includes(origen) ? await this.consultarHistoricoPanelGeneral({ ...consulta, meses: 12 }, permisos) : undefined;
+    return crearInformeDashboardM7({ origen, tituloContextual: fuente.titulo, periodo, filtros, generadoEn: generado, datos, panel: origen === 'panel' ? datos : undefined, historico, modo: String(consulta.modo || 'mes'), comparacion: periodoA && periodoB ? { periodoA, periodoB } : undefined });
   }
 }

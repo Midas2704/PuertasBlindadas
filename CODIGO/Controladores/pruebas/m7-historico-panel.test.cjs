@@ -138,7 +138,37 @@ test('M7 segmentación comercial y productos', async t => {
   await t.test('participaciones del prorrateo suman aproximadamente 100%', () => { const filas = distribuirVentaPorProductoM7(1000, detalles); assert.equal(filas.reduce((total, fila) => total + fila.ventaNetaClp / 1000 * 100, 0), 100); });
   await t.test('valor extranjero usa exclusivamente FX histórico', () => assert.equal(convertirVentaClpM7(100, 'USD', 925), 92500));
   await t.test('sin FX se excluye valor pero se conservan unidades', () => { const filas = distribuirVentaPorProductoM7(null, detalles); assert.equal(filas.reduce((total, fila) => total + fila.cantidad, 0), 5); assert.ok(filas.every(fila => fila.ventaNetaClp === null)); });
-  await t.test('segmento sin resultados y rango combinado permanecen accionables', () => { assert.deepEqual(calcularConversionSegmentadaM7([], 'B2C'), { totalCotizaciones: 0, convertidas: 0, tasaPorcentual: null }); const vista = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8'); assert.match(vista, /cambiarSegmento/); assert.match(vista, /parametrosTemporalesVentas\(filtros\)/); });
+  await t.test('segmento sin resultados y rango combinado permanecen accionables', () => { assert.deepEqual(calcularConversionSegmentadaM7([], 'B2C'), { totalCotizaciones: 0, convertidas: 0, tasaPorcentual: null }); const vista = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8'); assert.match(vista, /FiltroTemporalMaestro/); assert.match(vista, /parametrosTemporalesVentas\(filtros\)/); });
+});
+
+test('M7 filtro temporal maestro del Dashboard', async t => {
+  const controlador = readFileSync(resolve('src/controladores/M7Controller.ts'), 'utf8');
+  const panel = readFileSync(resolve('../Vistas/src/views/DashboardM7/PanelGeneralM7.tsx'), 'utf8');
+  const ventas = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8');
+  const filtros = readFileSync(resolve('../Vistas/src/views/DashboardM7/filtrosTemporalesVentas.tsx'), 'utf8');
+  const componentes = readFileSync(resolve('../Vistas/src/views/DashboardM7/componentes.tsx'), 'utf8');
+  const pdf = readFileSync(resolve('src/m7/informeDashboardPdf.ts'), 'utf8');
+  const excel = readFileSync(resolve('src/m7/informeVentasExcel.ts'), 'utf8');
+  await t.test('1 Mes conserva año mes MoM YoY YTD e histórico', () => { assert.match(filtros, /borrador\.modo === 'mes'/); assert.match(panel, /KpiVenta/); assert.match(panel, /ResumenComparativoMensual/); assert.match(panel, /GraficoComparativoMensual/); });
+  await t.test('2 Rango modifica los KPIs historizables del panel', () => { assert.match(panel, /usarConsultaM7\('\/dashboard-m7', true, parametrosTemporalesVentas\(contexto\)\)/); assert.match(controlador, /const periodo = resolverPeriodoM7\(consulta\)/); });
+  await t.test('3 Comparar produce snapshots completos A y B', () => { assert.match(controlador, /periodoA: datosA, periodoB: datosB/); assert.match(panel, /bloquesA/); assert.match(panel, /ComparacionIndicador/); });
+  await t.test('4 distinta duración queda visible y conserva promedio comparable', () => { assert.match(controlador, /duracionComparable: diasPeriodoM7\(periodoA\) === diasPeriodoM7\(periodoB\)/); assert.match(panel, /promedio.*permite comparar el ritmo/s); });
+  await t.test('5 B2B y rango comparten una sola consulta aplicada', () => { assert.match(filtros, /segmento: contexto\.segmento/); assert.match(filtros, /modo: 'rango', desde: filtros\.desde, hasta: filtros\.hasta/); });
+  await t.test('6 B2C y comparación conservan segmento y ambos períodos', () => { assert.match(filtros, /modo: 'comparar', desdeA: filtros\.desdeA, hastaA: filtros\.hastaA, desdeB: filtros\.desdeB, hastaB: filtros\.hastaB/); assert.match(filtros, /'B2B', 'B2C'/); });
+  await t.test('7 Productos usa el bloque del rango y compara A B sin dos donuts', () => { assert.match(panel, /productosComparados\(bloquesA\.ventas, bloques\.ventas\)/); assert.match(panel, /periodoA.*periodoB/); assert.match(panel, /contexto\.modo === 'comparar'.*GraficoBarras/s); });
+  await t.test('8 Estado de Resultados usa el contexto y compara A B', () => { assert.match(panel, /EstadoResultadosComparado/); assert.match(controlador, /this\.consultarResumenResultados\(consulta\)/); });
+  await t.test('9 Flujo ejecutado usa movimientos del rango', () => { assert.match(panel, /flujoBloque\(bloques\.liquidez\)/); assert.match(controlador, /const actuales = filtrados\.filter\(m => dentro\(m\.fecha_movimiento, periodo\)\)/); });
+  await t.test('10 CxC vigente se etiqueta como saldo actual sin histórico', () => assert.match(panel, /Cuentas por cobrar · saldo actual[^]*Estado actual; histórico no disponible/));
+  await t.test('11 CxP vigente se etiqueta como saldo actual sin histórico', () => assert.match(panel, /Cuentas por pagar · saldo actual[^]*Estado actual; histórico no disponible/));
+  await t.test('12 URL reconstruye el contexto completo al recargar', () => { for (const clave of ['modo', 'anio', 'mes', 'desde', 'hasta', 'desdeA', 'hastaA', 'desdeB', 'hastaB', 'segmento']) assert.match(filtros, new RegExp(clave)); assert.match(panel, /leerContextoTemporalM7\(location\.search/); });
+  await t.test('13 Ver detalle conserva la consulta maestra', () => assert.match(panel, /dashboard-m7\/ventas\?\$\{queryComercial\}/));
+  await t.test('14 Volver al panel conserva location search', () => { assert.match(componentes, /regreso\?\.busqueda/); assert.match(componentes, /dashboard-m7\$\{regresoPanel\}/); });
+  await t.test('15 Actualizar recarga sin limpiar filtros', () => { assert.match(filtros, /onClick=\{actualizar\}/); assert.match(filtros, />Actualizar datos</); assert.doesNotMatch(filtros, /onClick=\{actualizar\}[^]*aplicar\(limpio\)/); });
+  await t.test('16 PDF distingue Mes Rango y Comparar sin etiquetar otro período', () => { assert.match(componentes, /consultaExacta/); assert.match(pdf, /paginasRango/); assert.match(pdf, /paginasComparativas/); assert.match(controlador, /desdeA: 'Desde A'/); });
+  await t.test('17 Excel comparativo usa hojas separadas A y B', async () => { const archivo = await crearInformeVentasExcelM7({ tipo: 'VENTAS', periodo: 'A vs B', segmento: 'TODOS', generadoEn: new Date('2026-10-10T00:00:00Z'), filas: [], nombreArchivo: 'comparacion.xlsx', hojas: [{ nombre: 'Período A', periodo: '2025-01-01 al 2025-01-31', filas: [] }, { nombre: 'Período B', periodo: '2026-01-01 al 2026-01-31', filas: [] }] }); const libro = new ExcelJS.Workbook(); await libro.xlsx.load(Buffer.from(archivo.contenido.split(',')[1], 'base64')); assert.ok(libro.getWorksheet('Período A')); assert.ok(libro.getWorksheet('Período B')); assert.match(excel, /entrada\.hojas/); });
+  await t.test('18 comparación que cruza años conserva fechas exactas', () => { const periodo = resolverPeriodoM7({ desde: '2025-12-15', hasta: '2026-01-15' }); assert.deepEqual([periodo.etiquetaDesde, periodo.etiquetaHasta], ['2025-12-15', '2026-01-15']); });
+  await t.test('19 falta de FX histórico permanece fuera del consolidado', () => { assert.equal(convertirVentaClpM7(100, 'USD', null), null); assert.deepEqual(consolidarBucketVentasM7([null]), { ventaNetaClp: null, ventasIncluidasClp: 0, ventasExcluidasSinTipoCambio: 1 }); });
+  await t.test('20 base cero no produce NaN ni Infinity', () => { const comparacion = calcularComparacionPeriodosVentasM7(0, 100); assert.equal(comparacion.variacionPorcentual, null); assert.ok(!JSON.stringify(comparacion).includes('Infinity')); assert.ok(!JSON.stringify(comparacion).includes('NaN')); });
 });
 
 test('M7 exportación Excel detallada', async t => {

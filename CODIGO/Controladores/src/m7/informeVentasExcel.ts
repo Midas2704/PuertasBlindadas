@@ -51,6 +51,7 @@ export interface EntradaInformeVentasExcelM7 {
   generadoEn: Date;
   filas: FilaVentaExcelM7[] | FilaCotizacionExcelM7[];
   nombreArchivo: string;
+  hojas?: Array<{ nombre: string; periodo: string; filas: FilaVentaExcelM7[] | FilaCotizacionExcelM7[] }>;
 }
 
 interface ColumnaInforme {
@@ -110,57 +111,24 @@ export async function crearInformeVentasExcelM7(entrada: EntradaInformeVentasExc
   workbook.created = entrada.generadoEn;
   workbook.modified = entrada.generadoEn;
 
-  const hoja = workbook.addWorksheet(entrada.tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones', {
-    views: [{ state: 'frozen', ySplit: 6, showGridLines: false }],
-  });
-
-  hoja.columns = columnas.map((columna) => ({
-    key: columna.clave,
-    width: columna.ancho,
-    style: columna.formato ? { numFmt: columna.formato } : undefined,
-  }));
-
-  const ultimaColumna = columnas.length;
-  hoja.mergeCells(1, 1, 1, ultimaColumna);
-  hoja.getCell(1, 1).value = `Puertas Blindadas - Detalle de ${entrada.tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones'}`;
-  hoja.getCell(2, 1).value = 'Período';
-  hoja.getCell(2, 2).value = entrada.periodo;
-  hoja.mergeCells(2, 2, 2, ultimaColumna);
-  hoja.getCell(3, 1).value = 'Segmento';
-  hoja.getCell(3, 2).value = entrada.segmento;
-  hoja.mergeCells(3, 2, 3, ultimaColumna);
-  hoja.getCell(4, 1).value = 'Generado en';
-  hoja.getCell(4, 2).value = entrada.generadoEn;
-  hoja.getCell(4, 2).numFmt = 'dd-mm-yyyy hh:mm';
-  hoja.mergeCells(4, 2, 4, ultimaColumna);
-
-  hoja.getRow(1).height = 28;
-  hoja.getCell(1, 1).font = { bold: true, size: 16, color: { argb: 'FF000000' } };
-  hoja.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B8' } };
-  for (let fila = 2; fila <= 4; fila += 1) {
-    hoja.getCell(fila, 1).font = { bold: true, color: { argb: 'FF676767' } };
+  const hojas = entrada.hojas?.length ? entrada.hojas : [{ nombre: entrada.tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones', periodo: entrada.periodo, filas: entrada.filas }];
+  for (const definicion of hojas) {
+    const hoja = workbook.addWorksheet(definicion.nombre.slice(0, 31), { views: [{ state: 'frozen', ySplit: 6, showGridLines: false }] });
+    hoja.columns = columnas.map((columna) => ({ key: columna.clave, width: columna.ancho, style: columna.formato ? { numFmt: columna.formato } : undefined }));
+    const ultimaColumna = columnas.length;
+    hoja.mergeCells(1, 1, 1, ultimaColumna);
+    hoja.getCell(1, 1).value = `Puertas Blindadas - Detalle de ${entrada.tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones'} - ${definicion.nombre}`;
+    hoja.getCell(2, 1).value = 'Período'; hoja.getCell(2, 2).value = definicion.periodo; hoja.mergeCells(2, 2, 2, ultimaColumna);
+    hoja.getCell(3, 1).value = 'Segmento'; hoja.getCell(3, 2).value = entrada.segmento; hoja.mergeCells(3, 2, 3, ultimaColumna);
+    hoja.getCell(4, 1).value = 'Generado en'; hoja.getCell(4, 2).value = entrada.generadoEn; hoja.getCell(4, 2).numFmt = 'dd-mm-yyyy hh:mm'; hoja.mergeCells(4, 2, 4, ultimaColumna);
+    hoja.getRow(1).height = 28; hoja.getCell(1, 1).font = { bold: true, size: 16, color: { argb: 'FF000000' } }; hoja.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE0B8' } };
+    for (let fila = 2; fila <= 4; fila += 1) hoja.getCell(fila, 1).font = { bold: true, color: { argb: 'FF676767' } };
+    const filaEncabezados = hoja.getRow(6); filaEncabezados.values = columnas.map((columna) => columna.encabezado); filaEncabezados.height = 24;
+    filaEncabezados.eachCell((celda) => { celda.font = { bold: true, color: { argb: 'FF000000' } }; celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFE8F01' } }; celda.alignment = { vertical: 'middle', wrapText: true }; celda.border = { bottom: { style: 'thin', color: { argb: 'FF676767' } } }; });
+    for (const fila of definicion.filas) hoja.addRow(fila as unknown as Record<string, unknown>);
+    hoja.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: ultimaColumna } };
+    hoja.eachRow({ includeEmpty: false }, (fila, numeroFila) => { if (numeroFila > 6) fila.alignment = { vertical: 'top', wrapText: false }; });
   }
-
-  const filaEncabezados = hoja.getRow(6);
-  filaEncabezados.values = columnas.map((columna) => columna.encabezado);
-  filaEncabezados.height = 24;
-  filaEncabezados.eachCell((celda) => {
-    celda.font = { bold: true, color: { argb: 'FF000000' } };
-    celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFE8F01' } };
-    celda.alignment = { vertical: 'middle', wrapText: true };
-    celda.border = { bottom: { style: 'thin', color: { argb: 'FF676767' } } };
-  });
-
-  for (const fila of entrada.filas) {
-    hoja.addRow(fila as unknown as Record<string, unknown>);
-  }
-
-  hoja.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: ultimaColumna } };
-  hoja.eachRow({ includeEmpty: false }, (fila, numeroFila) => {
-    if (numeroFila > 6) {
-      fila.alignment = { vertical: 'top', wrapText: false };
-    }
-  });
 
   const contenido = await workbook.xlsx.writeBuffer();
   return {

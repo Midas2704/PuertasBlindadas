@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FileSpreadsheet, X } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
-import { ControlSegmentado, EncabezadoM7, EstadoDato, PdfDashboard, Periodo, formatearDato, usarConsultaM7 } from './componentes';
+import { ControlSegmentado, EncabezadoM7, EstadoDato, PdfDashboard, formatearDato, usarConsultaM7 } from './componentes';
 import { GraficoDonut, GraficoPeriodosVentas, GraficoRangoVentas } from './graficos';
 import type { DatoGrafico } from './graficos';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
 import { NombreProducto, PALETA_PRODUCTOS, limpiarNombreProducto } from './presentacionProductos';
-import { FiltroTemporalVentas, leerFiltrosTemporalesVentas, parametrosTemporalesVentas, type FiltrosTemporalesVentas } from './filtrosTemporalesVentas';
+import { FiltroTemporalMaestro, leerContextoTemporalM7, parametrosContextoTemporalM7, parametrosTemporalesVentas, type ContextoTemporalM7, type FiltrosTemporalesVentas } from './filtrosTemporalesVentas';
 
 type Objeto = Record<string, unknown>;
 const esObjeto = (valor: unknown): valor is Objeto => Boolean(valor) && typeof valor === 'object' && !Array.isArray(valor);
@@ -49,7 +49,7 @@ function ResumenRangoAnalisis({ filtros, datos }: { filtros: FiltrosTemporalesVe
   return <Seccion titulo="Evolución dentro del rango" descripcion="Cada punto representa un día en rangos de hasta 62 días; los rangos más extensos se agrupan por mes."><dl className="mb-5 grid gap-4 bg-gray-50 p-4 sm:grid-cols-2 lg:grid-cols-5">{item('Período', `${filtros.desde} → ${filtros.hasta}`)}{item('Venta neta', venta === null ? 'No disponible' : formatearDato(venta, 'monto'))}{item('Ventas', formatearDato(indicador(datos.cantidad).valor))}{item('Ticket promedio', numero(ticket.totalClp) === null ? 'N/A' : formatearDato(ticket.totalClp, 'monto'))}{item('Promedio diario', venta === null ? 'N/A' : formatearDato(venta / dias, 'monto'))}</dl><GraficoRangoVentas datos={serie} granularidad={granularidad}/></Seccion>;
 }
 
-function ExportarExcelVentas({ anio, mes, desde, hasta, segmento }: { anio: number; mes: number; desde?: string; hasta?: string; segmento: string }) {
+function ExportarExcelVentas({ consulta }: { consulta: Record<string, string> }) {
   const { sesion } = usarSesion();
   const opciones = ([
     sesion?.permisos.includes('CU219') && sesion.permisos.includes('CU220') ? 'VENTAS' : null,
@@ -64,7 +64,6 @@ function ExportarExcelVentas({ anio, mes, desde, hasta, segmento }: { anio: numb
   const descargar = async () => {
     setOcupado(true); setError('');
     try {
-      const consulta = desde && hasta ? { desde, hasta, segmento } : { anio, mes, segmento };
       const respuesta = await solicitarFinanzas('/dashboard-m7/excel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tipo, consulta }) });
       const archivo = await respuesta.json();
       if (!respuesta.ok) throw new Error(archivo.error || 'No fue posible generar el Excel');
@@ -81,7 +80,8 @@ export default function AnalisisVentasM7() {
   const location = useLocation();
   const parametrosUrl = new URLSearchParams(location.search); const hoy = new Date();
   const anioInicial = Number(parametrosUrl.get('anio')) || hoy.getFullYear(); const mesInicial = Number(parametrosUrl.get('mes')) || hoy.getMonth() + 1;
-  const [filtros, setFiltros] = useState<FiltrosTemporalesVentas>(() => leerFiltrosTemporalesVentas(location.search, anioInicial, mesInicial));
+  const [filtros, setFiltros] = useState<ContextoTemporalM7>(() => leerContextoTemporalM7(location.search, anioInicial, mesInicial));
+  useEffect(() => setFiltros(leerContextoTemporalM7(location.search, anioInicial, mesInicial)), [location.search, anioInicial, mesInicial]);
   const [metrica, setMetrica] = useState(() => new URLSearchParams(location.search).get('metrica') === 'UNIDADES' ? 'UNIDADES' : 'VALOR');
   const q = usarConsultaM7('/dashboard-m7/ventas', false, parametrosTemporalesVentas(filtros));
   const comparando = filtros.modo === 'comparar'; const respuesta = q.datos || {};
@@ -98,10 +98,9 @@ export default function AnalisisVentasM7() {
   const totalDonutProductos = donutProductos.reduce((total, item) => total + item.valor, 0);
   const productosConFxFaltante = productos.some(item => numero(item.unidades) !== null && numero(item.ventaNetaClp) === null);
   const donutSegmentos = participacion.map(item => ({ nombre: String(item.segmento), valor: numero(item.montoClp) || 0 })).filter(item => item.valor > 0);
-  const cambiarPeriodo = (anio: number, mes: number) => { const mensual = leerFiltrosTemporalesVentas('', anio, mes); setFiltros(mensual); q.cambiar(anio, mes, ['modo', 'desde', 'hasta', 'desdeA', 'hastaA', 'desdeB', 'hastaB']); };
-  const cambiarFiltros = (siguiente: FiltrosTemporalesVentas) => { setFiltros(siguiente); q.reemplazarParametros({ ...parametrosTemporalesVentas(siguiente), metrica }, ['modo', 'desde', 'hasta', 'desdeA', 'hastaA', 'desdeB', 'hastaB']); };
+  const cambiarFiltros = (siguiente: ContextoTemporalM7) => { setFiltros(siguiente); q.reemplazarParametros({ ...parametrosContextoTemporalM7(siguiente), metrica }, ['modo', 'desde', 'hasta', 'desdeA', 'hastaA', 'desdeB', 'hastaB', 'anio', 'mes', 'segmento']); };
   const cambiarMetrica = (valor: string) => { setMetrica(valor); q.actualizarParametros({ metrica: valor }); };
-  const rangoActivo = filtros.modo === 'rango' ? filtros : null;
+  const consultaExportacion = parametrosContextoTemporalM7(filtros);
   const resumenComparacion = comparando && esObjeto(respuesta.resumen) ? respuesta.resumen : null; const periodoA = comparando && esObjeto(respuesta.periodoA) ? respuesta.periodoA : null; const periodoB = comparando && esObjeto(respuesta.periodoB) ? respuesta.periodoB : null;
   const promedioDiarioComparacion = resumenComparacion?.granularidad === 'dia';
   const resumenPeriodo = (titulo: string, periodo: Objeto | null, clase: string) => {
@@ -111,7 +110,7 @@ export default function AnalisisVentasM7() {
     const periodoEsA = titulo === 'Período A'; const dias = resumenComparacion?.[periodoEsA ? 'diasA' : 'diasB']; const promedio = resumenComparacion?.[periodoEsA ? 'promedioA' : 'promedioB'];
     return <><article className={`border-t-4 bg-white p-4 shadow-sm ${clase}`}><p className="text-xs font-black uppercase text-gray-500">{titulo}</p><p className="mt-1 text-xs text-gray-500">{String(fechas.desde || '')} → {String(fechas.hasta || '')} · {String(dias || '—')} días</p><p className="mt-3 text-2xl font-black">{numero(pMonto.totalClp) === null ? 'No disponible' : formatearDato(pMonto.totalClp, 'monto')}</p><p className="mt-1 text-xs text-gray-600">Promedio {promedioDiarioComparacion ? 'diario' : 'mensual'}: <strong>{formatearDato(promedio, 'monto')}</strong></p><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><span className="text-gray-500">Ventas</span><strong className="block">{formatearDato(indicador(periodo?.cantidad).valor)}</strong></div><div><span className="text-gray-500">Ticket medio</span><strong className="block">{numero(pTicket.totalClp) === null ? 'N/A' : formatearDato(pTicket.totalClp, 'monto')}</strong></div></div><p className="mt-3 text-xs text-amber-800">{formatearDato(pMonto.ventasExcluidasSinTipoCambio)} venta(s) sin FX histórico.</p></article>{titulo === 'Período B' && <div className="lg:col-span-2"><DetalleComparacion periodoA={periodoA} periodoB={periodoB}/></div>}</>;
   };
-  return <div className="min-h-full bg-gray-100"><EncabezadoM7 titulo="Análisis de Ventas" descripcion="Ventas definitivas, clientes y productos con segmentación definida en la ficha del cliente" regreso={q.global}/><Periodo anio={q.anio} mes={q.mes} cambiar={cambiarPeriodo} cargando={q.cargando} recargar={q.recargar}/><div className="mx-auto mt-3 max-w-7xl space-y-3 px-5 sm:px-8"><div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"><ControlSegmentado etiqueta="Segmento comercial" valor={q.segmento} cambiar={q.cambiarSegmento} opciones={[{ valor: 'TODOS', etiqueta: 'Todos' }, { valor: 'B2B', etiqueta: 'B2B' }, { valor: 'B2C', etiqueta: 'B2C' }]} /></div><div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"><FiltroTemporalVentas valor={filtros} cambiar={cambiarFiltros} cargando={q.cargando}/></div></div><PdfDashboard origen="ventas" anio={q.anio} mes={q.mes} desde={rangoActivo?.desde} hasta={rangoActivo?.hasta} segmento={q.segmento} acciones={<ExportarExcelVentas anio={q.anio} mes={q.mes} desde={rangoActivo?.desde} hasta={rangoActivo?.hasta} segmento={q.segmento}/>}/>{q.error && <p role="alert" className="mx-auto mt-4 max-w-7xl border border-red-200 bg-red-50 px-5 py-3 text-red-800">{q.error}</p>}
+  return <div className="min-h-full bg-gray-100"><EncabezadoM7 titulo="Análisis de Ventas" descripcion="Ventas definitivas, clientes y productos con segmentación definida en la ficha del cliente" regreso={q.global}/><div className="mx-auto mt-5 max-w-7xl px-5 sm:px-8"><FiltroTemporalMaestro valor={filtros} aplicar={cambiarFiltros} actualizar={q.recargar} cargando={q.cargando}/></div><PdfDashboard origen="ventas" anio={q.anio} mes={q.mes} segmento={q.segmento} consulta={consultaExportacion} acciones={<ExportarExcelVentas consulta={consultaExportacion}/>}/>{q.error && <p role="alert" className="mx-auto mt-4 max-w-7xl border border-red-200 bg-red-50 px-5 py-3 text-red-800">{q.error}</p>}
     <main className="mx-auto max-w-7xl space-y-5 px-5 py-6 sm:px-8">
       {filtros.modo === 'rango' && <ResumenRangoAnalisis filtros={filtros} datos={datos}/>}
       {comparando && <Seccion titulo="Período B vs Período A" descripcion="Comparación de ventas netas con idénticas reglas de definitividad, segmento y tipo de cambio histórico.">

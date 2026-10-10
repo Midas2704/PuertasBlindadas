@@ -10,6 +10,8 @@ type EntradaInformeM7 = {
   datos: unknown;
   panel?: unknown;
   historico?: unknown;
+  modo?: string;
+  comparacion?: { periodoA: { etiquetaDesde: string; etiquetaHasta: string }; periodoB: { etiquetaDesde: string; etiquetaHasta: string } };
 };
 
 const registro = (valor: unknown): Registro => valor && typeof valor === 'object' && !Array.isArray(valor) ? valor as Registro : {};
@@ -313,12 +315,44 @@ const paginasContextuales = (origen: string, titulo: string, datosEntrada: unkno
   return paginas;
 };
 
+const paginasComparativas = (origen: string, datosEntrada: unknown, comparacion: NonNullable<EntradaInformeM7['comparacion']>): DocumentoGerencialPdf['paginas'] => {
+  const datos = registro(datosEntrada); const periodoA = registro(datos.periodoA); const periodoB = registro(datos.periodoB);
+  const ventas = (periodo: Registro) => origen === 'panel' ? bloque(periodo, 'ventas') : periodo;
+  const resultado = (periodo: Registro) => origen === 'panel' ? bloque(periodo, 'resumenResultados') : {};
+  const liquidez = (periodo: Registro) => origen === 'panel' ? bloque(periodo, 'liquidez') : {};
+  const montoVenta = (periodo: Registro) => numero(indicador(ventas(periodo).montoNeto).totalClp);
+  const cantidadVenta = (periodo: Registro) => numero(valorIndicador(ventas(periodo).cantidad));
+  const flujo = (periodo: Registro) => numero(lista(indicador(liquidez(periodo).flujoHistorico).totales).find(fila => fila.moneda === 'CLP')?.flujoReal);
+  const campoResultado = (periodo: Registro, campo: string) => numero(indicador(resultado(periodo).estadoResultados)[campo]);
+  const variacion = (a: number | null, b: number | null) => a === null || b === null || a === 0 ? null : (b - a) / Math.abs(a) * 100;
+  const fila = (nombre: string, a: number | null, b: number | null, formato: (valor: number | null) => string) => ({ indicador: nombre, periodoA: formato(a), periodoB: formato(b), diferencia: a === null || b === null ? 'N/A' : formato(b - a), variacion: porcentaje(variacion(a, b)) });
+  const filas = [fila('Ventas netas', montoVenta(periodoA), montoVenta(periodoB), moneda), fila('Cantidad de ventas', cantidadVenta(periodoA), cantidadVenta(periodoB), entero)];
+  if (origen === 'panel') filas.push(fila('Flujo ejecutado', flujo(periodoA), flujo(periodoB), moneda), fila('Costos de venta', campoResultado(periodoA, 'costoVenta'), campoResultado(periodoB, 'costoVenta'), moneda), fila('Margen bruto', campoResultado(periodoA, 'margenBruto'), campoResultado(periodoB, 'margenBruto'), moneda), fila('EBITDA', campoResultado(periodoA, 'ebitdaMonto'), campoResultado(periodoB, 'ebitdaMonto'), moneda));
+  return [{ titulo: 'Comparación de períodos', subtitulo: `${comparacion.periodoA.etiquetaDesde}–${comparacion.periodoA.etiquetaHasta} vs. ${comparacion.periodoB.etiquetaDesde}–${comparacion.periodoB.etiquetaHasta}`, bloques: [tabla('Período A vs Período B', [{ clave: 'indicador', etiqueta: 'Indicador', ancho: 130 }, { clave: 'periodoA', etiqueta: 'Período A', ancho: 100, alinear: 'derecha' }, { clave: 'periodoB', etiqueta: 'Período B', ancho: 100, alinear: 'derecha' }, { clave: 'diferencia', etiqueta: 'B − A', ancho: 90, alinear: 'derecha' }, { clave: 'variacion', etiqueta: 'Variación', ancho: 80, alinear: 'derecha' }], filas), { tipo: 'notas', lineas: ['Las variaciones son N/A cuando el Período A es cero o falta cobertura.', 'Los saldos vigentes no se presentan como comparaciones históricas.'] }] }];
+};
+
+const paginasRango = (origen: string, datosEntrada: unknown): DocumentoGerencialPdf['paginas'] => {
+  const datos = registro(datosEntrada); const ventas = origen === 'panel' ? bloque(datos, 'ventas') : datos;
+  const resultado = origen === 'panel' ? bloque(datos, 'resumenResultados') : {};
+  const liquidez = origen === 'panel' ? bloque(datos, 'liquidez') : {};
+  const monto = numero(indicador(ventas.montoNeto).totalClp); const cantidad = numero(valorIndicador(ventas.cantidad));
+  const conversion = indicador(ventas.conversion); const costos = origen === 'panel' ? numero(indicador(resultado.estadoResultados).costoVenta) : numero(valorIndicador(ventas.costosDirectos));
+  const resultadoGerencial = origen === 'panel' ? numero(indicador(resultado.estadoResultados).margenBruto) : numero(valorIndicador(ventas.resultadoGerencial));
+  const flujo = numero(lista(indicador(liquidez.flujoHistorico).totales).find(fila => fila.moneda === 'CLP')?.flujoReal);
+  const productos = lista(valorIndicador(ventas.productos)).slice(0, 8);
+  const tarjetas: TarjetaDocumentoPdf[] = [{ etiqueta: 'Ventas netas del rango', valor: moneda(monto) }, { etiqueta: 'Cantidad de ventas', valor: entero(cantidad) }, { etiqueta: 'Cotizaciones', valor: entero(numero(conversion.totalCotizaciones)) }, { etiqueta: 'Conversión', valor: porcentaje(numero(conversion.tasaPorcentual)) }, { etiqueta: 'Costos directos', valor: moneda(costos) }, { etiqueta: 'Resultado gerencial', valor: moneda(resultadoGerencial) }];
+  if (origen === 'panel') tarjetas.push({ etiqueta: 'Flujo ejecutado', valor: moneda(flujo) });
+  return [{ titulo: 'Resumen del rango aplicado', bloques: [{ tipo: 'tarjetas', tarjetas }, productos.length ? tabla('Productos principales', [{ clave: 'producto', etiqueta: 'Producto', ancho: 220 }, { clave: 'unidades', etiqueta: 'Unidades', ancho: 80, alinear: 'derecha' }, { clave: 'venta', etiqueta: 'Venta neta', ancho: 120, alinear: 'derecha' }], productos.map(item => ({ producto: textoHumano(item.producto), unidades: entero(numero(item.unidades)), venta: moneda(numero(item.ventaNetaClp)) }))) : notaNoDisponible('No hay productos comparables en el rango.'), { tipo: 'notas', lineas: ['El informe usa exactamente el rango y segmento indicados.', 'Los datos sin cobertura no se reemplazan por cero; los saldos actuales no se presentan como históricos.'] }] }];
+};
+
 export function crearInformeDashboardM7(entrada: EntradaInformeM7) {
-  const paginas = entrada.origen === 'panel' ? paginasPanel(entrada.panel, entrada.historico) : paginasContextuales(entrada.origen, entrada.tituloContextual, entrada.datos, entrada.historico);
+  const paginas = entrada.comparacion ? paginasComparativas(entrada.origen, entrada.datos, entrada.comparacion) : entrada.modo === 'rango' && ['panel', 'ventas'].includes(entrada.origen) ? paginasRango(entrada.origen, entrada.datos) : entrada.origen === 'panel' ? paginasPanel(entrada.panel, entrada.historico) : paginasContextuales(entrada.origen, entrada.tituloContextual, entrada.datos, entrada.historico);
+  const periodoDocumento = entrada.comparacion ? `${entrada.comparacion.periodoA.etiquetaDesde} a ${entrada.comparacion.periodoA.etiquetaHasta} vs. ${entrada.comparacion.periodoB.etiquetaDesde} a ${entrada.comparacion.periodoB.etiquetaHasta}` : `${entrada.periodo.etiquetaDesde} a ${entrada.periodo.etiquetaHasta}`;
   const documento: DocumentoGerencialPdf = {
     titulo: 'Informe Financiero Gerencial', subtitulo: 'Puertas Blindadas - Dashboard Financiero', generado: fechaHora(entrada.generadoEn),
-    periodo: `${entrada.periodo.etiquetaDesde} a ${entrada.periodo.etiquetaHasta}`, filtros: entrada.filtros, moneda: 'CLP', paginas,
+    periodo: periodoDocumento, filtros: entrada.filtros, moneda: 'CLP', paginas,
     pie: 'Documento generado por el Sistema Financiero Puertas Blindadas',
   };
-  return archivoPdfGerencial(`dashboard-${entrada.origen}-${entrada.periodo.etiquetaDesde}-${entrada.periodo.etiquetaHasta}.pdf`, documento);
+  const sufijo = entrada.comparacion ? `${entrada.comparacion.periodoA.etiquetaDesde}_${entrada.comparacion.periodoB.etiquetaHasta}` : `${entrada.periodo.etiquetaDesde}-${entrada.periodo.etiquetaHasta}`;
+  return archivoPdfGerencial(`dashboard-${entrada.origen}-${sufijo}.pdf`, documento);
 }
