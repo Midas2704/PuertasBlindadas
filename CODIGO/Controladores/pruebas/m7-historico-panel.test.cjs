@@ -86,11 +86,38 @@ test('M7 ventas comparativas de panel', async t => {
   });
   await t.test('filtro de ventas mantiene año mes y ofrece rango accionable', () => {
     const fuente = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8');
-    assert.match(fuente, /<Periodo anio=\{q\.anio\} mes=\{q\.mes\}/);
-    assert.match(fuente, /Aplicar rango/);
+    assert.match(fuente, /FiltroTemporalMaestro/);
+    assert.match(fuente, /parametrosContextoTemporalM7/);
     assert.match(fuente, /Rango activo:/);
-    assert.match(readFileSync(resolve('../Vistas/src/views/DashboardM7/filtrosTemporalesVentas.tsx'), 'utf8'), /Limpiar \/ Volver a vista mensual/);
+    assert.match(readFileSync(resolve('../Vistas/src/views/DashboardM7/filtrosTemporalesVentas.tsx'), 'utf8'), /Limpiar filtros/);
   });
+});
+
+test('M7 comparativo interanual de conversiones', async t => {
+  const panel = readFileSync(resolve('../Vistas/src/views/DashboardM7/PanelGeneralM7.tsx'), 'utf8');
+  const graficos = readFileSync(resolve('../Vistas/src/views/DashboardM7/graficos.tsx'), 'utf8');
+  const ventas = readFileSync(resolve('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'), 'utf8');
+  const controlador = readFileSync(resolve('src/controladores/M7Controller.ts'), 'utf8');
+  const periodoAnual = periodo => `${Number(periodo.slice(0, 4)) - 1}${periodo.slice(4)}`;
+  const diferenciaPp = (actual, anterior) => actual === null || anterior === null ? null : actual - anterior;
+
+  await t.test('1 octubre 2026 compara con octubre 2025', () => assert.equal(periodoAnual('2026-10'), '2025-10'));
+  await t.test('2 enero 2026 compara con enero 2025', () => assert.equal(periodoAnual('2026-01'), '2025-01'));
+  await t.test('3 noviembre 2025 compara con noviembre 2024', () => assert.equal(periodoAnual('2025-11'), '2024-11'));
+  await t.test('4 la ventana móvil conserva sólo doce meses visibles', () => { assert.match(panel, /mesesComparacion\.slice\(-12\)/); assert.match(panel, /mesesConversion/); });
+  await t.test('5 el histórico solicita cobertura suficiente para el año anterior', () => assert.match(panel, /meses=24&segmento=\$\{segmento\}/));
+  await t.test('6 la diferencia se etiqueta y formatea en puntos porcentuales', () => { assert.match(panel, /puntosPorcentualesCortos/); assert.match(graficos, /Diferencia YoY/); assert.match(graficos, / pp`/); });
+  await t.test('7 35 por ciento frente a 48 por ciento devuelve más 13 pp', () => assert.equal(diferenciaPp(48, 35), 13));
+  await t.test('8 cero cotizaciones produce tasa N A', () => assert.deepEqual(calcularConversionSegmentadaM7([], 'TODOS'), { totalCotizaciones: 0, convertidas: 0, tasaPorcentual: null }));
+  await t.test('9 cero convertidas con cotizaciones produce cero por ciento', () => assert.deepEqual(calcularConversionSegmentadaM7([{ segmento: 'B2B', convertida: false }], 'B2B'), { totalCotizaciones: 1, convertidas: 0, tasaPorcentual: 0 }));
+  await t.test('10 mes sin histórico conserva referencia nula', () => { assert.equal(diferenciaPp(44.44, null), null); assert.match(panel, /numero\(anterior\?\.conversionPorcentual\)/); });
+  await t.test('11 la línea histórica se interrumpe donde faltan datos', () => { assert.match(panel, /conversionAnioAnterior/); assert.match(graficos, /connectNulls=\{false\}/); });
+  await t.test('12 B2B usa el mismo filtro owner para ambos años', () => { assert.equal(resolverSegmentoComercialM7('B2B'), 'B2B'); assert.match(controlador, /perteneceSegmentoM7\(cotizacion\.ficha_cliente\.cliente_financiero, segmento\)/); });
+  await t.test('13 B2C usa el mismo filtro owner para ambos años', () => { assert.equal(resolverSegmentoComercialM7('B2C'), 'B2C'); assert.match(panel, /historico\?anio=\$\{anio\}&mes=\$\{mes\}&meses=24&segmento=\$\{segmento\}/); });
+  await t.test('14 modo rango conserva período y muestra su conversión', () => { assert.match(panel, /filtros\.modo === 'rango'/); assert.match(panel, /const conversion = valoresConversion\(datos\)/); assert.match(panel, /item\('Conversión', tasaCorta\(conversion\.tasa\)/); });
+  await t.test('15 modo comparar calcula diferencia de conversión B contra A', () => { assert.match(panel, /puntosPorcentuales\(conversionB\.tasa, conversionA\.tasa\)/); assert.match(ventas, /Diferencia de conversión B vs A/); assert.match(ventas, /diferenciaPp\(conversion\(periodoB\)\.tasaPorcentual, conversion\(periodoA\)\.tasaPorcentual\)/); });
+  await t.test('16 navegación conserva todos los parámetros maestros', () => { assert.match(panel, /dashboard-m7\/ventas\?\$\{queryComercial\}/); for (const clave of ['modo', 'anio', 'mes', 'desde', 'hasta', 'desdeA', 'hastaA', 'desdeB', 'hastaB', 'segmento']) assert.match(panel, new RegExp(clave)); });
+  await t.test('17 el gráfico compartido aplica discontinuidad sólo por serie', () => { assert.match(graficos, /discontinua\?: boolean/); assert.match(graficos, /strokeDasharray=\{serie\.discontinua \? '6 5' : undefined\}/); assert.match(panel, /Conversión año anterior[^]*discontinua: true/); assert.doesNotMatch(panel, /Flujo real'[^}]*discontinua/); });
 });
 
 test('M7 comparación flexible entre períodos de ventas', async t => {

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart,
   Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import { EstadoDato, formatearDato } from './componentes';
 
 export type DatoGrafico = Record<string, string | number | null>;
-export type SerieGrafico = { clave: string; nombre: string; color?: string };
+export type SerieGrafico = { clave: string; nombre: string; color?: string; discontinua?: boolean };
 
 const NARANJA = '#FE8F01';
 const GRIS = '#676767';
@@ -42,6 +42,32 @@ const TooltipGrafico = ({ active, payload, label }: { active?: boolean; payload?
     </div>)}
   </div>;
 };
+
+const numeroGrafico = (valor: unknown) => typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
+const tasaConversion = (valor: unknown) => { const numero = numeroGrafico(valor); return numero === null ? 'N/A' : `${numero.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} %`; };
+const diferenciaPp = (valor: unknown) => { const numero = numeroGrafico(valor); if (numero === null) return 'N/A'; const normalizado = Object.is(numero, -0) ? 0 : numero; return `${normalizado >= 0 ? '+' : ''}${normalizado.toLocaleString('es-CL', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} pp`; };
+
+export function TooltipConversionCotizaciones({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: DatoGrafico }>; label?: unknown }) {
+  const fila = payload?.[0]?.payload;
+  if (!active || !fila) return null;
+  const periodoActual = fila.periodo ?? label;
+  const periodoAnterior = fila.periodoConversionAnioAnterior;
+  const item = (etiqueta: string, valor: string, destacado = false) => <div className="flex items-center justify-between gap-5 py-0.5"><span className={destacado ? 'font-bold text-[#9a4f00]' : 'text-gray-600'}>{etiqueta}</span><strong className="shrink-0 text-gray-950">{valor}</strong></div>;
+  const cantidad = (valor: unknown) => numeroGrafico(valor) === null ? 'No disponible' : formatearDato(valor);
+  return <div className="w-[min(19rem,calc(100vw-2rem))] rounded-lg border border-gray-200 bg-white px-3 py-3 text-xs shadow-xl">
+    <p className="mb-1 font-black uppercase tracking-wide text-gray-950">{fechaCompleta(periodoActual)}</p>
+    {item('Cotizaciones emitidas', cantidad(fila.cotizaciones))}
+    {item('Cotizaciones convertidas', cantidad(fila.convertidas))}
+    {item('Conversión actual', tasaConversion(fila.conversionPorcentual))}
+    <div className="my-2 border-t border-gray-100" />
+    <p className="mb-1 font-black uppercase tracking-wide text-gray-700">{fechaCompleta(periodoAnterior)}</p>
+    {item('Cotizaciones emitidas', cantidad(fila.cotizacionesAnioAnterior))}
+    {item('Cotizaciones convertidas', cantidad(fila.convertidasAnioAnterior))}
+    {item('Conversión año anterior', tasaConversion(fila.conversionAnioAnterior))}
+    <div className="my-2 border-t border-gray-100" />
+    {item('Diferencia YoY', diferenciaPp(fila.diferenciaConversionPp), true)}
+  </div>;
+}
 
 export function EstadoSinDatos({ texto }: { texto: string }) {
   return <div className="flex h-44 flex-col items-center justify-center rounded-md border border-dashed border-gray-200 bg-gray-50 px-5 text-center">
@@ -84,7 +110,7 @@ export function GraficoBarras({ datos, series, etiqueta = 'etiqueta', apiladas =
   </BarChart></ResponsiveContainer></MarcoGrafico>;
 }
 
-export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', alto = 300, porcentaje = false }: { datos: DatoGrafico[]; barras: SerieGrafico[]; lineas: SerieGrafico[]; etiqueta?: string; alto?: number; porcentaje?: boolean }) {
+export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', alto = 300, porcentaje = false, tooltipPersonalizado }: { datos: DatoGrafico[]; barras: SerieGrafico[]; lineas: SerieGrafico[]; etiqueta?: string; alto?: number; porcentaje?: boolean; tooltipPersonalizado?: ReactElement }) {
   if (!datos.length) return <EstadoSinDatos texto="No hay una serie histórica suficiente para graficar." />;
   const tienePresupuestoFlujo = datos.some(dato => typeof dato.flujoPresupuestado === 'number');
   const lineasVisibles = tienePresupuestoFlujo && lineas.some(linea => linea.clave === 'flujoNeto') ? [...lineas.map(linea => linea.clave === 'flujoNeto' ? { ...linea, nombre: 'Flujo real' } : linea), { clave: 'flujoPresupuestado', nombre: 'Flujo presupuestado', color: '#b85e00' }] : lineas;
@@ -93,9 +119,9 @@ export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', 
     <XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
     <YAxis yAxisId="monto" tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />
     {porcentaje && <YAxis yAxisId="porcentaje" orientation="right" domain={[0, 100]} tickFormatter={valor => `${valor}%`} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />}
-    <Tooltip content={<TooltipGrafico />} /><Legend wrapperStyle={{ fontSize: 11 }} />
+    <Tooltip content={tooltipPersonalizado || <TooltipGrafico />} wrapperStyle={{ zIndex: 50, outline: 'none' }} allowEscapeViewBox={{ x: false, y: true }} /><Legend wrapperStyle={{ fontSize: 11, lineHeight: '18px' }} />
     {barras.map((serie, indice) => <Bar key={serie.clave} yAxisId="monto" dataKey={serie.clave} name={serie.nombre} fill={serie.color || COLORES[indice % COLORES.length]} radius={[3, 3, 0, 0]} maxBarSize={28} />)}
-    {lineasVisibles.map((serie, indice) => <Line key={serie.clave} yAxisId={porcentaje ? 'porcentaje' : 'monto'} type="monotone" dataKey={serie.clave} name={serie.nombre} stroke={serie.color || COLORES[(indice + barras.length) % COLORES.length]} strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />)}
+    {lineasVisibles.map((serie, indice) => <Line key={serie.clave} yAxisId={porcentaje ? 'porcentaje' : 'monto'} type="monotone" dataKey={serie.clave} name={serie.nombre} stroke={serie.color || COLORES[(indice + barras.length) % COLORES.length]} strokeDasharray={serie.discontinua ? '6 5' : undefined} strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />)}
   </ComposedChart></ResponsiveContainer></div></div>;
 }
 
