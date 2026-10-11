@@ -1,0 +1,45 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { resolve } = require('node:path');
+const { calcularHorasRealesM7, horasEstimadasDesdeTiempoM7, calcularComparacionProduccionM7 } = require('../dist/controladores/M7Controller');
+const { permiteOperacion } = require('../dist/validaciones/permisos');
+
+const controlador = readFileSync(resolve('src/controladores/M7Controller.ts'), 'utf8');
+const vista = readFileSync(resolve('../Vistas/src/views/DashboardM7/OperacionCostosM7.tsx'), 'utf8');
+const panel = readFileSync(resolve('../Vistas/src/views/DashboardM7/PanelGeneralM7.tsx'), 'utf8');
+const rutas = readFileSync(resolve('src/rutas/finanzas.ts'), 'utf8');
+const bloque = controlador.slice(controlador.indexOf('private async consultarProduccionModelosCompleto'), controlador.indexOf('async consultarCargaOperacional'));
+const ejecucion = (cantidad, unidad, estado = 'terminada', validacion = 'validada') => ({ cantidad, unidad, estado, validacion });
+
+test('M7 producción, modelos y horas hombre', async t => {
+  await t.test('01 producto comercial no equivale automáticamente a modelo técnico', () => assert.match(bloque, /Producto comercial y modelo técnico permanecen separados/));
+  await t.test('02 segmento B2B usa clasificación financiera estructurada', () => assert.match(bloque, /nombreSegmentoClienteM7\(item\.ficha_cliente\.cliente_financiero\)/));
+  await t.test('03 segmento B2C usa la misma fuente financiera', () => assert.match(bloque, /segmentoSolicitado === 'TODOS' \|\| segmentoOrden\(orden\) === segmentoSolicitado/));
+  await t.test('04 productos vendidos conservan su análisis existente', () => { assert.match(panel, /Productos vendidos/); assert.match(vista, /Ver productos vendidos/); });
+  await t.test('05 unidades producidas cuentan especificaciones únicas', () => assert.match(bloque, /producidas: new Set<string>/));
+  await t.test('06 una Nota de Venta con varios productos no se replica en producción', () => assert.doesNotMatch(bloque, /nota_venta\.findMany|detalle_cotizacion\.findMany/));
+  await t.test('07 un proyecto con varias puertas conserva cada especificación', () => assert.match(bloque, /acumulado\.especificaciones\.add\(idEspecificacion\)/));
+  await t.test('08 una OT con varias tareas no multiplica unidades', () => { assert.match(bloque, /acumulado\.tareas \+= orden\.tareas_produccion\.length/); assert.match(bloque, /acumulado\.producidas\.add\(idEspecificacion\)/); });
+  await t.test('09 relación modelo OT se realiza por ID', () => assert.match(bloque, /especificaciones_puerta_id_especificacion_puerta/));
+  await t.test('10 relación comercial técnica no identificable queda no disponible', () => assert.match(bloque, /Relación producto\/modelo[\s\S]*FUENTE_NO_DISPONIBLE/));
+  await t.test('11 tarea sin unidad horaria no produce horas', () => assert.equal(calcularHorasRealesM7([ejecucion(5, 'piezas')]).horas, null));
+  await t.test('12 cantidad de tareas no son horas', () => assert.deepEqual(calcularHorasRealesM7([ejecucion(8, 'tareas')]), { horas: null, ejecucionesHorarias: 0, ejecucionesSinUnidadHoraria: 1 }));
+  await t.test('13 tiempo estimado se mantiene separado de tiempo real', () => { assert.equal(horasEstimadasDesdeTiempoM7(new Date('1970-01-01T08:30:00Z')), 8.5); assert.match(vista, /Horas estimadas/); });
+  await t.test('14 horas reales exigen ejecución terminada y validada', () => { assert.equal(calcularHorasRealesM7([ejecucion(2, 'horas')]).horas, 2); assert.equal(calcularHorasRealesM7([ejecucion(2, 'horas', 'pendiente')]).horas, null); });
+  await t.test('15 costo laboral usa tarea remunerable validada', () => assert.match(bloque, /estado_validacion: 'validada'/));
+  await t.test('16 tarifa histórica no se recalcula', () => { assert.match(bloque, /monto_calculado/); assert.doesNotMatch(bloque, /valor_unitario_tarea|historial_tarifa_tarea\.find/); });
+  await t.test('17 remuneraciones no se duplican con costo oficial', () => assert.doesNotMatch(bloque, /remuneracion\.findMany|liquidacion_remuneracion\.findMany/));
+  await t.test('18 agregación por modelo usa clave modelo y segmento', () => assert.match(bloque, /const clave = `\$\{segmento \|\| 'SIN_CLASIFICAR'\}\|\$\{modelo\}`/));
+  await t.test('19 agregación por área usa área oficial de la OT', () => assert.match(bloque, /orden\.area_trabajo\?\.area_trabajo_nombre_area/));
+  await t.test('20 filtro Mes resuelve período mensual', () => assert.match(bloque, /resolverPeriodoM7\(consulta\)/));
+  await t.test('21 filtro Rango se propaga desde la interfaz', () => assert.match(vista, /parametrosTemporalesVentas\(filtros\)/));
+  await t.test('22 comparar períodos usa B contra A y conserva null', () => { assert.deepEqual(calcularComparacionProduccionM7(10, 12), { diferencia: 2, variacionPorcentual: 20 }); assert.deepEqual(calcularComparacionProduccionM7(null, 12), { diferencia: null, variacionPorcentual: null }); });
+  await t.test('23 cobertura parcial queda explícita', () => { assert.match(bloque, /PARCIALMENTE_DISPONIBLE/); assert.match(vista, /Cobertura de información/); });
+  await t.test('24 ausencia de horas equivale a null, no cero', () => assert.equal(calcularHorasRealesM7([]).horas, null));
+  await t.test('25 permiso de producción no expone costo sin CU242', () => { assert.equal(permiteOperacion('consultarProduccionModelosM7', ['CU247']), true); assert.match(bloque, /const puedeVerCostos = permisos\.includes\('CU242'\)/); });
+  await t.test('26 no regresión de Ventas', () => { assert.doesNotMatch(bloque, /nota_venta\.update|cotizacion\.update/); assert.match(panel, /dashboard-m7\/ventas/); });
+  await t.test('27 no regresión de costos M7', () => assert.doesNotMatch(bloque, /costo_proyecto\.(create|update|delete)/));
+  await t.test('28 no regresión de EBITDA', () => assert.doesNotMatch(bloque, /ebitda/i));
+  await t.test('ruta y navegación usan la vista existente', () => { assert.match(rutas, /operacion\/produccion-modelos/); assert.match(panel, /Producción y costos por modelo/); });
+});

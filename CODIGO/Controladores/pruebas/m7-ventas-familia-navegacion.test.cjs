@@ -154,9 +154,9 @@ test('M7 ventas por modelo y navegación segura', async t => {
     assert.match(backend, /permisos\.includes\('CU88'\)/);
     assert.match(backend, /permisos\.includes\('CU237'\)/);
   });
-  await t.test('panel no ofrece resúmenes sin CU238 o CU239', () => {
-    assert.match(panel, /puedeVerResumenes/);
-    assert.match(panel, /permiso === 'CU238' \|\| permiso === 'CU239'/);
+  await t.test('panel no ofrece Estado de Resultados sin CU238', () => {
+    assert.match(panel, /puedeVerResultados/);
+    assert.match(panel, /sesion\?\.permisos\.includes\('CU238'\)/);
   });
   await t.test('los destinos owner relevantes usados por M7 tienen una ruta React', () => {
     for (const patron of [

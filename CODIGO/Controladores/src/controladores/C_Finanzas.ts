@@ -87,7 +87,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
   | 'consultarPanelGeneralM7' | 'consultarHistoricoPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
   | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'consultarCostoRemuneracionesM7' | 'descargarPdfDashboardM7' | 'descargarExcelDashboardM7'
-  | 'consultarOrdenesTrabajoM7' | 'consultarCargaOperacionalM7' | 'consultarInstalacionesM7' | 'consultarAtrasosInstalacionesM7' | 'consultarIncidenciasRetrabajosM7'
+  | 'consultarOrdenesTrabajoM7' | 'consultarProduccionModelosM7' | 'consultarCargaOperacionalM7' | 'consultarInstalacionesM7' | 'consultarAtrasosInstalacionesM7' | 'consultarIncidenciasRetrabajosM7'
   | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7' | 'crearProyeccionM7' | 'actualizarProyeccionM7' | 'desactivarProyeccionM7'
   | 'registrarAjusteLiquidezM7' | 'crearCuentaBancariaM7' | 'actualizarCuentaBancariaM7' | 'crearSaldoInicialBancarioM7' | 'actualizarSaldoInicialBancarioM7' | 'consultarParametrosLiquidezM7' | 'configurarParametroLiquidezM7' | 'consultarCostosInstalacionM7' | 'configurarCostoInstalacionM7' | 'consultarParametroStockInmovilM7' | 'configurarParametroStockInmovilM7'
   | 'consultarExposicionCreditoM7' | 'consultarAlertasCreditoM7' | 'consultarResumenIvaM7' | 'consultarCostosFabricacionM7' | 'consultarBloqueosEconomicosM7' | 'consultarMargenInstalacionesM7'
@@ -513,6 +513,7 @@ export class C_Finanzas {
       case 'consultarSituacionFinancieraM7': return this.m7.consultarSituacionFinanciera(solicitud.consulta || {});
       case 'consultarCostoRemuneracionesM7': return this.m7.consultarCostoRemuneraciones(solicitud.consulta || {});
       case 'consultarOrdenesTrabajoM7': return this.m7.consultarOrdenesTrabajo(solicitud.consulta || {});
+      case 'consultarProduccionModelosM7': return this.m7.consultarProduccionModelos(solicitud.consulta || {}, actor.permisos);
       case 'consultarCargaOperacionalM7': return this.m7.consultarCargaOperacional(solicitud.consulta || {});
       case 'consultarInstalacionesM7': return this.m7.consultarInstalaciones(solicitud.consulta || {});
       case 'consultarAtrasosInstalacionesM7': return this.m7.consultarAtrasosInstalaciones(solicitud.consulta || {});

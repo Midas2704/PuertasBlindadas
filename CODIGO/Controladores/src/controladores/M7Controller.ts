@@ -74,6 +74,24 @@ export function calcularComparacionPeriodosVentasM7(valorA: number | null, valor
   };
 }
 
+export type EjecucionHorariaM7 = { cantidad: number | null; unidad: string | null; estado: string; validacion: string };
+export const esUnidadHorariaM7 = (unidad: unknown) => ['H', 'HR', 'HRS', 'HORA', 'HORAS'].includes(String(unidad || '').trim().toUpperCase());
+export function calcularHorasRealesM7(ejecuciones: EjecucionHorariaM7[]) {
+  const candidatas = ejecuciones.filter(item => normalizarTexto(item.estado) === 'terminada' && normalizarTexto(item.validacion) === 'validada');
+  const horarias = candidatas.filter(item => esUnidadHorariaM7(item.unidad) && typeof item.cantidad === 'number' && Number.isFinite(item.cantidad) && item.cantidad >= 0);
+  return { horas: horarias.length ? redondear(horarias.reduce((total, item) => total + item.cantidad!, 0)) : null, ejecucionesHorarias: horarias.length, ejecucionesSinUnidadHoraria: candidatas.length - horarias.length };
+}
+
+export function horasEstimadasDesdeTiempoM7(valor: Date | null | undefined) {
+  if (!(valor instanceof Date) || !Number.isFinite(valor.getTime())) return null;
+  return redondear(valor.getUTCHours() + valor.getUTCMinutes() / 60 + valor.getUTCSeconds() / 3600);
+}
+
+export function calcularComparacionProduccionM7(valorA: number | null, valorB: number | null) {
+  return valorA === null || valorB === null ? { diferencia: null, variacionPorcentual: null }
+    : { diferencia: redondear(valorB - valorA), variacionPorcentual: valorA === 0 ? null : redondear((valorB - valorA) / Math.abs(valorA) * 100) };
+}
+
 export type GranularidadVentasM7 = 'dia' | 'mes';
 
 const diasPeriodoM7 = (periodo: Periodo) => diasCalendario(periodo.desde, periodo.hastaExclusiva);
@@ -1439,6 +1457,84 @@ export class M7Controller {
       });
       return { periodo: periodoSalida(periodo), estado: filas.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, ordenes: filas, progreso: indicador(filas.length ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', filas.length ? filas.map(fila => ({ idOrden: fila.idOrden, estado: fila.estado, hitos: fila.hitos })) : null, 'Se muestran estados e hitos propietarios; no se inventa un porcentaje de avance'), cobertura: indicador('PARCIALMENTE_DISPONIBLE', { otCanonica: 'inventario.orden_trabajo', costos: 'Sólo tareas remunerables validadas' }, 'Contexto de sólo lectura; las asociaciones ausentes permanecen no disponibles') };
     } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, ordenes: [], progreso: indicador('FUENTE_NO_DISPONIBLE', null, 'OT/Terreno no está disponible') }; }
+  }
+
+  private async consultarProduccionModelosCompleto(consulta: Consulta, permisos: string[]) {
+    const periodo = resolverPeriodoM7(consulta);
+    const segmentoSolicitado = resolverSegmentoComercialM7(consulta.segmento);
+    const puedeVerCostos = permisos.includes('CU242');
+    const estadosOtTerminada = new Set(['completada', 'completado', 'terminada', 'terminado', 'cerrada', 'cerrado']);
+    try {
+      const ordenes = await prisma.orden_trabajo.findMany({
+        where: { OR: [
+          { orden_trabajo_fecha_hora: { gte: periodo.desde, lt: periodo.hastaExclusiva } },
+          { tareas_produccion: { some: { ejecuciones: { some: { fecha_ejecucion: { gte: periodo.desde, lt: periodo.hastaExclusiva } } } } } },
+          { tarea_remunerable: { some: { fecha_tarea: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_validacion: 'validada' } } },
+        ] },
+        include: {
+          especificaciones_puerta: true, area_trabajo: true,
+          proyecto: { include: { proyecto_financiero: { include: { ficha_cliente: { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } } } } } },
+          tareas_produccion: { include: { tarea_tipo: true, ejecuciones: { where: { fecha_ejecucion: { gte: periodo.desde, lt: periodo.hastaExclusiva } } } } },
+          tarea_remunerable: { where: { fecha_tarea: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_validacion: 'validada' } },
+        }, orderBy: { orden_trabajo_id_orden: 'asc' },
+      });
+      const segmentoOrden = (orden: typeof ordenes[number]) => {
+        const segmentos = [...new Set((orden.proyecto?.proyecto_financiero || []).map(item => nombreSegmentoClienteM7(item.ficha_cliente.cliente_financiero)).filter(Boolean))];
+        return segmentos.length === 1 ? segmentos[0] : null;
+      };
+      const filtradas = ordenes.filter(orden => segmentoSolicitado === 'TODOS' || segmentoOrden(orden) === segmentoSolicitado);
+      type Acumulado = { modelo: string; segmento: string | null; ordenes: number; especificaciones: Set<string>; producidas: Set<string>; tareas: number; ejecuciones: number; horasEstimadas: number; estimaciones: number; tareasSinEstimacion: number; horasReales: number; ejecucionesHorarias: number; ejecucionesSinUnidadHoraria: number; costo: Prisma.Decimal; costos: number; areas: Set<string> };
+      const modelos = new Map<string, Acumulado>();
+      const areas = new Map<string, { area: string; tareas: number; ejecuciones: number; horasReales: number; ejecucionesHorarias: number; ejecucionesSinUnidadHoraria: number; costo: Prisma.Decimal; costos: number }>();
+      for (const orden of filtradas) {
+        const modelo = orden.especificaciones_puerta?.especificacion_puerta_modelo_puerta?.trim() || 'Clasificación por confirmar';
+        const segmento = segmentoOrden(orden); const clave = `${segmento || 'SIN_CLASIFICAR'}|${modelo}`;
+        const acumulado = modelos.get(clave) || { modelo, segmento, ordenes: 0, especificaciones: new Set<string>(), producidas: new Set<string>(), tareas: 0, ejecuciones: 0, horasEstimadas: 0, estimaciones: 0, tareasSinEstimacion: 0, horasReales: 0, ejecucionesHorarias: 0, ejecucionesSinUnidadHoraria: 0, costo: new Prisma.Decimal(0), costos: 0, areas: new Set<string>() };
+        acumulado.ordenes += 1;
+        const idEspecificacion = orden.especificaciones_puerta_id_especificacion_puerta?.toString();
+        if (idEspecificacion) { acumulado.especificaciones.add(idEspecificacion); if (estadosOtTerminada.has(normalizarTexto(orden.orden_trabajo_estado))) acumulado.producidas.add(idEspecificacion); }
+        acumulado.tareas += orden.tareas_produccion.length;
+        const ejecuciones = orden.tareas_produccion.flatMap(tarea => tarea.ejecuciones.map(item => ({ cantidad: item.cantidad === null ? null : Number(item.cantidad), unidad: item.unidad, estado: item.estado_ejecucion, validacion: item.estado_validacion_productiva })));
+        acumulado.ejecuciones += ejecuciones.length;
+        const reales = calcularHorasRealesM7(ejecuciones); acumulado.horasReales += reales.horas || 0; acumulado.ejecucionesHorarias += reales.ejecucionesHorarias; acumulado.ejecucionesSinUnidadHoraria += reales.ejecucionesSinUnidadHoraria;
+        for (const tarea of orden.tareas_produccion) {
+          const estimaciones = tarea.tarea_tipo.map(item => horasEstimadasDesdeTiempoM7(item.tarea_tipo_tiempo_estimado_tarea)).filter((valor): valor is number => valor !== null);
+          if (estimaciones.length) { acumulado.horasEstimadas += estimaciones.reduce((total, valor) => total + valor, 0); acumulado.estimaciones += estimaciones.length; } else acumulado.tareasSinEstimacion += 1;
+        }
+        if (puedeVerCostos) for (const costo of orden.tarea_remunerable) { acumulado.costo = acumulado.costo.plus(costo.monto_calculado); acumulado.costos += 1; }
+        const area = orden.area_trabajo?.area_trabajo_nombre_area?.trim() || orden.area_trabajo?.area_trabajo_clasificacion?.trim() || 'Área por confirmar'; acumulado.areas.add(area);
+        const porArea = areas.get(area) || { area, tareas: 0, ejecuciones: 0, horasReales: 0, ejecucionesHorarias: 0, ejecucionesSinUnidadHoraria: 0, costo: new Prisma.Decimal(0), costos: 0 };
+        porArea.tareas += orden.tareas_produccion.length; porArea.ejecuciones += ejecuciones.length; porArea.horasReales += reales.horas || 0; porArea.ejecucionesHorarias += reales.ejecucionesHorarias; porArea.ejecucionesSinUnidadHoraria += reales.ejecucionesSinUnidadHoraria;
+        if (puedeVerCostos) for (const costo of orden.tarea_remunerable) { porArea.costo = porArea.costo.plus(costo.monto_calculado); porArea.costos += 1; }
+        areas.set(area, porArea); modelos.set(clave, acumulado);
+      }
+      const filasModelo = [...modelos.values()].map(item => ({ modeloTecnico: item.modelo, segmento: item.segmento || 'Clasificación por confirmar', ordenesTrabajo: item.ordenes, unidadesConEspecificacion: item.especificaciones.size, unidadesProducidas: item.producidas.size, tareasRegistradas: item.tareas, ejecucionesRegistradas: item.ejecuciones, horasEstimadas: item.estimaciones ? redondear(item.horasEstimadas) : null, horasReales: item.ejecucionesHorarias ? redondear(item.horasReales) : null, diferenciaHoras: item.estimaciones && item.ejecucionesHorarias ? redondear(item.horasReales - item.horasEstimadas) : null, costoLaboralValidado: puedeVerCostos && item.costos ? item.costo.toDecimalPlaces(2).toNumber() : null, costoLaboralPorUnidad: puedeVerCostos && item.costos && item.producidas.size ? item.costo.div(item.producidas.size).toDecimalPlaces(2).toNumber() : null, areas: [...item.areas], coberturaHoras: item.ejecucionesHorarias ? (item.ejecucionesSinUnidadHoraria ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO') : 'DATOS_INSUFICIENTES' })).sort((a, b) => b.unidadesProducidas - a.unidadesProducidas || a.modeloTecnico.localeCompare(b.modeloTecnico));
+      const filasArea = [...areas.values()].map(item => ({ area: item.area, tareasEjecutadas: item.ejecuciones, horasReales: item.ejecucionesHorarias ? redondear(item.horasReales) : null, costoLaboralValidado: puedeVerCostos && item.costos ? item.costo.toDecimalPlaces(2).toNumber() : null, coberturaHoras: item.ejecucionesHorarias ? (item.ejecucionesSinUnidadHoraria ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO') : 'DATOS_INSUFICIENTES' })).sort((a, b) => b.tareasEjecutadas - a.tareasEjecutadas || a.area.localeCompare(b.area));
+      const total = (clave: 'unidadesProducidas' | 'horasEstimadas' | 'horasReales' | 'costoLaboralValidado') => { const valores = filasModelo.map(item => item[clave]).filter((valor): valor is number => typeof valor === 'number' && Number.isFinite(valor)); return valores.length ? redondear(valores.reduce((suma, valor) => suma + valor, 0)) : null; };
+      const matriz = [
+        { metrica: 'Productos vendidos', fuenteOwner: 'finanzas.detalle_cotizacion / terreno.item_comercial', relacion: 'Cotización convertida a Nota de Venta definitiva', unidad: 'Unidades y neto', estadoValidacion: 'VALIDO', coberturaTemporal: 'Según venta definitiva', coberturaModelo: 'Producto comercial', calculable: true, brecha: null },
+        { metrica: 'Modelo técnico', fuenteOwner: 'terreno.especificaciones_puerta', relacion: 'OT → especificación por ID', unidad: 'Puerta', estadoValidacion: filasModelo.length ? 'PARCIALMENTE_DISPONIBLE' : 'DATOS_INSUFICIENTES', coberturaTemporal: 'OT/ejecución en período', coberturaModelo: 'Sólo OTs con especificación', calculable: filasModelo.length > 0, brecha: 'No existe catálogo normalizado de modelos' },
+        { metrica: 'Relación producto/modelo', fuenteOwner: 'Sin relación estructurada', relacion: 'No disponible', unidad: 'N/A', estadoValidacion: 'FUENTE_NO_DISPONIBLE', coberturaTemporal: 'N/A', coberturaModelo: 'Ninguna', calculable: false, brecha: 'Definir vínculo propietario entre item_comercial y especificaciones_puerta' },
+        { metrica: 'Unidades producidas', fuenteOwner: 'inventario.orden_trabajo', relacion: 'OT terminal → especificación única', unidad: 'Puertas', estadoValidacion: filasModelo.length ? 'PARCIALMENTE_DISPONIBLE' : 'DATOS_INSUFICIENTES', coberturaTemporal: 'OT/actividad en período', coberturaModelo: 'Especificaciones con OT terminal', calculable: filasModelo.length > 0, brecha: 'El estado de OT no reemplaza un hito formal de unidad terminada' },
+        { metrica: 'Horas estimadas', fuenteOwner: 'terreno.tarea_tipo', relacion: 'Tiempo estimado explícito de tarea', unidad: 'Horas estimadas', estadoValidacion: total('horasEstimadas') === null ? 'DATOS_INSUFICIENTES' : 'PARCIALMENTE_DISPONIBLE', coberturaTemporal: 'Tareas de OTs incluidas', coberturaModelo: 'Sólo tareas con tiempo estimado', calculable: total('horasEstimadas') !== null, brecha: 'No representa ejecución real' },
+        { metrica: 'Horas reales', fuenteOwner: 'terreno.ejecucion_tarea', relacion: 'Ejecución terminada y validada con unidad horaria explícita', unidad: 'Horas', estadoValidacion: total('horasReales') === null ? 'DATOS_INSUFICIENTES' : 'PARCIALMENTE_DISPONIBLE', coberturaTemporal: 'Fecha de ejecución', coberturaModelo: 'Sólo ejecuciones horarias', calculable: total('horasReales') !== null, brecha: 'Registro de horas hombre pendiente de definición con Terreno' },
+        { metrica: 'Costo laboral atribuible', fuenteOwner: 'finanzas.tarea_remunerable', relacion: 'Tarea validada → OT por ID', unidad: 'CLP', estadoValidacion: !puedeVerCostos ? 'SIN_PERMISO' : total('costoLaboralValidado') === null ? 'DATOS_INSUFICIENTES' : 'PARCIALMENTE_DISPONIBLE', coberturaTemporal: 'Fecha de tarea remunerable', coberturaModelo: 'Sólo tareas validadas con OT', calculable: puedeVerCostos && total('costoLaboralValidado') !== null, brecha: 'No se concilia aquí contra remuneración oficial cerrada' },
+      ];
+      return { periodo: periodoSalida(periodo), segmento: segmentoSolicitado, estado: filasModelo.length ? 'PARCIALMENTE_DISPONIBLE' as const : 'SIN_RESULTADOS' as const, resumen: indicador(filasModelo.length ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', { modelosTecnicos: filasModelo.filter(item => item.modeloTecnico !== 'Clasificación por confirmar').length, ordenesTrabajo: filtradas.length, unidadesProducidas: total('unidadesProducidas'), horasEstimadas: total('horasEstimadas'), horasReales: total('horasReales'), costoLaboralValidado: puedeVerCostos ? total('costoLaboralValidado') : null }, 'Producción y costos agregados únicamente mediante relaciones estructuradas'), modelos: indicador(filasModelo.length ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', filasModelo, 'Producto comercial y modelo técnico permanecen separados; no se distribuyen ventas entre puertas'), areas: indicador(filasArea.length ? 'PARCIALMENTE_DISPONIBLE' : 'SIN_RESULTADOS', filasArea, 'Área oficial de la OT; cantidad de tareas no se interpreta como horas'), cobertura: indicador('PARCIALMENTE_DISPONIBLE', matriz, 'Matriz de fuentes, relaciones, unidades y brechas del análisis'), relacionComercialTecnica: indicador('FUENTE_NO_DISPONIBLE', null, 'No existe una relación estructurada entre item_comercial y especificaciones_puerta; se mantienen ambos conceptos separados'), privacidad: puedeVerCostos ? 'Costos laborales agregados por modelo y área; no se exponen personas, salarios ni liquidaciones' : 'Costos laborales ocultos por permisos; no se exponen datos individuales' };
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      return { periodo: periodoSalida(periodo), segmento: segmentoSolicitado, estado: 'FUENTE_NO_DISPONIBLE' as const, resumen: indicador('FUENTE_NO_DISPONIBLE', null, 'Producción no está disponible'), modelos: indicador('FUENTE_NO_DISPONIBLE', [], 'Producción no está disponible'), areas: indicador('FUENTE_NO_DISPONIBLE', [], 'Producción no está disponible'), cobertura: indicador('FUENTE_NO_DISPONIBLE', null, 'No fue posible consultar las fuentes owner') };
+    }
+  }
+
+  async consultarProduccionModelos(consulta: Consulta, permisos: string[]) {
+    if (String(consulta.modo || '').toLowerCase() === 'comparar') {
+      const segmento = resolverSegmentoComercialM7(consulta.segmento);
+      const [periodoA, periodoB] = await Promise.all([this.consultarProduccionModelosCompleto({ desde: consulta.desdeA, hasta: consulta.hastaA, segmento }, permisos), this.consultarProduccionModelosCompleto({ desde: consulta.desdeB, hasta: consulta.hastaB, segmento }, permisos)]);
+      const valor = (periodo: any, clave: string) => { const dato = periodo?.resumen?.valor?.[clave]; return typeof dato === 'number' && Number.isFinite(dato) ? dato : null; };
+      return { modo: 'comparar', segmento, direccion: 'Período B vs Período A', periodoA, periodoB, comparacion: { unidadesProducidas: calcularComparacionProduccionM7(valor(periodoA, 'unidadesProducidas'), valor(periodoB, 'unidadesProducidas')), horasReales: calcularComparacionProduccionM7(valor(periodoA, 'horasReales'), valor(periodoB, 'horasReales')), costoLaboralValidado: calcularComparacionProduccionM7(valor(periodoA, 'costoLaboralValidado'), valor(periodoB, 'costoLaboralValidado')) } };
+    }
+    return this.consultarProduccionModelosCompleto(consulta, permisos);
   }
 
   async consultarCargaOperacional(consulta: Consulta) {

@@ -75,6 +75,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/dashboard-m7/situacion-financiera', derivar('consultarSituacionFinancieraM7'));
   rutas.get('/dashboard-m7/operacion/costo-remuneraciones', derivar('consultarCostoRemuneracionesM7'));
   rutas.get('/dashboard-m7/operacion/ordenes-trabajo', derivar('consultarOrdenesTrabajoM7'));
+  rutas.get('/dashboard-m7/operacion/produccion-modelos', derivar('consultarProduccionModelosM7'));
   rutas.get('/dashboard-m7/operacion/carga', derivar('consultarCargaOperacionalM7'));
   rutas.get('/dashboard-m7/operacion/instalaciones', derivar('consultarInstalacionesM7'));
   rutas.get('/dashboard-m7/operacion/instalaciones/atrasos', derivar('consultarAtrasosInstalacionesM7'));
