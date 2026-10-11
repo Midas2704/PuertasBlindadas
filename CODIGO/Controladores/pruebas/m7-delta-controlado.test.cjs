@@ -26,28 +26,28 @@ test('M7 delta controlado CU218-CU258', async t => {
   });
 
   await t.test('03 conversión usa NV activa, excluye anulada y no depende de pagos', async () => {
-    const originalNotas = prisma.nota_venta.findMany; const originalCotizaciones = prisma.cotizacion.findMany;
-    prisma.nota_venta.findMany = async () => [];
+    const originalNotas = prisma.nota_venta.findMany; const originalCotizaciones = prisma.cotizacion.findMany; const originalCostos = prisma.costo_proyecto.findMany; const originalTareas = prisma.tarea_remunerable.findMany;
+    prisma.nota_venta.findMany = async () => []; prisma.costo_proyecto.findMany = async () => []; prisma.tarea_remunerable.findMany = async () => [];
     const ficha_cliente = { cliente_financiero: { tipo_cliente_financiero: { nombre_tipo_cliente_financiero: 'B2B' } } };
-    prisma.cotizacion.findMany = async () => [{ id_cotizacion: 1, ficha_cliente, nota_venta: { estado_nota_venta: 'confirmada', asignacion_pago_cliente: [] } }, { id_cotizacion: 2, ficha_cliente, nota_venta: { estado_nota_venta: 'anulada', asignacion_pago_cliente: [{ monto: 999 }] } }, { id_cotizacion: 3, ficha_cliente, nota_venta: null }];
+    prisma.cotizacion.findMany = async () => [{ id_cotizacion: 1, fecha_emision: new Date('2026-10-01'), ficha_cliente, nota_venta: { estado_nota_venta: 'confirmada', asignacion_pago_cliente: [] } }, { id_cotizacion: 2, fecha_emision: new Date('2026-10-02'), ficha_cliente, nota_venta: { estado_nota_venta: 'anulada', asignacion_pago_cliente: [{ monto: 999 }] } }, { id_cotizacion: 3, fecha_emision: new Date('2026-10-03'), ficha_cliente, nota_venta: null }];
     try { const r = await new M7Controller().consultarAnalisisVentas(consulta, ['CU218']); assert.deepEqual(r.conversion.valor, { totalCotizaciones: 3, convertidas: 1, tasaPorcentual: 33.33 }); }
-    finally { prisma.nota_venta.findMany = originalNotas; prisma.cotizacion.findMany = originalCotizaciones; }
+    finally { prisma.nota_venta.findMany = originalNotas; prisma.cotizacion.findMany = originalCotizaciones; prisma.costo_proyecto.findMany = originalCostos; prisma.tarea_remunerable.findMany = originalTareas; }
   });
 
   await t.test('04 denominador cero queda NO_APLICA', async () => {
-    const originalNotas = prisma.nota_venta.findMany; const originalCotizaciones = prisma.cotizacion.findMany;
-    prisma.nota_venta.findMany = async () => []; prisma.cotizacion.findMany = async () => [];
+    const originalNotas = prisma.nota_venta.findMany; const originalCotizaciones = prisma.cotizacion.findMany; const originalCostos = prisma.costo_proyecto.findMany; const originalTareas = prisma.tarea_remunerable.findMany;
+    prisma.nota_venta.findMany = async () => []; prisma.cotizacion.findMany = async () => []; prisma.costo_proyecto.findMany = async () => []; prisma.tarea_remunerable.findMany = async () => [];
     try { const r = await new M7Controller().consultarAnalisisVentas(consulta, ['CU218']); assert.equal(r.conversion.estado, 'NO_APLICA'); assert.equal(r.conversion.valor.tasaPorcentual, null); }
-    finally { prisma.nota_venta.findMany = originalNotas; prisma.cotizacion.findMany = originalCotizaciones; }
+    finally { prisma.nota_venta.findMany = originalNotas; prisma.cotizacion.findMany = originalCotizaciones; prisma.costo_proyecto.findMany = originalCostos; prisma.tarea_remunerable.findMany = originalTareas; }
   });
 
   await t.test('05 liquidez acumula movimientos e incorpora Caja Chica sólo mediante su movimiento', async () => {
-    const original = prisma.movimiento_financiero.findMany;
+    const original = prisma.movimiento_financiero.findMany; const originalCaja = prisma.gasto_caja_chica_m5.findMany;
     const movimiento = (id, tipo, naturaleza, monto, origen = 'pago') => ({ id_movimiento_financiero: id, fecha_movimiento: new Date('2026-10-01T00:00:00Z'), estado_movimiento: 'confirmado', tipo_movimiento_financiero: tipo, naturaleza_movimiento: naturaleza, monto_movimiento: new Prisma.Decimal(monto), moneda: { codigo_moneda: 'CLP' }, origen_movimiento_financiero: [{ entidad_origen: origen, id_registro_origen: id, descripcion_origen: origen }] });
-    prisma.movimiento_financiero.findMany = async () => [movimiento(1, 'PAGO_CLIENTE', 'ingreso', 100), movimiento(2, 'PAGO_PROVEEDOR', 'egreso', 20), movimiento(3, 'AJUSTE_MANUAL_LIQUIDEZ', 'ingreso', 30, 'ajuste_manual_liquidez'), movimiento(4, 'AJUSTE_MANUAL_LIQUIDEZ', 'egreso', 5, 'ajuste_manual_liquidez'), movimiento(5, 'CAJA CHICA', 'egreso', 999, 'gasto_caja_chica')];
-    const modulo = new M7Controller(); modulo.consultarCuentasCobrarCompleto = async () => ({ cartera: { valor: [] } }); modulo.consultarCuentasPagarCompleto = async () => ({ cartera: { valor: [] } });
+    prisma.movimiento_financiero.findMany = async () => [movimiento(1, 'PAGO_CLIENTE', 'ingreso', 100), movimiento(2, 'PAGO_PROVEEDOR', 'egreso', 20), movimiento(3, 'AJUSTE_MANUAL_LIQUIDEZ', 'ingreso', 30, 'ajuste_manual_liquidez'), movimiento(4, 'AJUSTE_MANUAL_LIQUIDEZ', 'egreso', 5, 'ajuste_manual_liquidez'), movimiento(5, 'CAJA CHICA', 'egreso', 999, 'gasto_caja_chica')]; prisma.gasto_caja_chica_m5.findMany = async () => [];
+    const modulo = new M7Controller(); modulo.consultarDisponibilidadesBancariasM7 = async () => ({ estado: 'DATOS_INSUFICIENTES', valor: null, detalle: 'Fixture sin saldos bancarios' }); modulo.consultarCuentasCobrarCompleto = async () => ({ cartera: { valor: [] } }); modulo.consultarCuentasPagarCompleto = async () => ({ cartera: { valor: [] } }); modulo.consultarProyeccionesM7 = async () => ({ estado: 'SIN_RESULTADOS', categorias: [], proyecciones: [], totales: [] });
     try { const r = await modulo.consultarLiquidez(consulta); assert.equal(r.liquidezActual.estado, 'DATOS_INSUFICIENTES'); assert.equal(r.liquidezActual.valor, null); assert.deepEqual(r.flujoHistorico.valor.totales[0], { moneda: 'CLP', ingresosReales: 100, egresosReales: 1019, ajustesEntrada: 30, ajustesSalida: 5, flujoReal: -894 }); assert.equal(r.proyeccion.valor.horizonteDias, 30); }
-    finally { prisma.movimiento_financiero.findMany = original; }
+    finally { prisma.movimiento_financiero.findMany = original; prisma.gasto_caja_chica_m5.findMany = originalCaja; }
   });
 
   await t.test('06 ajuste manual exige Administrador y justificación', async () => {
@@ -102,17 +102,17 @@ test('M7 delta controlado CU218-CU258', async t => {
   });
 
   await t.test('13 inventario valorizado calcula stock por costo unitario y conserva cobertura', async () => {
-    const originalStock = prisma.inventario_bodega.findMany; const originalPrecio = prisma.historial_precio_material.findMany;
-    prisma.inventario_bodega.findMany = async () => [{ material_sku: 'MAT-1', inventario_bodega_cantidad_fisica: new Prisma.Decimal(3), bodega: { bodega_nombre_bodega: 'Central', bodega_direccion: 'Uno' }, material: { material_nombre_material: 'Acero', material_categoria_general: { material_categoria_general_nombre: 'Metal' } } }];
-    prisma.historial_precio_material.findMany = async () => [{ material_sku: 'MAT-1', precio_unitario_convertido: new Prisma.Decimal(25), precio_unitario: new Prisma.Decimal(20) }];
-    try { const r = await new M7Controller().consultarInventarioValorizado(consulta); assert.equal(r.valorTotal.valor, 75); assert.equal(r.inventario[0].valor, 75); }
-    finally { prisma.inventario_bodega.findMany = originalStock; prisma.historial_precio_material.findMany = originalPrecio; }
+    const originalStock = prisma.inventario_bodega.findMany; const originalPrecio = prisma.historial_precio_material.findMany; const originalReserva = prisma.reserva_inventario.findMany;
+    prisma.inventario_bodega.findMany = async () => [{ material_sku: 'MAT-1', lote_id_lote: 1n, bodega_id_bodega: 1n, inventario_bodega_cantidad_fisica: new Prisma.Decimal(3), inventario_bodega_cantidad_reservada: new Prisma.Decimal(0), bodega: { bodega_nombre_bodega: 'Central', bodega_direccion: 'Uno' }, lote: { lote_numero_lote: 'L-1' }, material: { material_nombre_material: 'Acero', material_unidad_medida: { material_unidad_medida_nombre: 'unidad' }, material_categoria_general: { material_categoria_general_nombre: 'Metal' } } }];
+    prisma.historial_precio_material.findMany = async () => [{ material_sku: 'MAT-1', precio_unitario_convertido: null, precio_unitario: new Prisma.Decimal(25), tipo_cambio_usado: null, id_proveedor: 1, moneda: { codigo_moneda: 'CLP' } }]; prisma.reserva_inventario.findMany = async () => [];
+    try { const r = await new M7Controller().consultarInventarioValorizado(consulta); assert.equal(r.valorTotal.valor, 75); assert.equal(r.existencias[0].valorActualReferencial, 75); }
+    finally { prisma.inventario_bodega.findMany = originalStock; prisma.historial_precio_material.findMany = originalPrecio; prisma.reserva_inventario.findMany = originalReserva; }
   });
 
   await t.test('14 riesgo de stock distingue material suficiente y faltante sin score', async () => {
     const originales = [prisma.inventario_bodega.findMany, prisma.detalle_material_orden_compra_m5.findMany, prisma.material_orden_trabajo.findMany, prisma.reserva_inventario.findMany];
     prisma.inventario_bodega.findMany = async () => [{ material_sku: 'OK', inventario_bodega_cantidad_fisica: new Prisma.Decimal(5), inventario_bodega_cantidad_reservada: new Prisma.Decimal(0) }, { material_sku: 'FALTA', inventario_bodega_cantidad_fisica: new Prisma.Decimal(1), inventario_bodega_cantidad_reservada: new Prisma.Decimal(0) }];
-    prisma.detalle_material_orden_compra_m5.findMany = async () => [{ material_sku: 'OK', cantidad_pedida: new Prisma.Decimal(5), cantidad_recibida: new Prisma.Decimal(0), material: { material_nombre_material: 'Material OK' }, orden_compra: {} }];
+    prisma.detalle_material_orden_compra_m5.findMany = async () => [{ material_sku: 'OK', cantidad_pedida: new Prisma.Decimal(5), cantidad_recibida: new Prisma.Decimal(0), material: { material_nombre_material: 'Material OK' }, orden_compra: { estado_ocs: 'abierta' } }];
     prisma.material_orden_trabajo.findMany = async () => [{ material_sku: 'OK', orden_trabajo_id_orden: 1n, material_orden_trabajo_consumo_estimado: new Prisma.Decimal(8), material_orden_trabajo_consumo_real: new Prisma.Decimal(0), material: { material_nombre_material: 'Material OK' }, orden_trabajo: { orden_trabajo_estado: 'en_progreso' } }, { material_sku: 'FALTA', orden_trabajo_id_orden: 2n, material_orden_trabajo_consumo_estimado: new Prisma.Decimal(4), material_orden_trabajo_consumo_real: new Prisma.Decimal(0), material: { material_nombre_material: 'Material Falta' }, orden_trabajo: { orden_trabajo_estado: 'en_progreso' } }];
     prisma.reserva_inventario.findMany = async () => [];
     try { const r = await new M7Controller().consultarRiesgoStock(consulta); assert.equal(r.materiales.find(item => item.sku === 'OK').riesgo, false); assert.equal(r.materiales.find(item => item.sku === 'FALTA').faltante, 3); assert.equal(Object.hasOwn(r.materiales[0], 'score'), false); }
@@ -121,7 +121,7 @@ test('M7 delta controlado CU218-CU258', async t => {
 
   await t.test('15 recepciones futuras calculan cantidad pendiente y fecha esperada', async () => {
     const original = prisma.detalle_material_orden_compra_m5.findMany;
-    prisma.detalle_material_orden_compra_m5.findMany = async () => [{ id_detalle_material_oc_m5: 1n, id_ocs_m5: 7, material_sku: 'MAT-1', cantidad_pedida: new Prisma.Decimal(10), cantidad_recibida: new Prisma.Decimal(4), fecha_esperada: new Date('2026-10-20T00:00:00Z'), material: { material_nombre_material: 'Acero' }, orden_compra: { proveedor: { nombre_razon_social: 'Proveedor' }, fecha_esperada_recepcion: null, id_ficha_cliente_contexto: null, id_cotizacion_contexto: null, id_proyecto_financiero_contexto: 3, id_orden_trabajo_contexto: 9n } }];
+    prisma.detalle_material_orden_compra_m5.findMany = async () => [{ id_detalle_material_oc_m5: 1n, id_ocs_m5: 7, material_sku: 'MAT-1', cantidad_pedida: new Prisma.Decimal(10), cantidad_recibida: new Prisma.Decimal(4), fecha_esperada: new Date('2026-10-20T00:00:00Z'), material: { material_nombre_material: 'Acero' }, orden_compra: { estado_ocs: 'abierta', proveedor: { nombre_razon_social: 'Proveedor' }, fecha_esperada_recepcion: null, id_ficha_cliente_contexto: null, id_cotizacion_contexto: null, id_proyecto_financiero_contexto: 3, id_orden_trabajo_contexto: 9n } }];
     try { const r = await new M7Controller().consultarComprasRecepciones(consulta); assert.equal(r.ordenesPendientes[0].cantidadPendiente, 6); assert.equal(r.ordenesPendientes[0].fechaEsperada, '2026-10-20'); assert.equal(r.ordenesPendientes[0].idOrden, '9'); }
     finally { prisma.detalle_material_orden_compra_m5.findMany = original; }
   });
@@ -149,7 +149,7 @@ test('M7 delta controlado CU218-CU258', async t => {
 
   await t.test('19 inventario y compras son consultas de sólo lectura en M7', () => {
     const controlador = fuente('src/controladores/M7Controller.ts'); const bloque = controlador.slice(controlador.indexOf('async consultarInventarioValorizado'), controlador.indexOf('async consultarResumenResultados'));
-    assert.doesNotMatch(bloque, /\.(?:create|update|delete|upsert)\s*\(/); assert.match(bloque, /cantidad_pedida\.minus\(item\.cantidad_recibida\)/);
+    assert.doesNotMatch(bloque, /\.(?:create|update|delete|upsert)\s*\(/); assert.match(bloque, /calcularCantidadPendienteCompraM7/);
   });
 
   await t.test('20 Cotización muestra advertencia sin bloquear aprobación', () => {
