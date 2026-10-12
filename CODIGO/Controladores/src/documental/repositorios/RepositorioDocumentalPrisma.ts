@@ -299,6 +299,46 @@ export class RepositorioDocumentalPrisma {
     return this.cliente.producto_comercial_documento.findMany({ where: { id_extension_producto_comercial: idProducto }, include: { documento: { include: { versiones: { orderBy: { numero_version: 'desc' } } } } }, orderBy: [{ orden_presentacion: 'asc' }, { asociado_en: 'asc' }] });
   }
 
+  /** Consulta acotada para el servicio comercial. No selecciona claves de objeto, proveedor ni hash. */
+  async consultarDocumentosProducto(idProducto: number, incluirHistorial: boolean, limiteVersiones = 50) {
+    const limite = Math.min(Math.max(Math.trunc(limiteVersiones), 1), 50);
+    return this.cliente.extension_producto_comercial.findUnique({
+      where: { id_extension_producto_comercial: idProducto },
+      select: {
+        id_extension_producto_comercial: true,
+        estado: true,
+        documentos: {
+          where: { estado: 'ACTIVO', documento: { estado: 'ACTIVO' } },
+          orderBy: [{ orden_presentacion: 'asc' }, { asociado_en: 'asc' }],
+          take: 200,
+          select: {
+            id_producto_comercial_documento: true, tipo_documento: true, orden_presentacion: true,
+            es_imagen_principal: true, habilitado_b2b: true, habilitado_b2c: true, asociado_en: true,
+            documento: {
+              select: {
+                id_documento_logico: true, titulo: true, clasificacion: true,
+                numero_version_actual: true, creado_en: true, actualizado_en: true,
+                versiones: {
+                  orderBy: { numero_version: 'desc' }, take: incluirHistorial ? limite : 1,
+                  select: {
+                    id_version_documento: true, numero_version: true, estado: true,
+                    nombre_seguro: true, mime_detectado: true, tamano_bytes: true,
+                    creado_en: true, validado_en: true,
+                    creador: { select: { usuario_username: true } },
+                    variantes_origen: {
+                      where: { tipo_variante: { in: ['MINIATURA', 'VISTA_PREVIA'] } },
+                      select: { tipo_variante: true, version_derivada: { select: { id_version_documento: true, estado: true } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
   async registrarEvento(entrada: RegistrarEventoDocumentalEntrada) {
     const tipo = textoRequerido(entrada.tipoEvento, 'Tipo de evento', 80).toUpperCase();
     const clave = textoRequerido(entrada.claveIdempotencia, 'Clave de idempotencia', 180);

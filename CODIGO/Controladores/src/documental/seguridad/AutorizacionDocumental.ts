@@ -1,6 +1,11 @@
 import { ErrorDocumental } from '../tipos';
 
-export type AccionDocumental = 'CONSULTAR_METADATA' | 'CONSULTAR_HISTORIAL' | 'ASOCIAR_PRODUCTO' | 'CREAR_INTENCION' | 'CONFIRMAR_CARGA' | 'DESCARGAR' | 'REEMPLAZAR' | 'ARCHIVAR' | 'GESTIONAR_CUARENTENA' | 'ADMINISTRAR_CONSERVACION';
+export type AccionDocumental =
+  | 'CONSULTAR_METADATA' | 'CONSULTAR_VERSIONES' | 'CONSULTAR_HISTORIAL'
+  | 'CREAR_INTENCION' | 'CONFIRMAR_CARGA' | 'DESCARGAR' | 'REEMPLAZAR'
+  | 'ASOCIAR_PRODUCTO' | 'DEFINIR_IMAGEN_PRINCIPAL' | 'ORDENAR_GALERIA'
+  | 'DEFINIR_USO_B2B_B2C' | 'ARCHIVAR_DOCUMENTO' | 'ARCHIVAR'
+  | 'GESTIONAR_CUARENTENA' | 'ADMINISTRAR_CONSERVACION';
 
 export interface ActorBackendDocumental {
   id: bigint;
@@ -20,6 +25,7 @@ export type VerificadorAlcanceDocumental = (actor: ActorBackendDocumental, conte
 
 const PERMISOS_APROBADOS_POR_ACCION: Partial<Record<AccionDocumental, string>> = {
   CONSULTAR_METADATA: 'CU360',
+  CONSULTAR_VERSIONES: 'CU367',
   CONSULTAR_HISTORIAL: 'CU367',
   ASOCIAR_PRODUCTO: 'CU366',
 };
@@ -27,6 +33,16 @@ const PERMISOS_APROBADOS_POR_ACCION: Partial<Record<AccionDocumental, string>> =
 /** Usa exclusivamente CU ya existentes. Las acciones sin CU aprobada se cierran por defecto. */
 export class AutorizadorDocumental {
   constructor(private readonly verificarAlcance: VerificadorAlcanceDocumental) {}
+
+  async puede(actor: ActorBackendDocumental, accion: AccionDocumental, contexto: ContextoAutorizacionDocumental): Promise<boolean> {
+    try {
+      await this.exigir(actor, accion, contexto);
+      return true;
+    } catch (error) {
+      if (error instanceof ErrorDocumental && [401, 403].includes(error.estadoHttp)) return false;
+      throw error;
+    }
+  }
 
   async exigir(actor: ActorBackendDocumental, accion: AccionDocumental, contexto: ContextoAutorizacionDocumental): Promise<void> {
     if (!actor.id || !actor.sesion) throw new ErrorDocumental('ACTOR_NO_AUTENTICADO', 'Se requiere una sesión backend autenticada', 401);

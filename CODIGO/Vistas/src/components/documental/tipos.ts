@@ -24,9 +24,11 @@ export type TipoDocumentoComercial =
   | 'OTRO_DOCUMENTO_AUTORIZADO';
 
 export type VarianteVistaPrevia = {
+  disponible: boolean;
   tipo: 'MINIATURA' | 'VISTA_PREVIA';
-  urlTemporal: string;
-  expiraEn: string;
+  idVersion: string;
+  urlTemporal?: string;
+  expiraEn?: string;
 };
 
 export type VersionDocumentoComercial = {
@@ -47,7 +49,7 @@ export type DocumentoComercialProducto = {
   clasificacion: string;
   tipo: TipoDocumentoComercial;
   estado: EstadoDocumentoComercial;
-  versionActual: number;
+  versionActual: number | null;
   incorporadoEn: string;
   actualizadoEn: string;
   esImagenPrincipal: boolean;
@@ -56,7 +58,7 @@ export type DocumentoComercialProducto = {
   habilitadoB2c: boolean;
   nombreSeguro?: string | null;
   mimeDetectado?: string | null;
-  tamanoBytes?: number | null;
+  tamanoBytes?: string | null;
   vistaPrevia?: VarianteVistaPrevia | null;
   versiones: readonly VersionDocumentoComercial[];
 };

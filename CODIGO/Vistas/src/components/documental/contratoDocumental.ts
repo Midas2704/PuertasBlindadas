@@ -2,7 +2,12 @@ import type { CapacidadesDocumentalesProducto, DocumentoComercialProducto } from
 
 export type MetadatosDocumentalesProducto = {
   productoId: number;
+  estadoProducto?: string;
+  estadoIntegracion?: 'VACIO' | 'LISTO';
   documentos: readonly DocumentoComercialProducto[];
+  fotografias?: readonly DocumentoComercialProducto[];
+  documentosTecnicos?: readonly DocumentoComercialProducto[];
+  fotografiaPrincipal?: DocumentoComercialProducto | null;
   capacidades: CapacidadesDocumentalesProducto;
 };
 
