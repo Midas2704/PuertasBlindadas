@@ -1,4 +1,5 @@
 import { RepositorioDocumentalPrisma } from './repositorios/RepositorioDocumentalPrisma';
+import type { StorageAdapter } from './StorageAdapter';
 import type {
   ActorDocumental, AsociarProductoEntrada, CrearDocumentoEntrada, CrearIntencionEntrada,
   EstadoDocumento, EstadoIntencion, EstadoOutbox, EstadoVersion, RegistrarEventoDocumentalEntrada,
@@ -10,7 +11,13 @@ import type {
  * Esas operaciones no se exponen hasta inyectar un StorageAdapter real y controles de 4.3/4.4.
  */
 export class ServicioDocumental {
-  constructor(private readonly repositorio = new RepositorioDocumentalPrisma()) {}
+  constructor(
+    private readonly repositorio = new RepositorioDocumentalPrisma(),
+    private readonly almacenamiento?: StorageAdapter,
+  ) {}
+
+  /** Sólo expone capacidades técnicas; 4.3 no coordina todavía carga con estados persistentes. */
+  capacidadesStorage() { return this.almacenamiento?.capacidades ?? null; }
 
   crearDocumento(entrada: CrearDocumentoEntrada, actor: ActorDocumental) { return this.repositorio.crearDocumento(entrada, actor); }
   consultarDocumento(id: bigint) { return this.repositorio.consultarDocumento(id); }
@@ -28,4 +35,7 @@ export class ServicioDocumental {
 }
 
 export type { StorageAdapter } from './StorageAdapter';
+export { crearStorageAdapter, crearStorageAdapterDesdeEntorno } from './adaptadores/crearStorageAdapter';
+export { cargarConfiguracionStorage, ErrorConfiguracionStorage } from './adaptadores/configuracionStorage';
+export { ErrorStorage, S3CompatibleStorageAdapter } from './adaptadores/S3CompatibleStorageAdapter';
 export * from './tipos';
