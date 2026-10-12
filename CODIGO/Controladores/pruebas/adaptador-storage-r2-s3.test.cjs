@@ -169,8 +169,12 @@ test('Bloque 4.3 — contrato portable R2/S3', async t => {
   });
 
   await t.test('22 firma GET con nombre seguro', async () => {
-    const { adaptador, firmas } = adaptar(); await adaptador.firmarDescarga({ referencia: ref(), nombreDescarga: 'ficha técnica.pdf', expiraEn: new Date(AHORA.getTime() + 60000) });
+    const { adaptador, firmas } = adaptar();
+    const resultado=await adaptador.firmarDescarga({ referencia: ref(), nombreDescarga: 'ficha técnica.pdf', mimeRespuesta:'application/pdf', cacheControlRespuesta:'private, no-store', expiraEn: new Date(AHORA.getTime() + 60000) });
     assert.equal(firmas[0].nombre, 'GetObjectCommand'); assert.match(firmas[0].entrada.ResponseContentDisposition, /^attachment;/);
+    assert.equal(firmas[0].entrada.ResponseContentType,'application/pdf');
+    assert.equal(firmas[0].entrada.ResponseCacheControl,'private, no-store');
+    assert.deepEqual(resultado.parametrosRespuestaFirmados,{'content-disposition':firmas[0].entrada.ResponseContentDisposition,'content-type':'application/pdf','cache-control':'private, no-store'});
   });
 
   await t.test('23 expiración firmada respeta segundos configurados', async () => {
@@ -283,8 +287,9 @@ test('Bloque 4.3 — contrato portable R2/S3', async t => {
 
   await t.test('45 copia objetos mediante comando y verifica destino con HEAD', async () => {
     const { adaptador, cliente } = adaptar();
-    await adaptador.copiarObjeto({ origen: ref('quarantine'), destino: ref('objects'), claveIdempotencia: 'copiar-1' });
+    await adaptador.copiarObjeto({ origen: ref('quarantine'), destino: ref('objects'), claveIdempotencia: 'copiar-1', etagOrigen:'"etag-inmutable"' });
     assert.deepEqual(cliente.llamadas.map(x => x.nombre), ['CopyObjectCommand', 'HeadObjectCommand']);
+    assert.equal(cliente.llamadas[0].entrada.CopySourceIfMatch,'"etag-inmutable"');
   });
 
   await t.test('46 lista multipart incompletos sólo bajo claves documentales válidas', async () => {

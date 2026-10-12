@@ -13,9 +13,10 @@ const { ProcesadorOutboxDocumental } = require('../dist/documental/operaciones/P
 const { ReconciliadorDocumental } = require('../dist/documental/operaciones/ReconciliadorDocumental');
 const { cargarConfiguracionSeguridadDocumental } = require('../dist/documental/seguridad/configuracionSeguridadDocumental');
 
-const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
-const png = Buffer.concat([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]), Buffer.from('IEND')]);
-const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF');
+const uuid = '11111111-1111-4111-8111-111111111111';
+const jpeg = Buffer.from([0xff,0xd8,0xff,0xe0,0,2,0xff,0xc0,0,2,0xff,0xd9]);
+const png = Buffer.concat([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]),Buffer.from([0,0,0,13]),Buffer.from('IHDR'),Buffer.alloc(17),Buffer.alloc(4),Buffer.from('IEND'),Buffer.alloc(4)]);
+const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<</Type /Catalog>>\nendobj\nstartxref\n9\n%%EOF\n');
 const webp = (() => { const b = Buffer.alloc(16); b.write('RIFF'); b.writeUInt32LE(8, 4); b.write('WEBP', 8); b.write('VP8 ', 12); return b; })();
 const sha = b => createHash('sha256').update(b).digest('hex');
 const politica = mimes => ({ minimoBytes: 1n, maximoBytes: 1024n, mimesPermitidos: mimes });
@@ -49,6 +50,23 @@ test('rechaza JPEG truncado y archivo comprimido', async () => {
   assert.equal(truncado.mimeDetectado,null); assert.equal(zip.mimeDetectado,null);
 });
 
+test('rechaza estructuras incompletas aunque conserven firmas conocidas', async () => {
+  const jpegSinSof=Buffer.from([0xff,0xd8,0xff,0xe0,0,2,0xff,0xd9]);
+  const pngSinIhdr=Buffer.concat([png.subarray(0,8),Buffer.alloc(4),Buffer.from('IEND'),Buffer.alloc(4)]);
+  const pdfConCola=Buffer.concat([pdf,Buffer.from('<script>activo</script>')]);
+  assert.equal((await validar(jpegSinSof,'image/jpeg')).mimeDetectado,null);
+  assert.equal((await validar(pngSinIhdr,'image/png')).mimeDetectado,null);
+  assert.equal((await validar(pdfConCola,'application/pdf')).mimeDetectado,null);
+});
+
+test('rechaza políglota con estructura JPEG y contenido activo embebido', async () => {
+  const poliglota=Buffer.concat([jpeg.subarray(0,-2),Buffer.from('<script>alert(1)</script>'),jpeg.subarray(-2)]);
+  const resultado=await validar(poliglota,'image/jpeg');
+  assert.equal(resultado.mimeDetectado,'image/jpeg');
+  assert.ok(resultado.codigos.includes('CONTENIDO_EMBEBIDO_SOSPECHOSO'));
+  assert.equal(resultado.valido,false);
+});
+
 test('propaga error de lectura sin convertirlo en aprobación', async () => {
   const contenido=new Readable({read(){this.destroy(new Error('LECTURA_FALLIDA'));}});
   await assert.rejects(()=>validarIntegridadContenido({contenido,mimeDeclarado:'image/jpeg',tamanoEsperado:1n,politica:politica(['image/jpeg'])}),/LECTURA_FALLIDA/);
@@ -66,7 +84,7 @@ test('corta el stream al superar límite técnico', async () => {
 });
 
 test('rechaza PDF con acción activa', async () => {
-  const activo = Buffer.from('%PDF-1.4\n/OpenAction 1 0 R\n%%EOF');
+  const activo = Buffer.from('%PDF-1.4\n/OpenAction 1 0 R\nstartxref\n9\n%%EOF');
   const resultado = await validar(activo, 'application/pdf');
   assert.ok(resultado.codigos.includes('PDF_CONTENIDO_ACTIVO'));
 });
@@ -119,6 +137,15 @@ test('adaptador clamd normaliza respuesta inválida y conexión fallida', async 
   assert.equal((await fallido.escanear(Readable.from(jpeg))).estado,'NO_DISPONIBLE');
 });
 
+test('adaptador clamd falla cerrado ante timeout sin exponer detalles internos', async () => {
+  const socket=socketClam('stream: OK\0');
+  socket.setTimeout=()=>{queueMicrotask(()=>socket.emit('timeout'));return socket;};
+  socket.end=()=>{};
+  const resultado=await new ClamAvDaemonAdapter({host:'local',puerto:3310,timeoutMs:1,maximoBytes:100n},()=>socket).escanear(Readable.from(jpeg));
+  assert.deepEqual(resultado,{estado:'NO_DISPONIBLE',motor:'CLAMAV_DAEMON',codigo:'CLAMAV_TIMEOUT'});
+  assert.doesNotMatch(JSON.stringify(resultado),/local|3310|secret|token/i);
+});
+
 const actor = { id: 7n, sesion: 's', permisos: ['CU360','CU366','CU367'], administrador: false };
 test('autorización usa permiso existente y alcance backend', async () => {
   const autorizador = new AutorizadorDocumental(async (_actor, contexto) => contexto.idProducto === 8);
@@ -138,112 +165,170 @@ test('auditoría rechaza URLs, tokens y secretos', () => {
   assert.throws(() => validarEventoAuditoria({ ...base, motivoCodigo: 'secret-value' }), /PROHIBIDO/);
 });
 
-function entornoCoordinador({ antivirusEstado = 'LIMPIO', bytes = jpeg, proveedor = 'R2', autorizar = async()=>{}, fallarCopia = false } = {}) {
-  const objetos = new Map([['tmp:tmp/123', bytes]]);
+function entornoCoordinador({ antivirusEstado = 'LIMPIO', bytes = jpeg, proveedor = 'R2', autorizar = async()=>{}, fallarCopia = false, antesCopiar, despuesEscaneo, fallarRegistroUnaVez = false } = {}) {
+  const objetos = new Map([[`tmp:tmp/${uuid}`, bytes]]);
+  const etag = b => `"${sha(b).slice(0,32)}"`;
   const storage = {
-    proveedor: 'R2', capacidades: {},
-    consultarObjeto: async r => { const b = objetos.get(`${r.contenedor}:${r.clave}`); if (!b) throw Object.assign(new Error('NO_ENCONTRADO'),{codigo:'NO_ENCONTRADO'}); return { tamanoBytes: BigInt(b.length) }; },
+    proveedor, capacidades: {},
+    consultarObjeto: async r => { const b = objetos.get(`${r.contenedor}:${r.clave}`); if (!b) throw Object.assign(new Error('NO_ENCONTRADO'),{codigo:'NO_ENCONTRADO'}); return { tamanoBytes: BigInt(b.length), etag:etag(b) }; },
     abrirLectura: async r => Readable.from(objetos.get(`${r.contenedor}:${r.clave}`)),
-    copiarObjeto: async ({origen,destino}) => { if(fallarCopia)throw Object.assign(new Error('FALLO_COPIA'),{codigo:'TEMPORAL'}); const b = Buffer.from(objetos.get(`${origen.contenedor}:${origen.clave}`)); objetos.set(`${destino.contenedor}:${destino.clave}`, b); return { tamanoBytes: BigInt(b.length) }; },
+    copiarObjeto: async entrada => { if(fallarCopia)throw Object.assign(new Error('FALLO_COPIA'),{codigo:'TEMPORAL'}); if(antesCopiar)await antesCopiar(entrada,objetos); const b=objetos.get(`${entrada.origen.contenedor}:${entrada.origen.clave}`); if(entrada.etagOrigen&&entrada.etagOrigen!==etag(b))throw Object.assign(new Error('ORIGEN_CAMBIO'),{codigo:'CONFLICTO'}); const copia=Buffer.from(b); objetos.set(`${entrada.destino.contenedor}:${entrada.destino.clave}`,copia); return{tamanoBytes:BigInt(copia.length),etag:etag(copia)}; },
   };
-  const intencion = { id_publico:'123', usuario_solicitante:7n, clasificacion:'FOTO', nombre_declarado:'foto.jpg', mime_declarado:'image/jpeg', tamano_esperado:BigInt(bytes.length), clave_temporal:'tmp/123', estado:'PENDIENTE', revision:1, expira_en:new Date(Date.now()+60000) };
-  const versiones = new Map(); let siguiente = 1n;
+  const intencion = { id_publico:uuid, id_documento_logico:2n, usuario_solicitante:7n, clasificacion:'FOTO', nombre_declarado:'foto.jpg', mime_declarado:'image/jpeg', tamano_esperado:BigInt(bytes.length), clave_temporal:`tmp/${uuid}`, estado:'PENDIENTE', revision:1, expira_en:new Date(Date.now()+60000) };
+  const versiones = new Map(); let siguiente = 1n; let fallosRegistro=0;
   const repo = {
     consultarIntencion: async () => ({...intencion}),
-    cambiarEstadoIntencion: async (_id, revision, estado) => { assert.equal(revision,intencion.revision); intencion.estado=estado; intencion.revision++; return {...intencion}; },
+    cambiarEstadoIntencion: async (_id, revision, estado) => { if(revision!==intencion.revision)throw Object.assign(new Error('REVISION_DESACTUALIZADA'),{codigo:'REVISION_DESACTUALIZADA'}); intencion.estado=estado; intencion.revision++; return {...intencion}; },
     consultarVersionPorObjeto: async (_p,c,k) => versiones.get(`${c}:${k}`) ?? null,
-    registrarVersionYFinalizarIntencion: async entrada => { const v={id_version_documento:siguiente++,estado:entrada.estadoIntencion}; versiones.set(`${entrada.version.contenedor}:${entrada.version.claveObjeto}`,v); intencion.estado=entrada.estadoIntencion; return v; },
+    registrarVersionYFinalizarIntencion: async entrada => { if(fallarRegistroUnaVez&&fallosRegistro++===0)throw Object.assign(new Error('DB_TEMPORAL'),{codigo:'DB_TEMPORAL'}); const v={id_version_documento:siguiente++,id_documento_logico:entrada.version.idDocumento,estado:entrada.estadoIntencion,tamano_bytes:BigInt(entrada.version.tamanoBytes),sha256:entrada.version.sha256,mime_detectado:entrada.version.mimeDetectado,resultado_validaciones:entrada.version.resultadoValidaciones}; versiones.set(`${entrada.version.contenedor}:${entrada.version.claveObjeto}`,v); intencion.estado=entrada.estadoIntencion; return v; },
   };
-  const coordinador = new CoordinadorCargaDocumental(repo, storage, { nombre:'TEST', escanear: async () => ({ estado:antivirusEstado }) }, autorizar, { proveedor, contenedorTemporal:'tmp', contenedorDefinitivo:'docs', prefijoDisponible:'objects', prefijoCuarentena:'quarantine', politicasPorClasificacion:{ FOTO:politica(['image/jpeg']) } });
-  return { coordinador, objetos, repo, intencion };
+  const coordinador = new CoordinadorCargaDocumental(repo, storage, { nombre:'TEST', escanear: async contenido => { for await(const _ of contenido){} if(despuesEscaneo)await despuesEscaneo(objetos); return { estado:antivirusEstado }; } }, autorizar, { proveedor, contenedorTemporal:'tmp', contenedorDefinitivo:'docs', prefijoDisponible:'objects', prefijoCuarentena:'quarantine', politicasPorClasificacion:{ FOTO:politica(['image/jpeg']) } });
+  return { coordinador, objetos, repo, intencion, cantidadVersiones:()=>versiones.size };
 }
 
 test('carga limpia se promueve, verifica y queda DISPONIBLE', async () => {
   const { coordinador, objetos } = entornoCoordinador();
-  const resultado = await coordinador.confirmar({ idIntencion:'123', idDocumento:2n, actor });
+  const resultado = await coordinador.confirmar({ idIntencion:uuid, idDocumento:2n, actor });
   assert.equal(resultado.estado, 'DISPONIBLE');
-  assert.deepEqual(objetos.get('docs:objects/123'), jpeg);
+  assert.deepEqual(objetos.get(`docs:objects/${uuid}`), jpeg);
   assert.equal(resultado.integridad.sha256, sha(jpeg));
 });
 
 for (const estado of ['INFECTADO','ERROR_ESCANEO','NO_DISPONIBLE','ARCHIVO_NO_SOPORTADO']) test(`antivirus ${estado} envía a cuarentena`, async () => {
   const { coordinador, objetos } = entornoCoordinador({ antivirusEstado:estado });
-  const resultado = await coordinador.confirmar({ idIntencion:'123', idDocumento:2n, actor });
+  const resultado = await coordinador.confirmar({ idIntencion:uuid, idDocumento:2n, actor });
   assert.equal(resultado.estado, 'CUARENTENA');
-  assert.ok(objetos.has('docs:quarantine/123'));
+  assert.ok(objetos.has(`docs:quarantine/${uuid}`));
 });
 
 test('reintento usa versión determinista sin duplicarla', async () => {
   const entorno = entornoCoordinador();
-  const primero = await entorno.coordinador.confirmar({ idIntencion:'123', idDocumento:2n, actor });
-  const segundo = await entorno.coordinador.confirmar({ idIntencion:'123', idDocumento:2n, actor });
+  const primero = await entorno.coordinador.confirmar({ idIntencion:uuid, idDocumento:2n, actor });
+  const segundo = await entorno.coordinador.confirmar({ idIntencion:uuid, idDocumento:2n, actor });
   assert.equal(segundo.versionId, primero.versionId);
   assert.equal(segundo.idempotente, true);
 });
 
+test('dos confirmaciones concurrentes no generan versiones duplicadas y el reintento converge', async () => {
+  const entorno=entornoCoordinador();
+  const resultados=await Promise.allSettled([
+    entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),
+    entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),
+  ]);
+  assert.equal(resultados.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal(resultados.filter(x=>x.status==='rejected'&&x.reason.codigo==='REVISION_DESACTUALIZADA').length,1);
+  assert.equal(entorno.cantidadVersiones(),1);
+  const exitoso=resultados.find(x=>x.status==='fulfilled').value;
+  const reintento=await entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor});
+  assert.equal(reintento.versionId,exitoso.versionId);
+  assert.equal(reintento.idempotente,true);
+});
+
 test('no sobrescribe una clave definitiva preexistente con otros bytes', async () => {
-  const entorno=entornoCoordinador(); entorno.objetos.set('docs:objects/123',png);
-  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:'123',idDocumento:2n,actor}),error=>error.codigo==='DESTINO_OCUPADO');
-  assert.deepEqual(entorno.objetos.get('docs:objects/123'),png);
+  const entorno=entornoCoordinador(); entorno.objetos.set(`docs:objects/${uuid}`,png);
+  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),error=>error.codigo==='DESTINO_OCUPADO');
+  assert.deepEqual(entorno.objetos.get(`docs:objects/${uuid}`),png);
 });
 
 test('fallo de promoción no confirma versión ni intención final', async () => {
   const entorno=entornoCoordinador({fallarCopia:true});
-  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:'123',idDocumento:2n,actor}),/FALLO_COPIA/);
+  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),/FALLO_COPIA/);
   assert.equal(entorno.intencion.estado,'VALIDANDO');
 });
 
 test('coordinador exige autorización backend antes de leer el objeto', async () => {
   const entorno=entornoCoordinador({autorizar:async()=>{throw Object.assign(new Error('DENEGADO'),{codigo:'DENEGADO'});}});
-  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:'123',idDocumento:2n,actor}),error=>error.codigo==='DENEGADO');
+  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),error=>error.codigo==='DENEGADO');
   assert.equal(entorno.intencion.estado,'PENDIENTE');
 });
 
 for(const proveedor of ['R2','S3']) test(`mismo flujo portable para ${proveedor}`,async()=>{
   const entorno=entornoCoordinador({proveedor});
-  assert.equal((await entorno.coordinador.confirmar({idIntencion:'123',idDocumento:2n,actor})).estado,'DISPONIBLE');
+  assert.equal((await entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor})).estado,'DISPONIBLE');
 });
 
 test('adaptador sin capacidades de lectura/copia falla antes de confirmar',async()=>{
   const entorno=entornoCoordinador();
   const repo=entorno.repo;
   const coordinador=new CoordinadorCargaDocumental(repo,{proveedor:'R2',capacidades:{},consultarObjeto:async()=>({tamanoBytes:1n})},{nombre:'x',escanear:async()=>({estado:'LIMPIO'})},async()=>{},{proveedor:'R2',contenedorTemporal:'tmp',contenedorDefinitivo:'docs',prefijoDisponible:'objects',prefijoCuarentena:'quarantine',politicasPorClasificacion:{FOTO:politica(['image/jpeg'])}});
-  await assert.rejects(()=>coordinador.confirmar({idIntencion:'123',idDocumento:2n,actor}),error=>error.codigo==='STORAGE_SIN_CAPACIDAD');
+  await assert.rejects(()=>coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),error=>error.codigo==='STORAGE_SIN_CAPACIDAD');
 });
 
 test('intención de otro actor no puede confirmarse', async () => {
   const { coordinador } = entornoCoordinador();
-  await assert.rejects(() => coordinador.confirmar({ idIntencion:'123', idDocumento:2n, actor:{...actor,id:9n} }), error => error.codigo === 'ACTOR_NO_COINCIDE');
+  await assert.rejects(() => coordinador.confirmar({ idIntencion:uuid, idDocumento:2n, actor:{...actor,id:9n} }), error => error.codigo === 'ACTOR_NO_COINCIDE');
+});
+
+test('intención no puede confirmarse contra otro documento', async()=>{
+  const entorno=entornoCoordinador();
+  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:3n,actor}),error=>error.codigo==='INTENCION_DOCUMENTO_NO_COINCIDE');
+});
+
+test('cambio del temporal durante la copia de trabajo se detecta por condición ETag',async()=>{
+  const entorno=entornoCoordinador({antesCopiar:async(entrada,objetos)=>{if(entrada.origen.clave.startsWith('tmp/'))objetos.set(`tmp:tmp/${uuid}`,png);}});
+  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),error=>error.codigo==='CONFLICTO');
+});
+
+test('cambio de copia de trabajo después del antivirus impide promoción',async()=>{
+  const entorno=entornoCoordinador({despuesEscaneo:async objetos=>objetos.set(`docs:quarantine/${uuid}`,png)});
+  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),error=>error.codigo==='COPIA_TRABAJO_MODIFICADA');
+  assert.equal(entorno.objetos.has(`docs:objects/${uuid}`),false);
+});
+
+test('error PostgreSQL después de copiar se recupera sin nueva carga',async()=>{
+  const entorno=entornoCoordinador({fallarRegistroUnaVez:true});
+  await assert.rejects(()=>entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),/DB_TEMPORAL/);
+  entorno.objetos.delete(`tmp:tmp/${uuid}`);
+  const recuperado=await entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor});
+  assert.equal(recuperado.estado,'DISPONIBLE');
+});
+
+test('la copia temporal original no se modifica ni se usa tras congelar el trabajo',async()=>{
+  const entorno=entornoCoordinador(); const original=Buffer.from(entorno.objetos.get(`tmp:tmp/${uuid}`));
+  await entorno.coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor});
+  assert.deepEqual(entorno.objetos.get(`tmp:tmp/${uuid}`),original);
 });
 
 test('descarga exige versión disponible, íntegra y limpia', async () => {
-  const storage = { firmarDescarga: async () => ({ url:'https://ejemplo.invalid/firma', expiraEn:new Date() }) };
-  const version = { id_version_documento:1n, proveedor_logico:'R2', contenedor_logico:'docs', clave_objeto:'objects/x', nombre_seguro:'x.pdf', estado:'DISPONIBLE', mime_detectado:'application/pdf', sha256:'a'.repeat(64), resultado_validaciones:{antivirus:{estado:'LIMPIO'}} };
-  const servicio = new ServicioRecuperacionDocumental(storage, async () => version, async () => {});
-  const resultado = await servicio.firmar(1n, 9999);
-  assert.equal(resultado.headersObligatorios['cache-control'], 'private, no-store');
-  assert.equal(resultado.headersObligatorios['x-content-type-options'], 'nosniff');
+  const storage = { proveedor:'R2', firmarDescarga: async entrada => ({ url:'https://ejemplo.invalid/firma', expiraEn:new Date(), parametrosRespuestaFirmados:{'cache-control':entrada.cacheControlRespuesta} }) };
+  const version = { id_version_documento:1n,id_documento_logico:2n, proveedor_logico:'R2', contenedor_logico:'docs', clave_objeto:'objects/x', nombre_seguro:'x.pdf', estado:'DISPONIBLE', mime_detectado:'application/pdf', sha256:'a'.repeat(64), resultado_validaciones:{antivirus:{estado:'LIMPIO'}} };
+  const servicio = new ServicioRecuperacionDocumental(storage, async () => version, async (autenticado,documento) => {assert.equal(autenticado.id,7n);assert.equal(documento.id_documento_logico,2n);});
+  const resultado = await servicio.firmar({idVersion:1n,actor,vigenciaSegundos:9999});
+  assert.equal(resultado.parametrosRespuestaFirmados['cache-control'], 'private, no-store');
+  assert.equal(resultado.headersRespuestaRequeridos['x-content-type-options'], 'nosniff');
 });
 
 test('cuarentena no puede descargarse', async () => {
-  const servicio = new ServicioRecuperacionDocumental({ firmarDescarga: async()=>{throw new Error('NO');} }, async()=>({ estado:'CUARENTENA', sha256:'a'.repeat(64), mime_detectado:'image/jpeg', resultado_validaciones:{antivirus:{estado:'INFECTADO'}} }), async()=>{});
-  await assert.rejects(() => servicio.firmar(1n), error => error.codigo === 'VERSION_NO_RECUPERABLE');
+  const servicio = new ServicioRecuperacionDocumental({ proveedor:'R2',firmarDescarga: async()=>{throw new Error('NO');} }, async()=>({ id_version_documento:1n,id_documento_logico:2n,proveedor_logico:'R2',contenedor_logico:'d',clave_objeto:'quarantine/x',nombre_seguro:'x',estado:'CUARENTENA', sha256:'a'.repeat(64), mime_detectado:'image/jpeg', resultado_validaciones:{antivirus:{estado:'INFECTADO'}} }), async()=>{});
+  await assert.rejects(() => servicio.firmar({idVersion:1n,actor}), error => error.codigo === 'VERSION_NO_RECUPERABLE');
+});
+
+test('descarga ajena es rechazada por autorización vinculada a entidad',async()=>{
+  const version={id_version_documento:1n,id_documento_logico:99n,proveedor_logico:'R2',contenedor_logico:'d',clave_objeto:'objects/x',nombre_seguro:'x',estado:'DISPONIBLE',sha256:'a'.repeat(64),mime_detectado:'image/jpeg',resultado_validaciones:{antivirus:{estado:'LIMPIO'}}};
+  const servicio=new ServicioRecuperacionDocumental({proveedor:'R2',firmarDescarga:async()=>{throw new Error('NO');}},async()=>version,async()=>{throw Object.assign(new Error('AJENO'),{codigo:'ALCANCE_DOCUMENTAL_DENEGADO'});});
+  await assert.rejects(()=>servicio.firmar({idVersion:1n,actor}),error=>error.codigo==='ALCANCE_DOCUMENTAL_DENEGADO');
+});
+
+test('descarga rechaza proveedor distinto al adaptador activo',async()=>{
+  const version={id_version_documento:1n,id_documento_logico:2n,proveedor_logico:'S3',contenedor_logico:'d',clave_objeto:'objects/x',nombre_seguro:'x',estado:'DISPONIBLE',sha256:'a'.repeat(64),mime_detectado:'image/jpeg',resultado_validaciones:{antivirus:{estado:'LIMPIO'}}};
+  const servicio=new ServicioRecuperacionDocumental({proveedor:'R2',firmarDescarga:async()=>({})},async()=>version,async()=>{});
+  await assert.rejects(()=>servicio.firmar({idVersion:1n,actor}),error=>error.codigo==='PROVEEDOR_NO_COINCIDE');
 });
 
 test('outbox no se ejecuta al importar y procesa explícitamente', async () => {
   const cambios=[]; let entregado=false; let manejado=0;
-  const repo={ reclamarSiguienteEvento:async()=>entregado?null:(entregado=true,{id_evento_operacional:1n,tipo_evento:'VALIDAR',estado:'PROCESANDO',cantidad_intentos:1}), cambiarEstadoEvento:async(_id,e)=>cambios.push(e) };
+  const repo={ reclamarSiguienteEvento:async()=>entregado?null:(entregado=true,{id_evento_operacional:1n,tipo_evento:'VALIDAR',estado:'PROCESANDO',cantidad_intentos:1,lease_token:'lease-a'}), cambiarEstadoEvento:async(_id,e,_c,lease)=>cambios.push([e,lease]) };
   const procesador=new ProcesadorOutboxDocumental(repo,{VALIDAR:async()=>{manejado++;}});
   assert.equal(manejado,0);
   assert.equal(await procesador.procesarUno(),'PROCESADO');
-  assert.deepEqual(cambios,['PROCESADO']);
+  assert.deepEqual(cambios,[['PROCESADO','lease-a']]);
 });
 
 test('outbox aplica límite de intentos y descarta con transiciones válidas', async () => {
-  const cambios=[]; const repo={ reclamarSiguienteEvento:async()=>({id_evento_operacional:1n,tipo_evento:'X',estado:'PROCESANDO',cantidad_intentos:4}), cambiarEstadoEvento:async(_id,e)=>cambios.push(e) };
-  const procesador=new ProcesadorOutboxDocumental(repo,{X:async()=>{throw new Error('TEMPORAL');}},5);
+  const cambios=[]; const repo={ reclamarSiguienteEvento:async()=>({id_evento_operacional:1n,tipo_evento:'X',estado:'PROCESANDO',cantidad_intentos:5,lease_token:'lease-a'}), cambiarEstadoEvento:async(_id,e,c,lease)=>cambios.push([e,c,lease]) };
+  const procesador=new ProcesadorOutboxDocumental(repo,{X:async()=>{throw Object.assign(new Error('secret=https://x'),{codigo:'TEMPORAL'});}},5);
   assert.equal(await procesador.procesarUno(),'DESCARTADO');
-  assert.deepEqual(cambios,['ERROR','DESCARTADO']);
+  assert.deepEqual(cambios,[['ERROR','TEMPORAL','lease-a'],['DESCARTADO','TEMPORAL',undefined]]);
 });
 
 test('reconciliación sólo informa faltantes, divergencias, expiraciones y atascos', async () => {

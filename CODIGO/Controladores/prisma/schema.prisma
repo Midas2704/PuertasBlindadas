@@ -3767,6 +3767,7 @@ model documento_logico {
   configuracion_conservacion    configuracion_conservacion_documental? @relation(fields: [id_configuracion_conservacion], references: [id_configuracion_conservacion], onDelete: Restrict, onUpdate: NoAction, map: "fk_documento_logico_conservacion")
   creador                       usuario                                @relation("documento_logico_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_documento_logico_creador")
   versiones                     version_documento[]
+  intenciones_carga             intencion_carga_documental[]
   asociaciones_producto         producto_comercial_documento[]
   eventos_operacionales         evento_operacional_documental[]
 
@@ -3829,6 +3830,7 @@ model variante_documento {
 model intencion_carga_documental {
   id_intencion_carga      BigInt    @id @default(autoincrement())
   id_publico              String    @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id_documento_logico     BigInt?
   usuario_solicitante     BigInt
   clasificacion           String    @db.VarChar(60)
   nombre_declarado        String    @db.VarChar(255)
@@ -3845,9 +3847,11 @@ model intencion_carga_documental {
   codigo_error            String?   @db.VarChar(100)
   revision                Int       @default(1)
   solicitante             usuario   @relation("intencion_documental_solicitante", fields: [usuario_solicitante], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_intencion_documental_solicitante")
+  documento               documento_logico? @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_intencion_documental_documento")
 
   @@unique([usuario_solicitante, clave_idempotencia], map: "uq_intencion_documental_idempotencia")
   @@index([estado, expira_en], map: "idx_intencion_documental_estado_expira")
+  @@index([id_documento_logico, estado], map: "idx_intencion_documental_documento_estado")
   @@schema("finanzas")
 }
 
@@ -3885,6 +3889,8 @@ model evento_operacional_documental {
   procesado_en          DateTime?          @db.Timestamptz(6)
   cantidad_intentos     Int                @default(0)
   proximo_intento_en    DateTime?          @db.Timestamptz(6)
+  lease_token           String?            @db.Uuid
+  lease_hasta           DateTime?          @db.Timestamptz(6)
   codigo_error          String?            @db.VarChar(100)
   clave_idempotencia    String             @unique @db.VarChar(180)
   payload_tecnico       Json?
@@ -3892,6 +3898,7 @@ model evento_operacional_documental {
   version               version_documento? @relation(fields: [id_version_documento], references: [id_version_documento], onDelete: Restrict, onUpdate: NoAction, map: "fk_evento_documental_version")
 
   @@index([estado, proximo_intento_en, creado_en], map: "idx_evento_documental_pendiente")
+  @@index([estado, lease_hasta], map: "idx_evento_documental_lease")
   @@index([id_documento_logico, creado_en], map: "idx_evento_documental_documento")
   @@schema("finanzas")
 }

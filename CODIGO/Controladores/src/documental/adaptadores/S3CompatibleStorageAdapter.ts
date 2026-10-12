@@ -218,24 +218,24 @@ export class S3CompatibleStorageAdapter implements StorageAdapter {
     throw new ErrorStorage('INTEGRIDAD', this.proveedor, false, 'El proveedor no entregó un stream legible');
   }
 
-  async firmarDescarga(entrada: { referencia: ReferenciaObjetoStorage; expiraEn: Date; nombreDescarga: string }): Promise<UrlFirmadaStorage> {
+  async firmarDescarga(entrada: { referencia: ReferenciaObjetoStorage; expiraEn: Date; nombreDescarga: string; mimeRespuesta?: string; cacheControlRespuesta?: string }): Promise<UrlFirmadaStorage> {
     const ref = this.referencia(entrada.referencia);
     const nombre = this.validar('firmar descarga', () => validarNombreArchivo(entrada.nombreDescarga, 'Nombre de descarga'));
     const expiresIn = this.expiracion(entrada.expiraEn);
     const disposicion = `attachment; filename*=UTF-8''${encodeURIComponent(nombre)}`;
     try {
-      const url = await this.firmarComando(this.cliente, new GetObjectCommand({ ...ref, ResponseContentDisposition: disposicion }), { expiresIn });
-      return { url, expiraEn: entrada.expiraEn };
+      const url = await this.firmarComando(this.cliente, new GetObjectCommand({ ...ref, ResponseContentDisposition: disposicion, ResponseContentType: entrada.mimeRespuesta, ResponseCacheControl: entrada.cacheControlRespuesta }), { expiresIn });
+      return { url, expiraEn: entrada.expiraEn, parametrosRespuestaFirmados: { 'content-disposition': disposicion, ...(entrada.mimeRespuesta ? { 'content-type': entrada.mimeRespuesta } : {}), ...(entrada.cacheControlRespuesta ? { 'cache-control': entrada.cacheControlRespuesta } : {}) } };
     } catch (error) { throw normalizarErrorStorage(error, this.proveedor, 'firmar descarga'); }
   }
 
-  async copiarObjeto(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string }): Promise<IntegridadStorage> {
+  async copiarObjeto(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string; etagOrigen?: string }): Promise<IntegridadStorage> {
     const origen = this.referencia(entrada.origen);
     const destino = this.referencia(entrada.destino);
     this.validar('copiar objeto', () => textoRequerido(entrada.claveIdempotencia, 'Clave de idempotencia', 160));
     const version = origen.VersionId ? `?versionId=${encodeURIComponent(origen.VersionId)}` : '';
     const copySource = `${encodeURIComponent(origen.Bucket)}/${origen.Key.split('/').map(encodeURIComponent).join('/')}${version}`;
-    await this.enviar(new CopyObjectCommand({ Bucket: destino.Bucket, Key: destino.Key, CopySource: copySource }), 'copiar objeto');
+    await this.enviar(new CopyObjectCommand({ Bucket: destino.Bucket, Key: destino.Key, CopySource: copySource, CopySourceIfMatch: entrada.etagOrigen }), 'copiar objeto');
     return this.consultarObjeto(entrada.destino);
   }
 

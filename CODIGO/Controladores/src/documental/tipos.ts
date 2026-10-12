@@ -28,6 +28,7 @@ export interface CrearDocumentoEntrada {
 }
 
 export interface CrearIntencionEntrada {
+  idDocumento: bigint;
   clasificacion: string;
   nombreDeclarado: string;
   mimeDeclarado: string;

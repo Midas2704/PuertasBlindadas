@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db';
 import {
   ActorDocumental, AsociarProductoEntrada, CrearDocumentoEntrada, CrearIntencionEntrada,
@@ -90,17 +91,21 @@ export class RepositorioDocumentalPrisma {
     });
   }
 
-  private intencionCoincide(actual: { clasificacion: string; nombre_declarado: string; mime_declarado: string; tamano_esperado: bigint; clave_temporal: string }, datos: { clasificacion: string; nombre: string; mime: string; tamano: bigint; clave: string }) {
-    return actual.clasificacion === datos.clasificacion && actual.nombre_declarado === datos.nombre && actual.mime_declarado === datos.mime && actual.tamano_esperado === datos.tamano && actual.clave_temporal === datos.clave;
+  private intencionCoincide(actual: { id_documento_logico: bigint | null; clasificacion: string; nombre_declarado: string; mime_declarado: string; tamano_esperado: bigint; clave_temporal: string }, datos: { idDocumento: bigint; clasificacion: string; nombre: string; mime: string; tamano: bigint; clave: string }) {
+    return actual.id_documento_logico === datos.idDocumento && actual.clasificacion === datos.clasificacion && actual.nombre_declarado === datos.nombre && actual.mime_declarado === datos.mime && actual.tamano_esperado === datos.tamano && actual.clave_temporal === datos.clave;
   }
 
   async crearIntencion(entrada: CrearIntencionEntrada, actor: ActorDocumental) {
     const datos = {
+      idDocumento: entrada.idDocumento,
       clasificacion: textoRequerido(entrada.clasificacion, 'Clasificación', 60).toUpperCase(),
       nombre: validarNombreArchivo(entrada.nombreDeclarado), mime: validarMime(entrada.mimeDeclarado),
       tamano: validarTamano(entrada.tamanoEsperado), clave: validarClaveTemporal(entrada.claveTemporal),
       idempotencia: textoRequerido(entrada.claveIdempotencia, 'Clave de idempotencia', 160),
     };
+    const documento = await this.cliente.documento_logico.findUnique({ where: { id_documento_logico: datos.idDocumento } });
+    if (!documento || documento.estado !== 'ACTIVO') throw new ErrorDocumental('DOCUMENTO_NO_DISPONIBLE', 'El documento de la intención no existe o no está activo', 409);
+    if (documento.clasificacion !== datos.clasificacion) throw new ErrorDocumental('CLASIFICACION_NO_COINCIDE', 'La clasificación de la intención no corresponde al documento', 409);
     if (!(entrada.expiraEn instanceof Date) || !Number.isFinite(entrada.expiraEn.getTime()) || entrada.expiraEn <= new Date()) throw new ErrorDocumental('EXPIRACION_INVALIDA', 'La intención debe expirar en el futuro');
     const existente = await this.cliente.intencion_carga_documental.findUnique({ where: { usuario_solicitante_clave_idempotencia: { usuario_solicitante: actor.id, clave_idempotencia: datos.idempotencia } } });
     if (existente) {
@@ -109,7 +114,7 @@ export class RepositorioDocumentalPrisma {
     }
     try {
       return await this.cliente.intencion_carga_documental.create({ data: {
-        usuario_solicitante: actor.id, clasificacion: datos.clasificacion, nombre_declarado: datos.nombre,
+        id_documento_logico: datos.idDocumento, usuario_solicitante: actor.id, clasificacion: datos.clasificacion, nombre_declarado: datos.nombre,
         mime_declarado: datos.mime, tamano_esperado: datos.tamano, clave_temporal: datos.clave,
         clave_idempotencia: datos.idempotencia, expira_en: entrada.expiraEn,
       } });
@@ -209,6 +214,8 @@ export class RepositorioDocumentalPrisma {
       await tx.$queryRaw`SELECT "id_intencion_carga" FROM "finanzas"."intencion_carga_documental" WHERE "id_publico" = ${entrada.idIntencionPublico}::uuid FOR UPDATE`;
       const intencion = await tx.intencion_carga_documental.findUnique({ where: { id_publico: entrada.idIntencionPublico } });
       if (!intencion) throw new ErrorDocumental('INTENCION_NO_ENCONTRADA', 'Intención de carga no encontrada', 404);
+      if (intencion.id_documento_logico === null) throw new ErrorDocumental('INTENCION_LEGACY_NO_CONFIRMABLE', 'La intención histórica no está vinculada a un documento', 409);
+      if (intencion.id_documento_logico !== v.idDocumento) throw new ErrorDocumental('INTENCION_DOCUMENTO_NO_COINCIDE', 'La intención no pertenece al documento solicitado', 409);
       const existente = await tx.version_documento.findUnique({ where: { proveedor_logico_contenedor_logico_clave_objeto: { proveedor_logico: v.proveedor, contenedor_logico: contenedor, clave_objeto: clave } } });
       if (existente && ['DISPONIBLE', 'CUARENTENA'].includes(intencion.estado)) return existente;
       if (intencion.revision !== entrada.revisionIntencion) throw new ErrorDocumental('REVISION_DESACTUALIZADA', 'La intención cambió concurrentemente', 409);
@@ -216,6 +223,7 @@ export class RepositorioDocumentalPrisma {
       await tx.$queryRaw`SELECT "id_documento_logico" FROM "finanzas"."documento_logico" WHERE "id_documento_logico" = ${v.idDocumento} FOR UPDATE`;
       const documento = await tx.documento_logico.findUnique({ where: { id_documento_logico: v.idDocumento } });
       if (!documento || documento.estado === 'ARCHIVADO') throw new ErrorDocumental('DOCUMENTO_NO_DISPONIBLE', 'Documento lógico inexistente o archivado', 409);
+      if (documento.clasificacion !== intencion.clasificacion) throw new ErrorDocumental('CLASIFICACION_NO_COINCIDE', 'La intención y el documento tienen clasificaciones distintas', 409);
       const ultima = await tx.version_documento.aggregate({ where: { id_documento_logico: v.idDocumento }, _max: { numero_version: true } });
       const numero = (ultima._max.numero_version ?? 0) + 1;
       const version = await tx.version_documento.create({ data: {
@@ -305,27 +313,37 @@ export class RepositorioDocumentalPrisma {
     }
   }
 
-  async cambiarEstadoEvento(id: bigint, siguiente: EstadoOutbox, codigoError?: string | null) {
+  async cambiarEstadoEvento(id: bigint, siguiente: EstadoOutbox, codigoError?: string | null, leaseToken?: string) {
     return this.transaccionReintentable(async tx => {
       const actual = await tx.evento_operacional_documental.findUnique({ where: { id_evento_operacional: id } });
       if (!actual) throw new ErrorDocumental('EVENTO_NO_ENCONTRADO', 'Evento operacional no encontrado', 404);
+      if (siguiente === 'PROCESANDO') throw new ErrorDocumental('EVENTO_DEBE_RECLAMARSE', 'Los eventos se procesan únicamente mediante un lease atómico', 409);
       exigirTransicionOutbox(actual.estado as EstadoOutbox, siguiente);
-      return tx.evento_operacional_documental.update({ where: { id_evento_operacional: id }, data: {
-        estado: siguiente, cantidad_intentos: siguiente === 'PROCESANDO' ? { increment: 1 } : undefined,
+      const ahora = new Date();
+      if (actual.estado === 'PROCESANDO' && (!leaseToken || actual.lease_token !== leaseToken || !actual.lease_hasta || actual.lease_hasta <= ahora)) throw new ErrorDocumental('LEASE_NO_POSEIDO', 'El worker no posee un lease vigente para este evento', 409);
+      const propiedad = actual.estado === 'PROCESANDO'
+        ? { estado: 'PROCESANDO', lease_token: leaseToken, lease_hasta: { gt: ahora } }
+        : { estado: actual.estado, lease_token: null, lease_hasta: null };
+      const cambio = await tx.evento_operacional_documental.updateMany({ where: { id_evento_operacional: id, ...propiedad }, data: {
+        estado: siguiente,
         procesado_en: siguiente === 'PROCESADO' ? new Date() : null,
         codigo_error: codigoError ? textoRequerido(codigoError, 'Código de error', 100) : null,
+        lease_token: null, lease_hasta: null,
       } });
+      if (cambio.count !== 1) throw new ErrorDocumental('EVENTO_CONFLICTO', 'El evento cambió concurrentemente', 409);
+      return tx.evento_operacional_documental.findUniqueOrThrow({ where: { id_evento_operacional: id } });
     });
   }
 
   async reclamarSiguienteEvento(fecha: Date, leaseHasta: Date) {
     return this.transaccionReintentable(async tx => {
+      const leaseToken = randomUUID();
       const candidatos = await tx.$queryRaw<Array<{ id_evento_operacional: bigint }>>`
         SELECT "id_evento_operacional"
         FROM "finanzas"."evento_operacional_documental"
         WHERE (
           ("estado" = 'PENDIENTE' AND ("proximo_intento_en" IS NULL OR "proximo_intento_en" <= ${fecha}))
-          OR ("estado" = 'PROCESANDO' AND "proximo_intento_en" <= ${fecha})
+          OR ("estado" = 'PROCESANDO' AND "lease_hasta" <= ${fecha})
         )
         ORDER BY "creado_en", "id_evento_operacional"
         FOR UPDATE SKIP LOCKED
@@ -333,7 +351,7 @@ export class RepositorioDocumentalPrisma {
       const candidato = candidatos[0];
       if (!candidato) return null;
       return tx.evento_operacional_documental.update({ where: { id_evento_operacional: candidato.id_evento_operacional }, data: {
-        estado: 'PROCESANDO', cantidad_intentos: { increment: 1 }, proximo_intento_en: leaseHasta, codigo_error: null,
+        estado: 'PROCESANDO', cantidad_intentos: { increment: 1 }, lease_token: leaseToken, lease_hasta: leaseHasta, codigo_error: null,
       } });
     });
   }

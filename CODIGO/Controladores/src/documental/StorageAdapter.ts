@@ -39,6 +39,8 @@ export interface UrlFirmadaStorage {
   url: string;
   expiraEn: Date;
   headersObligatorios?: Readonly<Record<string, string>>;
+  parametrosRespuestaFirmados?: Readonly<Record<string, string>>;
+  headersRespuestaRequeridos?: Readonly<Record<string, string>>;
 }
 
 export interface CargaIniciadaStorage {
@@ -60,8 +62,8 @@ export interface StorageAdapter {
   firmarCarga?(entrada: { referencia: ReferenciaObjetoStorage; mime: string; tamanoEsperado: bigint; expiraEn: Date }): Promise<UrlFirmadaStorage>;
   consultarObjeto(referencia: ReferenciaObjetoStorage): Promise<IntegridadStorage>;
   abrirLectura?(referencia: ReferenciaObjetoStorage): Promise<Readable>;
-  firmarDescarga?(entrada: { referencia: ReferenciaObjetoStorage; expiraEn: Date; nombreDescarga: string }): Promise<UrlFirmadaStorage>;
-  copiarObjeto?(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string }): Promise<IntegridadStorage>;
+  firmarDescarga?(entrada: { referencia: ReferenciaObjetoStorage; expiraEn: Date; nombreDescarga: string; mimeRespuesta?: string; cacheControlRespuesta?: string }): Promise<UrlFirmadaStorage>;
+  copiarObjeto?(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string; etagOrigen?: string }): Promise<IntegridadStorage>;
   subirParteStream?(entrada: { referencia: ReferenciaObjetoStorage; identificadorMultipart: string; numero: number; contenido: Readable; tamanoEsperado: bigint }): Promise<ParteMultipartStorage>;
   firmarParteMultipart?(entrada: { referencia: ReferenciaObjetoStorage; identificadorMultipart: string; numero: number; tamanoEsperado: bigint; expiraEn: Date }): Promise<ParteMultipartFirmadaStorage>;
   confirmarMultipart?(entrada: { referencia: ReferenciaObjetoStorage; identificadorMultipart: string; partes: readonly ParteMultipartStorage[]; sha256Esperado?: string }): Promise<IntegridadStorage>;

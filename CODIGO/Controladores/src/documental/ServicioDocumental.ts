@@ -31,7 +31,7 @@ export class ServicioDocumental {
   asociarProducto(entrada: AsociarProductoEntrada, actor: ActorDocumental) { return this.repositorio.asociarProducto(entrada, actor); }
   listarAsociacionesProducto(idProducto: number) { return this.repositorio.listarAsociacionesProducto(idProducto); }
   registrarEvento(entrada: RegistrarEventoDocumentalEntrada) { return this.repositorio.registrarEvento(entrada); }
-  cambiarEstadoEvento(id: bigint, estado: EstadoOutbox, codigoError?: string | null) { return this.repositorio.cambiarEstadoEvento(id, estado, codigoError); }
+  cambiarEstadoEvento(id: bigint, estado: EstadoOutbox, codigoError?: string | null, leaseToken?: string) { return this.repositorio.cambiarEstadoEvento(id, estado, codigoError, leaseToken); }
 }
 
 export type { StorageAdapter } from './StorageAdapter';

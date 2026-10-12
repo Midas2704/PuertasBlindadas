@@ -39,9 +39,9 @@ test('Bloque 4.2 — núcleo documental portable', async t => {
     const versiones = await prisma.version_documento.findMany({ where: { id_documento_logico: { in: documentos } }, select: { id_version_documento: true } });
     const idsVersion = versiones.map(v => v.id_version_documento);
     await prisma.variante_documento.deleteMany({ where: { OR: [{ id_version_original: { in: idsVersion } }, { id_version_derivada: { in: idsVersion } }] } });
+    await prisma.intencion_carga_documental.deleteMany({ where: { usuario_solicitante: actor.id } });
     await prisma.version_documento.deleteMany({ where: { id_documento_logico: { in: documentos } } });
     await prisma.documento_logico.deleteMany({ where: { id_documento_logico: { in: documentos } } });
-    await prisma.intencion_carga_documental.deleteMany({ where: { usuario_solicitante: actor.id } });
     if (producto) await prisma.extension_producto_comercial.delete({ where: { id_extension_producto_comercial: producto.id_extension_producto_comercial } });
     if (familia) await prisma.familia_producto_comercial.delete({ where: { id_familia_producto_comercial: familia.id_familia_producto_comercial } });
     await prisma.usuario.delete({ where: { usuario_id_usuario: actor.id } });
@@ -90,17 +90,28 @@ test('Bloque 4.2 — núcleo documental portable', async t => {
   });
 
   const claveIdem = `focal-${marca}`;
-  const intencionBase = { clasificacion: 'COMERCIAL', nombreDeclarado: 'foto.jpg', mimeDeclarado: 'image/jpeg', tamanoEsperado: 2048, claveTemporal: `tmp/${randomUUID()}`, claveIdempotencia: claveIdem, expiraEn: new Date(Date.now() + 60000) };
+  const intencionBase = { idDocumento: documento.id_documento_logico, clasificacion: 'COMERCIAL', nombreDeclarado: 'foto.jpg', mimeDeclarado: 'image/jpeg', tamanoEsperado: 2048, claveTemporal: `tmp/${randomUUID()}`, claveIdempotencia: claveIdem, expiraEn: new Date(Date.now() + 60000) };
   let intencion;
   await t.test('07 la misma intención repetida es idempotente', async () => {
     const [a, b] = await Promise.all([servicio.crearIntencion(intencionBase, actor), servicio.crearIntencion(intencionBase, actor)]);
     assert.equal(a.id_intencion_carga, b.id_intencion_carga);
+    assert.equal(a.id_documento_logico, documento.id_documento_logico);
     assert.equal(await prisma.intencion_carga_documental.count({ where: { usuario_solicitante: actor.id, clave_idempotencia: claveIdem } }), 1);
     intencion = a;
   });
 
   await t.test('08 rechaza reutilización conflictiva de idempotencia', async () => {
     await assert.rejects(servicio.crearIntencion({ ...intencionBase, nombreDeclarado: 'otro.pdf' }, actor), e => e.codigo === 'IDEMPOTENCIA_CONFLICTIVA');
+    const ajeno = await servicio.crearDocumento({ titulo: 'Documento distinto', clasificacion: 'COMERCIAL' }, actor); documentos.push(ajeno.id_documento_logico);
+    await assert.rejects(servicio.crearIntencion({ ...intencionBase, idDocumento: ajeno.id_documento_logico }, actor), e => e.codigo === 'IDEMPOTENCIA_CONFLICTIVA');
+  });
+
+  await t.test('08b la base exige documento en toda intención nueva', async () => {
+    await assert.rejects(prisma.intencion_carga_documental.create({data:{
+      usuario_solicitante:actor.id,clasificacion:'COMERCIAL',nombre_declarado:'sin-documento.jpg',
+      mime_declarado:'image/jpeg',tamano_esperado:1n,clave_temporal:`tmp/${randomUUID()}`,
+      clave_idempotencia:`sin-documento-${marca}`,expira_en:new Date(Date.now()+60000),
+    }}),/chk_intencion_documental_documento_obligatorio|check constraint/i);
   });
 
   await t.test('09 persiste estados de intención y bloquea transición imposible', async () => {
@@ -178,7 +189,19 @@ test('Bloque 4.2 — núcleo documental portable', async t => {
     assert.equal(await prisma.evento_operacional_documental.count({where:{id_version_documento:version.id_version_documento,tipo_evento:'CARGA_CONFIRMADA'}}),1);
   });
 
-  await t.test('21 no expone endpoints, permisos, secretos ni URLs firmadas', async () => {
+  await t.test('21 outbox recupera lease vencido y rechaza al worker anterior', async () => {
+    const evento = await servicio.registrarEvento({ tipoEvento:'VALIDACION_SEGURA', claveIdempotencia:`focal:${marca}:lease`, idDocumento:documento.id_documento_logico });
+    await prisma.evento_operacional_documental.update({where:{id_evento_operacional:evento.id_evento_operacional},data:{creado_en:new Date(0)}});
+    const primero = await repositorio.reclamarSiguienteEvento(new Date(),new Date(Date.now()+60000));
+    assert.equal(primero.id_evento_operacional,evento.id_evento_operacional); assert.ok(primero.lease_token);
+    await prisma.evento_operacional_documental.update({where:{id_evento_operacional:evento.id_evento_operacional},data:{lease_hasta:new Date(0)}});
+    const segundo = await repositorio.reclamarSiguienteEvento(new Date(),new Date(Date.now()+60000));
+    assert.equal(segundo.id_evento_operacional,evento.id_evento_operacional); assert.notEqual(segundo.lease_token,primero.lease_token);
+    await assert.rejects(repositorio.cambiarEstadoEvento(evento.id_evento_operacional,'PROCESADO',null,primero.lease_token),e=>e.codigo==='LEASE_NO_POSEIDO');
+    await repositorio.cambiarEstadoEvento(evento.id_evento_operacional,'PROCESADO',null,segundo.lease_token);
+  });
+
+  await t.test('22 no expone endpoints, permisos, secretos ni URLs firmadas', async () => {
     const rutas = await readFile(resolve(__dirname, '../src/rutas/finanzas.ts'), 'utf8');
     const permisos = await readFile(resolve(__dirname, '../src/validaciones/permisos.ts'), 'utf8');
     const servicioFuente = await readFile(resolve(__dirname, '../src/documental/ServicioDocumental.ts'), 'utf8');
