@@ -7,8 +7,8 @@ import type {
 } from './tipos';
 
 /**
- * Fachada de metadatos implementada en 4.2. No sube, descarga, firma, escanea ni elimina objetos.
- * Esas operaciones no se exponen hasta inyectar un StorageAdapter real y controles de 4.3/4.4.
+ * Fachada de metadatos implementada en 4.2. Las operaciones seguras de 4.4 permanecen
+ * como componentes internos: no se exponen por HTTP hasta aprobar CU y catálogo M9.
  */
 export class ServicioDocumental {
   constructor(
@@ -38,4 +38,12 @@ export type { StorageAdapter } from './StorageAdapter';
 export { crearStorageAdapter, crearStorageAdapterDesdeEntorno } from './adaptadores/crearStorageAdapter';
 export { cargarConfiguracionStorage, ErrorConfiguracionStorage } from './adaptadores/configuracionStorage';
 export { ErrorStorage, S3CompatibleStorageAdapter } from './adaptadores/S3CompatibleStorageAdapter';
+export { CoordinadorCargaDocumental } from './operaciones/CoordinadorCargaDocumental';
+export { ServicioRecuperacionDocumental } from './operaciones/ServicioRecuperacionDocumental';
+export { ProcesadorOutboxDocumental } from './operaciones/ProcesadorOutboxDocumental';
+export { ReconciliadorDocumental } from './operaciones/ReconciliadorDocumental';
+export { validarIntegridadContenido } from './seguridad/IntegridadContenido';
+export { AntivirusNoDisponible, ClamAvDaemonAdapter } from './seguridad/AntivirusAdapter';
+export { AutorizadorDocumental } from './seguridad/AutorizacionDocumental';
+export { cargarConfiguracionSeguridadDocumental } from './seguridad/configuracionSeguridadDocumental';
 export * from './tipos';

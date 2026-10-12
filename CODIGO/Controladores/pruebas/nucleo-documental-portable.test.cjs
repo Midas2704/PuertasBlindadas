@@ -5,6 +5,7 @@ const { readFile } = require('node:fs/promises');
 const { resolve } = require('node:path');
 const { prisma } = require('../dist/db');
 const { ServicioDocumental, ErrorDocumental } = require('../dist/documental/ServicioDocumental');
+const { RepositorioDocumentalPrisma } = require('../dist/documental/repositorios/RepositorioDocumentalPrisma');
 const { exigirTransicionIntencion, exigirTransicionVersion } = require('../dist/documental/estados');
 const { validarClaveObjeto, validarClaveTemporal, validarSha256, validarTamano } = require('../dist/documental/validaciones');
 
@@ -14,6 +15,7 @@ let familia;
 let producto;
 const documentos = [];
 const servicio = new ServicioDocumental();
+const repositorio = new RepositorioDocumentalPrisma(prisma);
 const sha = 'a'.repeat(64);
 
 const versionEntrada = (idDocumento, sufijo, extra = {}) => ({
@@ -166,7 +168,17 @@ test('Bloque 4.2 — núcleo documental portable', async t => {
     assert.equal(await prisma.evento_auditoria_m9.count({ where: { identidad_logica: { contains: entrada.claveIdempotencia } } }), 0);
   });
 
-  await t.test('20 no expone endpoints, permisos, secretos ni URLs firmadas', async () => {
+  await t.test('20 finaliza intención, versión, documento y outbox atómicamente', async () => {
+    let segura = await servicio.crearIntencion({ ...intencionBase, claveTemporal: `tmp/${randomUUID()}`, claveIdempotencia: `${claveIdem}-segura` }, actor);
+    segura = await servicio.cambiarEstadoIntencion(segura.id_publico, segura.revision, 'SUBIENDO');
+    segura = await servicio.cambiarEstadoIntencion(segura.id_publico, segura.revision, 'VALIDANDO');
+    const version = await repositorio.registrarVersionYFinalizarIntencion({ idIntencionPublico: segura.id_publico, revisionIntencion: segura.revision, estadoIntencion: 'DISPONIBLE', version: versionEntrada(documento.id_documento_logico, randomUUID(), { estado:'DISPONIBLE', sha256:sha, mimeDetectado:'image/jpeg', validadoEn:new Date(), resultadoValidaciones:{antivirus:{estado:'LIMPIO'}} }) }, actor);
+    assert.equal(version.estado, 'DISPONIBLE');
+    assert.equal((await prisma.intencion_carga_documental.findUniqueOrThrow({where:{id_publico:segura.id_publico}})).estado, 'DISPONIBLE');
+    assert.equal(await prisma.evento_operacional_documental.count({where:{id_version_documento:version.id_version_documento,tipo_evento:'CARGA_CONFIRMADA'}}),1);
+  });
+
+  await t.test('21 no expone endpoints, permisos, secretos ni URLs firmadas', async () => {
     const rutas = await readFile(resolve(__dirname, '../src/rutas/finanzas.ts'), 'utf8');
     const permisos = await readFile(resolve(__dirname, '../src/validaciones/permisos.ts'), 'utf8');
     const servicioFuente = await readFile(resolve(__dirname, '../src/documental/ServicioDocumental.ts'), 'utf8');

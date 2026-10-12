@@ -177,6 +177,70 @@ export class RepositorioDocumentalPrisma {
     });
   }
 
+  async consultarVersionPorObjeto(proveedor: string, contenedor: string, clave: string) {
+    return this.cliente.version_documento.findUnique({
+      where: { proveedor_logico_contenedor_logico_clave_objeto: {
+        proveedor_logico: textoRequerido(proveedor, 'Proveedor', 20).toUpperCase(),
+        contenedor_logico: validarContenedor(contenedor), clave_objeto: validarClaveObjeto(clave),
+      } },
+    });
+  }
+
+  /** Registra versión, actualiza documento, finaliza intención y emite outbox en una sola transacción DB. */
+  async registrarVersionYFinalizarIntencion(entrada: {
+    idIntencionPublico: string;
+    revisionIntencion: number;
+    version: RegistrarVersionEntrada;
+    estadoIntencion: 'DISPONIBLE' | 'CUARENTENA';
+    codigoError?: string | null;
+  }, actor: ActorDocumental) {
+    const v = entrada.version;
+    const contenedor = validarContenedor(v.contenedor);
+    const clave = validarClaveObjeto(v.claveObjeto);
+    const nombreOriginal = validarNombreArchivo(v.nombreOriginal, 'Nombre original');
+    const nombreSeguro = validarNombreArchivo(v.nombreSeguro, 'Nombre seguro');
+    const mimeDeclarado = validarMime(v.mimeDeclarado);
+    const mimeDetectado = v.mimeDetectado ? validarMime(v.mimeDetectado) : null;
+    const tamano = validarTamano(v.tamanoBytes);
+    const estadoVersion = v.estado ?? entrada.estadoIntencion;
+    const sha256 = validarSha256(v.sha256, estadoVersion === 'DISPONIBLE');
+    if (estadoVersion === 'DISPONIBLE' && (!mimeDetectado || !v.validadoEn)) throw new ErrorDocumental('VALIDACION_INCOMPLETA', 'Una versión disponible requiere MIME detectado, hash y fecha de validación');
+    return this.transaccionReintentable(async tx => {
+      await tx.$queryRaw`SELECT "id_intencion_carga" FROM "finanzas"."intencion_carga_documental" WHERE "id_publico" = ${entrada.idIntencionPublico}::uuid FOR UPDATE`;
+      const intencion = await tx.intencion_carga_documental.findUnique({ where: { id_publico: entrada.idIntencionPublico } });
+      if (!intencion) throw new ErrorDocumental('INTENCION_NO_ENCONTRADA', 'Intención de carga no encontrada', 404);
+      const existente = await tx.version_documento.findUnique({ where: { proveedor_logico_contenedor_logico_clave_objeto: { proveedor_logico: v.proveedor, contenedor_logico: contenedor, clave_objeto: clave } } });
+      if (existente && ['DISPONIBLE', 'CUARENTENA'].includes(intencion.estado)) return existente;
+      if (intencion.revision !== entrada.revisionIntencion) throw new ErrorDocumental('REVISION_DESACTUALIZADA', 'La intención cambió concurrentemente', 409);
+      exigirTransicionIntencion(intencion.estado as EstadoIntencion, entrada.estadoIntencion);
+      await tx.$queryRaw`SELECT "id_documento_logico" FROM "finanzas"."documento_logico" WHERE "id_documento_logico" = ${v.idDocumento} FOR UPDATE`;
+      const documento = await tx.documento_logico.findUnique({ where: { id_documento_logico: v.idDocumento } });
+      if (!documento || documento.estado === 'ARCHIVADO') throw new ErrorDocumental('DOCUMENTO_NO_DISPONIBLE', 'Documento lógico inexistente o archivado', 409);
+      const ultima = await tx.version_documento.aggregate({ where: { id_documento_logico: v.idDocumento }, _max: { numero_version: true } });
+      const numero = (ultima._max.numero_version ?? 0) + 1;
+      const version = await tx.version_documento.create({ data: {
+        id_documento_logico: v.idDocumento, numero_version: numero, proveedor_logico: v.proveedor,
+        contenedor_logico: contenedor, clave_objeto: clave, version_proveedor: v.versionProveedor ?? null,
+        nombre_original: nombreOriginal, nombre_seguro: nombreSeguro, mime_declarado: mimeDeclarado,
+        mime_detectado: mimeDetectado, tamano_bytes: tamano, sha256, estado: estadoVersion, creado_por: actor.id,
+        validado_en: v.validadoEn ?? null, id_version_reemplazada: v.idVersionReemplazada ?? null,
+        resultado_validaciones: jsonPrisma(v.resultadoValidaciones),
+      } });
+      await tx.documento_logico.update({ where: { id_documento_logico: v.idDocumento }, data: { numero_version_actual: numero, revision: { increment: 1 }, actualizado_en: new Date() } });
+      await tx.intencion_carga_documental.update({ where: { id_publico: entrada.idIntencionPublico }, data: {
+        estado: entrada.estadoIntencion, revision: { increment: 1 }, confirmado_en: entrada.estadoIntencion === 'DISPONIBLE' ? new Date() : null,
+        codigo_error: entrada.codigoError ? textoRequerido(entrada.codigoError, 'Código de error', 100) : null,
+      } });
+      await tx.evento_operacional_documental.create({ data: {
+        tipo_evento: entrada.estadoIntencion === 'DISPONIBLE' ? 'CARGA_CONFIRMADA' : 'CUARENTENA_APLICADA',
+        id_documento_logico: v.idDocumento, id_version_documento: version.id_version_documento,
+        clave_idempotencia: `intencion:${entrada.idIntencionPublico}:resultado`,
+        payload_tecnico: { resultado: entrada.estadoIntencion, codigo: entrada.codigoError ?? null },
+      } });
+      return version;
+    });
+  }
+
   async cambiarEstadoVersion(id: bigint, revision: number, siguiente: EstadoVersion) {
     return this.transaccionReintentable(async tx => {
       const actual = await tx.version_documento.findUnique({ where: { id_version_documento: id } });
@@ -252,5 +316,38 @@ export class RepositorioDocumentalPrisma {
         codigo_error: codigoError ? textoRequerido(codigoError, 'Código de error', 100) : null,
       } });
     });
+  }
+
+  async reclamarSiguienteEvento(fecha: Date, leaseHasta: Date) {
+    return this.transaccionReintentable(async tx => {
+      const candidatos = await tx.$queryRaw<Array<{ id_evento_operacional: bigint }>>`
+        SELECT "id_evento_operacional"
+        FROM "finanzas"."evento_operacional_documental"
+        WHERE (
+          ("estado" = 'PENDIENTE' AND ("proximo_intento_en" IS NULL OR "proximo_intento_en" <= ${fecha}))
+          OR ("estado" = 'PROCESANDO' AND "proximo_intento_en" <= ${fecha})
+        )
+        ORDER BY "creado_en", "id_evento_operacional"
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1`;
+      const candidato = candidatos[0];
+      if (!candidato) return null;
+      return tx.evento_operacional_documental.update({ where: { id_evento_operacional: candidato.id_evento_operacional }, data: {
+        estado: 'PROCESANDO', cantidad_intentos: { increment: 1 }, proximo_intento_en: leaseHasta, codigo_error: null,
+      } });
+    });
+  }
+
+  async reprogramarEventosFallidos(fecha: Date, limite = 100) {
+    const ids = await this.cliente.evento_operacional_documental.findMany({
+      where: { estado: 'ERROR', OR: [{ proximo_intento_en: null }, { proximo_intento_en: { lte: fecha } }] },
+      orderBy: { creado_en: 'asc' }, take: Math.max(1, Math.min(limite, 1000)), select: { id_evento_operacional: true },
+    });
+    let actualizados = 0;
+    for (const item of ids) {
+      const resultado = await this.cliente.evento_operacional_documental.updateMany({ where: { id_evento_operacional: item.id_evento_operacional, estado: 'ERROR' }, data: { estado: 'PENDIENTE', proximo_intento_en: fecha } });
+      actualizados += resultado.count;
+    }
+    return actualizados;
   }
 }
