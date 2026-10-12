@@ -281,6 +281,7 @@ export class RepositorioDocumentalPrisma {
       ]);
       if (!producto) throw new ErrorDocumental('PRODUCTO_NO_ENCONTRADO', 'Producto comercial no encontrado', 404);
       if (!documento || documento.estado !== 'ACTIVO') throw new ErrorDocumental('DOCUMENTO_NO_DISPONIBLE', 'El documento no existe o no está activo', 409);
+      if (documento.clasificacion !== 'COMERCIAL') throw new ErrorDocumental('CLASIFICACION_DOCUMENTAL_NO_AUTORIZADA', 'Sólo documentos comerciales pueden asociarse a productos', 403);
       const asociacion = await tx.producto_comercial_documento.create({ data: {
         id_extension_producto_comercial: entrada.idProducto, id_documento_logico: entrada.idDocumento,
         tipo_documento: entrada.tipoDocumento, orden_presentacion: orden, es_imagen_principal: entrada.esImagenPrincipal ?? false,
@@ -308,7 +309,7 @@ export class RepositorioDocumentalPrisma {
         id_extension_producto_comercial: true,
         estado: true,
         documentos: {
-          where: { estado: 'ACTIVO', documento: { estado: 'ACTIVO' } },
+          where: { estado: 'ACTIVO', documento: { estado: 'ACTIVO', clasificacion: 'COMERCIAL' } },
           orderBy: [{ orden_presentacion: 'asc' }, { asociado_en: 'asc' }],
           take: 200,
           select: {

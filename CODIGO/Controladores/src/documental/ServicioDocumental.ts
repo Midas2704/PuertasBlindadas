@@ -46,4 +46,5 @@ export { validarIntegridadContenido } from './seguridad/IntegridadContenido';
 export { AntivirusNoDisponible, ClamAvDaemonAdapter } from './seguridad/AntivirusAdapter';
 export { AutorizadorDocumental } from './seguridad/AutorizacionDocumental';
 export { cargarConfiguracionSeguridadDocumental } from './seguridad/configuracionSeguridadDocumental';
+export { cargarPoliticasActivacionDocumental } from './seguridad/PoliticasActivacionDocumental';
 export * from './tipos';

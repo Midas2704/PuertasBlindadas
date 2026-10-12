@@ -292,6 +292,25 @@ test('Bloque 4.3 — contrato portable R2/S3', async t => {
     assert.equal(cliente.llamadas[0].entrada.CopySourceIfMatch,'"etag-inmutable"');
   });
 
+  await t.test('45a S3 protege la creación del destino con If-None-Match', async () => {
+    const { adaptador, cliente } = adaptar('S3');
+    await adaptador.copiarObjeto({ origen: ref('quarantine'), destino: ref('objects'), claveIdempotencia:'condicional-s3', etagOrigen:'"origen"', exigirDestinoAusente:true });
+    assert.equal(adaptador.capacidades.copiaCondicionalDestino,true);
+    assert.equal(cliente.llamadas[0].entrada.IfNoneMatch,'*');
+  });
+
+  await t.test('45b R2 queda bloqueado hasta validar su extensión condicional real', async () => {
+    const { adaptador, cliente } = adaptar('R2');
+    assert.equal(adaptador.capacidades.copiaCondicionalDestino,false);
+    await assert.rejects(adaptador.copiarObjeto({ origen:ref('quarantine'), destino:ref('objects'), claveIdempotencia:'condicional-r2', exigirDestinoAusente:true }), e=>e.codigo==='NO_SOPORTADO');
+    assert.equal(cliente.llamadas.length,0);
+  });
+
+  await t.test('45c precondición fallida se normaliza como conflicto no reintentable', async () => {
+    const { adaptador } = adaptar('S3', async()=>{const e=new Error('detalle privado');e.name='PreconditionFailed';e.$metadata={httpStatusCode:412};throw e;});
+    await assert.rejects(adaptador.copiarObjeto({ origen:ref('quarantine'), destino:ref('objects'), claveIdempotencia:'conflicto', exigirDestinoAusente:true }), e=>e.codigo==='CONFLICTO'&&e.reintentable===false&&!e.message.includes('privado'));
+  });
+
   await t.test('46 lista multipart incompletos sólo bajo claves documentales válidas', async () => {
     const valida = ref('tmp');
     const { adaptador } = adaptar('R2', async comando => comando.constructor.name === 'ListMultipartUploadsCommand'

@@ -9,6 +9,29 @@ export const EVENTOS_DOCUMENTALES_PROPUESTOS = [
 
 export type EventoDocumentalPropuesto = typeof EVENTOS_DOCUMENTALES_PROPUESTOS[number];
 
+export interface DefinicionEventoM9Documental {
+  tipo: EventoDocumentalPropuesto;
+  productorPropuesto: 'M2';
+  operacion: string;
+  criticidad: 'BAJA' | 'MEDIA' | 'ALTA';
+  requiereIdempotencia: boolean;
+  justificacion: string;
+  campos: readonly ('ACTOR' | 'ENTIDAD' | 'DOCUMENTO' | 'VERSION' | 'RESULTADO')[];
+  estadoAprobacion: 'PENDIENTE_APROBACION';
+}
+
+/** Propuesta de catálogo; no registra ni publica eventos por sí misma. */
+export const MATRIZ_EVENTOS_M9_DOCUMENTALES: readonly DefinicionEventoM9Documental[] = EVENTOS_DOCUMENTALES_PROPUESTOS.map(tipo => ({
+  tipo,
+  productorPropuesto: 'M2',
+  operacion: tipo,
+  criticidad: /INTEGRIDAD|CUARENTENA|RECHAZADO/.test(tipo) ? 'ALTA' : /CARGA|DESCARGADO|REEMPLAZADO|ASOCIADO|PRINCIPAL|USO/.test(tipo) ? 'MEDIA' : 'BAJA',
+  requiereIdempotencia: tipo !== 'DOCUMENTO_CONSULTADO',
+  justificacion: tipo === 'DOCUMENTO_CONSULTADO' ? 'Evaluar trazabilidad acotada sin registrar cada lectura indiscriminadamente.' : 'Trazabilidad funcional de una mutación o resultado documental relevante.',
+  campos: Object.freeze(['ACTOR','ENTIDAD','DOCUMENTO','VERSION','RESULTADO'] as const),
+  estadoAprobacion: 'PENDIENTE_APROBACION',
+}));
+
 export interface EventoM9DocumentalPreparado {
   tipo: EventoDocumentalPropuesto;
   idempotencia: string;

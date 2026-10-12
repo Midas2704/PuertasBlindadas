@@ -18,6 +18,8 @@ export interface CapacidadesStorage {
   retencionProveedor: boolean;
   legalHold: boolean;
   cifradoClaveAdministrada: boolean;
+  /** Creación de destino atómica: la copia falla si la clave ya existe. */
+  copiaCondicionalDestino: boolean;
 }
 
 export interface ReferenciaObjetoStorage {
@@ -63,7 +65,7 @@ export interface StorageAdapter {
   consultarObjeto(referencia: ReferenciaObjetoStorage): Promise<IntegridadStorage>;
   abrirLectura?(referencia: ReferenciaObjetoStorage): Promise<Readable>;
   firmarDescarga?(entrada: { referencia: ReferenciaObjetoStorage; expiraEn: Date; nombreDescarga: string; mimeRespuesta?: string; cacheControlRespuesta?: string }): Promise<UrlFirmadaStorage>;
-  copiarObjeto?(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string; etagOrigen?: string }): Promise<IntegridadStorage>;
+  copiarObjeto?(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string; etagOrigen?: string; exigirDestinoAusente?: boolean }): Promise<IntegridadStorage>;
   subirParteStream?(entrada: { referencia: ReferenciaObjetoStorage; identificadorMultipart: string; numero: number; contenido: Readable; tamanoEsperado: bigint }): Promise<ParteMultipartStorage>;
   firmarParteMultipart?(entrada: { referencia: ReferenciaObjetoStorage; identificadorMultipart: string; numero: number; tamanoEsperado: bigint; expiraEn: Date }): Promise<ParteMultipartFirmadaStorage>;
   confirmarMultipart?(entrada: { referencia: ReferenciaObjetoStorage; identificadorMultipart: string; partes: readonly ParteMultipartStorage[]; sha256Esperado?: string }): Promise<IntegridadStorage>;

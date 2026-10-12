@@ -12,6 +12,7 @@ const { ServicioRecuperacionDocumental } = require('../dist/documental/operacion
 const { ProcesadorOutboxDocumental } = require('../dist/documental/operaciones/ProcesadorOutboxDocumental');
 const { ReconciliadorDocumental } = require('../dist/documental/operaciones/ReconciliadorDocumental');
 const { cargarConfiguracionSeguridadDocumental } = require('../dist/documental/seguridad/configuracionSeguridadDocumental');
+const { cargarPoliticasActivacionDocumental } = require('../dist/documental/seguridad/PoliticasActivacionDocumental');
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 const jpeg = Buffer.from([0xff,0xd8,0xff,0xe0,0,2,0xff,0xc0,0,2,0xff,0xd9]);
@@ -107,6 +108,19 @@ test('configuración valida límites y allowlist MIME', () => {
   assert.throws(() => cargarConfiguracionSeguridadDocumental({ DOCUMENTAL_POLITICAS_TECNICAS_JSON: JSON.stringify({ foto:{minimoBytes:'1',maximoBytes:'100',mimesPermitidos:['image/svg+xml']} }) }), /MIME/);
 });
 
+test('política de activación falla cerrada si falta configuración empresarial',()=>{
+  assert.throws(()=>cargarPoliticasActivacionDocumental({}),/Falta DOCUMENTAL_POLITICAS_ACTIVACION_JSON/);
+});
+
+test('política provisional aislada exige todos los límites y antivirus real',()=>{
+  const base={minimoBytes:1,maximoBytes:100,mimesPermitidos:['image/jpeg'],timeoutMs:1000,concurrenciaMaxima:2,cantidadMaximaPorOperacion:3,expiracionIntencionSegundos:300,expiracionUrlFirmadaSegundos:60,antivirusObligatorio:true};
+  const politicas=cargarPoliticasActivacionDocumental({DOCUMENTAL_POLITICAS_ACTIVACION_JSON:JSON.stringify({COMERCIAL:base})});
+  assert.equal(politicas.COMERCIAL.antivirusObligatorio,true);
+  assert.equal(politicas.COMERCIAL.maximoBytes,100n);
+  assert.throws(()=>cargarPoliticasActivacionDocumental({DOCUMENTAL_POLITICAS_ACTIVACION_JSON:JSON.stringify({COMERCIAL:{...base,antivirusObligatorio:false}})}),/Antivirus obligatorio/);
+  assert.throws(()=>cargarPoliticasActivacionDocumental({DOCUMENTAL_POLITICAS_ACTIVACION_JSON:JSON.stringify({TRIBUTARIO:base})}),/COMERCIAL/);
+});
+
 test('sólo LIMPIO supera el guard antivirus', () => assert.doesNotThrow(() => exigirResultadoLimpio({ estado: 'LIMPIO' })));
 
 function socketClam(respuesta) {
@@ -169,10 +183,10 @@ function entornoCoordinador({ antivirusEstado = 'LIMPIO', bytes = jpeg, proveedo
   const objetos = new Map([[`tmp:tmp/${uuid}`, bytes]]);
   const etag = b => `"${sha(b).slice(0,32)}"`;
   const storage = {
-    proveedor, capacidades: {},
+    proveedor, capacidades: { copiaCondicionalDestino:true },
     consultarObjeto: async r => { const b = objetos.get(`${r.contenedor}:${r.clave}`); if (!b) throw Object.assign(new Error('NO_ENCONTRADO'),{codigo:'NO_ENCONTRADO'}); return { tamanoBytes: BigInt(b.length), etag:etag(b) }; },
     abrirLectura: async r => Readable.from(objetos.get(`${r.contenedor}:${r.clave}`)),
-    copiarObjeto: async entrada => { if(fallarCopia)throw Object.assign(new Error('FALLO_COPIA'),{codigo:'TEMPORAL'}); if(antesCopiar)await antesCopiar(entrada,objetos); const b=objetos.get(`${entrada.origen.contenedor}:${entrada.origen.clave}`); if(entrada.etagOrigen&&entrada.etagOrigen!==etag(b))throw Object.assign(new Error('ORIGEN_CAMBIO'),{codigo:'CONFLICTO'}); const copia=Buffer.from(b); objetos.set(`${entrada.destino.contenedor}:${entrada.destino.clave}`,copia); return{tamanoBytes:BigInt(copia.length),etag:etag(copia)}; },
+    copiarObjeto: async entrada => { if(fallarCopia)throw Object.assign(new Error('FALLO_COPIA'),{codigo:'TEMPORAL'}); if(antesCopiar)await antesCopiar(entrada,objetos); const b=objetos.get(`${entrada.origen.contenedor}:${entrada.origen.clave}`); if(entrada.etagOrigen&&entrada.etagOrigen!==etag(b))throw Object.assign(new Error('ORIGEN_CAMBIO'),{codigo:'CONFLICTO'}); const destino=`${entrada.destino.contenedor}:${entrada.destino.clave}`; if(entrada.exigirDestinoAusente&&objetos.has(destino))throw Object.assign(new Error('DESTINO_EXISTE'),{codigo:'CONFLICTO'}); const copia=Buffer.from(b); objetos.set(destino,copia); return{tamanoBytes:BigInt(copia.length),etag:etag(copia)}; },
   };
   const intencion = { id_publico:uuid, id_documento_logico:2n, usuario_solicitante:7n, clasificacion:'FOTO', nombre_declarado:'foto.jpg', mime_declarado:'image/jpeg', tamano_esperado:BigInt(bytes.length), clave_temporal:`tmp/${uuid}`, estado:'PENDIENTE', revision:1, expira_en:new Date(Date.now()+60000) };
   const versiones = new Map(); let siguiente = 1n; let fallosRegistro=0;
@@ -252,6 +266,14 @@ test('adaptador sin capacidades de lectura/copia falla antes de confirmar',async
   const repo=entorno.repo;
   const coordinador=new CoordinadorCargaDocumental(repo,{proveedor:'R2',capacidades:{},consultarObjeto:async()=>({tamanoBytes:1n})},{nombre:'x',escanear:async()=>({estado:'LIMPIO'})},async()=>{},{proveedor:'R2',contenedorTemporal:'tmp',contenedorDefinitivo:'docs',prefijoDisponible:'objects',prefijoCuarentena:'quarantine',politicasPorClasificacion:{FOTO:politica(['image/jpeg'])}});
   await assert.rejects(()=>coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),error=>error.codigo==='STORAGE_SIN_CAPACIDAD');
+});
+
+test('proveedor sin creación condicional de destino queda bloqueado antes de leer bytes',async()=>{
+  const entorno=entornoCoordinador(); let lecturas=0;
+  const storage={proveedor:'R2',capacidades:{copiaCondicionalDestino:false},consultarObjeto:async()=>{lecturas++;return{tamanoBytes:1n}},abrirLectura:async()=>Readable.from([]),copiarObjeto:async()=>({tamanoBytes:1n})};
+  const coordinador=new CoordinadorCargaDocumental(entorno.repo,storage,{nombre:'x',escanear:async()=>({estado:'LIMPIO'})},async()=>{},{proveedor:'R2',contenedorTemporal:'tmp',contenedorDefinitivo:'docs',prefijoDisponible:'objects',prefijoCuarentena:'quarantine',politicasPorClasificacion:{FOTO:politica(['image/jpeg'])}});
+  await assert.rejects(()=>coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),error=>error.codigo==='PROMOCION_CONDICIONAL_NO_VALIDADA');
+  assert.equal(lecturas,0);
 });
 
 test('intención de otro actor no puede confirmarse', async () => {

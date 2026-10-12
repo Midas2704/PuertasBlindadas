@@ -24,7 +24,7 @@ const datosVersion = (idDocumento, numero, estado = 'DISPONIBLE') => ({
 });
 
 async function crearDocumento(producto, tipo, titulo, opciones = {}) {
-  const documento = await prisma.documento_logico.create({ data:{ titulo, clasificacion:'COMERCIAL', estado:opciones.estadoDocumento ?? 'ACTIVO', creado_por:usuario.usuario_id_usuario } });
+  const documento = await prisma.documento_logico.create({ data:{ titulo, clasificacion:opciones.clasificacion ?? 'COMERCIAL', estado:opciones.estadoDocumento ?? 'ACTIVO', creado_por:usuario.usuario_id_usuario } });
   idsDocumentos.push(documento.id_documento_logico);
   if (opciones.historia) await prisma.version_documento.create({ data:datosVersion(documento.id_documento_logico, 1, 'REEMPLAZADO') });
   const numero = opciones.historia ? 2 : 1;
@@ -43,7 +43,7 @@ async function crearDocumento(producto, tipo, titulo, opciones = {}) {
 test('Bloque 4.5B.1 — integración backend documental comercial', async t => {
   usuario = await prisma.usuario.create({ data:{ usuario_username:`docprod_${marca}`, usuario_estado_cuenta:'activa', usuario_fecha_de_creacion:new Date() } });
   familia = await prisma.familia_producto_comercial.create({ data:{ codigo:`DB-${marca}`.toUpperCase(), nombre:`Familia documental ${marca}`, creado_por:usuario.usuario_id_usuario, actualizado_por:usuario.usuario_id_usuario } });
-  for (const sufijo of ['principal','ajeno','vacio']) productos.push(await prisma.extension_producto_comercial.create({ data:{ codigo_comercial:`${marca}-${sufijo}`.toUpperCase(), nombre_comercial:`Producto ${sufijo}`, id_familia_producto_comercial:familia.id_familia_producto_comercial, creado_por:usuario.usuario_id_usuario, actualizado_por:usuario.usuario_id_usuario } }));
+  for (const sufijo of ['principal','ajeno','vacio','inactivo']) productos.push(await prisma.extension_producto_comercial.create({ data:{ codigo_comercial:`${marca}-${sufijo}`.toUpperCase(), nombre_comercial:`Producto ${sufijo}`, id_familia_producto_comercial:familia.id_familia_producto_comercial, estado:sufijo==='inactivo'?'INACTIVO':'BORRADOR', creado_por:usuario.usuario_id_usuario, actualizado_por:usuario.usuario_id_usuario } }));
 
   const foto = await crearDocumento(productos[0], 'FOTOGRAFIA_COMERCIAL', 'Fotografía principal', { principal:true, b2b:true, historia:true, orden:1 });
   await crearDocumento(productos[0], 'DIAGRAMA_TECNICO', 'Diagrama', { b2b:true, b2c:true, orden:2 });
@@ -53,6 +53,9 @@ test('Bloque 4.5B.1 — integración backend documental comercial', async t => {
   await crearDocumento(productos[0], 'FOTOGRAFIA_COMERCIAL', 'Foto en cuarentena', { estadoVersion:'CUARENTENA', orden:6 });
   await crearDocumento(productos[0], 'CATALOGO', 'Documento desactivado', { estadoDocumento:'INACTIVO', orden:7 });
   const ajeno = await crearDocumento(productos[1], 'FICHA_TECNICA', 'Documento ajeno');
+  const tributario = await crearDocumento(productos[0], 'FICHA_TECNICA', 'Documento tributario sensible', { clasificacion:'TRIBUTARIO', orden:20 });
+  const laboral = await crearDocumento(productos[0], 'FICHA_TECNICA', 'Documento laboral sensible', { clasificacion:'LABORAL', orden:21 });
+  const financiero = await crearDocumento(productos[0], 'FICHA_TECNICA', 'Documento financiero sensible', { clasificacion:'FINANCIERO', orden:22 });
 
   t.after(async () => {
     await prisma.producto_comercial_documento.deleteMany({ where:{ id_extension_producto_comercial:{ in:productos.map(p => p.id_extension_producto_comercial) } } });
@@ -104,4 +107,9 @@ test('Bloque 4.5B.1 — integración backend documental comercial', async t => {
   await t.test('26 puente M9 bloquea catálogo no aprobado', async () => {let llamadas=0;const puente=new PuenteM9DocumentosProducto({publicar:async()=>{llamadas++;return{aceptado:true,idempotente:false}}});await assert.rejects(puente.publicar({tipo:'DOCUMENTO_CONSULTADO',idempotencia:'x',actorId:'1',productoId:1,resultado:'EXITO',ocurridoEn:new Date().toISOString(),criticidad:'BAJA'}),e=>e.codigo==='EVENTO_M9_NO_APROBADO');assert.equal(llamadas,0);});
   await t.test('27 puente M9 delegado conserva idempotencia', async () => {const vistos=new Set();const puente=new PuenteM9DocumentosProducto({publicar:async e=>{const repetido=vistos.has(e.idempotencia);vistos.add(e.idempotencia);return{aceptado:true,idempotente:repetido}}},new Set(['DOCUMENTO_ASOCIADO_PRODUCTO']));const e={tipo:'DOCUMENTO_ASOCIADO_PRODUCTO',idempotencia:'idem',actorId:'1',productoId:1,resultado:'EXITO',ocurridoEn:new Date().toISOString(),criticidad:'MEDIA'};assert.equal((await puente.publicar(e)).idempotente,false);assert.equal((await puente.publicar(e)).idempotente,true);});
   await t.test('28 puente M9 rechaza datos sensibles', async () => {const puente=new PuenteM9DocumentosProducto({publicar:async()=>({aceptado:true,idempotente:false})},new Set(EVENTOS_DOCUMENTALES_PROPUESTOS));await assert.rejects(puente.publicar({tipo:'DOCUMENTO_CONSULTADO',idempotencia:'https://firma',actorId:'1',productoId:1,resultado:'EXITO',ocurridoEn:new Date().toISOString(),criticidad:'BAJA'}),e=>e.codigo==='EVENTO_M9_DATO_PROHIBIDO');});
+  await t.test('29 consulta Prisma excluye clasificaciones tributaria, laboral y financiera aunque estén asociadas', async()=>{const s=await servicio.listar(productos[0].id_extension_producto_comercial,actorCompleto);for(const d of [tributario,laboral,financiero])assert.equal(s.documentos.some(x=>x.idDocumento===d.id_documento_logico.toString()),false);});
+  await t.test('30 defensa del servicio rechaza una fila no comercial entregada por un repositorio defectuoso', async()=>{const fila=(await repositorio.consultarDocumentosProducto(productos[0].id_extension_producto_comercial,true));fila.documentos[0].documento.clasificacion='TRIBUTARIO';const defectuoso=new ServicioDocumentosProducto({consultarDocumentosProducto:async()=>fila},autorizaTodo);await assert.rejects(defectuoso.listar(productos[0].id_extension_producto_comercial,actorCompleto),e=>e.codigo==='CLASIFICACION_DOCUMENTAL_NO_AUTORIZADA');});
+  await t.test('31 asociación futura rechaza documento no comercial', async()=>await assert.rejects(repositorio.asociarProducto({idProducto:productos[1].id_extension_producto_comercial,idDocumento:tributario.id_documento_logico,tipoDocumento:'FICHA_TECNICA'},{id:usuario.usuario_id_usuario}),e=>e.codigo==='CLASIFICACION_DOCUMENTAL_NO_AUTORIZADA'));
+  await t.test('32 matriz distingue consulta de escritura y mantiene pendientes cerrados',()=>{assert.equal(MATRIZ_CAPACIDADES_DOCUMENTALES.find(x=>x.accion==='CONSULTAR_METADATA').tipoAcceso,'CONSULTA');assert.ok(MATRIZ_CAPACIDADES_DOCUMENTALES.filter(x=>x.estadoAprobacion==='PENDIENTE_APROBACION').every(x=>x.tipoAcceso==='ESCRITURA'));});
+  await t.test('33 producto inactivo no expone metadatos documentales',async()=>await assert.rejects(servicio.listar(productos[3].id_extension_producto_comercial,actorCompleto),e=>e.codigo==='PRODUCTO_NO_DISPONIBLE'));
 });

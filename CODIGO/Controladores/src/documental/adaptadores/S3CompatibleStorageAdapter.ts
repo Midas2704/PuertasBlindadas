@@ -48,7 +48,7 @@ export const normalizarErrorStorage = (error: unknown, proveedor: string, operac
   if (estado === 404 || /NoSuch(Key|Bucket|Upload)|NotFound/i.test(nombre)) {
     return new ErrorStorage('NO_ENCONTRADO', proveedor, false, `${operacion}: recurso no encontrado`, estado);
   }
-  if (estado === 409 || /Conflict|OperationAborted/i.test(nombre)) {
+  if (estado === 409 || estado === 412 || /Conflict|OperationAborted|PreconditionFailed/i.test(nombre)) {
     return new ErrorStorage('CONFLICTO', proveedor, false, `${operacion}: conflicto de almacenamiento`, estado);
   }
   if (estado === 413 || /EntityTooLarge|TooManyParts|LimitExceeded/i.test(nombre)) {
@@ -104,6 +104,9 @@ export class S3CompatibleStorageAdapter implements StorageAdapter {
       retencionProveedor: configuracion.proveedor === 'S3' && configuracion.s3ObjectLockHabilitado,
       legalHold: configuracion.proveedor === 'S3' && configuracion.s3ObjectLockHabilitado,
       cifradoClaveAdministrada: configuracion.proveedor === 'S3' && configuracion.s3KmsHabilitado,
+      // S3 documenta If-None-Match:* para CopyObject. R2 exige una extensión propia aún no
+      // incorporada ni validada contra proveedor real, por lo que permanece cerrado.
+      copiaCondicionalDestino: configuracion.proveedor === 'S3',
     });
   }
 
@@ -229,13 +232,16 @@ export class S3CompatibleStorageAdapter implements StorageAdapter {
     } catch (error) { throw normalizarErrorStorage(error, this.proveedor, 'firmar descarga'); }
   }
 
-  async copiarObjeto(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string; etagOrigen?: string }): Promise<IntegridadStorage> {
+  async copiarObjeto(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string; etagOrigen?: string; exigirDestinoAusente?: boolean }): Promise<IntegridadStorage> {
     const origen = this.referencia(entrada.origen);
     const destino = this.referencia(entrada.destino);
     this.validar('copiar objeto', () => textoRequerido(entrada.claveIdempotencia, 'Clave de idempotencia', 160));
+    if (entrada.exigirDestinoAusente && !this.capacidades.copiaCondicionalDestino) {
+      throw new ErrorStorage('NO_SOPORTADO', this.proveedor, false, 'El proveedor no tiene una copia condicional de destino validada');
+    }
     const version = origen.VersionId ? `?versionId=${encodeURIComponent(origen.VersionId)}` : '';
     const copySource = `${encodeURIComponent(origen.Bucket)}/${origen.Key.split('/').map(encodeURIComponent).join('/')}${version}`;
-    await this.enviar(new CopyObjectCommand({ Bucket: destino.Bucket, Key: destino.Key, CopySource: copySource, CopySourceIfMatch: entrada.etagOrigen }), 'copiar objeto');
+    await this.enviar(new CopyObjectCommand({ Bucket: destino.Bucket, Key: destino.Key, CopySource: copySource, CopySourceIfMatch: entrada.etagOrigen, IfNoneMatch: entrada.exigirDestinoAusente ? '*' : undefined }), 'copiar objeto');
     return this.consultarObjeto(entrada.destino);
   }
 

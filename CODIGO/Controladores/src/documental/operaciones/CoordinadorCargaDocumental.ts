@@ -56,6 +56,7 @@ export class CoordinadorCargaDocumental {
 
   async confirmar(entrada: { idIntencion: string; idDocumento: bigint; actor: ActorBackendDocumental; sha256Esperado?: string }): Promise<ResultadoConfirmacionDocumental> {
     if (!this.storage.abrirLectura || !this.storage.copiarObjeto) throw new ErrorDocumental('STORAGE_SIN_CAPACIDAD', 'El proveedor no permite validar y promover contenido', 503);
+    if (!this.storage.capacidades.copiaCondicionalDestino) throw new ErrorDocumental('PROMOCION_CONDICIONAL_NO_VALIDADA', 'La activación permanece bloqueada: el proveedor no garantiza una creación condicional del destino', 503);
     if (this.storage.proveedor !== this.configuracion.proveedor) throw new ErrorDocumental('PROVEEDOR_NO_COINCIDE', 'El proveedor configurado no corresponde al adaptador activo', 503);
     let intencion = await this.repositorio.consultarIntencion(entrada.idIntencion);
     if (intencion.usuario_solicitante !== entrada.actor.id) throw new ErrorDocumental('ACTOR_NO_COINCIDE', 'La intención pertenece a otro actor', 403);
@@ -103,15 +104,16 @@ export class CoordinadorCargaDocumental {
     const destino: ReferenciaObjetoStorage = { contenedor: this.configuracion.contenedorDefinitivo, clave: disponible ? claveDisponible : claveCuarentena };
     const metadataTrabajoActual = await this.storage.consultarObjeto(trabajo);
     if (metadataTrabajoActual.tamanoBytes !== metadataTrabajo.tamanoBytes || (metadataTrabajo.etag && metadataTrabajoActual.etag !== metadataTrabajo.etag)) throw new ErrorDocumental('COPIA_TRABAJO_MODIFICADA', 'La copia de trabajo cambió durante la validación', 409);
-    let destinoYaExiste = false;
-    if (disponible) try {
-      await this.storage.consultarObjeto(destino);
-      destinoYaExiste = true;
-    } catch (error) {
-      if (!(error && typeof error === 'object' && 'codigo' in error && error.codigo === 'NO_ENCONTRADO')) throw error;
-    }
     if (disponible && !metadataTrabajoActual.etag) throw new ErrorDocumental('TOKEN_CONCURRENCIA_NO_DISPONIBLE', 'El proveedor no entregó un token para promover de forma segura', 503);
-    if (disponible && !destinoYaExiste) await this.storage.copiarObjeto({ origen: trabajo, destino, claveIdempotencia: `promocion:${intencion.id_publico}`, etagOrigen: metadataTrabajoActual.etag });
+    let destinoPreexistente = false;
+    if (disponible) try {
+      await this.storage.copiarObjeto({ origen: trabajo, destino, claveIdempotencia: `promocion:${intencion.id_publico}`, etagOrigen: metadataTrabajoActual.etag, exigirDestinoAusente: true });
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'codigo' in error && error.codigo === 'CONFLICTO')) throw error;
+      // Un reintento posterior a una caída de PostgreSQL puede encontrar la clave reservada.
+      // Sólo converge si la relectura completa demuestra que contiene exactamente los mismos bytes.
+      destinoPreexistente = true;
+    }
 
     // La promoción aprobada se relee y compara por SHA-256. Un rechazo por límite se verifica sólo por HEAD:
     // su hash parcial nunca se persiste como si representara el archivo completo.
@@ -123,7 +125,7 @@ export class CoordinadorCargaDocumental {
     } else {
       promocionIntegra = metadataTrabajoActual.tamanoBytes === metadataTrabajo.tamanoBytes;
     }
-    if (!promocionIntegra) throw new ErrorDocumental(destinoYaExiste ? 'DESTINO_OCUPADO' : 'PROMOCION_NO_INTEGRA', destinoYaExiste ? 'La clave definitiva ya existe con otros bytes' : 'La copia promovida no conserva los bytes originales', destinoYaExiste ? 409 : 502);
+    if (!promocionIntegra) throw new ErrorDocumental(destinoPreexistente ? 'DESTINO_OCUPADO' : 'PROMOCION_NO_INTEGRA', destinoPreexistente ? 'La clave definitiva ya existe con otros bytes' : 'La copia promovida no conserva los bytes originales', destinoPreexistente ? 409 : 502);
 
     const estado = disponible ? 'DISPONIBLE' : 'CUARENTENA';
     const version = await this.repositorio.registrarVersionYFinalizarIntencion({

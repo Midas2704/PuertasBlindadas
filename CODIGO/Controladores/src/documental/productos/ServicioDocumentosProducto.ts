@@ -47,6 +47,7 @@ export class ServicioDocumentosProducto {
     const capacidades = await this.consultarCapacidades(idProducto, actor);
     const producto = await this.repositorio.consultarDocumentosProducto(idProducto, capacidades.consultarVersiones);
     if (!producto) throw new ErrorDocumental('PRODUCTO_NO_ENCONTRADO', 'Producto comercial no encontrado', 404);
+    if (producto.estado === 'INACTIVO') throw new ErrorDocumental('PRODUCTO_NO_DISPONIBLE', 'El producto comercial está inactivo', 409);
     const documentos = producto.documentos.map(asociacion => this.mapear(asociacion, idProducto, capacidades.consultarVersiones));
     const fotografias = documentos.filter(documento => documento.tipo === 'FOTOGRAFIA_COMERCIAL');
     const documentosTecnicos = documentos.filter(documento => documento.tipo !== 'FOTOGRAFIA_COMERCIAL');
@@ -62,6 +63,7 @@ export class ServicioDocumentosProducto {
     await this.autorizador.exigir(actor, 'CONSULTAR_VERSIONES', { idProducto, idDocumento });
     const producto = await this.repositorio.consultarDocumentosProducto(idProducto, true);
     if (!producto) throw new ErrorDocumental('PRODUCTO_NO_ENCONTRADO', 'Producto comercial no encontrado', 404);
+    if (producto.estado === 'INACTIVO') throw new ErrorDocumental('PRODUCTO_NO_DISPONIBLE', 'El producto comercial está inactivo', 409);
     const asociacion = producto.documentos.find(item => item.documento.id_documento_logico === idDocumento);
     if (!asociacion) throw new ErrorDocumental('DOCUMENTO_PRODUCTO_NO_ENCONTRADO', 'El documento no está asociado al producto autorizado', 404);
     return this.mapear(asociacion, idProducto, true).versiones;
@@ -69,6 +71,7 @@ export class ServicioDocumentosProducto {
 
   private mapear(asociacion: AsociacionDocumental, idProducto: number, mostrarResponsable: boolean): DocumentoComercialProductoDto {
     const documento = asociacion.documento;
+    if (documento.clasificacion !== 'COMERCIAL') throw new ErrorDocumental('CLASIFICACION_DOCUMENTAL_NO_AUTORIZADA', 'La consulta comercial rechazó un documento de otra clasificación', 403);
     const actual = documento.versiones.find(version => version.numero_version === documento.numero_version_actual) ?? documento.versiones[0] ?? null;
     const variante = actual?.estado === 'DISPONIBLE'
       ? actual.variantes_origen.find(item => item.version_derivada.estado === 'DISPONIBLE')
