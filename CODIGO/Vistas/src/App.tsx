@@ -59,6 +59,8 @@ import OperacionCostosM7 from './views/DashboardM7/OperacionCostosM7';
 import DeltaControladoM7 from './views/DashboardM7/DeltaControladoM7';
 import SolicitudesCredito from './views/Credito/SolicitudesCredito';
 import Auditoria from './views/Auditoria/Auditoria';
+import Mantenedores from './views/Mantenedores/Mantenedores';
+import { permisosAccesoMantenedores } from './views/Mantenedores/permisos';
 
 const App: React.FC = () => {
   return (
@@ -87,7 +89,7 @@ const App: React.FC = () => {
           <Route path="empleados" element={<Protegido permiso="CU155"><CatalogoEmpleados /></Protegido>} />
           <Route path="empleados/:id" element={<Protegido permiso="CU155"><FichaEmpleado /></Protegido>} />
           <Route path="esquemas-remuneracionales" element={<Protegido permiso={['CU162','CU163','CU164','CU165','CU166']}><EsquemasRemuneracionales /></Protegido>} />
-          <Route path="parametros-remuneraciones" element={<Protegido permiso={['CU167','CU168','CU169','CU170','CU171','CU246']}><MantenedorParametros /></Protegido>} />
+          <Route path="parametros-remuneraciones" element={<Protegido permiso={['CU167','CU168','CU169','CU170','CU171','CU246','CU268']}><MantenedorParametros /></Protegido>} />
           <Route path="periodos-remuneracion" element={<Protegido permiso={['CU178','CU181']}><PeriodosRemuneracion /></Protegido>} />
           <Route path="detalle-remuneracion" element={<Protegido permiso={['CU172','CU173','CU174','CU175','CU176','CU177','CU179','CU180','CU182','CU183','CU184']}><DetalleRemuneracion /></Protegido>} />
           <Route path="pagos-remuneraciones" element={<Protegido permiso={['CU185','CU186','CU187','CU188','CU189','CU190']}><RegistroPagosRemuneracion /></Protegido>} />
@@ -118,6 +120,7 @@ const App: React.FC = () => {
           <Route path="credito/solicitudes" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
           <Route path="credito/solicitudes/:id" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
           <Route path="auditoria" element={<Protegido permiso="CU355"><Auditoria /></Protegido>} />
+          <Route path="mantenedores" element={<Protegido permiso={[...permisosAccesoMantenedores]}><Mantenedores /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

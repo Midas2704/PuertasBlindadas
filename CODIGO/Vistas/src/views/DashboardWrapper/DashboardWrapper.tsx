@@ -21,7 +21,6 @@ import {
   Settings,
   ShieldCheck,
   ShoppingCart,
-  Tags,
   Truck,
   UserCog,
   Users,
@@ -33,6 +32,7 @@ import {
   CreditCard,
   ScrollText,
 } from 'lucide-react';
+import { permisosAccesoMantenedores } from '../Mantenedores/permisos';
 
 type MenuItem = {
   path: string;
@@ -141,8 +141,7 @@ const menuGroups: MenuGroupDefinition[] = [
     label: 'Mantenedores',
     icon: Settings,
     items: [
-      { path: '/categorias-egreso', label: 'Categorías de Egreso', icon: Tags, permission: 'CU134' },
-      { path: '/configuracion/umbral', label: 'Umbral por vencer', icon: Settings, permission: 'CU41' },
+      { path: '/mantenedores', label: 'Panel de Mantenedores', icon: Settings, permissions: [...permisosAccesoMantenedores] },
     ],
   },
   {
