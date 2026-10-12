@@ -24,7 +24,7 @@ test('la matriz conserva perfiles previos y asigna M8 por capacidad',()=>{
   assert.deepEqual(codigosGerencia,esperados.gerencia);
   assert.deepEqual(codigosSecretaria,esperados.secretaria);
   assert.deepEqual(codigosContador,esperados.contador);
-  const catalogo=[...tramo(1,274),'CU355','CU359'];
+  const catalogo=[...tramo(1,274),'CU355','CU359',...tramo(360,367)];
   assert.deepEqual(Object.keys(matrizPermisosPorCU),catalogo);
   for(const codigo of catalogo) assert.deepEqual(matrizPermisosPorCU[codigo],[...Object.keys(actores).filter(perfil=>actores[perfil].includes(codigo))]);
 });

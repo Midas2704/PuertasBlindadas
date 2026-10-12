@@ -10,6 +10,55 @@ import { registrarCompromisoCredito, validarCreditoParaFormalizacion } from '../
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
+const ESTADOS_FAMILIA_COMERCIAL = ['ACTIVA', 'INACTIVA'] as const;
+const ESTADOS_PRODUCTO_COMERCIAL = ['BORRADOR', 'VINCULADO', 'INACTIVO'] as const;
+const CAMPOS_TECNICOS_PRODUCTO = ['tipoEstructura','materialesPrincipales','revestimientos','terminaciones','cerradurasCompatibles','caracteristicasSeguridad','dimensionesReferenciales','requisitosTecnicos','opcionales','observacionesTecnicas'] as const;
+
+const codigoCatalogo = (valor: unknown, maximo: number, nombre: string) => {
+  const codigo = texto(valor, maximo).toLocaleUpperCase('es-CL');
+  if (!new RegExp(`^[A-Z0-9][A-Z0-9._-]{1,${maximo - 1}}$`).test(codigo)) throw new ErrorAplicacion(400, `${nombre} debe usar letras, números, punto, guion o guion bajo`);
+  return codigo;
+};
+const motivoObligatorio = (valor: unknown) => {
+  const motivo = texto(valor, 2000);
+  if (!motivo) throw new ErrorAplicacion(400, 'El motivo es obligatorio');
+  return motivo;
+};
+const revisionEntrada = (valor: unknown) => {
+  const revision = identificador(valor);
+  return revision;
+};
+const caracteristicasTecnicas = (valor: unknown): Prisma.InputJsonObject => {
+  if (valor === undefined || valor === null) return {};
+  if (typeof valor !== 'object' || Array.isArray(valor)) throw new ErrorAplicacion(400, 'Las características técnicas deben ser un objeto');
+  const entrada = valor as Record<string, unknown>;
+  if (Object.keys(entrada).some(campo => !CAMPOS_TECNICOS_PRODUCTO.includes(campo as typeof CAMPOS_TECNICOS_PRODUCTO[number]))) throw new ErrorAplicacion(400, 'Existe una característica técnica no admitida');
+  const salida: Record<string, string> = {};
+  for (const campo of CAMPOS_TECNICOS_PRODUCTO) {
+    const contenido = entrada[campo];
+    if (contenido === undefined || contenido === null || contenido === '') continue;
+    if (typeof contenido !== 'string' || contenido.length > 4000) throw new ErrorAplicacion(400, `La característica ${campo} no es válida`);
+    salida[campo] = contenido.trim();
+  }
+  return salida as Prisma.InputJsonObject;
+};
+const caracteristicasDestacadas = (valor: unknown): Prisma.InputJsonArray => {
+  if (valor === undefined || valor === null) return [];
+  if (!Array.isArray(valor) || valor.length > 20) throw new ErrorAplicacion(400, 'Las características destacadas deben ser una lista de hasta 20 elementos');
+  return valor.map(item => {
+    if (typeof item !== 'string' || !item.trim() || item.length > 250) throw new ErrorAplicacion(400, 'Característica destacada inválida');
+    return item.trim();
+  });
+};
+const fechaComercial = (valor: unknown) => {
+  const fecha = texto(valor, 20);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !Number.isFinite(Date.parse(`${fecha}T00:00:00Z`))) throw new ErrorAplicacion(400, 'Fecha de vigencia inválida');
+  return new Date(`${fecha}T00:00:00Z`);
+};
+const auditableM9 = <T extends object>(resultado: T, anterior?: Prisma.InputJsonValue, nuevo?: Prisma.InputJsonValue) => {
+  Object.defineProperty(resultado, '__auditoriaM9', { enumerable: false, value: { anterior, nuevo } });
+  return resultado;
+};
 function importes(base: Prisma.Decimal, tipo: unknown, valor: unknown, exento: unknown) {
   if (typeof exento !== 'boolean') throw new ErrorAplicacion(400, 'Indica IVA o exención');
   const descuento = new Prisma.Decimal(numeroNoNegativo(valor ?? 0, 'Descuento'));
@@ -262,6 +311,180 @@ export class M2Controller {
     }));
   }
   async listarProductos() { return prisma.item_comercial.findMany({ where: { estado_item: 'activo' } }); }
+  async listarFamiliasProductoComercial(consulta: Entrada = {}) {
+    const busqueda = texto(consulta.busqueda, 150);
+    const estado = texto(consulta.estado || 'TODAS', 20).toUpperCase();
+    if (estado !== 'TODAS' && !ESTADOS_FAMILIA_COMERCIAL.includes(estado as typeof ESTADOS_FAMILIA_COMERCIAL[number])) throw new ErrorAplicacion(400, 'Estado de familia inválido');
+    return prisma.familia_producto_comercial.findMany({
+      where: {
+        ...(estado === 'TODAS' ? {} : { estado }),
+        ...(busqueda ? { OR: [{ codigo: { contains: busqueda, mode: 'insensitive' } }, { nombre: { contains: busqueda, mode: 'insensitive' } }] } : {}),
+      },
+      include: { _count: { select: { productos: true } } }, orderBy: [{ estado: 'asc' }, { nombre: 'asc' }],
+    });
+  }
+  async crearFamiliaProductoComercial(entrada: Entrada, usuario: bigint) {
+    const codigo = codigoCatalogo(entrada.codigo, 40, 'El código de familia');
+    const nombre = texto(entrada.nombre, 150); if (!nombre) throw new ErrorAplicacion(400, 'El nombre de la familia es obligatorio');
+    const descripcion = texto(entrada.descripcion, 2000) || null;
+    try {
+      const creada = await prisma.$transaction(async tx => {
+        const familia = await tx.familia_producto_comercial.create({ data: { codigo, nombre, descripcion, creado_por: usuario, actualizado_por: usuario } });
+        await tx.historial_familia_producto_comercial.create({ data: { id_familia_producto_comercial: familia.id_familia_producto_comercial, evento: 'CREACION', valor_nuevo: { codigo, nombre, descripcion, estado: familia.estado }, usuario_id_usuario: usuario } });
+        return familia;
+      });
+      return auditableM9(creada, undefined, { id: creada.id_familia_producto_comercial, codigo, nombre, estado: creada.estado });
+    } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe una familia con ese código'); throw error; }
+  }
+  async actualizarFamiliaProductoComercial(id: number, entrada: Entrada, usuario: bigint) {
+    const revision = revisionEntrada(entrada.revision);
+    return prisma.$transaction(async tx => {
+      const actual = await tx.familia_producto_comercial.findUnique({ where: { id_familia_producto_comercial: id } });
+      if (!actual) throw new ErrorAplicacion(404, 'Familia comercial no encontrada');
+      const codigo = entrada.codigo === undefined ? actual.codigo : codigoCatalogo(entrada.codigo, 40, 'El código de familia');
+      const nombre = entrada.nombre === undefined ? actual.nombre : texto(entrada.nombre, 150); if (!nombre) throw new ErrorAplicacion(400, 'El nombre de la familia es obligatorio');
+      const descripcion = entrada.descripcion === undefined ? actual.descripcion : texto(entrada.descripcion, 2000) || null;
+      try {
+        const cambio = await tx.familia_producto_comercial.updateMany({ where: { id_familia_producto_comercial: id, revision }, data: { codigo, nombre, descripcion, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+        if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La familia cambió mientras la editabas; vuelve a cargarla');
+        const actualizada = await tx.familia_producto_comercial.findUniqueOrThrow({ where: { id_familia_producto_comercial: id } });
+        await tx.historial_familia_producto_comercial.create({ data: { id_familia_producto_comercial: id, evento: 'MODIFICACION', valor_anterior: { codigo: actual.codigo, nombre: actual.nombre, descripcion: actual.descripcion }, valor_nuevo: { codigo, nombre, descripcion }, motivo: texto(entrada.motivo, 2000) || null, usuario_id_usuario: usuario } });
+        return auditableM9(actualizada, { codigo: actual.codigo, nombre: actual.nombre }, { codigo, nombre });
+      } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe una familia con ese código'); throw error; }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+  async cambiarEstadoFamiliaProductoComercial(id: number, activar: boolean, entrada: Entrada, usuario: bigint) {
+    const revision = revisionEntrada(entrada.revision); const motivo = motivoObligatorio(entrada.motivo); const estado = activar ? 'ACTIVA' : 'INACTIVA';
+    return prisma.$transaction(async tx => {
+      const actual = await tx.familia_producto_comercial.findUnique({ where: { id_familia_producto_comercial: id } });
+      if (!actual) throw new ErrorAplicacion(404, 'Familia comercial no encontrada');
+      if (actual.estado === estado) throw new ErrorAplicacion(409, `La familia ya está ${estado.toLowerCase()}`);
+      if (!activar && await tx.extension_producto_comercial.count({ where: { id_familia_producto_comercial: id, estado: { not: 'INACTIVO' } } })) throw new ErrorAplicacion(409, 'No se puede desactivar una familia con productos activos');
+      const cambio = await tx.familia_producto_comercial.updateMany({ where: { id_familia_producto_comercial: id, revision }, data: { estado, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La familia cambió mientras la editabas; vuelve a cargarla');
+      const actualizada = await tx.familia_producto_comercial.findUniqueOrThrow({ where: { id_familia_producto_comercial: id } });
+      await tx.historial_familia_producto_comercial.create({ data: { id_familia_producto_comercial: id, evento: activar ? 'REACTIVACION' : 'DESACTIVACION', valor_anterior: { estado: actual.estado }, valor_nuevo: { estado }, motivo, usuario_id_usuario: usuario } });
+      return auditableM9(actualizada, { estado: actual.estado }, { estado });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+  async historialFamiliaProductoComercial(id: number) {
+    const familia = await prisma.familia_producto_comercial.findUnique({ where: { id_familia_producto_comercial: id }, include: { productos: { select: { id_extension_producto_comercial: true, codigo_comercial: true, nombre_comercial: true, estado: true } }, historial: { include: { usuario: { select: { usuario_id_usuario: true, usuario_username: true } } }, orderBy: { fecha_evento: 'desc' } } } });
+    if (!familia) throw new ErrorAplicacion(404, 'Familia comercial no encontrada');
+    return familia;
+  }
+  async listarProductosComerciales(consulta: Entrada = {}) {
+    const busqueda = texto(consulta.busqueda, 200); const estado = texto(consulta.estado || 'TODOS', 20).toUpperCase();
+    if (estado !== 'TODOS' && !ESTADOS_PRODUCTO_COMERCIAL.includes(estado as typeof ESTADOS_PRODUCTO_COMERCIAL[number])) throw new ErrorAplicacion(400, 'Estado de producto inválido');
+    const idFamilia = consulta.familia ? identificador(consulta.familia) : undefined;
+    return prisma.extension_producto_comercial.findMany({ where: { ...(estado === 'TODOS' ? {} : { estado }), ...(idFamilia ? { id_familia_producto_comercial: idFamilia } : {}), ...(busqueda ? { OR: [{ codigo_comercial: { contains: busqueda, mode: 'insensitive' } }, { nombre_comercial: { contains: busqueda, mode: 'insensitive' } }] } : {}) }, include: { familia: true, item_comercial: true, producto_terminado: true }, orderBy: [{ estado: 'asc' }, { nombre_comercial: 'asc' }] });
+  }
+  private datosProductoComercial(entrada: Entrada, actual?: Entrada) {
+    const codigo_comercial = entrada.codigoComercial === undefined ? actual?.codigo_comercial : codigoCatalogo(entrada.codigoComercial, 60, 'El código comercial');
+    const nombre_comercial = entrada.nombreComercial === undefined ? actual?.nombre_comercial : texto(entrada.nombreComercial, 200);
+    if (!nombre_comercial) throw new ErrorAplicacion(400, 'El nombre comercial es obligatorio');
+    const id_familia_producto_comercial = entrada.idFamilia === undefined ? actual?.id_familia_producto_comercial : identificador(entrada.idFamilia);
+    return {
+      codigo_comercial, nombre_comercial, id_familia_producto_comercial,
+      subfamilia: entrada.subfamilia === undefined ? actual?.subfamilia : texto(entrada.subfamilia, 120) || null,
+      tipo_producto: entrada.tipoProducto === undefined ? actual?.tipo_producto : texto(entrada.tipoProducto, 100) || null,
+      descripcion_general: entrada.descripcionGeneral === undefined ? actual?.descripcion_general : texto(entrada.descripcionGeneral, 8000) || null,
+      descripcion_b2b: entrada.descripcionB2b === undefined ? actual?.descripcion_b2b : texto(entrada.descripcionB2b, 8000) || null,
+      descripcion_b2c: entrada.descripcionB2c === undefined ? actual?.descripcion_b2c : texto(entrada.descripcionB2c, 8000) || null,
+      observaciones: entrada.observaciones === undefined ? actual?.observaciones : texto(entrada.observaciones, 4000) || null,
+      garantia_referencial: entrada.garantiaReferencial === undefined ? actual?.garantia_referencial : texto(entrada.garantiaReferencial, 4000) || null,
+      condiciones_particulares: entrada.condicionesParticulares === undefined ? actual?.condiciones_particulares : texto(entrada.condicionesParticulares, 4000) || null,
+      caracteristicas_destacadas: entrada.caracteristicasDestacadas === undefined ? actual?.caracteristicas_destacadas : caracteristicasDestacadas(entrada.caracteristicasDestacadas),
+      caracteristicas_tecnicas: entrada.caracteristicasTecnicas === undefined ? actual?.caracteristicas_tecnicas : caracteristicasTecnicas(entrada.caracteristicasTecnicas),
+    };
+  }
+  async crearProductoComercial(entrada: Entrada, usuario: bigint) {
+    const datos = this.datosProductoComercial(entrada);
+    try {
+      const creado = await prisma.$transaction(async tx => {
+        const familia = await tx.familia_producto_comercial.findFirst({ where: { id_familia_producto_comercial: datos.id_familia_producto_comercial, estado: 'ACTIVA' } });
+        if (!familia) throw new ErrorAplicacion(409, 'Selecciona una familia activa');
+        const producto = await tx.extension_producto_comercial.create({ data: { ...datos, creado_por: usuario, actualizado_por: usuario } });
+        await tx.historial_producto_comercial.create({ data: { id_extension_producto_comercial: producto.id_extension_producto_comercial, evento: 'CREACION', valor_nuevo: { codigo: producto.codigo_comercial, nombre: producto.nombre_comercial, estado: producto.estado }, usuario_id_usuario: usuario } });
+        return producto;
+      });
+      return auditableM9(creado, undefined, { id: creado.id_extension_producto_comercial, codigo: creado.codigo_comercial, nombre: creado.nombre_comercial, estado: creado.estado });
+    } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe un producto con ese código comercial'); throw error; }
+  }
+  async actualizarProductoComercial(id: number, entrada: Entrada, usuario: bigint) {
+    const revision = revisionEntrada(entrada.revision);
+    try { return await prisma.$transaction(async tx => {
+      const actual = await tx.extension_producto_comercial.findUnique({ where: { id_extension_producto_comercial: id } });
+      if (!actual) throw new ErrorAplicacion(404, 'Producto comercial no encontrado');
+      if (actual.estado === 'INACTIVO') throw new ErrorAplicacion(409, 'Reactiva el producto antes de modificarlo');
+      const datos = this.datosProductoComercial(entrada, actual);
+      const familia = await tx.familia_producto_comercial.findFirst({ where: { id_familia_producto_comercial: datos.id_familia_producto_comercial, estado: 'ACTIVA' } });
+      if (!familia) throw new ErrorAplicacion(409, 'Selecciona una familia activa');
+      const cambio = await tx.extension_producto_comercial.updateMany({ where: { id_extension_producto_comercial: id, revision }, data: { ...datos, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El producto cambió mientras lo editabas; vuelve a cargarlo');
+      const actualizado = await tx.extension_producto_comercial.findUniqueOrThrow({ where: { id_extension_producto_comercial: id } });
+      await tx.historial_producto_comercial.create({ data: { id_extension_producto_comercial: id, evento: 'MODIFICACION_BORRADOR', valor_anterior: { revision: actual.revision, codigo: actual.codigo_comercial, nombre: actual.nombre_comercial }, valor_nuevo: { revision: actualizado.revision, codigo: actualizado.codigo_comercial, nombre: actualizado.nombre_comercial }, motivo: texto(entrada.motivo, 2000) || null, usuario_id_usuario: usuario } });
+      return auditableM9(actualizado, { revision: actual.revision, codigo: actual.codigo_comercial, nombre: actual.nombre_comercial }, { revision: actualizado.revision, codigo: actualizado.codigo_comercial, nombre: actualizado.nombre_comercial });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002','P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'El producto cambió concurrentemente o el código ya está en uso'); throw error; }
+  }
+  async cambiarEstadoProductoComercial(id: number, activar: boolean, entrada: Entrada, usuario: bigint) {
+    const revision = revisionEntrada(entrada.revision); const motivo = motivoObligatorio(entrada.motivo);
+    return prisma.$transaction(async tx => {
+      const actual = await tx.extension_producto_comercial.findUnique({ where: { id_extension_producto_comercial: id } }); if (!actual) throw new ErrorAplicacion(404, 'Producto comercial no encontrado');
+      const estado = activar ? (actual.id_item_comercial ? 'VINCULADO' : 'BORRADOR') : 'INACTIVO';
+      if (actual.estado === estado) throw new ErrorAplicacion(409, `El producto ya está ${estado.toLowerCase()}`);
+      const cambio = await tx.extension_producto_comercial.updateMany({ where: { id_extension_producto_comercial: id, revision }, data: { estado, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El producto cambió mientras lo editabas; vuelve a cargarlo');
+      const actualizado = await tx.extension_producto_comercial.findUniqueOrThrow({ where: { id_extension_producto_comercial: id } });
+      await tx.historial_producto_comercial.create({ data: { id_extension_producto_comercial: id, evento: activar ? 'REACTIVACION' : 'DESACTIVACION', valor_anterior: { estado: actual.estado }, valor_nuevo: { estado }, motivo, usuario_id_usuario: usuario } });
+      return auditableM9(actualizado, { estado: actual.estado }, { estado });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+  async vincularProductoComercial(id: number, entrada: Entrada, usuario: bigint) {
+    const revision = revisionEntrada(entrada.revision); const motivo = motivoObligatorio(entrada.motivo);
+    const idItem = entrada.idItemComercial === null || entrada.idItemComercial === '' ? null : identificador(entrada.idItemComercial);
+    const idInventario = entrada.idProductoTerminado === null || entrada.idProductoTerminado === '' ? null : BigInt(identificador(entrada.idProductoTerminado));
+    try { return await prisma.$transaction(async tx => {
+      const actual = await tx.extension_producto_comercial.findUnique({ where: { id_extension_producto_comercial: id } }); if (!actual) throw new ErrorAplicacion(404, 'Producto comercial no encontrado');
+      if (actual.estado === 'INACTIVO') throw new ErrorAplicacion(409, 'Reactiva el producto antes de administrar sus vínculos');
+      if (idItem && !await tx.item_comercial.findFirst({ where: { id_item_comercial: idItem, estado_item: 'activo' } })) throw new ErrorAplicacion(409, 'El ítem comercial no existe o no está activo');
+      if (idInventario && !await tx.producto_terminado.findFirst({ where: { producto_terminado_id_producto: idInventario, producto_terminado_activo: { not: false } } })) throw new ErrorAplicacion(409, 'El producto terminado no existe o no está activo');
+      const estado = idItem ? 'VINCULADO' : 'BORRADOR';
+      const cambio = await tx.extension_producto_comercial.updateMany({ where: { id_extension_producto_comercial: id, revision }, data: { id_item_comercial: idItem, producto_terminado_id_producto: idInventario, estado, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El producto cambió mientras lo editabas; vuelve a cargarlo');
+      const actualizado = await tx.extension_producto_comercial.findUniqueOrThrow({ where: { id_extension_producto_comercial: id } });
+      const anterior = { idItemComercial: actual.id_item_comercial, idProductoTerminado: actual.producto_terminado_id_producto?.toString() || null, estado: actual.estado };
+      const nuevo = { idItemComercial: idItem, idProductoTerminado: idInventario?.toString() || null, estado };
+      await tx.historial_producto_comercial.create({ data: { id_extension_producto_comercial: id, evento: 'CAMBIO_VINCULACION', valor_anterior: anterior, valor_nuevo: nuevo, motivo, usuario_id_usuario: usuario } });
+      return auditableM9(actualizado, anterior, nuevo);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'El registro de Terreno o Inventario ya está vinculado a otra ficha comercial'); if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new ErrorAplicacion(409, 'La vinculación cambió concurrentemente'); throw error; }
+  }
+  async publicarVersionProductoComercial(id: number, entrada: Entrada, usuario: bigint) {
+    const revision = revisionEntrada(entrada.revision); const motivo = motivoObligatorio(entrada.motivo); const vigencia = fechaComercial(entrada.vigenciaDesde);
+    try { return await prisma.$transaction(async tx => {
+      const producto = await tx.extension_producto_comercial.findUnique({ where: { id_extension_producto_comercial: id }, include: { familia: true, item_comercial: true } });
+      if (!producto) throw new ErrorAplicacion(404, 'Producto comercial no encontrado');
+      if (producto.estado !== 'VINCULADO' || !producto.id_item_comercial || producto.item_comercial?.estado_item !== 'activo') throw new ErrorAplicacion(409, 'Sólo un producto vinculado a un ítem operativo activo puede publicarse');
+      if (producto.familia.estado !== 'ACTIVA') throw new ErrorAplicacion(409, 'La familia debe estar activa para publicar');
+      const numero = (await tx.producto_comercial_version.aggregate({ where: { id_extension_producto_comercial: id }, _max: { numero_version: true } }))._max.numero_version ?? 0;
+      const version = await tx.producto_comercial_version.create({ data: { id_extension_producto_comercial: id, numero_version: numero + 1, codigo_comercial: producto.codigo_comercial, nombre_comercial: producto.nombre_comercial, id_familia_producto_comercial: producto.id_familia_producto_comercial, codigo_familia: producto.familia.codigo, nombre_familia: producto.familia.nombre, subfamilia: producto.subfamilia, tipo_producto: producto.tipo_producto, descripcion_general: producto.descripcion_general, descripcion_b2b: producto.descripcion_b2b, descripcion_b2c: producto.descripcion_b2c, observaciones: producto.observaciones, garantia_referencial: producto.garantia_referencial, condiciones_particulares: producto.condiciones_particulares, caracteristicas_destacadas: producto.caracteristicas_destacadas as Prisma.InputJsonValue, caracteristicas_tecnicas: producto.caracteristicas_tecnicas as Prisma.InputJsonValue, id_item_comercial: producto.id_item_comercial, producto_terminado_id_producto: producto.producto_terminado_id_producto, vigencia_desde: vigencia, motivo, usuario_id_usuario: usuario } });
+      const cambio = await tx.extension_producto_comercial.updateMany({ where: { id_extension_producto_comercial: id, revision }, data: { numero_version_vigente: version.numero_version, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El producto cambió mientras se publicaba; vuelve a cargarlo');
+      await tx.historial_producto_comercial.create({ data: { id_extension_producto_comercial: id, evento: 'PUBLICACION_VERSION', valor_anterior: { version: producto.numero_version_vigente }, valor_nuevo: { version: version.numero_version, vigenciaDesde: vigencia.toISOString().slice(0, 10) }, motivo, usuario_id_usuario: usuario } });
+      return auditableM9(version, { version: producto.numero_version_vigente }, { version: version.numero_version, vigenciaDesde: vigencia.toISOString().slice(0, 10) });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002','P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'Otra publicación modificó el producto; vuelve a cargarlo'); throw error; }
+  }
+  async obtenerProductoComercial(id: number, incluirHistorial = false) {
+    const producto = await prisma.extension_producto_comercial.findUnique({ where: { id_extension_producto_comercial: id }, include: { familia: true, item_comercial: true, producto_terminado: true, versiones: { orderBy: { numero_version: 'desc' } }, ...(incluirHistorial ? { historial: { include: { usuario: { select: { usuario_id_usuario: true, usuario_username: true } } }, orderBy: { fecha_evento: 'desc' as const } } } : {}) } });
+    if (!producto) throw new ErrorAplicacion(404, 'Producto comercial no encontrado');
+    return producto;
+  }
+  async catalogosVinculacionProductoComercial() {
+    const [items, productos] = await Promise.all([
+      prisma.item_comercial.findMany({ select: { id_item_comercial: true, nombre_item: true, tipo_item: true, estado_item: true }, orderBy: { nombre_item: 'asc' } }),
+      prisma.producto_terminado.findMany({ select: { producto_terminado_id_producto: true, producto_terminado_codigo_producto: true, producto_terminado_nombre_producto: true, producto_terminado_tipo_producto: true, producto_terminado_activo: true }, orderBy: { producto_terminado_nombre_producto: 'asc' } }),
+    ]);
+    return { itemsTerreno: items, productosInventario: productos.map(producto => ({ ...producto, producto_terminado_id_producto: producto.producto_terminado_id_producto.toString() })) };
+  }
   async listarMonedas() { return prisma.moneda.findMany({ where: { estado_moneda: 'activo', codigo_moneda: { in: ['CLP', 'USD'] } } }); }
   async consultarResumen() {
     const [notas, cotizacionesPendientes] = await Promise.all([

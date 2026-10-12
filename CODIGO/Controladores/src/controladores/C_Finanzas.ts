@@ -95,7 +95,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'listarSolicitudesCreditoM8' | 'obtenerSolicitudCreditoM8' | 'crearSolicitudInicialM8' | 'crearSolicitudExcepcionM8' | 'enviarSolicitudCreditoM8' | 'cancelarSolicitudCreditoM8'
   | 'resolverSolicitudInicialM8' | 'resolverSolicitudExcepcionM8' | 'modificarCupoCreditoM8' | 'suspenderCreditoM8' | 'reactivarCreditoM8' | 'configurarLimiteCreditoM8'
   | 'consultarExposicionCreditoM8' | 'consultarSituacionCreditoM8' | 'consultarHistorialCreditoM8' | 'exportarCreditoM8' | 'consultarDistribucionCreditoM8' | 'consultarComposicionCreditoM8' | 'validarFormalizacionCreditoM8'
-  | 'consultarAuditoriaM9' | 'obtenerDetalleAuditoriaM9' | 'exportarAuditoriaM9' | 'consultarResumenAuditoriaM9';
+  | 'consultarAuditoriaM9' | 'obtenerDetalleAuditoriaM9' | 'exportarAuditoriaM9' | 'consultarResumenAuditoriaM9'
+  | 'listarFamiliasProductoComercial' | 'crearFamiliaProductoComercial' | 'actualizarFamiliaProductoComercial' | 'desactivarFamiliaProductoComercial' | 'reactivarFamiliaProductoComercial' | 'historialFamiliaProductoComercial'
+  | 'listarProductosComerciales' | 'crearProductoComercial' | 'obtenerProductoComercial' | 'actualizarProductoComercial' | 'desactivarProductoComercial' | 'reactivarProductoComercial' | 'vincularProductoComercial' | 'publicarVersionProductoComercial' | 'historialProductoComercial' | 'catalogosVinculacionProductoComercial';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -448,6 +450,22 @@ export class C_Finanzas {
       }
       case 'inventario': return this.m2.listarInventario();
       case 'productos': return this.m2.listarProductos();
+      case 'listarFamiliasProductoComercial': return this.m2.listarFamiliasProductoComercial(solicitud.consulta || {});
+      case 'crearFamiliaProductoComercial': return this.m2.crearFamiliaProductoComercial(cuerpo, actor.id);
+      case 'actualizarFamiliaProductoComercial': return this.m2.actualizarFamiliaProductoComercial(identificador(parametros.id), cuerpo, actor.id);
+      case 'desactivarFamiliaProductoComercial': return this.m2.cambiarEstadoFamiliaProductoComercial(identificador(parametros.id), false, cuerpo, actor.id);
+      case 'reactivarFamiliaProductoComercial': return this.m2.cambiarEstadoFamiliaProductoComercial(identificador(parametros.id), true, cuerpo, actor.id);
+      case 'historialFamiliaProductoComercial': return this.m2.historialFamiliaProductoComercial(identificador(parametros.id));
+      case 'listarProductosComerciales': return this.m2.listarProductosComerciales(solicitud.consulta || {});
+      case 'crearProductoComercial': return this.m2.crearProductoComercial(cuerpo, actor.id);
+      case 'obtenerProductoComercial': return this.m2.obtenerProductoComercial(identificador(parametros.id));
+      case 'actualizarProductoComercial': return this.m2.actualizarProductoComercial(identificador(parametros.id), cuerpo, actor.id);
+      case 'desactivarProductoComercial': return this.m2.cambiarEstadoProductoComercial(identificador(parametros.id), false, cuerpo, actor.id);
+      case 'reactivarProductoComercial': return this.m2.cambiarEstadoProductoComercial(identificador(parametros.id), true, cuerpo, actor.id);
+      case 'vincularProductoComercial': return this.m2.vincularProductoComercial(identificador(parametros.id), cuerpo, actor.id);
+      case 'publicarVersionProductoComercial': return this.m2.publicarVersionProductoComercial(identificador(parametros.id), cuerpo, actor.id);
+      case 'historialProductoComercial': return this.m2.obtenerProductoComercial(identificador(parametros.id), true);
+      case 'catalogosVinculacionProductoComercial': return this.m2.catalogosVinculacionProductoComercial();
       case 'monedas': return this.m2.listarMonedas();
       case 'bandeja': return this.m2.consultarBandeja();
       case 'historial': return this.m2.consultarBandeja(true);

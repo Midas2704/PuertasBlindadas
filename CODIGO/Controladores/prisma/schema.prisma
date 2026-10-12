@@ -2679,6 +2679,7 @@ model producto_terminado {
   producto_terminado_requerimientos_instalacion   String?
   producto_terminado_activo                       Boolean?
   material_producto_terminado                     material_producto_terminado[]
+  extensiones_comerciales                         extension_producto_comercial[]
 
   @@schema("inventario")
 }
@@ -3017,6 +3018,7 @@ model item_comercial {
   tipo_item          String?              @db.VarChar(50)
   estado_item        String               @default("activo") @db.VarChar(30)
   detalle_cotizacion detalle_cotizacion[]
+  extensiones_comerciales extension_producto_comercial[]
 
   @@schema("terreno")
 }
@@ -3344,6 +3346,13 @@ model usuario {
   saldos_bancarios_m7_creados saldo_inicial_bancario_m7[] @relation("saldo_inicial_bancario_m7_creador")
   saldos_bancarios_m7_actualizados saldo_inicial_bancario_m7[] @relation("saldo_inicial_bancario_m7_actualizador")
   proyecciones_m7_actualizadas proyeccion_financiera_m7[] @relation("proyeccion_m7_actualizador")
+  familias_comerciales_creadas familia_producto_comercial[] @relation("familia_producto_creador")
+  familias_comerciales_actualizadas familia_producto_comercial[] @relation("familia_producto_actualizador")
+  historial_familias_comerciales historial_familia_producto_comercial[]
+  productos_comerciales_creados extension_producto_comercial[] @relation("producto_comercial_creador")
+  productos_comerciales_actualizados extension_producto_comercial[] @relation("producto_comercial_actualizador")
+  historial_productos_comerciales historial_producto_comercial[]
+  versiones_productos_comerciales producto_comercial_version[]
   seguridad estado_seguridad_usuario?
   sesiones sesion_usuario[]
   recuperaciones token_recuperacion[]
@@ -3593,6 +3602,130 @@ view v_ficha_cliente_movimientos {
   monto                 Decimal?  @db.Decimal
   descripcion           String?
 
+  @@schema("finanzas")
+}
+
+model familia_producto_comercial {
+  id_familia_producto_comercial Int       @id @default(autoincrement())
+  codigo                        String    @unique @db.VarChar(40)
+  nombre                        String    @db.VarChar(150)
+  descripcion                   String?
+  estado                        String    @default("ACTIVA") @db.VarChar(20)
+  revision                      Int       @default(1)
+  creado_en                     DateTime  @default(now()) @db.Timestamp(6)
+  actualizado_en                DateTime  @default(now()) @db.Timestamp(6)
+  creado_por                    BigInt
+  actualizado_por               BigInt
+  creador                       usuario   @relation("familia_producto_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict)
+  actualizador                  usuario   @relation("familia_producto_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict)
+  productos                     extension_producto_comercial[]
+  versiones                     producto_comercial_version[]
+  historial                     historial_familia_producto_comercial[]
+
+  @@index([estado, nombre])
+  @@schema("finanzas")
+}
+
+model historial_familia_producto_comercial {
+  id_historial_familia_producto_comercial Int       @id @default(autoincrement())
+  id_familia_producto_comercial            Int
+  evento                                   String    @db.VarChar(40)
+  valor_anterior                           Json?
+  valor_nuevo                              Json?
+  motivo                                   String?
+  usuario_id_usuario                       BigInt
+  fecha_evento                             DateTime  @default(now()) @db.Timestamp(6)
+  familia                                  familia_producto_comercial @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict)
+  usuario                                  usuario   @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict)
+
+  @@index([id_familia_producto_comercial, fecha_evento])
+  @@schema("finanzas")
+}
+
+model extension_producto_comercial {
+  id_extension_producto_comercial Int       @id @default(autoincrement())
+  codigo_comercial                String    @unique @db.VarChar(60)
+  nombre_comercial                String    @db.VarChar(200)
+  id_familia_producto_comercial   Int
+  subfamilia                      String?   @db.VarChar(120)
+  tipo_producto                   String?   @db.VarChar(100)
+  descripcion_general             String?
+  descripcion_b2b                 String?
+  descripcion_b2c                 String?
+  observaciones                   String?
+  garantia_referencial            String?
+  condiciones_particulares        String?
+  caracteristicas_destacadas      Json      @default("[]")
+  caracteristicas_tecnicas        Json      @default("{}")
+  estado                          String    @default("BORRADOR") @db.VarChar(20)
+  id_item_comercial               Int?      @unique
+  producto_terminado_id_producto  BigInt?   @unique
+  numero_version_vigente          Int?
+  revision                        Int       @default(1)
+  creado_en                       DateTime  @default(now()) @db.Timestamp(6)
+  actualizado_en                  DateTime  @default(now()) @db.Timestamp(6)
+  creado_por                      BigInt
+  actualizado_por                 BigInt
+  familia                         familia_producto_comercial @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict)
+  item_comercial                  item_comercial? @relation(fields: [id_item_comercial], references: [id_item_comercial], onDelete: Restrict)
+  producto_terminado              producto_terminado? @relation(fields: [producto_terminado_id_producto], references: [producto_terminado_id_producto], onDelete: Restrict)
+  creador                         usuario   @relation("producto_comercial_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict)
+  actualizador                    usuario   @relation("producto_comercial_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict)
+  versiones                       producto_comercial_version[]
+  historial                       historial_producto_comercial[]
+
+  @@index([id_familia_producto_comercial, estado])
+  @@index([nombre_comercial])
+  @@schema("finanzas")
+}
+
+model producto_comercial_version {
+  id_producto_comercial_version Int       @id @default(autoincrement())
+  id_extension_producto_comercial Int
+  numero_version                Int
+  codigo_comercial              String    @db.VarChar(60)
+  nombre_comercial              String    @db.VarChar(200)
+  id_familia_producto_comercial Int
+  codigo_familia                String    @db.VarChar(40)
+  nombre_familia                String    @db.VarChar(150)
+  subfamilia                    String?   @db.VarChar(120)
+  tipo_producto                 String?   @db.VarChar(100)
+  descripcion_general           String?
+  descripcion_b2b               String?
+  descripcion_b2c               String?
+  observaciones                 String?
+  garantia_referencial          String?
+  condiciones_particulares      String?
+  caracteristicas_destacadas    Json
+  caracteristicas_tecnicas      Json
+  id_item_comercial             Int?
+  producto_terminado_id_producto BigInt?
+  vigencia_desde                DateTime  @db.Date
+  motivo                        String
+  usuario_id_usuario            BigInt
+  creado_en                     DateTime  @default(now()) @db.Timestamp(6)
+  producto                      extension_producto_comercial @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict)
+  familia                       familia_producto_comercial @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict)
+  usuario                       usuario   @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict)
+
+  @@unique([id_extension_producto_comercial, numero_version])
+  @@index([id_extension_producto_comercial, creado_en])
+  @@schema("finanzas")
+}
+
+model historial_producto_comercial {
+  id_historial_producto_comercial Int       @id @default(autoincrement())
+  id_extension_producto_comercial Int
+  evento                          String    @db.VarChar(50)
+  valor_anterior                  Json?
+  valor_nuevo                     Json?
+  motivo                          String?
+  usuario_id_usuario              BigInt
+  fecha_evento                    DateTime  @default(now()) @db.Timestamp(6)
+  producto                        extension_producto_comercial @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict)
+  usuario                         usuario   @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict)
+
+  @@index([id_extension_producto_comercial, fecha_evento])
   @@schema("finanzas")
 }
 

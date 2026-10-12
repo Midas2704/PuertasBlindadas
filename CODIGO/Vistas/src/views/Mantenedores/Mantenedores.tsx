@@ -49,7 +49,7 @@ const categorias: CategoriaMantenedor[] = [
     nombre: 'Comercial',
     descripcion: 'Configuraciones que apoyan cotizaciones y presentación comercial.',
     tarjetas: [
-      { nombre: 'Productos y familias', descripcion: 'Catálogo comercial, familias y características de presentación.', modulo: 'M2', estado: 'PENDIENTE DE DEFINICIÓN', icono: Boxes },
+      { nombre: 'Productos y familias', descripcion: 'Catálogo comercial, familias y características de presentación.', modulo: 'M2', estado: 'DISPONIBLE', icono: Boxes, ruta: '/mantenedores/productos', permisos: ['CU360'] },
       { nombre: 'Parámetros comerciales', descripcion: 'Márgenes sugeridos, vigencias y valores administrativos.', modulo: 'M2', estado: 'PENDIENTE DE DEFINICIÓN', icono: Gauge },
       { nombre: 'Condiciones comerciales', descripcion: 'Plazos, garantías y condiciones diferenciadas B2B y B2C.', modulo: 'M2', estado: 'PENDIENTE DE DEFINICIÓN', icono: ClipboardCheck },
       { nombre: 'Plantillas documentales', descripcion: 'Formatos comerciales y versiones de documentos emitidos.', modulo: 'M2', estado: 'PENDIENTE DE DEFINICIÓN', icono: FileText },

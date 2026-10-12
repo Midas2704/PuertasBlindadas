@@ -60,6 +60,7 @@ import DeltaControladoM7 from './views/DashboardM7/DeltaControladoM7';
 import SolicitudesCredito from './views/Credito/SolicitudesCredito';
 import Auditoria from './views/Auditoria/Auditoria';
 import Mantenedores from './views/Mantenedores/Mantenedores';
+import ProductosFamilias from './views/Mantenedores/ProductosFamilias';
 import { permisosAccesoMantenedores } from './views/Mantenedores/permisos';
 
 const App: React.FC = () => {
@@ -121,6 +122,7 @@ const App: React.FC = () => {
           <Route path="credito/solicitudes/:id" element={<Protegido permiso="CU259"><SolicitudesCredito /></Protegido>} />
           <Route path="auditoria" element={<Protegido permiso="CU355"><Auditoria /></Protegido>} />
           <Route path="mantenedores" element={<Protegido permiso={[...permisosAccesoMantenedores]}><Mantenedores /></Protegido>} />
+          <Route path="mantenedores/productos" element={<Protegido permiso="CU360"><ProductosFamilias /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

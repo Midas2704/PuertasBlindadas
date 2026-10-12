@@ -20,4 +20,5 @@ export const permisosAccesoMantenedores = [
   'CU257',
   'CU268',
   'CU355',
+  'CU360',
 ] as const;
