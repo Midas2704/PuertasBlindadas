@@ -1615,6 +1615,9 @@ export class M7Controller {
 
   async consultarAtrasosInstalaciones(consulta: Consulta) {
     const periodo = resolverPeriodoM7(consulta);
+    const anioSeleccionado = periodo.desde.getUTCFullYear();
+    const inicioAnio = new Date(Date.UTC(anioSeleccionado, 0, 1));
+    const finAnio = new Date(Date.UTC(anioSeleccionado + 1, 0, 1));
     const fechaReferencia = consulta.fechaReferencia ? fechaUtc(consulta.fechaReferencia, 'Fecha de referencia') : new Date(`${fechaNegocio()}T00:00:00Z`);
     const estadosTerminales = new Set(['completada', 'completado', 'terminada', 'terminado', 'cerrada', 'cerrado', 'cancelada', 'cancelado', 'anulada', 'anulado']);
     try {
@@ -1622,8 +1625,9 @@ export class M7Controller {
         include: { servicio_terreno: true, orden_trabajo: { include: { proyecto: true } } },
         orderBy: { tarea_tarea_id: 'asc' },
       });
-      const confirmadas = tareas.filter(tarea => tarea.servicio_terreno && esServicioInstalacion(tarea.servicio_terreno.servicio_terreno_tipo_servicio));
-      const relacionNoConfirmada = tareas.length - confirmadas.length;
+      const tareasDelAnio = tareas.filter(tarea => !tarea.tarea_horario_limite || (tarea.tarea_horario_limite >= inicioAnio && tarea.tarea_horario_limite < finAnio));
+      const confirmadas = tareasDelAnio.filter(tarea => tarea.servicio_terreno && esServicioInstalacion(tarea.servicio_terreno.servicio_terreno_tipo_servicio));
+      const relacionNoConfirmada = tareasDelAnio.length - confirmadas.length;
       const conEfecto = confirmadas.filter(tarea => !estadosTerminales.has(normalizarTexto(tarea.tarea_estado_de_tarea)) && !estadosTerminales.has(normalizarTexto(tarea.servicio_terreno?.servicio_terreno_estado)) && !estadosTerminales.has(normalizarTexto(tarea.orden_trabajo?.orden_trabajo_estado)));
       const finalizadasExcluidas = confirmadas.length - conEfecto.length;
       const calculables = conEfecto.filter(tarea => tarea.tarea_horario_limite instanceof Date && Number.isFinite(tarea.tarea_horario_limite.getTime()));
@@ -1641,7 +1645,7 @@ export class M7Controller {
       const duraciones = confirmadas.filter(tarea => tarea.tarea_fecha_de_inicio && tarea.tarea_fecha_de_termino && tarea.tarea_fecha_de_termino >= tarea.tarea_fecha_de_inicio).map(tarea => ({ idTarea: tarea.tarea_tarea_id.toString(), inicioReal: fechaIso(tarea.tarea_fecha_de_inicio!), terminoReal: fechaIso(tarea.tarea_fecha_de_termino!), duracionDias: diasCalendario(tarea.tarea_fecha_de_inicio!, tarea.tarea_fecha_de_termino!) }));
       const resumen = { coberturaTemporalValida: calculables.length, atrasadas: atrasadas.length, enPlazo: enPlazo.length, sinFechaSuficiente: sinFecha.length, relacionInstalacionNoConfirmada: relacionNoConfirmada, finalizadasOAnuladasExcluidas: finalizadasExcluidas };
       return {
-        periodo: periodoSalida(periodo), fechaReferencia: fechaIso(fechaReferencia), estado: 'PARCIALMENTE_DISPONIBLE' as const,
+        periodo: { desde: fechaIso(inicioAnio), hasta: fechaIso(new Date(finAnio.getTime() - 86400000)), anio: anioSeleccionado }, fechaReferencia: fechaIso(fechaReferencia), estado: 'PARCIALMENTE_DISPONIBLE' as const,
         resumen: indicador('PARCIALMENTE_DISPONIBLE', resumen, 'Cobertura parcial: sólo tareas vinculadas directamente a servicios cuyo tipo propietario identifica una instalación'),
         atrasos: indicador(atrasadas.length ? 'VALIDO' : 'SIN_RESULTADOS', atrasadas, 'Clasificación derivada de tarea_horario_limite vencido y estados propietarios no terminales; días calendario'),
         enPlazo: indicador(enPlazo.length ? 'VALIDO' : 'SIN_RESULTADOS', enPlazo, 'Tareas con fecha límite válida aún no vencida; no incluye tareas sin fecha'),
@@ -1699,6 +1703,11 @@ export class M7Controller {
       await tx.evento_auditoria.create({ data: { id_usuario: actor.id, tipo_evento: 'AJUSTE_LIQUIDEZ', entidad_afectada: 'movimiento_financiero', id_registro_afectado: movimiento.id_movimiento_financiero, accion_realizada: naturaleza === 'entrada' ? 'AJUSTE_ENTRADA' : 'AJUSTE_SALIDA', descripcion_evento: justificacion } });
       return { idMovimiento: movimiento.id_movimiento_financiero, naturaleza: naturaleza.toUpperCase(), monto: Number(movimiento.monto_movimiento), fecha: movimiento.fecha_movimiento, responsable: actor.id.toString(), justificacion };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async consultarCatalogosAjusteLiquidez() {
+    const monedas = await prisma.moneda.findMany({ where: { estado_moneda: 'activo' }, select: { id_moneda: true, codigo_moneda: true, nombre_moneda: true }, orderBy: { codigo_moneda: 'asc' } });
+    return { naturalezas: [{ valor: 'entrada', etiqueta: 'Entrada' }, { valor: 'salida', etiqueta: 'Salida' }], monedas: monedas.map(moneda => ({ id: moneda.id_moneda, codigo: moneda.codigo_moneda, nombre: moneda.nombre_moneda })) };
   }
 
   async consultarParametrosDeltaM7() {

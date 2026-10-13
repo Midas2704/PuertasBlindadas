@@ -39,6 +39,8 @@ test('M7 CU252 atrasos de instalaciones con cobertura parcial', async t => {
   const anulada = await crearTarea('Anulada', new Date('2197-10-01T12:00:00Z'), 'anulada');
   const noInstalacion = await crearTarea('No instalación', new Date('2197-10-01T12:00:00Z'), 'pendiente', levantamiento.servicio_terreno_servicio_terreno_id);
   const sinRelacion = await crearTarea('Sin relación', new Date('2197-10-01T12:00:00Z'), 'pendiente', null);
+  const anioAnterior = await crearTarea('Año anterior', new Date('2196-12-31T23:59:59Z'));
+  const inicioAnio = await crearTarea('Inicio año', new Date('2197-01-01T00:00:00Z'));
 
   try {
     const buscarTareasOriginal = prisma.tarea.findMany;
@@ -81,6 +83,10 @@ test('M7 CU252 atrasos de instalaciones con cobertura parcial', async t => {
     });
     await t.test('19 no crea score ni prioridad', () => { const claves = clavesRecursivas(resultado); assert.equal(claves.includes('score'), false); assert.equal(claves.includes('prioridad'), false); });
     await t.test('20 conserva sólo las migraciones M7 autorizadas', () => assert.deepEqual(readdirSync(resolve('prisma/migrations')).filter(nombre => /m7/i.test(nombre)), ['040_m7_parametros_dashboard', '041_m7_delta_controlado', '051_m7_proyeccion_financiera', '053_m7_saldos_bancarios']));
+    await t.test('21 utiliza el año seleccionado', () => assert.equal(resultado.periodo.anio, 2197));
+    await t.test('22 no mezcla tareas fechadas en otro año', () => assert.equal(idsAtrasados.includes(anioAnterior.tarea_tarea_id.toString()), false));
+    await t.test('23 incluye correctamente el límite UTC del primer día', () => assert.ok(idsAtrasados.includes(inicioAnio.tarea_tarea_id.toString())));
+    await t.test('24 conserva sin fecha en cobertura separada sin declararla atraso', () => assert.ok(idsSinFecha.includes(sinFecha.tarea_tarea_id.toString())));
   } finally {
     await prisma.tarea.deleteMany({ where: { tarea_tarea_id: { in: ids.tareas } } });
     await prisma.orden_trabajo.deleteMany({ where: { orden_trabajo_id_orden: { in: ids.ordenes } } });

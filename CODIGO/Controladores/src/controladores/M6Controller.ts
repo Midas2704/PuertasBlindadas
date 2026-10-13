@@ -2804,12 +2804,45 @@ export class M6Controller {
     });
   }
 
-  async catalogosIncidenciaOperativa() {
-    const [categorias, areas] = await Promise.all([
+  async catalogosIncidenciaOperativa(consulta: Record<string, unknown> = {}) {
+    const busqueda = String(consulta.busqueda || '').trim().slice(0, 100);
+    const clienteRut = String(consulta.clienteRut || '').trim();
+    if (clienteRut.length > 12) throw new ErrorAplicacion(400, 'Cliente inválido');
+    const filtroCliente = busqueda ? { OR: [
+      { cliente_cliente_rut: { contains: busqueda, mode: 'insensitive' as const } },
+      { cliente_razon_social: { contains: busqueda, mode: 'insensitive' as const } },
+      { cliente_cliente_b2b_razon_social: { contains: busqueda, mode: 'insensitive' as const } },
+      { cliente_cliente_b2c_primer_nombre: { contains: busqueda, mode: 'insensitive' as const } },
+      { cliente_cliente_b2c_primer_apellido: { contains: busqueda, mode: 'insensitive' as const } },
+    ] } : undefined;
+    const [categorias, areas, clientes, ordenes] = await Promise.all([
       prisma.categoria_incidencia_terreno.findMany({ where: { activa: true }, orderBy: { nombre: 'asc' } }),
       prisma.area_trabajo.findMany({ where: { area_trabajo_activo: { not: false } }, orderBy: { area_trabajo_nombre_area: 'asc' } }),
+      prisma.cliente.findMany({
+        where: filtroCliente,
+        select: { cliente_cliente_rut: true, cliente_razon_social: true, cliente_cliente_b2b_razon_social: true, cliente_cliente_b2c_primer_nombre: true, cliente_cliente_b2c_primer_apellido: true },
+        orderBy: [{ cliente_razon_social: 'asc' }, { cliente_cliente_rut: 'asc' }], take: 50,
+      }),
+      clienteRut ? prisma.orden_trabajo.findMany({
+        where: { proyecto: { rut_cliente: clienteRut }, tareas_produccion: { some: { ejecuciones: { some: {} } } } },
+        select: {
+          orden_trabajo_id_orden: true, orden_trabajo_estado: true, orden_trabajo_fecha_hora: true,
+          proyecto: { select: { proyecto_codigo_proyecto: true, proyecto_nombre_referencia: true, rut_cliente: true } },
+          tareas_produccion: { select: { tarea_tarea_id: true, tarea_titulo: true, ejecuciones: { select: { id_ejecucion_tarea: true, fecha_ejecucion: true, estado_ejecucion: true }, orderBy: { fecha_ejecucion: 'desc' } } } },
+        }, orderBy: { orden_trabajo_id_orden: 'desc' },
+      }) : [],
     ]);
-    return { categorias: categorias.map(categoria => ({ id: categoria.id_categoria_incidencia, codigo: categoria.codigo, nombre: categoria.nombre })), areas: areas.map(area => ({ id: area.area_trabajo_id_area.toString(), nombre: area.area_trabajo_nombre_area || area.area_trabajo_clasificacion || `Área ${area.area_trabajo_id_area.toString()}` })) };
+    const nombreCliente = (cliente: typeof clientes[number]) => cliente.cliente_razon_social || cliente.cliente_cliente_b2b_razon_social || [cliente.cliente_cliente_b2c_primer_nombre, cliente.cliente_cliente_b2c_primer_apellido].filter(Boolean).join(' ') || 'Cliente sin nombre registrado';
+    return {
+      categorias: categorias.map(categoria => ({ id: categoria.id_categoria_incidencia, codigo: categoria.codigo, nombre: categoria.nombre })),
+      areas: areas.map(area => ({ id: area.area_trabajo_id_area.toString(), nombre: area.area_trabajo_nombre_area || area.area_trabajo_clasificacion || `Área ${area.area_trabajo_id_area.toString()}` })),
+      clientes: clientes.map(cliente => ({ id: cliente.cliente_cliente_rut, nombre: nombreCliente(cliente), etiqueta: `${nombreCliente(cliente)} · ${cliente.cliente_cliente_rut}` })),
+      ordenes: ordenes.flatMap(orden => orden.tareas_produccion.flatMap(tarea => tarea.ejecuciones.map(ejecucion => ({
+        idOrdenTrabajo: orden.orden_trabajo_id_orden.toString(), idEjecucion: ejecucion.id_ejecucion_tarea.toString(), idTarea: tarea.tarea_tarea_id.toString(),
+        etiqueta: `OT-${orden.orden_trabajo_id_orden.toString()} · ${tarea.tarea_titulo || orden.proyecto?.proyecto_nombre_referencia || orden.proyecto?.proyecto_codigo_proyecto || 'Tarea sin descripción'}`,
+        estadoOrden: orden.orden_trabajo_estado, estadoEjecucion: ejecucion.estado_ejecucion, fechaEjecucion: ejecucion.fecha_ejecucion,
+      })))),
+    };
   }
 
   async registrarIncidenciaRetrabajo(idEjecucion: number, entrada: Record<string, unknown>, actor: ActorIncidenciaM6) {
@@ -2820,12 +2853,20 @@ export class M6Controller {
     const idArea = areaTexto ? BigInt(areaTexto) : null;
     const evidencia = leerEvidenciaIncidencia(entrada.evidencia);
     const salida = await prisma.$transaction(async tx => {
+      const clienteRut = entrada.clienteRut === undefined ? '' : String(entrada.clienteRut).trim();
+      const idOrdenTexto = entrada.idOrdenTrabajo === undefined ? '' : String(entrada.idOrdenTrabajo).trim();
+      if (Boolean(clienteRut) !== Boolean(idOrdenTexto)) throw new ErrorAplicacion(400, 'Cliente y orden de trabajo deben informarse juntos');
+      if (idOrdenTexto && !/^\d+$/.test(idOrdenTexto)) throw new ErrorAplicacion(400, 'Orden de trabajo inválida');
       const [ejecucion, categoria, area] = await Promise.all([
-        tx.ejecucion_tarea.findUnique({ where: { id_ejecucion_tarea: BigInt(idEjecucion) } }),
+        tx.ejecucion_tarea.findUnique({ where: { id_ejecucion_tarea: BigInt(idEjecucion) }, include: { tarea: { include: { orden_trabajo: { include: { proyecto: true } } } } } }),
         tx.categoria_incidencia_terreno.findFirst({ where: { id_categoria_incidencia: idCategoria, activa: true } }),
         idArea === null ? null : tx.area_trabajo.findFirst({ where: { area_trabajo_id_area: idArea, area_trabajo_activo: { not: false } } }),
       ]);
       if (!ejecucion) throw new ErrorAplicacion(404, 'Ejecución no encontrada');
+      if (clienteRut) {
+        const orden = ejecucion.tarea.orden_trabajo;
+        if (!orden || orden.orden_trabajo_id_orden !== BigInt(idOrdenTexto) || orden.proyecto?.rut_cliente !== clienteRut) throw new ErrorAplicacion(409, 'La ejecución no pertenece a la orden de trabajo y cliente seleccionados');
+      }
       if (!categoria) throw new ErrorAplicacion(400, 'Categoría de incidencia no disponible');
       if (idArea !== null && !area) throw new ErrorAplicacion(400, 'Área responsable no disponible');
       const incidencia = await tx.incidencia_retrabajo_tarea.create({ data: { id_ejecucion_tarea: ejecucion.id_ejecucion_tarea, descripcion, causa_referencia: texto(entrada.causaReferencia, 500) || null, responsabilidad: texto(entrada.responsabilidad, 120) || null, estado: 'pendiente', fecha_registro: new Date(), id_categoria_incidencia: categoria.id_categoria_incidencia, id_area_responsable: idArea, id_usuario_creador: actor.id, estado_revision: 'pendiente_revision' } });

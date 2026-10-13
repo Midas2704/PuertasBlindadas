@@ -82,6 +82,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.delete('/dashboard-m7/proyecciones/:id', derivar('desactivarProyeccionM7'));
   rutas.get('/dashboard-m7/riesgo-deficit', derivar('consultarRiesgoDeficitM7'));
   rutas.post('/dashboard-m7/liquidez/ajustes', derivar('registrarAjusteLiquidezM7'));
+  rutas.get('/dashboard-m7/liquidez/ajustes/catalogos', derivar('consultarCatalogosAjusteLiquidezM7'));
   rutas.get('/dashboard-m7/configuracion/umbrales-liquidez', derivar('consultarParametrosLiquidezM7'));
   rutas.post('/dashboard-m7/configuracion/umbrales-liquidez', derivar('configurarParametroLiquidezM7'));
   rutas.get('/dashboard-m7/proyectos/exposicion', derivar('consultarExposicionProyectosM7'));
