@@ -1,23 +1,63 @@
-import type { ReactElement, ReactNode } from 'react';
+import { cloneElement, createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
+import type { CSSProperties, ReactElement, ReactNode, RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart,
   Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
+import type { TooltipContentProps } from 'recharts';
 import { BarChart3, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { EstadoDato, formatearDato } from './componentes';
+import { calcularPosicionTooltip } from './tooltipFlotante';
+import type { PosicionTooltip } from './tooltipFlotante';
 
 export type DatoGrafico = Record<string, string | number | null>;
 export type SerieGrafico = { clave: string; nombre: string; color?: string; discontinua?: boolean };
 
 const NARANJA = '#FE8F01';
 const GRIS = '#676767';
-const portalTooltip = () => typeof document === 'undefined' ? null : document.body;
-const estiloTooltip = { zIndex: 70, outline: 'none', pointerEvents: 'none' as const };
 const VERDE = '#15803d';
 const ROJO = '#b91c1c';
 const COLORES = [NARANJA, GRIS, '#9ca3af', VERDE, ROJO, '#d97706'];
 type DatoDonut = { nombre: string; valor: number; color?: string; porcentaje?: number | null };
+
+const ContextoSuperficieTooltip = createContext<RefObject<HTMLDivElement | null> | null>(null);
+
+function SuperficieTooltip({ children, className, style }: { children: ReactNode; className?: string; style?: CSSProperties }) {
+  const referencia = useRef<HTMLDivElement>(null);
+  return <ContextoSuperficieTooltip.Provider value={referencia}><div ref={referencia} className={className} style={style}>{children}</div></ContextoSuperficieTooltip.Provider>;
+}
+
+function ContenidoTooltipEnPortal({ contenido, propiedades, superficie }: { contenido: ReactElement; propiedades: TooltipContentProps; superficie: RefObject<HTMLDivElement | null> }) {
+  const referencia = useRef<HTMLDivElement>(null);
+  const [posicion, setPosicion] = useState<PosicionTooltip | null>(null);
+  const coordenadaX = propiedades.coordinate?.x;
+  const coordenadaY = propiedades.coordinate?.y;
+
+  useLayoutEffect(() => {
+    if (!propiedades.active || coordenadaX === undefined || coordenadaY === undefined) return;
+    const actualizar = () => {
+      const origen = superficie.current?.getBoundingClientRect();
+      const caja = referencia.current?.getBoundingClientRect();
+      if (!origen || !caja || caja.width <= 0 || caja.height <= 0) return;
+      setPosicion(calcularPosicionTooltip({ anclaX: origen.left + coordenadaX, anclaY: origen.top + coordenadaY, ancho: caja.width, alto: caja.height, anchoVentana: window.innerWidth, altoVentana: window.innerHeight }));
+    };
+    actualizar();
+    window.addEventListener('resize', actualizar);
+    window.addEventListener('scroll', actualizar, true);
+    return () => { window.removeEventListener('resize', actualizar); window.removeEventListener('scroll', actualizar, true); };
+  }, [coordenadaX, coordenadaY, propiedades.active, propiedades.payload, superficie]);
+
+  if (!propiedades.active || coordenadaX === undefined || coordenadaY === undefined || typeof document === 'undefined') return null;
+  return createPortal(<div ref={referencia} data-tooltip-m7="true" style={{ position: 'fixed', left: posicion?.izquierda ?? 0, top: posicion?.arriba ?? 0, zIndex: 70, maxWidth: 'calc(100vw - 16px)', pointerEvents: 'none', visibility: posicion ? 'visible' : 'hidden' }}>{cloneElement(contenido, propiedades)}</div>, document.body);
+}
+
+function TooltipFlotante({ contenido }: { contenido: ReactElement }) {
+  const superficie = useContext(ContextoSuperficieTooltip);
+  if (!superficie) return <Tooltip content={contenido} wrapperStyle={{ pointerEvents: 'none' }} />;
+  return <Tooltip isAnimationActive={false} content={propiedades => <ContenidoTooltipEnPortal contenido={contenido} propiedades={propiedades} superficie={superficie} />} wrapperStyle={{ pointerEvents: 'none' }} />;
+}
 
 const abreviar = (valor: number) => new Intl.NumberFormat('es-CL', { notation: 'compact', maximumFractionDigits: 1 }).format(valor);
 const fechaCorta = (valor: unknown) => {
@@ -79,13 +119,13 @@ export function EstadoSinDatos({ texto }: { texto: string }) {
 }
 
 function MarcoGrafico({ children, alto = 190 }: { children: ReactNode; alto?: number }) {
-  return <div className="w-full" style={{ height: alto }}>{children}</div>;
+  return <SuperficieTooltip className="w-full" style={{ height: alto }}>{children}</SuperficieTooltip>;
 }
 
 export function GraficoLinea({ datos, series, etiqueta = 'etiqueta', referencias = [] }: { datos: DatoGrafico[]; series: SerieGrafico[]; etiqueta?: string; referencias?: Array<{ valor: number; nombre: string; color?: string }> }) {
   if (!datos.length || !series.length) return <EstadoSinDatos texto="No hay una serie temporal suficiente para graficar." />;
   return <MarcoGrafico><ResponsiveContainer width="100%" height="100%"><LineChart data={datos} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-    <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip content={<TooltipGrafico />} portal={portalTooltip()} wrapperStyle={estiloTooltip} allowEscapeViewBox={{ x: true, y: true }} />
+    <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} /><TooltipFlotante contenido={<TooltipGrafico />} />
     {referencias.map(ref => <ReferenceLine key={ref.nombre} y={ref.valor} stroke={ref.color || ROJO} strokeDasharray="4 4" label={{ value: ref.nombre, fill: ref.color || ROJO, fontSize: 10 }} />)}
     {series.map((serie, indice) => <Line key={serie.clave} type="monotone" dataKey={serie.clave} name={serie.nombre} stroke={serie.color || COLORES[indice % COLORES.length]} strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />)}
   </LineChart></ResponsiveContainer></MarcoGrafico>;
@@ -95,7 +135,7 @@ export function GraficoArea({ datos, series, etiqueta = 'etiqueta', referencias 
   if (!datos.length || !series.length) return <EstadoSinDatos texto="No hay proyección suficiente para graficar." />;
   return <MarcoGrafico><ResponsiveContainer width="100%" height="100%"><AreaChart data={datos} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
     <defs>{series.map((serie, indice) => <linearGradient key={serie.clave} id={`area-${serie.clave.replace(/[^a-z0-9]/gi, '')}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={serie.color || COLORES[indice % COLORES.length]} stopOpacity={0.28}/><stop offset="95%" stopColor={serie.color || COLORES[indice % COLORES.length]} stopOpacity={0.03}/></linearGradient>)}</defs>
-    <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip content={<TooltipGrafico />} portal={portalTooltip()} wrapperStyle={estiloTooltip} allowEscapeViewBox={{ x: true, y: true }} />
+    <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} /><TooltipFlotante contenido={<TooltipGrafico />} />
     <ReferenceLine y={0} stroke="#9ca3af" />{referencias.map(ref => <ReferenceLine key={ref.nombre} y={ref.valor} stroke={ref.color || ROJO} strokeDasharray="4 4" label={{ value: ref.nombre, fill: ref.color || ROJO, fontSize: 10 }} />)}
     {series.map((serie, indice) => <Area key={serie.clave} type="monotone" dataKey={serie.clave} name={serie.nombre} stroke={serie.color || COLORES[indice % COLORES.length]} fill={`url(#area-${serie.clave.replace(/[^a-z0-9]/gi, '')})`} strokeWidth={2.5} connectNulls={false} />)}
   </AreaChart></ResponsiveContainer></MarcoGrafico>;
@@ -107,7 +147,7 @@ export function GraficoBarras({ datos, series, etiqueta = 'etiqueta', apiladas =
   return <MarcoGrafico alto={alto}><ResponsiveContainer width="100%" height="100%"><BarChart data={datos} layout={horizontal ? 'vertical' : 'horizontal'} margin={{ top: 8, right: 8, left: horizontal ? 20 : -18, bottom: 0 }}>
     <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" horizontal={!horizontal} vertical={horizontal} />
     {horizontal ? <><XAxis type="number" tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis type="category" width={92} dataKey={etiqueta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/></> : <><XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/></>}
-    <Tooltip content={<TooltipGrafico />} portal={portalTooltip()} wrapperStyle={estiloTooltip} allowEscapeViewBox={{ x: true, y: true }} />{series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
+    <TooltipFlotante contenido={<TooltipGrafico />} />{series.length > 1 && <Legend wrapperStyle={{ fontSize: 11 }} />}
     {series.map((serie, indice) => <Bar key={serie.clave} dataKey={serie.clave} name={serie.nombre} fill={serie.color || COLORES[indice % COLORES.length]} stackId={apiladas ? 'total' : undefined} radius={apiladas ? undefined : [3, 3, 0, 0]} maxBarSize={34} />)}
   </BarChart></ResponsiveContainer></MarcoGrafico>;
 }
@@ -116,15 +156,15 @@ export function GraficoCombinado({ datos, barras, lineas, etiqueta = 'periodo', 
   if (!datos.length) return <EstadoSinDatos texto="No hay una serie histórica suficiente para graficar." />;
   const tienePresupuestoFlujo = datos.some(dato => typeof dato.flujoPresupuestado === 'number');
   const lineasVisibles = tienePresupuestoFlujo && lineas.some(linea => linea.clave === 'flujoNeto') ? [...lineas.map(linea => linea.clave === 'flujoNeto' ? { ...linea, nombre: 'Flujo real' } : linea), { clave: 'flujoPresupuestado', nombre: 'Flujo presupuestado', color: '#b85e00' }] : lineas;
-  return <div className="w-full overflow-x-auto"><div className="min-w-[680px]" style={{ height: alto }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
+  return <div className="w-full overflow-x-auto"><SuperficieTooltip className="min-w-[680px]" style={{ height: alto }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
     <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} />
     <XAxis dataKey={etiqueta} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
     <YAxis yAxisId="monto" tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />
     {porcentaje && <YAxis yAxisId="porcentaje" orientation="right" domain={[0, 100]} tickFormatter={valor => `${valor}%`} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />}
-    <Tooltip content={tooltipPersonalizado || <TooltipGrafico />} portal={portalTooltip()} wrapperStyle={estiloTooltip} allowEscapeViewBox={{ x: true, y: true }} /><Legend wrapperStyle={{ fontSize: 11, lineHeight: '18px' }} />
+    <TooltipFlotante contenido={tooltipPersonalizado || <TooltipGrafico />} /><Legend wrapperStyle={{ fontSize: 11, lineHeight: '18px' }} />
     {barras.map((serie, indice) => <Bar key={serie.clave} yAxisId="monto" dataKey={serie.clave} name={serie.nombre} fill={serie.color || COLORES[indice % COLORES.length]} radius={[3, 3, 0, 0]} maxBarSize={28} />)}
     {lineasVisibles.map((serie, indice) => <Line key={serie.clave} yAxisId={porcentaje ? 'porcentaje' : 'monto'} type="monotone" dataKey={serie.clave} name={serie.nombre} stroke={serie.color || COLORES[(indice + barras.length) % COLORES.length]} strokeDasharray={serie.discontinua ? '6 5' : undefined} strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />)}
-  </ComposedChart></ResponsiveContainer></div></div>;
+  </ComposedChart></ResponsiveContainer></SuperficieTooltip></div>;
 }
 
 const porcentajeComparativo = (valor: unknown) => typeof valor === 'number' && Number.isFinite(valor)
@@ -166,17 +206,17 @@ const LeyendaComparativa = () => <div className="mb-3 flex flex-wrap items-cente
 
 export function GraficoComparativoMensual({ datos, alto = 340 }: { datos: DatoGrafico[]; alto?: number }) {
   if (!datos.length) return <EstadoSinDatos texto="No hay una serie histórica suficiente para graficar." />;
-  return <div className="w-full"><LeyendaComparativa /><div className="w-full overflow-x-auto"><div className="min-w-[720px]" style={{ height: alto }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
+  return <div className="w-full"><LeyendaComparativa /><div className="w-full overflow-x-auto"><SuperficieTooltip className="min-w-[720px]" style={{ height: alto }}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
     <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} />
     <XAxis dataKey="periodo" tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
     <YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false} />
-    <Tooltip content={<TooltipComparativoMensual />} portal={portalTooltip()} wrapperStyle={estiloTooltip} allowEscapeViewBox={{ x: true, y: true }} />
+    <TooltipFlotante contenido={<TooltipComparativoMensual />} />
     <Bar dataKey="ventasNetasGerencial" name="Ventas" fill={NARANJA} radius={[3, 3, 0, 0]} maxBarSize={28} />
     <Bar dataKey="costosDirectos" name="Costos" fill="#9ca3af" radius={[3, 3, 0, 0]} maxBarSize={28} />
     <Line type="monotone" dataKey="resultadoGerencial" name="Resultado" stroke="#000000" strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false} />
     <Line type="monotone" dataKey="ventasAnioAnterior" name="Ventas año anterior" stroke="#f6b35d" strokeWidth={2} strokeDasharray="6 4" dot={{ r: 2 }} activeDot={{ r: 4 }} connectNulls={false} />
     <Line type="monotone" dataKey="resultadoAnioAnterior" name="Resultado año anterior" stroke="#4b5563" strokeWidth={1.75} strokeDasharray="3 4" dot={{ r: 2 }} activeDot={{ r: 4 }} connectNulls={false} />
-  </ComposedChart></ResponsiveContainer></div></div></div>;
+  </ComposedChart></ResponsiveContainer></SuperficieTooltip></div></div>;
 }
 
 function TooltipPeriodosVentas({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: DatoGrafico }>; label?: unknown }) {
@@ -194,7 +234,7 @@ const contextoSerie = (datos: DatoGrafico[], clave: 'periodoA' | 'periodoB') => 
 export function GraficoPeriodosVentas({ datos }: { datos: DatoGrafico[] }) {
   if (!datos.length) return <EstadoSinDatos texto="No hay ventas comparables en los períodos seleccionados."/>;
   const intervalo = Math.max(0, Math.ceil(datos.length / 8) - 1);
-  return <div className="w-full overflow-x-auto"><div className="min-w-[680px]" style={{ height: 320 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}><CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="posicion" interval={intervalo} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip content={<TooltipPeriodosVentas/>} portal={portalTooltip()} wrapperStyle={estiloTooltip} allowEscapeViewBox={{ x: true, y: true }}/><Legend wrapperStyle={{ fontSize: 11 }}/><Line type="monotone" dataKey="ventaA" name={contextoSerie(datos, 'periodoA')} stroke="#676767" strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false}/><Line type="monotone" dataKey="ventaB" name={contextoSerie(datos, 'periodoB')} stroke="#FE8F01" strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false}/></LineChart></ResponsiveContainer></div></div>;
+  return <div className="w-full overflow-x-auto"><SuperficieTooltip className="min-w-[680px]" style={{ height: 320 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}><CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="posicion" interval={intervalo} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><TooltipFlotante contenido={<TooltipPeriodosVentas/>}/><Legend wrapperStyle={{ fontSize: 11 }}/><Line type="monotone" dataKey="ventaA" name={contextoSerie(datos, 'periodoA')} stroke="#676767" strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false}/><Line type="monotone" dataKey="ventaB" name={contextoSerie(datos, 'periodoB')} stroke="#FE8F01" strokeWidth={2.5} dot={{ r: 2.5 }} activeDot={{ r: 5 }} connectNulls={false}/></LineChart></ResponsiveContainer></SuperficieTooltip></div>;
 }
 
 function TooltipRangoVentas({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: DatoGrafico }>; label?: unknown }) {
@@ -206,7 +246,7 @@ function TooltipRangoVentas({ active, payload, label }: { active?: boolean; payl
 export function GraficoRangoVentas({ datos, granularidad }: { datos: DatoGrafico[]; granularidad: 'dia' | 'mes' }) {
   if (!datos.length) return <EstadoSinDatos texto="No hay evolución temporal disponible para el rango."/>;
   const intervalo = granularidad === 'dia' ? Math.max(0, Math.ceil(datos.length / 8) - 1) : 0;
-  return <div className="w-full overflow-x-auto"><div className="min-w-[680px]" style={{ height: 310 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}><CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="periodo" interval={intervalo} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><Tooltip content={<TooltipRangoVentas/>} portal={portalTooltip()} wrapperStyle={estiloTooltip} allowEscapeViewBox={{ x: true, y: true }}/><Line type="monotone" dataKey="ventaNetaClp" name="Venta neta" stroke="#FE8F01" strokeWidth={2.5} dot={{ r: granularidad === 'dia' ? 2 : 3 }} activeDot={{ r: 5 }} connectNulls={false}/></LineChart></ResponsiveContainer></div></div>;
+  return <div className="w-full overflow-x-auto"><SuperficieTooltip className="min-w-[680px]" style={{ height: 310 }}><ResponsiveContainer width="100%" height="100%"><LineChart data={datos} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}><CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="periodo" interval={intervalo} tickFormatter={fechaCorta} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><YAxis tickFormatter={abreviar} tick={{ fill: GRIS, fontSize: 11 }} axisLine={false} tickLine={false}/><TooltipFlotante contenido={<TooltipRangoVentas/>}/><Line type="monotone" dataKey="ventaNetaClp" name="Venta neta" stroke="#FE8F01" strokeWidth={2.5} dot={{ r: granularidad === 'dia' ? 2 : 3 }} activeDot={{ r: 5 }} connectNulls={false}/></LineChart></ResponsiveContainer></SuperficieTooltip></div>;
 }
 
 function TooltipDonut({ active, payload, metrica, total }: { active?: boolean; payload?: Array<{ payload?: DatoDonut }>; metrica: 'VALOR' | 'UNIDADES' | 'GENERICO'; total: number }) {
@@ -226,7 +266,7 @@ export function GraficoDonut({ datos, centro, centroEtiqueta, centroValor, metri
   if (!validos.length || validos.every(dato => dato.valor === 0)) return <EstadoSinDatos texto="No hay composición suficiente para graficar." />;
   const coloreados = validos.map((dato, indice) => ({ ...dato, color: dato.color || COLORES[indice % COLORES.length] }));
   const total = coloreados.reduce((suma, dato) => suma + dato.valor, 0);
-  return <MarcoGrafico alto={alto}><div className="relative h-full overflow-visible"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={coloreados} dataKey="valor" nameKey="nombre" innerRadius={radioInterior} outerRadius={radioExterior} paddingAngle={2} stroke="#FFFFFF" strokeWidth={2}>{coloreados.map(dato => <Cell key={dato.nombre} fill={dato.color} />)}</Pie><Tooltip content={<TooltipDonut metrica={metrica} total={total} />} portal={portalTooltip()} wrapperStyle={estiloTooltip} allowEscapeViewBox={{ x: true, y: true }} />{mostrarLeyenda && <Legend wrapperStyle={{ fontSize: 11 }} />}</PieChart></ResponsiveContainer>{(centro || centroValor) && <div className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center ${mostrarLeyenda ? 'pb-6' : ''}`}><span className="max-w-32 text-[10px] font-black uppercase tracking-[0.14em] text-gray-500">{centroEtiqueta}</span><strong className="mt-1 max-w-40 break-words text-xl font-black leading-tight text-gray-950 sm:text-2xl">{centroValor || centro}</strong></div>}</div></MarcoGrafico>;
+  return <MarcoGrafico alto={alto}><div className="relative h-full overflow-visible"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={coloreados} dataKey="valor" nameKey="nombre" innerRadius={radioInterior} outerRadius={radioExterior} paddingAngle={2} stroke="#FFFFFF" strokeWidth={2} isAnimationActive={false}>{coloreados.map(dato => <Cell key={dato.nombre} fill={dato.color} />)}</Pie><TooltipFlotante contenido={<TooltipDonut metrica={metrica} total={total} />} />{mostrarLeyenda && <Legend wrapperStyle={{ fontSize: 11 }} />}</PieChart></ResponsiveContainer>{(centro || centroValor) && <div className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center ${mostrarLeyenda ? 'pb-6' : ''}`}><span className="max-w-32 text-[10px] font-black uppercase tracking-[0.14em] text-gray-500">{centroEtiqueta}</span><strong className="mt-1 max-w-40 break-words text-xl font-black leading-tight text-gray-950 sm:text-2xl">{centroValor || centro}</strong></div>}</div></MarcoGrafico>;
 }
 
 export function GraficoProgreso({ utilizado, disponible, total }: { utilizado: number | null; disponible: number | null; total: number | null }) {
