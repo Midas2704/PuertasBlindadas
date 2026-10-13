@@ -48,11 +48,17 @@ export const normalizarErrorStorage = (error: unknown, proveedor: string, operac
   if (estado === 404 || /NoSuch(Key|Bucket|Upload)|NotFound/i.test(nombre)) {
     return new ErrorStorage('NO_ENCONTRADO', proveedor, false, `${operacion}: recurso no encontrado`, estado);
   }
-  if (estado === 409 || estado === 412 || /Conflict|OperationAborted|PreconditionFailed/i.test(nombre)) {
+  if (estado === 409 || /Conflict|OperationAborted/i.test(nombre)) {
+    return new ErrorStorage('CONFLICTO_TRANSITORIO', proveedor, true, `${operacion}: conflicto transitorio de almacenamiento`, estado);
+  }
+  if (estado === 412 || /PreconditionFailed/i.test(nombre)) {
     return new ErrorStorage('CONFLICTO', proveedor, false, `${operacion}: conflicto de almacenamiento`, estado);
   }
   if (estado === 413 || /EntityTooLarge|TooManyParts|LimitExceeded/i.test(nombre)) {
     return new ErrorStorage('LIMITE', proveedor, false, `${operacion}: límite del proveedor excedido`, estado);
+  }
+  if (/IncompleteBody|BadDigest|InvalidDigest|ChecksumMismatch/i.test(nombre)) {
+    return new ErrorStorage('INTEGRIDAD', proveedor, false, `${operacion}: contenido incompleto o inconsistente`, estado);
   }
   if (estado === 501 || /NotImplemented|Unsupported/i.test(nombre)) {
     return new ErrorStorage('NO_SOPORTADO', proveedor, false, `${operacion}: operación no soportada`, estado);
@@ -107,6 +113,12 @@ export class S3CompatibleStorageAdapter implements StorageAdapter {
       // S3 documenta If-None-Match:* para CopyObject. R2 exige una extensión propia aún no
       // incorporada ni validada contra proveedor real, por lo que permanece cerrado.
       copiaCondicionalDestino: configuracion.proveedor === 'S3',
+      // R2 y S3 documentan If-None-Match:* para PutObject. La validación contra proveedor real
+      // permanece como condición de activación; esta capacidad describe el contrato implementado.
+      escrituraCondicionalDestino: true,
+      lecturaCondicionalOrigen: true,
+      // No se expone hasta validar la condición de CompleteMultipartUpload en ambos proveedores.
+      multipartCondicionalDestino: false,
     });
   }
 
@@ -196,6 +208,33 @@ export class S3CompatibleStorageAdapter implements StorageAdapter {
     return this.integridad(resultado, tamano);
   }
 
+  async crearObjetoExclusivo(entrada: { referencia: ReferenciaObjetoStorage; contenido: Readable; mime: string; tamanoEsperado: bigint; claveIdempotencia: string; sha256?: string }): Promise<IntegridadStorage> {
+    const ref = this.referencia(entrada.referencia);
+    const mime = this.validar('crear objeto exclusivo', () => validarMime(entrada.mime));
+    const tamano = this.validar('crear objeto exclusivo', () => validarTamano(entrada.tamanoEsperado));
+    const claveIdempotencia = this.validar('crear objeto exclusivo', () => textoRequerido(entrada.claveIdempotencia, 'Clave de idempotencia', 160));
+    if (entrada.sha256) this.validar('crear objeto exclusivo', () => validarSha256(entrada.sha256));
+    if (tamano > 5_000_000_000n) throw new ErrorStorage('LIMITE', this.proveedor, false, 'La creación condicional portable admite como máximo 5 GB');
+    const contador = new ContadorIntegridadStream(tamano, this.proveedor);
+    entrada.contenido.once('error', error => contador.destroy(error));
+    entrada.contenido.pipe(contador);
+    try {
+      await this.enviar(new PutObjectCommand({
+        ...ref, Body: contador, ContentLength: this.tamanoNumerico(tamano), ContentType: mime,
+        IfNoneMatch: '*', Metadata: { 'idempotencia-documental': claveIdempotencia },
+      }), 'crear objeto exclusivo');
+    } catch (error) {
+      if (error instanceof ErrorStorage && error.codigo === 'CONFLICTO' && error.estadoHttp === 412) {
+        throw new ErrorStorage('OBJETO_EXISTENTE', this.proveedor, false, 'crear objeto exclusivo: el destino ya existe', 412);
+      }
+      throw error;
+    }
+    if (contador.bytes !== tamano) throw new ErrorStorage('INTEGRIDAD', this.proveedor, false, 'El stream no coincide con el tamaño esperado');
+    const resultado = await this.consultarObjeto(entrada.referencia);
+    if (resultado.tamanoBytes !== tamano) throw new ErrorStorage('INTEGRIDAD', this.proveedor, false, 'El objeto creado no conserva el tamaño esperado');
+    return resultado;
+  }
+
   async firmarCarga(entrada: { referencia: ReferenciaObjetoStorage; mime: string; tamanoEsperado: bigint; expiraEn: Date }): Promise<UrlFirmadaStorage> {
     const ref = this.referencia(entrada.referencia);
     const mime = this.validar('firmar carga', () => validarMime(entrada.mime));
@@ -214,6 +253,16 @@ export class S3CompatibleStorageAdapter implements StorageAdapter {
 
   async abrirLectura(referencia: ReferenciaObjetoStorage): Promise<Readable> {
     const resultado = await this.enviar<{ Body?: unknown }>(new GetObjectCommand(this.referencia(referencia)), 'abrir lectura');
+    if (resultado.Body instanceof Readable) return this.protegerLectura(resultado.Body);
+    const cuerpo = resultado.Body as { transformToWebStream?: () => ReadableStream<Uint8Array>; [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array> } | undefined;
+    if (cuerpo?.transformToWebStream) return this.protegerLectura(Readable.fromWeb(cuerpo.transformToWebStream() as never));
+    if (cuerpo?.[Symbol.asyncIterator]) return this.protegerLectura(Readable.from(cuerpo as AsyncIterable<Uint8Array>));
+    throw new ErrorStorage('INTEGRIDAD', this.proveedor, false, 'El proveedor no entregó un stream legible');
+  }
+
+  async abrirLecturaCondicionada(entrada: { referencia: ReferenciaObjetoStorage; etag: string }): Promise<Readable> {
+    const etag = this.validar('abrir lectura condicionada', () => textoRequerido(entrada.etag, 'ETag', 512));
+    const resultado = await this.enviar<{ Body?: unknown }>(new GetObjectCommand({ ...this.referencia(entrada.referencia), IfMatch: etag }), 'abrir lectura condicionada');
     if (resultado.Body instanceof Readable) return this.protegerLectura(resultado.Body);
     const cuerpo = resultado.Body as { transformToWebStream?: () => ReadableStream<Uint8Array>; [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array> } | undefined;
     if (cuerpo?.transformToWebStream) return this.protegerLectura(Readable.fromWeb(cuerpo.transformToWebStream() as never));

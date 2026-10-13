@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream';
 
-export type CodigoErrorStorage = 'NO_AUTORIZADO' | 'NO_ENCONTRADO' | 'CONFLICTO' | 'INTEGRIDAD' | 'NO_SOPORTADO' | 'LIMITE' | 'TEMPORAL' | 'DESCONOCIDO';
+export type CodigoErrorStorage = 'NO_AUTORIZADO' | 'NO_ENCONTRADO' | 'OBJETO_EXISTENTE' | 'CONFLICTO' | 'CONFLICTO_TRANSITORIO' | 'INTEGRIDAD' | 'NO_SOPORTADO' | 'LIMITE' | 'TEMPORAL' | 'DESCONOCIDO';
 
 export interface ErrorStorageNormalizado extends Error {
   codigo: CodigoErrorStorage;
@@ -20,6 +20,12 @@ export interface CapacidadesStorage {
   cifradoClaveAdministrada: boolean;
   /** Creación de destino atómica: la copia falla si la clave ya existe. */
   copiaCondicionalDestino: boolean;
+  /** Creación de destino atómica por PUT: la escritura falla si la clave ya existe. */
+  escrituraCondicionalDestino: boolean;
+  /** Lectura que falla si el objeto ya no conserva el token de concurrencia entregado. */
+  lecturaCondicionalOrigen: boolean;
+  /** Confirmación multipart que falla de forma atómica si la clave final ya existe. */
+  multipartCondicionalDestino: boolean;
 }
 
 export interface ReferenciaObjetoStorage {
@@ -61,9 +67,11 @@ export interface StorageAdapter {
   readonly capacidades: Readonly<CapacidadesStorage>;
   iniciarCarga(entrada: { referencia: ReferenciaObjetoStorage; mime: string; tamanoEsperado: bigint; claveIdempotencia: string; multipart?: boolean }): Promise<CargaIniciadaStorage>;
   subirStream?(entrada: { referencia: ReferenciaObjetoStorage; contenido: Readable; mime: string; tamanoEsperado: bigint; sha256?: string }): Promise<IntegridadStorage>;
+  crearObjetoExclusivo?(entrada: { referencia: ReferenciaObjetoStorage; contenido: Readable; mime: string; tamanoEsperado: bigint; claveIdempotencia: string; sha256?: string }): Promise<IntegridadStorage>;
   firmarCarga?(entrada: { referencia: ReferenciaObjetoStorage; mime: string; tamanoEsperado: bigint; expiraEn: Date }): Promise<UrlFirmadaStorage>;
   consultarObjeto(referencia: ReferenciaObjetoStorage): Promise<IntegridadStorage>;
   abrirLectura?(referencia: ReferenciaObjetoStorage): Promise<Readable>;
+  abrirLecturaCondicionada?(entrada: { referencia: ReferenciaObjetoStorage; etag: string }): Promise<Readable>;
   firmarDescarga?(entrada: { referencia: ReferenciaObjetoStorage; expiraEn: Date; nombreDescarga: string; mimeRespuesta?: string; cacheControlRespuesta?: string }): Promise<UrlFirmadaStorage>;
   copiarObjeto?(entrada: { origen: ReferenciaObjetoStorage; destino: ReferenciaObjetoStorage; claveIdempotencia: string; etagOrigen?: string; exigirDestinoAusente?: boolean }): Promise<IntegridadStorage>;
   subirParteStream?(entrada: { referencia: ReferenciaObjetoStorage; identificadorMultipart: string; numero: number; contenido: Readable; tamanoEsperado: bigint }): Promise<ParteMultipartStorage>;

@@ -158,8 +158,11 @@ test('Bloque 4.2 — núcleo documental portable', async t => {
   });
 
   await t.test('16 asocia documento con producto mediante FKs reales', async () => {
-    const asociacion = await servicio.asociarProducto({ idProducto: producto.id_extension_producto_comercial, idDocumento: documento.id_documento_logico, tipoDocumento: 'FOTOGRAFIA_COMERCIAL', esImagenPrincipal: true, habilitadoB2b: true, ordenPresentacion: 0 }, actor);
+    const entradaAsociacion = { idProducto: producto.id_extension_producto_comercial, idDocumento: documento.id_documento_logico, tipoDocumento: 'FOTOGRAFIA_COMERCIAL', esImagenPrincipal: true, habilitadoB2b: true, ordenPresentacion: 0 };
+    const asociacion = await servicio.asociarProducto(entradaAsociacion, actor);
     assert.equal(asociacion.es_imagen_principal, true);
+    const recuperada = await servicio.asociarProducto(entradaAsociacion, actor);
+    assert.equal(recuperada.id_producto_comercial_documento, asociacion.id_producto_comercial_documento);
     assert.equal((await servicio.listarAsociacionesProducto(producto.id_extension_producto_comercial)).length, 1);
   });
 

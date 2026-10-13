@@ -274,7 +274,7 @@ export class RepositorioDocumentalPrisma {
     const orden = entrada.ordenPresentacion ?? 0;
     if (!Number.isInteger(orden) || orden < 0) throw new ErrorDocumental('ORDEN_INVALIDO', 'El orden de presentación debe ser un entero no negativo');
     if (entrada.esImagenPrincipal && entrada.tipoDocumento !== 'FOTOGRAFIA_COMERCIAL') throw new ErrorDocumental('PRINCIPAL_INVALIDA', 'Sólo una fotografía comercial puede ser imagen principal');
-    return this.transaccionReintentable(async tx => {
+    try { return await this.transaccionReintentable(async tx => {
       const [producto, documento] = await Promise.all([
         tx.extension_producto_comercial.findUnique({ where: { id_extension_producto_comercial: entrada.idProducto } }),
         tx.documento_logico.findUnique({ where: { id_documento_logico: entrada.idDocumento } }),
@@ -287,13 +287,32 @@ export class RepositorioDocumentalPrisma {
         tipo_documento: entrada.tipoDocumento, orden_presentacion: orden, es_imagen_principal: entrada.esImagenPrincipal ?? false,
         habilitado_b2b: entrada.habilitadoB2b ?? false, habilitado_b2c: entrada.habilitadoB2c ?? false, usuario_responsable: actor.id,
       } });
-      await tx.evento_operacional_documental.create({ data: {
-        tipo_evento: 'DOCUMENTO_ASOCIADO_PRODUCTO', id_documento_logico: entrada.idDocumento,
-        clave_idempotencia: `producto:${entrada.idProducto}:documento:${entrada.idDocumento}:${entrada.tipoDocumento}`,
-        payload_tecnico: { idProducto: entrada.idProducto, tipoDocumento: entrada.tipoDocumento },
-      } });
+      const claveEvento = `producto:${entrada.idProducto}:documento:${entrada.idDocumento}:${entrada.tipoDocumento}`;
+      await tx.evento_operacional_documental.upsert({
+        where: { clave_idempotencia: claveEvento }, update: {}, create: {
+          tipo_evento: 'DOCUMENTO_ASOCIADO_PRODUCTO', id_documento_logico: entrada.idDocumento,
+          clave_idempotencia: claveEvento, payload_tecnico: { idProducto: entrada.idProducto, tipoDocumento: entrada.tipoDocumento },
+        },
+      });
       return asociacion;
-    });
+    }); } catch (error) {
+      if (!esConflictoUnico(error)) throw error;
+      const existente = await this.cliente.producto_comercial_documento.findUnique({
+        where: { id_extension_producto_comercial_id_documento_logico_tipo_documento: {
+          id_extension_producto_comercial: entrada.idProducto,
+          id_documento_logico: entrada.idDocumento,
+          tipo_documento: entrada.tipoDocumento,
+        } },
+      });
+      if (!existente) throw error;
+      if (existente.orden_presentacion !== orden
+        || existente.es_imagen_principal !== (entrada.esImagenPrincipal ?? false)
+        || existente.habilitado_b2b !== (entrada.habilitadoB2b ?? false)
+        || existente.habilitado_b2c !== (entrada.habilitadoB2c ?? false)) {
+        throw new ErrorDocumental('IDEMPOTENCIA_CONFLICTIVA', 'La asociación ya existe con una configuración diferente', 409);
+      }
+      return existente;
+    }
   }
 
   async listarAsociacionesProducto(idProducto: number) {

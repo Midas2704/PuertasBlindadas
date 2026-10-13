@@ -4,6 +4,7 @@ import { ErrorDocumental, type AsociarProductoEntrada } from '../tipos';
 
 export interface PuertoAsociacionComercial {
   asociarProducto(entrada: AsociarProductoEntrada, actor: { id: bigint }): Promise<unknown>;
+  registrarEvento?(entrada: { tipoEvento: string; claveIdempotencia: string; idDocumento: bigint; idVersion: bigint; payloadTecnico: Record<string, unknown> }): Promise<unknown>;
 }
 
 /**
@@ -34,7 +35,23 @@ export class CoordinadorDocumentosProducto {
       throw new ErrorDocumental('DOCUMENTO_NO_ASOCIABLE', 'Sólo una versión íntegra, limpia y disponible puede asociarse', 409);
     }
     await this.autorizador.exigir(entrada.actor, 'ASOCIAR_PRODUCTO', contexto);
-    const asociacion = await this.asociaciones.asociarProducto({ idProducto: entrada.idProducto, idDocumento: entrada.idDocumento, ...entrada.asociacion }, { id: entrada.actor.id });
+    let asociacion: unknown;
+    try {
+      asociacion = await this.asociaciones.asociarProducto({ idProducto: entrada.idProducto, idDocumento: entrada.idDocumento, ...entrada.asociacion }, { id: entrada.actor.id });
+    } catch (error) {
+      // La versión ya confirmada nunca se elimina como compensación. El evento técnico deja una
+      // intención de reconciliación idempotente cuando PostgreSQL aún permite registrar el fallo.
+      try {
+        await this.asociaciones.registrarEvento?.({
+          tipoEvento: 'ASOCIACION_PRODUCTO_PENDIENTE',
+          claveIdempotencia: `asociacion-pendiente:${entrada.idIntencion}:${entrada.idProducto}:${entrada.asociacion.tipoDocumento}`,
+          idDocumento: entrada.idDocumento,
+          idVersion: confirmacion.versionId,
+          payloadTecnico: { idProducto: entrada.idProducto, tipoDocumento: entrada.asociacion.tipoDocumento },
+        });
+      } catch { /* El reintento determinista y la reconciliación de versiones siguen disponibles. */ }
+      throw error;
+    }
     return { confirmacion, asociacion };
   }
 }

@@ -227,11 +227,11 @@ test('Bloque 4.3 — contrato portable R2/S3', async t => {
   });
 
   await t.test('32 R2 implementa el mismo contrato StorageAdapter', () => {
-    const { adaptador } = adaptar('R2'); for (const metodo of ['subirStream', 'consultarObjeto', 'abrirLectura', 'firmarCarga', 'firmarDescarga', 'confirmarMultipart']) assert.equal(typeof adaptador[metodo], 'function');
+    const { adaptador } = adaptar('R2'); for (const metodo of ['subirStream', 'crearObjetoExclusivo', 'consultarObjeto', 'abrirLectura', 'abrirLecturaCondicionada', 'firmarCarga', 'firmarDescarga', 'confirmarMultipart']) assert.equal(typeof adaptador[metodo], 'function');
   });
 
   await t.test('33 S3 implementa el mismo contrato StorageAdapter', () => {
-    const { adaptador } = adaptar('S3'); for (const metodo of ['subirStream', 'consultarObjeto', 'abrirLectura', 'firmarCarga', 'firmarDescarga', 'confirmarMultipart']) assert.equal(typeof adaptador[metodo], 'function');
+    const { adaptador } = adaptar('S3'); for (const metodo of ['subirStream', 'crearObjetoExclusivo', 'consultarObjeto', 'abrirLectura', 'abrirLecturaCondicionada', 'firmarCarga', 'firmarDescarga', 'confirmarMultipart']) assert.equal(typeof adaptador[metodo], 'function');
   });
 
   await t.test('34 capacidades diferencian R2 de S3 configurado', () => {
@@ -302,6 +302,7 @@ test('Bloque 4.3 — contrato portable R2/S3', async t => {
   await t.test('45b R2 queda bloqueado hasta validar su extensión condicional real', async () => {
     const { adaptador, cliente } = adaptar('R2');
     assert.equal(adaptador.capacidades.copiaCondicionalDestino,false);
+    assert.equal(adaptador.capacidades.escrituraCondicionalDestino,true);
     await assert.rejects(adaptador.copiarObjeto({ origen:ref('quarantine'), destino:ref('objects'), claveIdempotencia:'condicional-r2', exigirDestinoAusente:true }), e=>e.codigo==='NO_SOPORTADO');
     assert.equal(cliente.llamadas.length,0);
   });
@@ -309,6 +310,25 @@ test('Bloque 4.3 — contrato portable R2/S3', async t => {
   await t.test('45c precondición fallida se normaliza como conflicto no reintentable', async () => {
     const { adaptador } = adaptar('S3', async()=>{const e=new Error('detalle privado');e.name='PreconditionFailed';e.$metadata={httpStatusCode:412};throw e;});
     await assert.rejects(adaptador.copiarObjeto({ origen:ref('quarantine'), destino:ref('objects'), claveIdempotencia:'conflicto', exigirDestinoAusente:true }), e=>e.codigo==='CONFLICTO'&&e.reintentable===false&&!e.message.includes('privado'));
+  });
+
+  await t.test('45d PUT exclusivo usa If-None-Match y metadato de idempotencia', async () => {
+    const { adaptador, cliente } = adaptar('R2');
+    await adaptador.crearObjetoExclusivo({referencia:ref('objects'),contenido:Readable.from(['abc']),mime:'text/plain',tamanoEsperado:3n,claveIdempotencia:'documental-1'});
+    const put=cliente.llamadas.find(x=>x.nombre==='PutObjectCommand');
+    assert.equal(put.entrada.IfNoneMatch,'*'); assert.equal(put.entrada.Metadata['idempotencia-documental'],'documental-1');
+  });
+
+  await t.test('45e PUT exclusivo distingue objeto existente de conflicto transitorio', async () => {
+    const precondicion=adaptar('R2',async()=>{const e=new Error('privado');e.name='PreconditionFailed';e.$metadata={httpStatusCode:412};throw e;}).adaptador;
+    await assert.rejects(precondicion.crearObjetoExclusivo({referencia:ref(),contenido:Readable.from(['a']),mime:'text/plain',tamanoEsperado:1n,claveIdempotencia:'x'}),e=>e.codigo==='OBJETO_EXISTENTE'&&!e.reintentable);
+    const conflicto=adaptar('R2',async()=>{const e=new Error('privado');e.name='ConditionalRequestConflict';e.$metadata={httpStatusCode:409};throw e;}).adaptador;
+    await assert.rejects(conflicto.crearObjetoExclusivo({referencia:ref(),contenido:Readable.from(['a']),mime:'text/plain',tamanoEsperado:1n,claveIdempotencia:'x'}),e=>e.codigo==='CONFLICTO_TRANSITORIO'&&e.reintentable);
+  });
+
+  await t.test('45f GET condicionado envía If-Match y no confunde ETag con SHA-256', async () => {
+    const {adaptador,cliente}=adaptar('S3'); const lectura=await adaptador.abrirLecturaCondicionada({referencia:ref(),etag:'"token"'}); await consumir(lectura);
+    const get=cliente.llamadas.find(x=>x.nombre==='GetObjectCommand');assert.equal(get.entrada.IfMatch,'"token"');
   });
 
   await t.test('46 lista multipart incompletos sólo bajo claves documentales válidas', async () => {

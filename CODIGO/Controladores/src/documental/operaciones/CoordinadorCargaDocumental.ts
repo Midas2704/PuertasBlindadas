@@ -55,8 +55,8 @@ export class CoordinadorCargaDocumental {
   ) {}
 
   async confirmar(entrada: { idIntencion: string; idDocumento: bigint; actor: ActorBackendDocumental; sha256Esperado?: string }): Promise<ResultadoConfirmacionDocumental> {
-    if (!this.storage.abrirLectura || !this.storage.copiarObjeto) throw new ErrorDocumental('STORAGE_SIN_CAPACIDAD', 'El proveedor no permite validar y promover contenido', 503);
-    if (!this.storage.capacidades.copiaCondicionalDestino) throw new ErrorDocumental('PROMOCION_CONDICIONAL_NO_VALIDADA', 'La activación permanece bloqueada: el proveedor no garantiza una creación condicional del destino', 503);
+    if (!this.storage.abrirLecturaCondicionada || !this.storage.crearObjetoExclusivo) throw new ErrorDocumental('STORAGE_SIN_CAPACIDAD', 'El proveedor no permite leer y crear objetos de forma condicional', 503);
+    if (!this.storage.capacidades.escrituraCondicionalDestino || !this.storage.capacidades.lecturaCondicionalOrigen) throw new ErrorDocumental('PROMOCION_CONDICIONAL_NO_VALIDADA', 'La activación permanece bloqueada: el proveedor no garantiza lectura estable y creación exclusiva', 503);
     if (this.storage.proveedor !== this.configuracion.proveedor) throw new ErrorDocumental('PROVEEDOR_NO_COINCIDE', 'El proveedor configurado no corresponde al adaptador activo', 503);
     let intencion = await this.repositorio.consultarIntencion(entrada.idIntencion);
     if (intencion.usuario_solicitante !== entrada.actor.id) throw new ErrorDocumental('ACTOR_NO_COINCIDE', 'La intención pertenece a otro actor', 403);
@@ -83,20 +83,42 @@ export class CoordinadorCargaDocumental {
 
     const temporal: ReferenciaObjetoStorage = { contenedor: this.configuracion.contenedorTemporal, clave: intencion.clave_temporal };
     const trabajo: ReferenciaObjetoStorage = { contenedor: this.configuracion.contenedorDefinitivo, clave: claveCuarentena };
+    const claveIdempotenciaTrabajo = `trabajo:${intencion.id_publico}`;
+    const exigirPropiedad = (metadata: IntegridadStorage, clave: string, codigo: string) => {
+      if (metadata.metadatosProveedor?.['idempotencia-documental'] !== clave) {
+        throw new ErrorDocumental(codigo, 'La clave ya existe, pero no acredita pertenecer a esta operación documental', 409);
+      }
+    };
     let metadataTrabajo: IntegridadStorage;
-    try { metadataTrabajo = await this.storage.consultarObjeto(trabajo); }
+    try {
+      metadataTrabajo = await this.storage.consultarObjeto(trabajo);
+      exigirPropiedad(metadataTrabajo, claveIdempotenciaTrabajo, 'COPIA_TRABAJO_OCUPADA');
+    }
     catch (error) {
       if (!(error && typeof error === 'object' && 'codigo' in error && error.codigo === 'NO_ENCONTRADO')) throw error;
       const metadataTemporal = await this.storage.consultarObjeto(temporal);
       if (metadataTemporal.tamanoBytes !== intencion.tamano_esperado) throw new ErrorDocumental('TAMANO_STORAGE_NO_COINCIDE', 'El tamaño almacenado no coincide con la intención', 409);
       if (!metadataTemporal.etag) throw new ErrorDocumental('TOKEN_CONCURRENCIA_NO_DISPONIBLE', 'El proveedor no entregó un token para congelar la carga temporal', 503);
-      metadataTrabajo = await this.storage.copiarObjeto({ origen: temporal, destino: trabajo, claveIdempotencia: `trabajo:${intencion.id_publico}`, etagOrigen: metadataTemporal.etag });
+      try {
+        metadataTrabajo = await this.storage.crearObjetoExclusivo({
+          referencia: trabajo,
+          contenido: await this.storage.abrirLecturaCondicionada({ referencia: temporal, etag: metadataTemporal.etag }),
+          mime: intencion.mime_declarado,
+          tamanoEsperado: intencion.tamano_esperado,
+          claveIdempotencia: claveIdempotenciaTrabajo,
+        });
+      } catch (errorCreacion) {
+        if (!(errorCreacion && typeof errorCreacion === 'object' && 'codigo' in errorCreacion && errorCreacion.codigo === 'OBJETO_EXISTENTE')) throw errorCreacion;
+        metadataTrabajo = await this.storage.consultarObjeto(trabajo);
+      }
+      exigirPropiedad(metadataTrabajo, claveIdempotenciaTrabajo, 'COPIA_TRABAJO_OCUPADA');
     }
     if (metadataTrabajo.tamanoBytes !== intencion.tamano_esperado) throw new ErrorDocumental('COPIA_TRABAJO_INCONSISTENTE', 'La copia de trabajo no conserva el tamaño esperado', 409);
-    const integridad = await validarIntegridadContenido({ contenido: await this.storage.abrirLectura(trabajo), mimeDeclarado: intencion.mime_declarado, tamanoEsperado: intencion.tamano_esperado, sha256Esperado: entrada.sha256Esperado, politica });
+    if (!metadataTrabajo.etag) throw new ErrorDocumental('TOKEN_CONCURRENCIA_NO_DISPONIBLE', 'La copia de trabajo no tiene un token de concurrencia', 503);
+    const integridad = await validarIntegridadContenido({ contenido: await this.storage.abrirLecturaCondicionada({ referencia: trabajo, etag: metadataTrabajo.etag }), mimeDeclarado: intencion.mime_declarado, tamanoEsperado: intencion.tamano_esperado, sha256Esperado: entrada.sha256Esperado, politica });
     let antivirus: ResultadoAntivirus = { estado: 'ARCHIVO_NO_SOPORTADO', codigo: 'INTEGRIDAD_RECHAZADA' };
     if (integridad.valido) {
-      const escaneo = await escanearConIntegridad(this.antivirus, await this.storage.abrirLectura(trabajo));
+      const escaneo = await escanearConIntegridad(this.antivirus, await this.storage.abrirLecturaCondicionada({ referencia: trabajo, etag: metadataTrabajo.etag }));
       antivirus = escaneo.resultado;
       if (!escaneo.completo || escaneo.sha256 !== integridad.sha256 || escaneo.tamanoBytes !== integridad.tamanoBytes) antivirus = { estado: 'ERROR_ESCANEO', motor: this.antivirus.nombre, codigo: 'BYTES_ESCANEADOS_NO_COINCIDEN' };
     }
@@ -106,25 +128,39 @@ export class CoordinadorCargaDocumental {
     if (metadataTrabajoActual.tamanoBytes !== metadataTrabajo.tamanoBytes || (metadataTrabajo.etag && metadataTrabajoActual.etag !== metadataTrabajo.etag)) throw new ErrorDocumental('COPIA_TRABAJO_MODIFICADA', 'La copia de trabajo cambió durante la validación', 409);
     if (disponible && !metadataTrabajoActual.etag) throw new ErrorDocumental('TOKEN_CONCURRENCIA_NO_DISPONIBLE', 'El proveedor no entregó un token para promover de forma segura', 503);
     let destinoPreexistente = false;
+    let metadataDestino = metadataTrabajoActual;
+    const claveIdempotenciaDestino = `promocion:${intencion.id_publico}`;
     if (disponible) try {
-      await this.storage.copiarObjeto({ origen: trabajo, destino, claveIdempotencia: `promocion:${intencion.id_publico}`, etagOrigen: metadataTrabajoActual.etag, exigirDestinoAusente: true });
+      metadataDestino = await this.storage.crearObjetoExclusivo({
+        referencia: destino,
+        contenido: await this.storage.abrirLecturaCondicionada({ referencia: trabajo, etag: metadataTrabajoActual.etag! }),
+        mime: intencion.mime_declarado,
+        tamanoEsperado: metadataTrabajoActual.tamanoBytes,
+        claveIdempotencia: claveIdempotenciaDestino,
+        sha256: integridad.sha256,
+      });
     } catch (error) {
-      if (!(error && typeof error === 'object' && 'codigo' in error && error.codigo === 'CONFLICTO')) throw error;
+      if (!(error && typeof error === 'object' && 'codigo' in error && error.codigo === 'OBJETO_EXISTENTE')) throw error;
       // Un reintento posterior a una caída de PostgreSQL puede encontrar la clave reservada.
       // Sólo converge si la relectura completa demuestra que contiene exactamente los mismos bytes.
       destinoPreexistente = true;
+      metadataDestino = await this.storage.consultarObjeto(destino);
     }
+    if (disponible) exigirPropiedad(metadataDestino, claveIdempotenciaDestino, 'DESTINO_OCUPADO');
+    if (!metadataDestino.etag) throw new ErrorDocumental('TOKEN_CONCURRENCIA_NO_DISPONIBLE', 'El objeto conservado no tiene un token de concurrencia', 503);
 
     // La promoción aprobada se relee y compara por SHA-256. Un rechazo por límite se verifica sólo por HEAD:
     // su hash parcial nunca se persiste como si representara el archivo completo.
     const hashCompleto = !integridad.codigos.includes('TAMANO_SUPERA_LIMITE');
     let promocionIntegra = false;
     if (hashCompleto) {
-      const verificacion = await validarIntegridadContenido({ contenido: await this.storage.abrirLectura(destino), mimeDeclarado: intencion.mime_declarado, tamanoEsperado: metadataTrabajo.tamanoBytes, sha256Esperado: integridad.sha256, politica: { ...politica, maximoBytes: metadataTrabajo.tamanoBytes, mimesPermitidos: politica.mimesPermitidos } });
+      const verificacion = await validarIntegridadContenido({ contenido: await this.storage.abrirLecturaCondicionada({ referencia: destino, etag: metadataDestino.etag }), mimeDeclarado: intencion.mime_declarado, tamanoEsperado: metadataTrabajo.tamanoBytes, sha256Esperado: integridad.sha256, politica: { ...politica, maximoBytes: metadataTrabajo.tamanoBytes, mimesPermitidos: politica.mimesPermitidos } });
       promocionIntegra = verificacion.sha256 === integridad.sha256 && verificacion.tamanoBytes === metadataTrabajo.tamanoBytes;
     } else {
       promocionIntegra = metadataTrabajoActual.tamanoBytes === metadataTrabajo.tamanoBytes;
     }
+    const metadataDestinoFinal = await this.storage.consultarObjeto(destino);
+    if (metadataDestinoFinal.tamanoBytes !== metadataDestino.tamanoBytes || metadataDestinoFinal.etag !== metadataDestino.etag) promocionIntegra = false;
     if (!promocionIntegra) throw new ErrorDocumental(destinoPreexistente ? 'DESTINO_OCUPADO' : 'PROMOCION_NO_INTEGRA', destinoPreexistente ? 'La clave definitiva ya existe con otros bytes' : 'La copia promovida no conserva los bytes originales', destinoPreexistente ? 409 : 502);
 
     const estado = disponible ? 'DISPONIBLE' : 'CUARENTENA';

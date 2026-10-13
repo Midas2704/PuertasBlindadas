@@ -181,12 +181,13 @@ test('auditoría rechaza URLs, tokens y secretos', () => {
 
 function entornoCoordinador({ antivirusEstado = 'LIMPIO', bytes = jpeg, proveedor = 'R2', autorizar = async()=>{}, fallarCopia = false, antesCopiar, despuesEscaneo, fallarRegistroUnaVez = false } = {}) {
   const objetos = new Map([[`tmp:tmp/${uuid}`, bytes]]);
+  const metadatos = new Map(); const reservas = new Set(); let hookCopiaEjecutado=false;
   const etag = b => `"${sha(b).slice(0,32)}"`;
   const storage = {
-    proveedor, capacidades: { copiaCondicionalDestino:true },
-    consultarObjeto: async r => { const b = objetos.get(`${r.contenedor}:${r.clave}`); if (!b) throw Object.assign(new Error('NO_ENCONTRADO'),{codigo:'NO_ENCONTRADO'}); return { tamanoBytes: BigInt(b.length), etag:etag(b) }; },
-    abrirLectura: async r => Readable.from(objetos.get(`${r.contenedor}:${r.clave}`)),
-    copiarObjeto: async entrada => { if(fallarCopia)throw Object.assign(new Error('FALLO_COPIA'),{codigo:'TEMPORAL'}); if(antesCopiar)await antesCopiar(entrada,objetos); const b=objetos.get(`${entrada.origen.contenedor}:${entrada.origen.clave}`); if(entrada.etagOrigen&&entrada.etagOrigen!==etag(b))throw Object.assign(new Error('ORIGEN_CAMBIO'),{codigo:'CONFLICTO'}); const destino=`${entrada.destino.contenedor}:${entrada.destino.clave}`; if(entrada.exigirDestinoAusente&&objetos.has(destino))throw Object.assign(new Error('DESTINO_EXISTE'),{codigo:'CONFLICTO'}); const copia=Buffer.from(b); objetos.set(destino,copia); return{tamanoBytes:BigInt(copia.length),etag:etag(copia)}; },
+    proveedor, capacidades: { copiaCondicionalDestino:proveedor==='S3', escrituraCondicionalDestino:true, lecturaCondicionalOrigen:true, multipartCondicionalDestino:false },
+    consultarObjeto: async r => { const k=`${r.contenedor}:${r.clave}`; const b = objetos.get(k); if (!b) throw Object.assign(new Error('NO_ENCONTRADO'),{codigo:'NO_ENCONTRADO'}); return { tamanoBytes: BigInt(b.length), etag:etag(b), metadatosProveedor:metadatos.get(k) }; },
+    abrirLecturaCondicionada: async entrada => { if(antesCopiar&&!hookCopiaEjecutado){hookCopiaEjecutado=true;await antesCopiar({origen:entrada.referencia},objetos);} const b=objetos.get(`${entrada.referencia.contenedor}:${entrada.referencia.clave}`); if(!b)throw Object.assign(new Error('NO_ENCONTRADO'),{codigo:'NO_ENCONTRADO'}); if(entrada.etag!==etag(b))throw Object.assign(new Error('ORIGEN_CAMBIO'),{codigo:'CONFLICTO'}); return Readable.from([Buffer.from(b)]); },
+    crearObjetoExclusivo: async entrada => { if(fallarCopia)throw Object.assign(new Error('FALLO_COPIA'),{codigo:'TEMPORAL'}); const destino=`${entrada.referencia.contenedor}:${entrada.referencia.clave}`; if(objetos.has(destino)||reservas.has(destino))throw Object.assign(new Error('DESTINO_EXISTE'),{codigo:'OBJETO_EXISTENTE'}); reservas.add(destino); try {const partes=[];for await(const parte of entrada.contenido)partes.push(Buffer.from(parte));const copia=Buffer.concat(partes);if(BigInt(copia.length)!==entrada.tamanoEsperado)throw Object.assign(new Error('INCOMPLETO'),{codigo:'INTEGRIDAD'});objetos.set(destino,copia);metadatos.set(destino,{'idempotencia-documental':entrada.claveIdempotencia});return{tamanoBytes:BigInt(copia.length),etag:etag(copia),metadatosProveedor:metadatos.get(destino)};}finally{reservas.delete(destino);} },
   };
   const intencion = { id_publico:uuid, id_documento_logico:2n, usuario_solicitante:7n, clasificacion:'FOTO', nombre_declarado:'foto.jpg', mime_declarado:'image/jpeg', tamano_esperado:BigInt(bytes.length), clave_temporal:`tmp/${uuid}`, estado:'PENDIENTE', revision:1, expira_en:new Date(Date.now()+60000) };
   const versiones = new Map(); let siguiente = 1n; let fallosRegistro=0;
@@ -197,7 +198,7 @@ function entornoCoordinador({ antivirusEstado = 'LIMPIO', bytes = jpeg, proveedo
     registrarVersionYFinalizarIntencion: async entrada => { if(fallarRegistroUnaVez&&fallosRegistro++===0)throw Object.assign(new Error('DB_TEMPORAL'),{codigo:'DB_TEMPORAL'}); const v={id_version_documento:siguiente++,id_documento_logico:entrada.version.idDocumento,estado:entrada.estadoIntencion,tamano_bytes:BigInt(entrada.version.tamanoBytes),sha256:entrada.version.sha256,mime_detectado:entrada.version.mimeDetectado,resultado_validaciones:entrada.version.resultadoValidaciones}; versiones.set(`${entrada.version.contenedor}:${entrada.version.claveObjeto}`,v); intencion.estado=entrada.estadoIntencion; return v; },
   };
   const coordinador = new CoordinadorCargaDocumental(repo, storage, { nombre:'TEST', escanear: async contenido => { for await(const _ of contenido){} if(despuesEscaneo)await despuesEscaneo(objetos); return { estado:antivirusEstado }; } }, autorizar, { proveedor, contenedorTemporal:'tmp', contenedorDefinitivo:'docs', prefijoDisponible:'objects', prefijoCuarentena:'quarantine', politicasPorClasificacion:{ FOTO:politica(['image/jpeg']) } });
-  return { coordinador, objetos, repo, intencion, cantidadVersiones:()=>versiones.size };
+  return { coordinador, objetos, metadatos, repo, intencion, cantidadVersiones:()=>versiones.size };
 }
 
 test('carga limpia se promueve, verifica y queda DISPONIBLE', async () => {
@@ -270,7 +271,7 @@ test('adaptador sin capacidades de lectura/copia falla antes de confirmar',async
 
 test('proveedor sin creación condicional de destino queda bloqueado antes de leer bytes',async()=>{
   const entorno=entornoCoordinador(); let lecturas=0;
-  const storage={proveedor:'R2',capacidades:{copiaCondicionalDestino:false},consultarObjeto:async()=>{lecturas++;return{tamanoBytes:1n}},abrirLectura:async()=>Readable.from([]),copiarObjeto:async()=>({tamanoBytes:1n})};
+  const storage={proveedor:'R2',capacidades:{escrituraCondicionalDestino:false,lecturaCondicionalOrigen:true},consultarObjeto:async()=>{lecturas++;return{tamanoBytes:1n}},abrirLecturaCondicionada:async()=>Readable.from([]),crearObjetoExclusivo:async()=>({tamanoBytes:1n})};
   const coordinador=new CoordinadorCargaDocumental(entorno.repo,storage,{nombre:'x',escanear:async()=>({estado:'LIMPIO'})},async()=>{},{proveedor:'R2',contenedorTemporal:'tmp',contenedorDefinitivo:'docs',prefijoDisponible:'objects',prefijoCuarentena:'quarantine',politicasPorClasificacion:{FOTO:politica(['image/jpeg'])}});
   await assert.rejects(()=>coordinador.confirmar({idIntencion:uuid,idDocumento:2n,actor}),error=>error.codigo==='PROMOCION_CONDICIONAL_NO_VALIDADA');
   assert.equal(lecturas,0);
