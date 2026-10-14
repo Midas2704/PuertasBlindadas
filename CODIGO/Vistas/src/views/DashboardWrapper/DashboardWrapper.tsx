@@ -10,11 +10,10 @@ import {
   ClipboardList,
   FileSearch,
   FileSignature,
+  House,
   Landmark,
   LayoutDashboard,
   ListChecks,
-  ListTodo,
-  MapPinned,
   Menu,
   Receipt,
   SearchCheck,
@@ -58,7 +57,7 @@ type MenuGroupProps = {
 };
 
 const dashboardItem: MenuItem = {
-  path: '/',
+  path: '/finanzas',
   label: 'Dashboard',
   icon: LayoutDashboard,
   permission: 'CU05',
@@ -123,18 +122,6 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/pagos-remuneraciones', label: 'Pagos de Remuneración', icon: Banknote, permissions: ['CU185', 'CU186', 'CU187', 'CU188', 'CU189', 'CU190'] },
       { path: '/documentos-remuneracion', label: 'Documentos de Remuneración', icon: FileSearch, permissions: ['CU191', 'CU192', 'CU193'] },
       { path: '/honorarios', label: 'Honorarios', icon: Receipt, permissions: ['CU196', 'CU197', 'CU198'] },
-    ],
-  },
-  {
-    id: 'terreno',
-    label: 'Terreno',
-    icon: MapPinned,
-    items: [
-      { path: '/terreno/visitas', label: 'Visitas y Servicios', icon: MapPinned, permissions: ['CU199', 'CU200', 'CU210', 'CU211'] },
-      { path: '/terreno/ordenes-trabajo', label: 'Órdenes de Trabajo', icon: ClipboardList, permissions: ['CU202', 'CU205', 'CU209'] },
-      { path: '/terreno/mis-tareas', label: 'Mis Tareas', icon: ListTodo, permissions: ['CU201', 'CU208'] },
-      { path: '/terreno/produccion', label: 'Producción', icon: ListTodo, permissions: ['CU207', 'CU209'] },
-      { path: '/terreno/incidencias', label: 'Incidencias', icon: ListTodo, permissions: ['CU212', 'CU213'] },
     ],
   },
   {
@@ -279,7 +266,7 @@ const DashboardWrapper: React.FC = () => {
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 shadow-sm lg:hidden">
         <div className="flex min-w-0 items-center gap-3">
           <span className="rounded-md bg-primary-600 p-2 text-white"><ShieldCheck className="h-5 w-5" /></span>
-          <span className="truncate font-bold text-gray-950">Finanzas PBlindadas</span>
+          <span className="truncate font-bold text-gray-950">Finanzas · Puertas Blindadas</span>
         </div>
         <button
           type="button"
@@ -304,7 +291,7 @@ const DashboardWrapper: React.FC = () => {
             <div className="shrink-0 rounded-lg bg-primary-600 p-2">
               <ShieldCheck className="h-6 w-6 text-white" />
             </div>
-            <span className="min-w-0 truncate text-lg font-bold tracking-tight">Finanzas PBlindadas</span>
+            <span className="min-w-0 truncate text-lg font-bold tracking-tight">Finanzas</span>
           </div>
           <button type="button" aria-label="Cerrar menú principal" onClick={() => setMobileMenu({ open: false, pathname: location.pathname })} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-gray-300 hover:bg-gray-800 hover:text-white lg:hidden"><X className="h-5 w-5" /></button>
         </div>
@@ -314,6 +301,8 @@ const DashboardWrapper: React.FC = () => {
           className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-4 py-4 lg:py-6"
         >
           {canSee(dashboardItem) && <MenuLink item={dashboardItem} pathname={location.pathname} onNavigate={() => setMobileMenu({ open: false, pathname: location.pathname })} />}
+
+          <MenuLink item={{ path: '/', label: 'Volver al inicio', icon: House }} pathname={location.pathname} onNavigate={() => setMobileMenu({ open: false, pathname: location.pathname })} />
 
           {visibleGroups.map((group) => (
             <MenuGroup

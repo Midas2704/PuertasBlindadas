@@ -66,6 +66,11 @@ import ProductosFamilias from './views/Mantenedores/ProductosFamilias';
 import AreasTrabajo from './views/Mantenedores/AreasTrabajo';
 import TareasFabricacion from './views/Mantenedores/TareasFabricacion';
 import { permisosAccesoMantenedores } from './views/Mantenedores/permisos';
+import PortalPrincipal from './views/PortalPrincipal/PortalPrincipal';
+import InventarioPendiente from './views/PortalPrincipal/InventarioPendiente';
+import TerrenoWrapper from './views/Terreno/TerrenoWrapper';
+import InicioTerreno from './views/Terreno/InicioTerreno';
+import { permisosTerreno } from './seguridad/accesosSistemas';
 
 const App: React.FC = () => {
   return (
@@ -74,11 +79,13 @@ const App: React.FC = () => {
       <ProveedorSesion><Routes>
         <Route path="/login" element={<Acceso modo="login"/>}/>
         <Route path="/recuperar" element={<Acceso modo="recuperar"/>}/>
-        <Route path="/" element={<Protegido><DashboardWrapper /></Protegido>}>
+        <Route path="/" element={<PortalPrincipal/>}/>
+        <Route path="/inventario" element={<InventarioPendiente/>}/>
+        <Route element={<Protegido><DashboardWrapper /></Protegido>}>
           <Route path="usuarios" element={<Protegido permiso="CU67"><Usuarios/></Protegido>}/>
           <Route path="sesiones" element={<Protegido permiso="CU73"><Sesiones/></Protegido>}/>
           <Route path="cuenta/clave" element={<Acceso modo="clave"/>}/>
-          <Route index element={<Protegido permiso="CU05"><DashboardPrincipal /></Protegido>} />
+          <Route path="finanzas" element={<Protegido permiso="CU05"><DashboardPrincipal /></Protegido>} />
           <Route path="clientes" element={<Protegido permiso="CU05"><CatalogoClientes /></Protegido>} />
           <Route path="clientes/:rut" element={<Protegido permiso="CU09"><VerFicha /></Protegido>} />
           <Route path="proveedores" element={<Protegido permiso="CU80"><CatalogoProveedores /></Protegido>} />
@@ -101,13 +108,6 @@ const App: React.FC = () => {
           <Route path="pagos-remuneraciones/:id" element={<Protegido permiso={['CU188','CU189','CU190']}><DetallePagoRemuneracion /></Protegido>} />
           <Route path="documentos-remuneracion" element={<Protegido permiso={['CU191','CU192','CU193']}><DocumentosRemuneracion /></Protegido>} />
           <Route path="honorarios" element={<Protegido permiso={['CU196','CU197','CU198']}><Honorarios /></Protegido>} />
-          <Route path="terreno/visitas" element={<Protegido permiso={['CU199','CU200','CU210','CU211']}><GestionTerreno /></Protegido>} />
-          <Route path="terreno/mis-tareas" element={<Protegido permiso={['CU201','CU208']}><MisTareasTerreno /></Protegido>} />
-          <Route path="terreno/produccion" element={<Protegido permiso={['CU207','CU209']}><ProduccionTerreno /></Protegido>} />
-          <Route path="terreno/incidencias" element={<Protegido permiso={['CU212','CU213']}><IncidenciasTerreno /></Protegido>} />
-          <Route path="terreno/ordenes-trabajo" element={<Protegido permiso={['CU202','CU205','CU207','CU209']}><GestionOrdenesTrabajo /></Protegido>} />
-          <Route path="terreno/ordenes-trabajo/:id" element={<Protegido permiso={['CU202','CU205','CU207','CU209']}><DetalleOrdenTrabajo /></Protegido>} />
-          <Route path="terreno/tareas/:id/levantamiento" element={<Protegido permiso={['CU202','CU203','CU204','CU205','CU206']}><LevantamientoTecnico /></Protegido>} />
           <Route path="dashboard-m7" element={<Protegido permiso="CU215"><PanelGeneralM7 /></Protegido>} />
           <Route path="dashboard-m7/centro-atencion" element={<Protegido permiso="CU216"><CentroAtencionM7 /></Protegido>} />
           <Route path="dashboard-m7/cotizaciones-pendientes" element={<Protegido permiso="CU217"><CotizacionesPendientesM7 /></Protegido>} />
@@ -136,6 +136,16 @@ const App: React.FC = () => {
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />
           <Route path="pagos" element={<Protegido permiso="CU42"><PagosCliente /></Protegido>} />
           <Route path="configuracion/umbral" element={<Protegido permiso="CU41"><UmbralPorVencer /></Protegido>} />
+        </Route>
+        <Route path="/terreno" element={<Protegido permiso={[...permisosTerreno]}><TerrenoWrapper/></Protegido>}>
+          <Route index element={<InicioTerreno/>}/>
+          <Route path="visitas" element={<Protegido permiso={['CU199','CU200','CU210','CU211']}><GestionTerreno /></Protegido>} />
+          <Route path="mis-tareas" element={<Protegido permiso={['CU201','CU208']}><MisTareasTerreno /></Protegido>} />
+          <Route path="produccion" element={<Protegido permiso={['CU207','CU209']}><ProduccionTerreno /></Protegido>} />
+          <Route path="incidencias" element={<Protegido permiso={['CU212','CU213']}><IncidenciasTerreno /></Protegido>} />
+          <Route path="ordenes-trabajo" element={<Protegido permiso={['CU202','CU205','CU207','CU209']}><GestionOrdenesTrabajo /></Protegido>} />
+          <Route path="ordenes-trabajo/:id" element={<Protegido permiso={['CU202','CU205','CU207','CU209']}><DetalleOrdenTrabajo /></Protegido>} />
+          <Route path="tareas/:id/levantamiento" element={<Protegido permiso={['CU202','CU203','CU204','CU205','CU206']}><LevantamientoTecnico /></Protegido>} />
         </Route>
       </Routes></ProveedorSesion>
     </BrowserRouter>

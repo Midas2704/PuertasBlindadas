@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { solicitarFinanzas } from '../api/finanzas';
 export interface Sesion {id:string;nombre:string;acceso:string;permisos:string[];configuracion:string;administrador:boolean;cambiarClave:boolean}
 const Contexto = createContext<{sesion:Sesion|null;cargando:boolean;actualizar:()=>Promise<void>}>({sesion:null,cargando:true,actualizar:async()=>{}});
@@ -13,8 +13,9 @@ export function ProveedorSesion({children}:{children:ReactNode}) {
 export const usarSesion=()=>useContext(Contexto);
 export function Protegido({children,permiso}:{children:ReactNode;permiso?:string|string[]}) {
  const {sesion,cargando}=usarSesion();
+ const ubicacion=useLocation();
  if(cargando)return <p className="p-8">Cargando sesión…</p>;
- if(!sesion)return <Navigate to="/login" replace/>;
+ if(!sesion)return <Navigate to="/login" state={{desde:`${ubicacion.pathname}${ubicacion.search}${ubicacion.hash}`}} replace/>;
  if(sesion.cambiarClave && window.location.pathname!=='/cuenta/clave')return <Navigate to="/cuenta/clave" replace/>;
  const autorizado=!permiso || (Array.isArray(permiso) ? permiso.some((codigo)=>sesion.permisos.includes(codigo)) : sesion.permisos.includes(permiso));
  if(!autorizado)return <div className="p-8"><h1 className="text-2xl font-bold">Acceso no disponible</h1><p className="mt-3 text-gray-500">Tu cuenta no tiene permiso para esta operación.</p></div>;
