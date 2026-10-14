@@ -21,6 +21,7 @@ import {
   Tags,
   Users,
   WalletCards,
+  Workflow,
 } from 'lucide-react';
 import { usarSesion } from '../../seguridad/Sesion';
 
@@ -44,6 +45,15 @@ type CategoriaMantenedor = {
 };
 
 const categorias: CategoriaMantenedor[] = [
+  {
+    id: 'operacion',
+    nombre: 'Operación y producción',
+    descripcion: 'Catálogos operativos compartidos con la futura asignación de órdenes de trabajo.',
+    tarjetas: [
+      { nombre: 'Áreas de trabajo', descripcion: 'Áreas productivas y empleados actualmente asociados.', modulo: 'M6 / Terreno', estado: 'DISPONIBLE', icono: Workflow, ruta: '/mantenedores/areas-trabajo', permisos: ['CU155', 'CU157'] },
+      { nombre: 'Tareas de fabricación', descripcion: 'Catálogo de tareas productivas por área para construir plantillas.', modulo: 'M2 / Producción', estado: 'DISPONIBLE', icono: ClipboardCheck, ruta: '/mantenedores/tareas-fabricacion', permisos: ['CU360'] },
+    ],
+  },
   {
     id: 'comercial',
     nombre: 'Comercial',

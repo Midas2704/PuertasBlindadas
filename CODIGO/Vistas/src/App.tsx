@@ -42,6 +42,8 @@ import MisTareasTerreno from './views/MisTareasTerreno/MisTareasTerreno';
 import LevantamientoTecnico from './views/LevantamientoTecnico/LevantamientoTecnico';
 import ProduccionTerreno from './views/ProduccionTerreno/ProduccionTerreno';
 import IncidenciasTerreno from './views/IncidenciasTerreno/IncidenciasTerreno';
+import GestionOrdenesTrabajo from './views/GestionOrdenesTrabajo/GestionOrdenesTrabajo';
+import DetalleOrdenTrabajo from './views/GestionOrdenesTrabajo/DetalleOrdenTrabajo';
 import PanelGeneralM7 from './views/DashboardM7/PanelGeneralM7';
 import AnalisisVentasM7 from './views/DashboardM7/AnalisisVentasM7';
 import CuentasCobrarM7 from './views/DashboardM7/CuentasCobrarM7';
@@ -61,6 +63,8 @@ import SolicitudesCredito from './views/Credito/SolicitudesCredito';
 import Auditoria from './views/Auditoria/Auditoria';
 import Mantenedores from './views/Mantenedores/Mantenedores';
 import ProductosFamilias from './views/Mantenedores/ProductosFamilias';
+import AreasTrabajo from './views/Mantenedores/AreasTrabajo';
+import TareasFabricacion from './views/Mantenedores/TareasFabricacion';
 import { permisosAccesoMantenedores } from './views/Mantenedores/permisos';
 
 const App: React.FC = () => {
@@ -101,6 +105,8 @@ const App: React.FC = () => {
           <Route path="terreno/mis-tareas" element={<Protegido permiso={['CU201','CU208']}><MisTareasTerreno /></Protegido>} />
           <Route path="terreno/produccion" element={<Protegido permiso={['CU207','CU209']}><ProduccionTerreno /></Protegido>} />
           <Route path="terreno/incidencias" element={<Protegido permiso={['CU212','CU213']}><IncidenciasTerreno /></Protegido>} />
+          <Route path="terreno/ordenes-trabajo" element={<Protegido permiso={['CU202','CU205','CU207','CU209']}><GestionOrdenesTrabajo /></Protegido>} />
+          <Route path="terreno/ordenes-trabajo/:id" element={<Protegido permiso={['CU202','CU205','CU207','CU209']}><DetalleOrdenTrabajo /></Protegido>} />
           <Route path="terreno/tareas/:id/levantamiento" element={<Protegido permiso={['CU202','CU203','CU204','CU205','CU206']}><LevantamientoTecnico /></Protegido>} />
           <Route path="dashboard-m7" element={<Protegido permiso="CU215"><PanelGeneralM7 /></Protegido>} />
           <Route path="dashboard-m7/centro-atencion" element={<Protegido permiso="CU216"><CentroAtencionM7 /></Protegido>} />
@@ -123,6 +129,8 @@ const App: React.FC = () => {
           <Route path="auditoria" element={<Protegido permiso="CU355"><Auditoria /></Protegido>} />
           <Route path="mantenedores" element={<Protegido permiso={[...permisosAccesoMantenedores]}><Mantenedores /></Protegido>} />
           <Route path="mantenedores/productos" element={<Protegido permiso="CU360"><ProductosFamilias /></Protegido>} />
+          <Route path="mantenedores/areas-trabajo" element={<Protegido permiso={['CU155','CU157']}><AreasTrabajo /></Protegido>} />
+          <Route path="mantenedores/tareas-fabricacion" element={<Protegido permiso="CU360"><TareasFabricacion /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
           <Route path="venta/directa" element={<Protegido permiso="CU27"><NotaDeVentaDirecta /></Protegido>} />
           <Route path="aprobaciones" element={<Protegido permiso="CU20"><BandejaAprobacionGerencia /></Protegido>} />

@@ -44,7 +44,7 @@ test('M6 T1 CU155-CU158 administra el maestro actual de empleados', async (t) =>
       assert.equal(listado.length, 1);
       assert.equal(listado[0].id, empleado.id_empleado);
       assert.equal(listado[0].cargoActual, cargo.nombre_cargo);
-      assert.deepEqual(Object.keys(listado[0]).sort(), ['cargoActual', 'estado', 'id', 'nombreCompleto', 'rut']);
+      assert.deepEqual(Object.keys(listado[0]).sort(), ['areaActual', 'cargoActual', 'estado', 'id', 'nombreCompleto', 'rut']);
       assert.equal('sueldoBase' in listado[0], false);
       assert.equal('afp' in listado[0], false);
       const ficha = await modulo.obtenerEmpleado(empleado.id_empleado);

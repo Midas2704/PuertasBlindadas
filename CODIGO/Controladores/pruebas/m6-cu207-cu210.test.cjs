@@ -16,13 +16,11 @@ test('M6 Terreno CU207-CU210 asigna, ejecuta, valida y prepara salida sin adelan
   const ot = await prisma.orden_trabajo.create({ data: { orden_trabajo_estado: 'en_progreso', orden_trabajo_fecha_hora: new Date(), especificaciones_puerta_id_especificacion_puerta: puerta.especificacion_puerta_especificacion_puerta_id } }); ids.ots.push(ot.orden_trabajo_id_orden);
   const tarea = await prisma.tarea.create({ data: { tarea_titulo: `Producción ${sufijo}`, tarea_estado_de_tarea: 'pendiente', id_orden_trabajo: ot.orden_trabajo_id_orden, id_especificacion_puerta: puerta.especificacion_puerta_especificacion_puerta_id } }); ids.tareas.push(tarea.tarea_tarea_id);
   const u1 = await prisma.usuario.create({ data: { usuario_username: `tec1_${sufijo}` } }); const u2 = await prisma.usuario.create({ data: { usuario_username: `tec2_${sufijo}` } }); ids.usuarios.push(u1.usuario_id_usuario, u2.usuario_id_usuario);
+  const actorAdministrador = { id: u1.usuario_id_usuario, administrador: true, permisos: ['CU207','CU209'] };
   try {
-    await t.test('CU207 reemplaza asignaciones, valida usuarios y nunca usa tarea.id_usuario', async () => {
-      await assert.rejects(modulo.asignarTareaProduccion(Number(tarea.tarea_tarea_id), { idsUsuarios: ['999999999'] }), (e) => e.estado === 404);
-      let resultado = await modulo.asignarTareaProduccion(Number(tarea.tarea_tarea_id), { idsUsuarios: [u1.usuario_id_usuario.toString(), u2.usuario_id_usuario.toString()], prioridad: 'alta' });
-      assert.equal(resultado.asignados.length, 2); assert.equal(resultado.prioridad, 'alta');
-      resultado = await modulo.asignarTareaProduccion(Number(tarea.tarea_tarea_id), { idsUsuarios: [u1.usuario_id_usuario.toString()] });
-      assert.deepEqual(resultado.asignados.map((u) => u.id), [u1.usuario_id_usuario.toString()]);
+    await t.test('CU207 impide que una tarea Legacy omita el flujo productivo versionado', async () => {
+      await assert.rejects(modulo.asignarTareaProduccion(Number(tarea.tarea_tarea_id), { idsUsuarios: ['999999999'], motivo:'Intento Legacy' }, actorAdministrador), (e) => e.estado === 409);
+      await prisma.tarea_usuario.create({data:{tarea_usuario_tarea_id:tarea.tarea_tarea_id,tarea_usuario_usuario_id:u1.usuario_id_usuario}});
       assert.equal((await prisma.tarea.findUnique({ where: { tarea_tarea_id: tarea.tarea_tarea_id } })).id_usuario, null);
     });
 
@@ -35,8 +33,8 @@ test('M6 Terreno CU207-CU210 asigna, ejecuta, valida y prepara salida sin adelan
 
     await t.test('CU209 resuelve una sola vez sin incidencias ni efecto remuneracional', async () => {
       const pendientes = await modulo.listarEjecucionesPendientes(); assert.ok(pendientes.some((e) => e.id === ids.ejecuciones[0].toString()));
-      const validada = await modulo.validarEjecucionProductiva(Number(ids.ejecuciones[0]), { decision: 'validada' }); assert.equal(validada.validacion, 'validada');
-      await assert.rejects(modulo.validarEjecucionProductiva(Number(ids.ejecuciones[0]), { decision: 'rechazada' }), (e) => e.estado === 409);
+      const validada = await modulo.validarEjecucionProductiva(Number(ids.ejecuciones[0]), { decision: 'validada' },actorAdministrador); assert.equal(validada.validacion, 'validada');
+      await assert.rejects(modulo.validarEjecucionProductiva(Number(ids.ejecuciones[0]), { decision: 'rechazada' },actorAdministrador), (e) => e.estado === 409);
       assert.equal(await prisma.incidencia_retrabajo_tarea.count({ where: { id_ejecucion_tarea: ids.ejecuciones[0] } }), 0);
       assert.equal(await prisma.tratamiento_remuneracional_ejecucion.count({ where: { id_ejecucion_tarea: ids.ejecuciones[0] } }), 0);
     });

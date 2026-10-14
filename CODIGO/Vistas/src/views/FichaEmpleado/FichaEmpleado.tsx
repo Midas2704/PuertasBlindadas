@@ -1,6 +1,6 @@
 import { solicitarTexto } from '../../components/DialogosSistema';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, BriefcaseBusiness, CalendarDays, ChevronDown, CircleDollarSign, FileCheck2, FileText, History, Layers3, Plus, Save, Sparkles } from 'lucide-react';
+import { ArrowLeft, BriefcaseBusiness, CalendarDays, ChevronDown, CircleDollarSign, FileCheck2, FileText, History, Layers3, MapPinned, Plus, Save, Sparkles } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
@@ -15,7 +15,10 @@ type Empleado = {
   fechaNacimiento: string | null;
   estado: string;
   cargoActual: string | null;
+  areaActual: { id: string; nombre: string | null } | null;
 };
+type AreaTrabajo = { id: string; nombre: string; activa: boolean };
+type HistorialArea = { id: number; area: { id: string; nombre: string | null }; vigenciaDesde: string; vigenciaHasta: string | null; motivo: string; asignadoPor: string | null; finalizadoPor: string | null };
 
 type RelacionLaboral = {
   id: number;
@@ -109,6 +112,9 @@ export default function FichaEmpleado() {
   const [historial, setHistorial] = useState<HistorialRemuneracional | null>(null);
   const [filtroHistorial, setFiltroHistorial] = useState({ anio: '', tipoEvento: 'TODOS' });
   const [periodosAbiertos, setPeriodosAbiertos] = useState<Record<string, boolean>>({});
+  const [areasTrabajo, setAreasTrabajo] = useState<AreaTrabajo[]>([]);
+  const [historialArea, setHistorialArea] = useState<HistorialArea[]>([]);
+  const [nuevaArea, setNuevaArea] = useState({ idArea: '', motivo: '' });
 
   useEffect(() => {
     const cancelacion = new AbortController();
@@ -118,6 +124,15 @@ export default function FichaEmpleado() {
         setDatosBase({ nombres: resultado.nombres, apellidoPaterno: resultado.apellidoPaterno, apellidoMaterno: resultado.apellidoMaterno || '', fechaNacimiento: resultado.fechaNacimiento?.slice(0, 10) || '', estado: resultado.estado });
       })
       .catch((causa) => { if (!cancelacion.signal.aborted) setError(causa.message); });
+    return () => cancelacion.abort();
+  }, [id, version]);
+
+  useEffect(() => {
+    const cancelacion = new AbortController();
+    Promise.all([
+      respuestaJson('/areas-trabajo?incluirInactivas=false', { signal: cancelacion.signal }),
+      respuestaJson(`/empleados/${id}/area-historial`, { signal: cancelacion.signal }),
+    ]).then(([areas, historial]) => { setAreasTrabajo(areas); setHistorialArea(historial); }).catch(causa => { if (!cancelacion.signal.aborted) setError(causa.message); });
     return () => cancelacion.abort();
   }, [id, version]);
 
@@ -254,6 +269,11 @@ export default function FichaEmpleado() {
   };
   const asignarDeduccion=async()=>{setGuardando(true);setError('');try{await respuestaJson(`/empleados/${id}/deducciones`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nuevaDeduccion)});setNuevaDeduccion({idConcepto:'',vigenciaDesde:'',vigenciaHasta:'',valorAplicable:'',fundamento:'',autorizacionReferencia:''});setMensaje('Deducción recurrente asignada.');setVersion(v=>v+1)}catch(e){setError((e as Error).message)}finally{setGuardando(false)}};
   const finalizarDeduccion=async(a:Deduccion)=>{const vigenciaHasta=await solicitarTexto('Fecha de término (AAAA-MM-DD)');if(!vigenciaHasta)return;try{await respuestaJson(`/empleados/${id}/deducciones/${a.id}/finalizar`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({vigenciaHasta})});setVersion(v=>v+1)}catch(e){setError((e as Error).message)}};
+  const asignarArea = async () => {
+    setGuardando(true); setError(''); setMensaje('');
+    try { await respuestaJson(`/empleados/${id}/area`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nuevaArea) }); setNuevaArea({ idArea: '', motivo: '' }); setMensaje('Área de trabajo actualizada.'); setVersion(v => v + 1); }
+    catch (causa) { setError((causa as Error).message); } finally { setGuardando(false); }
+  };
 
   return <div className="min-h-full bg-slate-50 p-5 lg:p-8"><div className="mx-auto max-w-6xl">
     <button onClick={() => navegar('/empleados')} className="mb-5 flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900"><ArrowLeft className="h-4 w-4" />Volver al catálogo</button>
@@ -298,6 +318,14 @@ export default function FichaEmpleado() {
       <section className="border-y border-gray-200 bg-white px-5 py-5">
         <div className="mb-4 flex items-center justify-between gap-3"><div className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5 text-primary-600" /><h2 className="font-bold text-gray-900">Datos generales</h2></div>{puedeCU157 && <button disabled={guardando} onClick={() => void guardarDatosBase()} className="flex items-center gap-2 rounded-md bg-primary-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" />Guardar</button>}</div>
         {puedeCU157 ? <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"><label className="text-sm font-medium">Nombres<input value={datosBase.nombres} onChange={(evento) => setDatosBase({ ...datosBase, nombres: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label><label className="text-sm font-medium">Apellido paterno<input value={datosBase.apellidoPaterno} onChange={(evento) => setDatosBase({ ...datosBase, apellidoPaterno: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label><label className="text-sm font-medium">Apellido materno<input value={datosBase.apellidoMaterno} onChange={(evento) => setDatosBase({ ...datosBase, apellidoMaterno: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label><label className="text-sm font-medium">Fecha de nacimiento<input type="date" value={datosBase.fechaNacimiento} onChange={(evento) => setDatosBase({ ...datosBase, fechaNacimiento: evento.target.value })} className="mt-1 w-full rounded-md border p-2.5" /></label></div> : <dl className="grid gap-4 text-sm md:grid-cols-3"><div><dt className="text-gray-500">Nombres</dt><dd className="mt-1 font-medium">{empleado.nombres}</dd></div><div><dt className="text-gray-500">Apellidos</dt><dd className="mt-1 font-medium">{[empleado.apellidoPaterno, empleado.apellidoMaterno].filter(Boolean).join(' ')}</dd></div><div><dt className="text-gray-500">Cargo actual</dt><dd className="mt-1 font-medium">{empleado.cargoActual || 'Sin configurar'}</dd></div></dl>}
+      </section>
+
+      <section className="mt-6 border-y border-gray-200 bg-white px-5 py-5">
+        <div className="mb-4 flex items-center gap-2"><MapPinned className="h-5 w-5 text-primary-600" /><div><h2 className="font-bold text-gray-900">Área de trabajo</h2><p className="text-sm text-gray-500">Independiente del cargo y conservada con historial.</p></div></div>
+        <div className="rounded-md bg-gray-50 p-4"><span className="text-xs font-semibold uppercase text-gray-500">Área actual</span><p className="mt-1 text-lg font-bold">{empleado.areaActual?.nombre || 'Sin área asignada'}</p></div>
+        {puedeCU157 && <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_auto]"><label className="text-sm font-medium">Nueva área<select value={nuevaArea.idArea} onChange={e => setNuevaArea({ ...nuevaArea, idArea: e.target.value })} className="mt-1 w-full rounded-md border p-2.5"><option value="">Seleccionar</option>{areasTrabajo.map(area => <option key={area.id} value={area.id}>{area.nombre}</option>)}</select></label><label className="text-sm font-medium">Motivo del cambio<input value={nuevaArea.motivo} onChange={e => setNuevaArea({ ...nuevaArea, motivo: e.target.value })} maxLength={1000} className="mt-1 w-full rounded-md border p-2.5" placeholder="Obligatorio para la trazabilidad" /></label><button disabled={guardando || !nuevaArea.idArea || !nuevaArea.motivo.trim() || empleado.estado !== 'activo'} onClick={() => void asignarArea()} className="mt-6 h-11 rounded-md bg-primary-600 px-4 text-sm font-bold text-white disabled:opacity-50">Asignar área</button></div>}
+        {empleado.estado !== 'activo' && <p className="mt-3 text-sm text-amber-700">El empleado no está activo y no está disponible para nuevas asignaciones productivas.</p>}
+        <details className="mt-5"><summary className="cursor-pointer text-sm font-bold text-primary-700">Ver historial de áreas ({historialArea.length})</summary><div className="mt-3 overflow-x-auto"><table className="w-full min-w-[650px] text-left text-sm"><thead className="bg-gray-50"><tr><th className="px-3 py-2">Área</th><th className="px-3 py-2">Desde</th><th className="px-3 py-2">Hasta</th><th className="px-3 py-2">Motivo</th><th className="px-3 py-2">Responsable</th></tr></thead><tbody>{historialArea.map(item => <tr key={item.id} className="border-t"><td className="px-3 py-2 font-semibold">{item.area.nombre}</td><td className="px-3 py-2">{new Date(item.vigenciaDesde).toLocaleString('es-CL')}</td><td className="px-3 py-2">{item.vigenciaHasta ? new Date(item.vigenciaHasta).toLocaleString('es-CL') : 'Actual'}</td><td className="px-3 py-2">{item.motivo}</td><td className="px-3 py-2">{item.asignadoPor || 'Usuario'}</td></tr>)}</tbody></table>{!historialArea.length && <p className="py-5 text-center text-gray-500">Sin cambios de área registrados.</p>}</div></details>
       </section>
 
       {puedeCU157 && <section className="mt-6 border-y border-gray-200 bg-white px-5 py-5">

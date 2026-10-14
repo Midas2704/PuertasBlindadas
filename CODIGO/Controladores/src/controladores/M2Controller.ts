@@ -12,7 +12,10 @@ import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 const ESTADOS_FAMILIA_COMERCIAL = ['ACTIVA', 'INACTIVA'] as const;
 const ESTADOS_PRODUCTO_COMERCIAL = ['BORRADOR', 'VINCULADO', 'INACTIVO'] as const;
+const ESTADOS_TAREA_FABRICACION = ['ACTIVA', 'INACTIVA'] as const;
 const CAMPOS_TECNICOS_PRODUCTO = ['tipoEstructura','materialesPrincipales','revestimientos','terminaciones','cerradurasCompatibles','caracteristicasSeguridad','dimensionesReferenciales','requisitosTecnicos','opcionales','observacionesTecnicas'] as const;
+const CAMPOS_MEDIDAS_RECTIFICACION = ['marcoAncho','marcoAlto','marcoEspesor','vanoVerticalAncho','vanoVerticalAlto','vanoVerticalEspesor','vanoHorizontalAncho','vanoHorizontalAlto','vanoHorizontalEspesor','alojamientoVerticalAlto','alojamientoVerticalAncho','alojamientoVerticalEspesor','alojamientoHorizontalAlto','alojamientoHorizontalAncho','alojamientoHorizontalEspesor','alojamientoVertical','medidaMarcoAncho','medidaMarcoAlto','medidaMarcoEspesor'] as const;
+const MEDIDAS_OBLIGATORIAS_HEREDADAS = ['marcoAncho','marcoAlto'] as const;
 
 const codigoCatalogo = (valor: unknown, maximo: number, nombre: string) => {
   const codigo = texto(valor, maximo).toLocaleUpperCase('es-CL');
@@ -54,6 +57,43 @@ const fechaComercial = (valor: unknown) => {
   const fecha = texto(valor, 20);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !Number.isFinite(Date.parse(`${fecha}T00:00:00Z`))) throw new ErrorAplicacion(400, 'Fecha de vigencia inválida');
   return new Date(`${fecha}T00:00:00Z`);
+};
+const minutosOpcionales = (valor: unknown, nombre = 'Tiempo estimado') => {
+  if (valor === undefined || valor === null || valor === '') return null;
+  const minutos = Number(valor);
+  if (!Number.isInteger(minutos) || minutos <= 0 || minutos > 525600) throw new ErrorAplicacion(400, `${nombre} debe ser un número entero mayor a cero`);
+  return minutos;
+};
+const idEdicion = (valor: unknown) => typeof valor === 'string' && /^[0-9a-f-]{36}$/i.test(valor) ? valor : randomUUID();
+
+type TareaEtapaFabricacion = {
+  id: string;
+  idTareaFabricacion: number | null;
+  nombre: string;
+  descripcion: string | null;
+  instrucciones: string | null;
+  tiempoEstimadoMin: number | null;
+};
+type EtapaFabricacion = {
+  id: string;
+  orden: number;
+  idAreaTrabajo: string;
+  nombreArea: string;
+  nombre: string;
+  descripcion: string | null;
+  instrucciones: string | null;
+  tiempoEstimadoMin: number | null;
+  tareas: TareaEtapaFabricacion[];
+};
+type PlanUnidadCotizada = {
+  idDetalleCotizacion: number;
+  numeroUnidad: number;
+  idProductoComercial: number;
+  idFamiliaProducto: number;
+  idVersionPlantilla: number;
+  producto: string;
+  familia: string;
+  etapas: Entrada[];
 };
 const auditableM9 = <T extends object>(resultado: T, anterior?: Prisma.InputJsonValue, nuevo?: Prisma.InputJsonValue) => {
   Object.defineProperty(resultado, '__auditoriaM9', { enumerable: false, value: { anterior, nuevo } });
@@ -165,7 +205,120 @@ export class M2Controller {
     return prisma.$transaction(accion,{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:30000});
   }
 
-  async consolidarB2C(idCotizacion:number, entrada:Entrada, responsable:string) {
+  private aplicarAjusteProductoPlantilla(etapasBase: Entrada[], ajuste: Prisma.JsonValue | null): Entrada[] {
+    const cambios = ajuste && typeof ajuste === 'object' && !Array.isArray(ajuste) ? ajuste as Prisma.JsonObject : null;
+    const reemplazo = cambios?.etapas;
+    if (Array.isArray(reemplazo)) return structuredClone(reemplazo) as Entrada[];
+    return structuredClone(etapasBase);
+  }
+
+  private async resolverPuertasCotizacion(tx: Prisma.TransactionClient, idCotizacion: number) {
+    const cotizacion = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: incluirCotizacion });
+    if (!cotizacion) throw new ErrorAplicacion(404, 'Cotización no encontrada');
+    const idsItem = [...new Set(cotizacion.detalle_cotizacion.map(detalle => detalle.id_item_comercial))];
+    const productos = await tx.extension_producto_comercial.findMany({
+      where: { id_item_comercial: { in: idsItem }, estado: { not: 'INACTIVO' } },
+      include: {
+        familia: { include: { plantilla_fabricacion: { include: { versiones: true } } } },
+        ajuste_plantilla_fabricacion: true,
+      },
+    });
+    const porItem = new Map(productos.map(producto => [producto.id_item_comercial!, producto]));
+    const unidades: PlanUnidadCotizada[] = [];
+    for (const detalle of cotizacion.detalle_cotizacion) {
+      const producto = porItem.get(detalle.id_item_comercial);
+      if (!producto) continue;
+      const cantidad = detalle.cantidad_item.toNumber();
+      if (!Number.isInteger(cantidad) || cantidad <= 0) throw new ErrorAplicacion(409, `La cantidad de ${producto.nombre_comercial} debe ser un entero positivo para generar sus OT`);
+      const plantilla = producto.familia.plantilla_fabricacion;
+      const version = plantilla?.numero_version_vigente ? plantilla.versiones.find(item => item.numero_version === plantilla.numero_version_vigente) : null;
+      if (!plantilla || !version) throw new ErrorAplicacion(409, `El producto ${producto.codigo_comercial} · ${producto.nombre_comercial} requiere una plantilla de fabricación publicada`);
+      const contenido = version.contenido as Prisma.JsonObject;
+      const etapasBase = Array.isArray(contenido.etapas) ? contenido.etapas as Entrada[] : [];
+      const ajuste = producto.ajuste_plantilla_fabricacion?.estado === 'PUBLICADO' && producto.ajuste_plantilla_fabricacion.id_version_plantilla_base === version.id_version_plantilla ? producto.ajuste_plantilla_fabricacion.cambios : null;
+      const etapas = this.aplicarAjusteProductoPlantilla(etapasBase, ajuste);
+      if (!etapas.length) throw new ErrorAplicacion(409, `La plantilla vigente de ${producto.nombre_comercial} no contiene etapas`);
+      for (let numeroUnidad = 1; numeroUnidad <= cantidad; numeroUnidad++) unidades.push({ idDetalleCotizacion: detalle.id_detalle_cotizacion, numeroUnidad, idProductoComercial: producto.id_extension_producto_comercial, idFamiliaProducto: producto.id_familia_producto_comercial, idVersionPlantilla: version.id_version_plantilla, producto: producto.nombre_comercial, familia: producto.familia.nombre, etapas: structuredClone(etapas) });
+    }
+    return { cotizacion, unidades };
+  }
+
+  private async normalizarPlanificacionesOt(tx: Prisma.TransactionClient, idCotizacion: number, entrada?: unknown) {
+    const base = await this.resolverPuertasCotizacion(tx, idCotizacion);
+    if (entrada === undefined) return base;
+    if (!Array.isArray(entrada) || entrada.length !== base.unidades.length) throw new ErrorAplicacion(400, `La planificación debe contener exactamente ${base.unidades.length} puertas`);
+    const esperadas = new Map(base.unidades.map(unidad => [`${unidad.idDetalleCotizacion}:${unidad.numeroUnidad}`, unidad]));
+    const normalizadas: PlanUnidadCotizada[] = [];
+    const asignacionesEmpleado: Array<{ idEmpleado:number; idArea:bigint }> = [];
+    for (const valor of entrada) {
+      if (!valor || typeof valor !== 'object' || Array.isArray(valor)) throw new ErrorAplicacion(400, 'Planificación de puerta inválida');
+      const unidadEntrada = valor as Entrada;
+      const idDetalle = identificador(unidadEntrada.idDetalleCotizacion);
+      const numeroUnidad = identificador(unidadEntrada.numeroUnidad);
+      const esperada = esperadas.get(`${idDetalle}:${numeroUnidad}`);
+      if (!esperada) throw new ErrorAplicacion(400, 'La planificación contiene una puerta que no pertenece a la Cotización');
+      if (identificador(unidadEntrada.idVersionPlantilla) !== esperada.idVersionPlantilla) throw new ErrorAplicacion(409, `La plantilla de ${esperada.producto}, unidad ${numeroUnidad}, cambió; vuelve a abrir la planificación`);
+      if (!Array.isArray(unidadEntrada.etapas) || !unidadEntrada.etapas.length || unidadEntrada.etapas.length > 80) throw new ErrorAplicacion(400, `La puerta ${esperada.producto} #${numeroUnidad} requiere al menos una etapa`);
+      let totalTareas = 0;
+      const etapas = unidadEntrada.etapas.map((etapaValor:unknown, indice:number) => {
+        if (!etapaValor || typeof etapaValor !== 'object' || Array.isArray(etapaValor)) throw new ErrorAplicacion(400, `Etapa ${indice + 1} inválida`);
+        const etapa = etapaValor as Entrada; const idArea = BigInt(identificador(etapa.idAreaTrabajo)); const nombre = texto(etapa.nombre,150);
+        if (!nombre) throw new ErrorAplicacion(400, `La etapa ${indice + 1} requiere nombre`);
+        if (!Array.isArray(etapa.tareas) || etapa.tareas.length > 100) throw new ErrorAplicacion(400, `Tareas de etapa ${indice + 1} inválidas`);
+        totalTareas += etapa.tareas.length;
+        const tareas = etapa.tareas.map((tareaValor:unknown, posicion:number) => {
+          if (!tareaValor || typeof tareaValor !== 'object' || Array.isArray(tareaValor)) throw new ErrorAplicacion(400, `Tarea ${posicion + 1} inválida`);
+          const tarea = tareaValor as Entrada; const nombreTarea = texto(tarea.nombre,150); if (!nombreTarea) throw new ErrorAplicacion(400, `La tarea ${posicion + 1} requiere nombre`);
+          const idEmpleado = tarea.idEmpleado ? identificador(tarea.idEmpleado) : null; if (idEmpleado) asignacionesEmpleado.push({ idEmpleado, idArea });
+          return { id: idEdicion(tarea.id), orden: posicion + 1, idTareaFabricacion: tarea.idTareaFabricacion ? identificador(tarea.idTareaFabricacion) : null, nombre: nombreTarea, descripcion: texto(tarea.descripcion,4000)||null, instrucciones: texto(tarea.instrucciones,4000)||null, tiempoEstimadoMin: minutosOpcionales(tarea.tiempoEstimadoMin,'Tiempo estimado de tarea'), idEmpleado };
+        });
+        return { id: idEdicion(etapa.id), orden: indice + 1, idAreaTrabajo: idArea.toString(), nombre, descripcion: texto(etapa.descripcion,4000)||null, instrucciones: texto(etapa.instrucciones,4000)||null, tiempoEstimadoMin: minutosOpcionales(etapa.tiempoEstimadoMin,'Tiempo estimado de etapa'), tareas };
+      });
+      if (!totalTareas) throw new ErrorAplicacion(400, `La puerta ${esperada.producto} #${numeroUnidad} no puede generar una OT vacía`);
+      normalizadas.push({ ...esperada, etapas }); esperadas.delete(`${idDetalle}:${numeroUnidad}`);
+    }
+    if (esperadas.size) throw new ErrorAplicacion(400, 'Faltan puertas en la planificación');
+    const idsArea = [...new Set(normalizadas.flatMap(unidad => unidad.etapas.map(etapa => BigInt(etapa.idAreaTrabajo).toString())))];
+    const areas = await tx.area_trabajo.findMany({ where: { area_trabajo_id_area: { in: idsArea.map(BigInt) }, area_trabajo_activo: true }, select: { area_trabajo_id_area: true } });
+    if (areas.length !== idsArea.length) throw new ErrorAplicacion(409, 'La planificación contiene un área inactiva o inexistente');
+    if (asignacionesEmpleado.length) {
+      const pares = await Promise.all(asignacionesEmpleado.map(par => tx.asignacion_area_empleado.findFirst({ where: { id_empleado: par.idEmpleado, id_area_trabajo: par.idArea, vigencia_hasta: null, empleado: { estado_laboral: 'activo' } }, select: { id_asignacion_area_empleado: true } })));
+      if (pares.some(par => !par)) throw new ErrorAplicacion(409, 'Un empleado seleccionado ya no está activo en el área indicada');
+    }
+    return { cotizacion: base.cotizacion, unidades: normalizadas };
+  }
+
+  async obtenerPlanificacionAprobacionCotizacion(idCotizacion:number) {
+    const resultado = await this.enTransaccion(tx => this.normalizarPlanificacionesOt(tx,idCotizacion));
+    const idsArea = [...new Set(resultado.unidades.flatMap(unidad => unidad.etapas.map(etapa => String(etapa.idAreaTrabajo))))];
+    const [asignaciones,areas] = await Promise.all([
+      prisma.asignacion_area_empleado.findMany({ where: { id_area_trabajo: { in: idsArea.map(BigInt) }, vigencia_hasta: null, empleado: { estado_laboral: 'activo' } }, include: { empleado: true }, orderBy: [{ empleado: { apellido_paterno:'asc' } },{ empleado:{ nombres:'asc' } }] }),
+      prisma.area_trabajo.findMany({where:{area_trabajo_activo:true},select:{area_trabajo_id_area:true,area_trabajo_nombre_area:true},orderBy:{area_trabajo_nombre_area:'asc'}}),
+    ]);
+    const empleadosPorArea:Record<string,Array<{id:number;nombre:string;rut:string}>>={};
+    for(const asignacion of asignaciones){const clave=asignacion.id_area_trabajo.toString();(empleadosPorArea[clave]??=[]).push({id:asignacion.empleado.id_empleado,nombre:[asignacion.empleado.nombres,asignacion.empleado.apellido_paterno,asignacion.empleado.apellido_materno].filter(Boolean).join(' '),rut:asignacion.empleado.rut_empleado});}
+    return { cotizacion:{ id:resultado.cotizacion.id_cotizacion, cliente:resultado.cotizacion.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, fechaVigencia:resultado.cotizacion.fecha_vigencia }, totalOt:resultado.unidades.length, planificaciones:resultado.unidades, empleadosPorArea, areas:areas.map(area=>({id:area.area_trabajo_id_area.toString(),nombre:area.area_trabajo_nombre_area||`Área ${area.area_trabajo_id_area}`})) };
+  }
+
+  private async crearOrdenesTrabajoCotizacion(tx:Prisma.TransactionClient,idCotizacion:number,entrada:unknown,usuario:bigint){
+    if (entrada === undefined) {
+      const base = await this.resolverPuertasCotizacion(tx,idCotizacion);
+      if (base.unidades.length) throw new ErrorAplicacion(400, 'Debes revisar y confirmar la planificación de todas las puertas antes de aprobar la Cotización');
+      return [];
+    }
+    const resultado=await this.normalizarPlanificacionesOt(tx,idCotizacion,entrada);
+    const creadas:Array<{idOrdenTrabajo:string;idUnidad:string;detalle:number;unidad:number;version:number}>=[];
+    for(const unidad of resultado.unidades){
+      const orden=await tx.orden_trabajo.create({data:{orden_trabajo_fecha_hora:new Date(),orden_trabajo_estado:'PENDIENTE_RECTIFICACION',especificaciones_puerta_id_especificacion_puerta:null,proyecto_id_proyecto:null,area_trabajo_id_area:null,usuario_id_usuario:null}});
+      const planificacion={etapas:unidad.etapas};
+      const registro=await tx.unidad_fisica_orden_trabajo.create({data:{id_cotizacion:idCotizacion,id_detalle_cotizacion:unidad.idDetalleCotizacion,id_extension_producto_comercial:unidad.idProductoComercial,id_familia_producto_comercial:unidad.idFamiliaProducto,numero_unidad:unidad.numeroUnidad,id_version_plantilla:unidad.idVersionPlantilla,id_orden_trabajo:orden.orden_trabajo_id_orden,planificacion_inicial:planificacion as Prisma.InputJsonValue,planificacion_actual:planificacion as Prisma.InputJsonValue,creado_por:usuario}});
+      await tx.historial_unidad_fisica_ot.create({data:{id_unidad_fisica_ot:registro.id_unidad_fisica_ot,evento:'CREACION_DESDE_COTIZACION',valor_nuevo:{idCotizacion,idDetalle:unidad.idDetalleCotizacion,numeroUnidad:unidad.numeroUnidad,idOrdenTrabajo:orden.orden_trabajo_id_orden.toString(),idVersionPlantilla:unidad.idVersionPlantilla,estado:'PENDIENTE_RECTIFICACION'},usuario_id_usuario:usuario}});
+      creadas.push({idOrdenTrabajo:orden.orden_trabajo_id_orden.toString(),idUnidad:registro.id_unidad_fisica_ot.toString(),detalle:unidad.idDetalleCotizacion,unidad:unidad.numeroUnidad,version:unidad.idVersionPlantilla});
+    }
+    return creadas;
+  }
+
+  async consolidarB2C(idCotizacion:number, entrada:Entrada, responsable:bigint) {
     return this.enTransaccion(async tx=>{
       const cotizacion=await tx.cotizacion.findUnique({where:{id_cotizacion:idCotizacion},include:{...incluirCotizacion,nota_venta:true}});
       if(!cotizacion || cotizacion.estado_cotizacion!=='emitida' || !cotizacion.fecha_vigencia || cotizacion.fecha_vigencia.toISOString().slice(0,10)<fechaNegocio() || cotizacion.nota_venta) throw new ErrorAplicacion(409,'Cotización no emitida/vigente o ya consolidada');
@@ -181,15 +334,16 @@ export class M2Controller {
       if(idDocumento&&(!documento || documento.id_ficha_cliente!==nota.id_ficha_cliente))throw new ErrorAplicacion(400,'Selecciona un documento tributario existente del mismo cliente');
       const catalogo={medios:await tx.medio_pago.findMany({where:{estado_medio_pago:'activo'}}),categorias:await tx.categoria_pago.findMany({where:{activo:true}}),cuotas:await tx.config_cuotas_tarjeta.findMany({where:{activo:true}})};
       const datosPago=tipoCambio?{...entrada,tipoCambio:tipoCambio.toString()}:entrada;
-      const pago=await tx.pago_cliente.create({data:prepararPago(nota,datosPago,catalogo,idDocumento,responsable)});
+      const pago=await tx.pago_cliente.create({data:prepararPago(nota,datosPago,catalogo,idDocumento,responsable.toString())});
       const actual=await tx.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta},include:incluirNota});
       await tx.nota_venta.update({where:{id_nota_venta:nota.id_nota_venta},data:{estado_pago:calcularNota(actual).estadoPago}});
+      const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,responsable);
       await tx.cotizacion.update({where:{id_cotizacion:idCotizacion},data:{estado_cotizacion:'aprobada'}});
-      return {mensaje:'Venta B2C consolidada con su primer pago',idNota:nota.id_nota_venta,idPago:pago.id_pago_cliente};
+      return auditableM9({mensaje:'Venta B2C consolidada con su primer pago y OT pendientes de rectificación',idNota:nota.id_nota_venta,idPago:pago.id_pago_cliente,ordenesTrabajo},undefined,{idCotizacion,idNota:nota.id_nota_venta,ordenesTrabajo});
     });
   }
 
-  async aprobarCotizacionB2B(idCotizacion: number, entrada: Entrada) {
+  async aprobarCotizacionB2B(idCotizacion: number, entrada: Entrada, usuario: bigint) {
     return this.enTransaccion(async tx => {
       const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true, moneda: true } });
       if (!cot || cot.estado_cotizacion !== 'emitida' || cot.nota_venta) throw new ErrorAplicacion(409, 'La Cotización no está disponible para aceptación');
@@ -212,8 +366,9 @@ export class M2Controller {
       }
       const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: montoTotal, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio?montoTotal.mul(tipoCambio).toDecimalPlaces(2):null, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente' } });
       if (montoFinanciado) await registrarCompromisoCredito(tx, { idFicha: cot.id_ficha_cliente, idNota: nota.id_nota_venta, montoFinanciado, idSolicitudExcepcion: autorizacionCredito?.idSolicitudExcepcion });
+      const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,usuario);
       await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'aprobada' } });
-      return { mensaje: 'Orden de Compra registrada y Nota de Venta generada', idNota: nota.id_nota_venta, ordenCompra: oc };
+      return auditableM9({ mensaje: 'Orden de Compra, Nota de Venta y OT generadas', idNota: nota.id_nota_venta, ordenCompra: oc, ordenesTrabajo },undefined,{idCotizacion,idNota:nota.id_nota_venta,ordenesTrabajo});
     });
   }
 
@@ -484,6 +639,137 @@ export class M2Controller {
       prisma.producto_terminado.findMany({ select: { producto_terminado_id_producto: true, producto_terminado_codigo_producto: true, producto_terminado_nombre_producto: true, producto_terminado_tipo_producto: true, producto_terminado_activo: true }, orderBy: { producto_terminado_nombre_producto: 'asc' } }),
     ]);
     return { itemsTerreno: items, productosInventario: productos.map(producto => ({ ...producto, producto_terminado_id_producto: producto.producto_terminado_id_producto.toString() })) };
+  }
+  async listarTareasFabricacion(consulta: Entrada = {}) {
+    const estado = texto(consulta.estado || 'TODAS', 20).toUpperCase();
+    if (![...ESTADOS_TAREA_FABRICACION, 'TODAS'].includes(estado as typeof ESTADOS_TAREA_FABRICACION[number] | 'TODAS')) throw new ErrorAplicacion(400, 'Estado de tarea inválido');
+    const idArea = consulta.idArea ? BigInt(identificador(consulta.idArea)) : null;
+    const busqueda = texto(consulta.busqueda, 150);
+    return prisma.catalogo_tarea_fabricacion.findMany({
+      where: {
+        ...(estado === 'TODAS' ? {} : { estado }),
+        ...(idArea ? { id_area_trabajo: idArea } : {}),
+        ...(busqueda ? { OR: [{ nombre: { contains: busqueda, mode: 'insensitive' } }, { descripcion: { contains: busqueda, mode: 'insensitive' } }] } : {}),
+      },
+      include: { area: { select: { area_trabajo_id_area: true, area_trabajo_nombre_area: true, area_trabajo_activo: true } } },
+      orderBy: [{ estado: 'asc' }, { nombre: 'asc' }],
+    });
+  }
+  async crearTareaFabricacion(entrada: Entrada, usuario: bigint) {
+    const nombre = texto(entrada.nombre, 150);
+    if (!nombre) throw new ErrorAplicacion(400, 'El nombre de la tarea es obligatorio');
+    const idArea = BigInt(identificador(entrada.idArea));
+    const area = await prisma.area_trabajo.findFirst({ where: { area_trabajo_id_area: idArea, area_trabajo_activo: true } });
+    if (!area) throw new ErrorAplicacion(400, 'Selecciona un área activa');
+    try {
+      const creada = await prisma.catalogo_tarea_fabricacion.create({ data: { nombre, descripcion: texto(entrada.descripcion, 4000) || null, id_area_trabajo: idArea, tiempo_estimado_min: minutosOpcionales(entrada.tiempoEstimadoMin), creado_por: usuario, actualizado_por: usuario }, include: { area: true } });
+      return auditableM9(creada, undefined, { id: creada.id_tarea_fabricacion, nombre, idArea: idArea.toString(), estado: creada.estado });
+    } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe una tarea con ese nombre en el área'); throw error; }
+  }
+  async actualizarTareaFabricacion(id: number, entrada: Entrada, usuario: bigint) {
+    const nombre = texto(entrada.nombre, 150);
+    if (!nombre) throw new ErrorAplicacion(400, 'El nombre de la tarea es obligatorio');
+    const revision = revisionEntrada(entrada.revision);
+    const idArea = BigInt(identificador(entrada.idArea));
+    try {
+      return await prisma.$transaction(async tx => {
+        const actual = await tx.catalogo_tarea_fabricacion.findUnique({ where: { id_tarea_fabricacion: id } });
+        if (!actual) throw new ErrorAplicacion(404, 'Tarea de fabricación no encontrada');
+        const area = await tx.area_trabajo.findFirst({ where: { area_trabajo_id_area: idArea, area_trabajo_activo: true } });
+        if (!area) throw new ErrorAplicacion(400, 'Selecciona un área activa');
+        const cambio = await tx.catalogo_tarea_fabricacion.updateMany({ where: { id_tarea_fabricacion: id, revision }, data: { nombre, descripcion: texto(entrada.descripcion, 4000) || null, id_area_trabajo: idArea, tiempo_estimado_min: minutosOpcionales(entrada.tiempoEstimadoMin), actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+        if (!cambio.count) throw new ErrorAplicacion(409, 'La tarea fue modificada por otra persona; vuelve a cargarla');
+        const actualizada = await tx.catalogo_tarea_fabricacion.findUniqueOrThrow({ where: { id_tarea_fabricacion: id }, include: { area: true } });
+        return auditableM9(actualizada, { nombre: actual.nombre, idArea: actual.id_area_trabajo.toString(), tiempoEstimadoMin: actual.tiempo_estimado_min }, { nombre, idArea: idArea.toString(), tiempoEstimadoMin: actualizada.tiempo_estimado_min });
+      });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe una tarea con ese nombre en el área'); throw error; }
+  }
+  async cambiarEstadoTareaFabricacion(id: number, activar: boolean, entrada: Entrada, usuario: bigint) {
+    const revision = revisionEntrada(entrada.revision);
+    const estado = activar ? 'ACTIVA' : 'INACTIVA';
+    const cambio = await prisma.catalogo_tarea_fabricacion.updateMany({ where: { id_tarea_fabricacion: id, revision }, data: { estado, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+    if (!cambio.count) {
+      if (!await prisma.catalogo_tarea_fabricacion.count({ where: { id_tarea_fabricacion: id } })) throw new ErrorAplicacion(404, 'Tarea de fabricación no encontrada');
+      throw new ErrorAplicacion(409, 'La tarea fue modificada por otra persona; vuelve a cargarla');
+    }
+    const actualizada = await prisma.catalogo_tarea_fabricacion.findUniqueOrThrow({ where: { id_tarea_fabricacion: id }, include: { area: true } });
+    return auditableM9(actualizada, undefined, { estado });
+  }
+  private async normalizarPlantillaFabricacion(entrada: Entrada, tx: Prisma.TransactionClient): Promise<{ etapas: EtapaFabricacion[]; medidasObligatorias: string[] }> {
+    if (!Array.isArray(entrada.etapas) || entrada.etapas.length > 60) throw new ErrorAplicacion(400, 'La plantilla debe contener una lista de hasta 60 etapas');
+    const etapasEntrada = entrada.etapas as Entrada[];
+    const idsArea = [...new Set(etapasEntrada.map(etapa => BigInt(identificador(etapa.idArea)).toString()))];
+    const areas = idsArea.length ? await tx.area_trabajo.findMany({ where: { area_trabajo_id_area: { in: idsArea.map(BigInt) }, area_trabajo_activo: true } }) : [];
+    const mapaAreas = new Map(areas.map(area => [area.area_trabajo_id_area.toString(), area]));
+    if (mapaAreas.size !== idsArea.length) throw new ErrorAplicacion(400, 'Todas las etapas deben pertenecer a áreas activas');
+    const idsCatalogo = [...new Set(etapasEntrada.flatMap(etapa => Array.isArray(etapa.tareas) ? (etapa.tareas as Entrada[]).map(tarea => tarea.idTareaFabricacion ? identificador(tarea.idTareaFabricacion) : null) : []).filter((id): id is number => id !== null))];
+    const catalogadas = idsCatalogo.length ? await tx.catalogo_tarea_fabricacion.findMany({ where: { id_tarea_fabricacion: { in: idsCatalogo }, estado: 'ACTIVA' } }) : [];
+    const mapaTareas = new Map(catalogadas.map(tarea => [tarea.id_tarea_fabricacion, tarea]));
+    if (mapaTareas.size !== idsCatalogo.length) throw new ErrorAplicacion(400, 'Existe una tarea catalogada inexistente o inactiva');
+    const etapas: EtapaFabricacion[] = etapasEntrada.map((etapa, indice) => {
+      const idAreaTrabajo = BigInt(identificador(etapa.idArea)).toString();
+      const area = mapaAreas.get(idAreaTrabajo)!;
+      const nombre = texto(etapa.nombre, 150);
+      if (!nombre) throw new ErrorAplicacion(400, `El nombre de la etapa ${indice + 1} es obligatorio`);
+      if (!Array.isArray(etapa.tareas) || etapa.tareas.length > 100) throw new ErrorAplicacion(400, `Las tareas de la etapa ${indice + 1} no son válidas`);
+      const tareas = (etapa.tareas as Entrada[]).map((tarea, posicion): TareaEtapaFabricacion => {
+        const idCatalogo = tarea.idTareaFabricacion ? identificador(tarea.idTareaFabricacion) : null;
+        const catalogada = idCatalogo ? mapaTareas.get(idCatalogo) : null;
+        if (catalogada && catalogada.id_area_trabajo.toString() !== idAreaTrabajo) throw new ErrorAplicacion(400, `La tarea ${catalogada.nombre} no pertenece al área de su etapa`);
+        const nombreTarea = catalogada?.nombre || texto(tarea.nombre, 150);
+        if (!nombreTarea) throw new ErrorAplicacion(400, `La tarea particular ${posicion + 1} de la etapa ${indice + 1} requiere nombre`);
+        return { id: idEdicion(tarea.id), idTareaFabricacion: idCatalogo, nombre: nombreTarea, descripcion: catalogada?.descripcion || texto(tarea.descripcion, 4000) || null, instrucciones: texto(tarea.instrucciones, 4000) || null, tiempoEstimadoMin: minutosOpcionales(tarea.tiempoEstimadoMin ?? catalogada?.tiempo_estimado_min, 'Tiempo estimado de tarea') };
+      });
+      return { id: idEdicion(etapa.id), orden: indice + 1, idAreaTrabajo, nombreArea: area.area_trabajo_nombre_area || `Área ${idAreaTrabajo}`, nombre, descripcion: texto(etapa.descripcion, 4000) || null, instrucciones: texto(etapa.instrucciones, 4000) || null, tiempoEstimadoMin: minutosOpcionales(etapa.tiempoEstimadoMin, 'Tiempo estimado de etapa'), tareas };
+    });
+    const medidasEntrada = entrada.medidasObligatorias === undefined ? [...MEDIDAS_OBLIGATORIAS_HEREDADAS] : entrada.medidasObligatorias;
+    if (!Array.isArray(medidasEntrada) || !medidasEntrada.length || medidasEntrada.length > CAMPOS_MEDIDAS_RECTIFICACION.length) throw new ErrorAplicacion(400, 'Selecciona al menos una medida obligatoria para la rectificación');
+    if (medidasEntrada.some(campo => typeof campo !== 'string' || !CAMPOS_MEDIDAS_RECTIFICACION.includes(campo as typeof CAMPOS_MEDIDAS_RECTIFICACION[number]))) throw new ErrorAplicacion(400, 'La plantilla contiene una medida obligatoria no admitida');
+    const medidasObligatorias = [...new Set(medidasEntrada as string[])];
+    if (medidasObligatorias.length !== medidasEntrada.length) throw new ErrorAplicacion(400, 'Las medidas obligatorias no pueden repetirse');
+    return { etapas, medidasObligatorias };
+  }
+  async obtenerPlantillaFabricacionFamilia(idFamilia: number, incluirHistorial = false) {
+    const familia = await prisma.familia_producto_comercial.findUnique({ where: { id_familia_producto_comercial: idFamilia }, select: { id_familia_producto_comercial: true, codigo: true, nombre: true, estado: true } });
+    if (!familia) throw new ErrorAplicacion(404, 'Familia comercial no encontrada');
+    const plantilla = await prisma.plantilla_fabricacion_familia.findUnique({ where: { id_familia_producto_comercial: idFamilia }, include: { ...(incluirHistorial ? { versiones: { orderBy: { numero_version: 'desc' as const }, include: { publicador: { select: { usuario_username: true } } } } } : {}) } });
+    return { familia, plantilla: plantilla || null };
+  }
+  async guardarBorradorPlantillaFabricacion(idFamilia: number, entrada: Entrada, usuario: bigint) {
+    return prisma.$transaction(async tx => {
+      const familia = await tx.familia_producto_comercial.findFirst({ where: { id_familia_producto_comercial: idFamilia, estado: 'ACTIVA' } });
+      if (!familia) throw new ErrorAplicacion(404, 'Familia comercial activa no encontrada');
+      const borrador = await this.normalizarPlantillaFabricacion(entrada, tx);
+      const existente = await tx.plantilla_fabricacion_familia.findUnique({ where: { id_familia_producto_comercial: idFamilia } });
+      if (!existente) {
+        const creada = await tx.plantilla_fabricacion_familia.create({ data: { id_familia_producto_comercial: idFamilia, borrador: borrador as unknown as Prisma.InputJsonValue, creado_por: usuario, actualizado_por: usuario } });
+        return auditableM9(creada, undefined, { familia: idFamilia, etapas: borrador.etapas.length, revision: creada.revision });
+      }
+      const revision = revisionEntrada(entrada.revision);
+      const cambio = await tx.plantilla_fabricacion_familia.updateMany({ where: { id_plantilla_fabricacion: existente.id_plantilla_fabricacion, revision }, data: { borrador: borrador as unknown as Prisma.InputJsonValue, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+      if (!cambio.count) throw new ErrorAplicacion(409, 'El borrador fue modificado por otra persona; vuelve a cargarlo');
+      const actualizada = await tx.plantilla_fabricacion_familia.findUniqueOrThrow({ where: { id_plantilla_fabricacion: existente.id_plantilla_fabricacion } });
+      return auditableM9(actualizada, { revision: existente.revision }, { etapas: borrador.etapas.length, revision: actualizada.revision });
+    });
+  }
+  async publicarPlantillaFabricacion(idFamilia: number, entrada: Entrada, usuario: bigint) {
+    const motivo = motivoObligatorio(entrada.motivo);
+    try {
+      return await prisma.$transaction(async tx => {
+        const plantilla = await tx.plantilla_fabricacion_familia.findUnique({ where: { id_familia_producto_comercial: idFamilia } });
+        if (!plantilla) throw new ErrorAplicacion(404, 'Guarda primero un borrador de la plantilla');
+        const revision = revisionEntrada(entrada.revision);
+        if (plantilla.revision !== revision) throw new ErrorAplicacion(409, 'El borrador cambió antes de publicarse; vuelve a cargarlo');
+        const borrador = plantilla.borrador as { etapas?: unknown[] };
+        if (!Array.isArray(borrador.etapas) || !borrador.etapas.length) throw new ErrorAplicacion(400, 'La plantilla debe tener al menos una etapa antes de publicarse');
+        const numeroVersion = (plantilla.numero_version_vigente || 0) + 1;
+        const contenido = { ...(plantilla.borrador as Prisma.JsonObject), familia: { id: idFamilia }, numeroVersion } as Prisma.InputJsonObject;
+        const version = await tx.version_plantilla_fabricacion.create({ data: { id_plantilla_fabricacion: plantilla.id_plantilla_fabricacion, numero_version: numeroVersion, contenido, motivo, publicado_por: usuario } });
+        const cambio = await tx.plantilla_fabricacion_familia.updateMany({ where: { id_plantilla_fabricacion: plantilla.id_plantilla_fabricacion, revision }, data: { numero_version_vigente: numeroVersion, actualizado_por: usuario, actualizado_en: new Date(), revision: { increment: 1 } } });
+        if (!cambio.count) throw new ErrorAplicacion(409, 'El borrador cambió antes de publicarse; vuelve a cargarlo');
+        return auditableM9(version, { version: plantilla.numero_version_vigente }, { version: numeroVersion, etapas: borrador.etapas.length });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'Otra publicación actualizó la plantilla; vuelve a cargarla'); throw error; }
   }
   async listarMonedas() { return prisma.moneda.findMany({ where: { estado_moneda: 'activo', codigo_moneda: { in: ['CLP', 'USD'] } } }); }
   async consultarResumen() {

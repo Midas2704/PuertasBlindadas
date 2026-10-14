@@ -3,6 +3,7 @@ import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect } from 'react';
 import { Check, X, AlertTriangle, Edit2 } from 'lucide-react';
 import ModalDetalleDocumento from '../../components/ModalDetalleDocumento';
+import ModalPlanificacionOrdenes from '../../components/ModalPlanificacionOrdenes';
 
 const BandejaAprobacionGerencia: React.FC = () => {
   const [cotizaciones, setCotizaciones] = useState<any[]>([]);
@@ -14,6 +15,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
   const [historyNvs, setHistoryNvs] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'cotizaciones' | 'notas' | 'historial'>('cotizaciones');
   const [activeModal, setActiveModal] = useState<{ tipo: 'cotizacion' | 'nota_venta', data: any } | null>(null);
+  const [cotizacionPlanificacion,setCotizacionPlanificacion]=useState<number|null>(null);
 
   const fetchPendientes = () => {
     setLoading(true);
@@ -63,19 +65,11 @@ const BandejaAprobacionGerencia: React.FC = () => {
   };
 
   const handleApprove = async (tipo: 'quotes' | 'nota-venta', id: number) => {
-    if (tipo === 'quotes' && approvingQuoteId !== id) {
-      setApprovingQuoteId(id);
-      return;
-    }
-
+    if(tipo==='quotes'){setCotizacionPlanificacion(id);return;}
     try {
-      const endpoint = tipo === 'quotes' ? `/billing/quotes/${id}/accept-b2b` : `/billing/${tipo}/${id}/approve`;
-      const folioOrdenCompra = tipo === 'quotes' ? await solicitarTexto('Folio de la Orden de Compra B2B:') : '';
-      if (tipo === 'quotes' && !folioOrdenCompra) { setApprovingQuoteId(null); return; }
-      const res = await solicitarFinanzas(endpoint, {
+      const res = await solicitarFinanzas(`/billing/${tipo}/${id}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: tipo === 'quotes' ? JSON.stringify({ plazo_pago: plazoPago, folioOrdenCompra, respaldoOrdenCompra: `Registro de Orden de Compra ${folioOrdenCompra}` }) : undefined
       });
       if (!res.ok) { const resultado = await res.json(); throw new Error(resultado.error || 'Error al aprobar'); }
       const data = await res.json();
@@ -419,6 +413,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
 
       {/* Modal Desglose (Universal) */}
       <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)} />
+      {cotizacionPlanificacion&&<ModalPlanificacionOrdenes cotizacionId={cotizacionPlanificacion} modo="B2B" cerrar={()=>setCotizacionPlanificacion(null)} completado={()=>{setCotizacionPlanificacion(null);setMensaje({text:'Cotización aprobada y órdenes de trabajo generadas',type:'success'});fetchPendientes();fetchHistory();}}/>}
 
       {/* Modal Editar Cotizacion */}
       {editingQuote && (

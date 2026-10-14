@@ -1,4 +1,4 @@
-const { test, after } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { readFileSync } = require('node:fs');
@@ -8,6 +8,25 @@ const { M7Controller } = require('../dist/controladores/M7Controller');
 
 const ids = { clientes: [], fichas: [], items: [], cotizaciones: [], detalles: [], notas: [] };
 const consulta = { anio: 2055, mes: 5 };
+
+async function limpiarFixturesModelosHuerfanos() {
+  const clientes = await prisma.cliente_financiero.findMany({ where: { nombre_razon_social_referencia: { startsWith: 'Cliente modelos M7 ' } }, select: { id_cliente_financiero: true, ficha_cliente: { select: { id_ficha_cliente: true } } } });
+  const fichas = clientes.flatMap(fila => fila.ficha_cliente ? [fila.ficha_cliente.id_ficha_cliente] : []);
+  if (fichas.length) {
+    const cotizaciones = await prisma.cotizacion.findMany({ where: { id_ficha_cliente: { in: fichas } }, select: { id_cotizacion: true } });
+    const idsCotizaciones = cotizaciones.map(fila => fila.id_cotizacion);
+    await prisma.nota_venta.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+    if (idsCotizaciones.length) await prisma.detalle_cotizacion.deleteMany({ where: { id_cotizacion: { in: idsCotizaciones } } });
+    await prisma.cotizacion.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+    await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+    await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: clientes.map(fila => fila.id_cliente_financiero) } } });
+  }
+  const candidatos = await prisma.item_comercial.findMany({ where: { OR: [{ nombre_item: { startsWith: 'Puerta Strong ' } }, { nombre_item: { startsWith: 'Puerta Bunker ' } }] }, select: { id_item_comercial: true, nombre_item: true, detalle_cotizacion: { select: { id_detalle_cotizacion: true } }, extensiones_comerciales: { select: { id_extension_producto_comercial: true } } } });
+  const items = candidatos.filter(fila => /^Puerta (Strong|Bunker) [0-9a-f]{12}$/i.test(fila.nombre_item) && !fila.detalle_cotizacion.length && !fila.extensiones_comerciales.length).map(fila => fila.id_item_comercial);
+  if (items.length) await prisma.item_comercial.deleteMany({ where: { id_item_comercial: { in: items } } });
+}
+
+before(limpiarFixturesModelosHuerfanos);
 
 async function preparar() {
   const [tipoCliente, clp, usd] = await Promise.all([
@@ -89,7 +108,7 @@ after(async () => {
   await prisma.item_comercial.deleteMany({ where: { id_item_comercial: { in: ids.items } } });
   await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: ids.fichas } } });
   await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: ids.clientes } } });
-  await prisma.$disconnect();
+  await limpiarFixturesModelosHuerfanos();
 });
 
 test('M7 ventas por modelo y navegación segura', async t => {

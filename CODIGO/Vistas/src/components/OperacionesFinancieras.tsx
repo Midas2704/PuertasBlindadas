@@ -2,18 +2,19 @@ import { confirmarAccion } from './DialogosSistema';
 import {useState} from 'react';
 import {operar,usarSesion} from '../seguridad/Sesion';
 import {entradaClase,botonClase} from '../views/Seguridad/Acceso';
+import ModalPlanificacionOrdenes from './ModalPlanificacionOrdenes';
 interface Catalogos {medios:{id_medio_pago:number;nombre_medio_pago:string}[];categorias:{id_categoria_pago:number;nombre:string}[];cuotas:{cantidad:number}[];documentos:{id_documento_tributario:number;folio_documento:string;tipo_documento:{nombre_tipo_documento:string}}[]}
 export default function OperacionesFinancieras({tipo,documento}:{tipo:string;documento:any}) {
  // acá termina la magia: este componente sólo ordena las acciones financieras
- const {sesion}=usarSesion();const [modo,cambiarModo]=useState('');const [catalogos,cambiarCatalogos]=useState<Catalogos|null>(null);const [mensaje,cambiarMensaje]=useState('');const [ocupado,cambiarOcupado]=useState(false);const [pdf,cambiarPdf]=useState('');
+ const {sesion}=usarSesion();const [modo,cambiarModo]=useState('');const [catalogos,cambiarCatalogos]=useState<Catalogos|null>(null);const [mensaje,cambiarMensaje]=useState('');const [ocupado,cambiarOcupado]=useState(false);const [pdf,cambiarPdf]=useState('');const [planificacionB2C,setPlanificacionB2C]=useState<Record<string,unknown>|null>(null);
  const nota=tipo==='nota_venta';const permite=(p:string)=>sesion?.permisos.includes(p);const moneda=documento.moneda?.codigo_moneda;
  const iniciar=async(operacion:string)=>{cambiarModo(operacion);cambiarMensaje('');if(operacion!=='reversion')try{cambiarCatalogos(await operar(`/pagos/catalogos?idFicha=${documento.id_ficha_cliente}`));}catch(e){cambiarMensaje((e as Error).message);}};
- return <section className="border-t mt-6 pt-5"><div className="flex gap-3 flex-wrap">
+ return <><section className="border-t mt-6 pt-5"><div className="flex gap-3 flex-wrap">
  {nota&&permite('CU43')&&<button className={botonClase} onClick={()=>iniciar('pago')}>Registrar pago</button>}
  {nota&&permite('CU38')&&<button className="px-4 py-2 border rounded-lg text-red-600" onClick={()=>iniciar('reversion')}>Reversión comercial</button>}
  {!nota&&documento.estado_cotizacion==='emitida'&&permite('CU25')&&<button className={botonClase} onClick={()=>iniciar('b2c')}>Consolidar B2C con primer pago</button>}</div>
  {mensaje&&<p role="status" className="mt-4 p-3 bg-orange-50 text-orange-900 rounded-lg">{mensaje}</p>}
- {modo&&<form className="space-y-4 mt-5" onSubmit={async evento=>{evento.preventDefault();if(!await confirmarAccion('¿Confirmas los antecedentes y la operación?'))return;const datos=Object.fromEntries(new FormData(evento.currentTarget));cambiarOcupado(true);try{
+ {modo&&<form className="space-y-4 mt-5" onSubmit={async evento=>{evento.preventDefault();const datos=Object.fromEntries(new FormData(evento.currentTarget));if(modo==='b2c'){setPlanificacionB2C(datos);return;}if(!await confirmarAccion('¿Confirmas los antecedentes y la operación?'))return;cambiarOcupado(true);try{
  const ruta=modo==='reversion'?`/notas-venta/${documento.id_nota_venta}/revertir`:modo==='b2c'?`/cotizaciones/${documento.id_cotizacion}/consolidar-b2c`:'/pagos';
  const resultado=await operar(ruta,{...datos,idNota:documento.id_nota_venta,respaldoPdf:pdf,confirmacionMontoPdf:datos.confirmacionMontoPdf==='on'});cambiarMensaje(resultado.mensaje || 'Operación realizada');cambiarModo('');window.location.reload();
  }catch(e){cambiarMensaje((e as Error).message);}finally{cambiarOcupado(false);}}}>
@@ -29,5 +30,5 @@ export default function OperacionesFinancieras({tipo,documento}:{tipo:string;doc
  <label className="block text-sm">Referencia del respaldo del pago<input className={entradaClase} name="respaldo" required/></label></>}
  <div className="flex gap-3"><button className={botonClase} disabled={ocupado || (modo!=='reversion'&&!catalogos)}>{ocupado?'Procesando…':'Confirmar operación'}</button><button type="button" onClick={()=>cambiarModo('')} className="px-4 py-2 border rounded-lg">Cancelar</button></div>
  </form>}
- </section>;
+ </section>{planificacionB2C&&<ModalPlanificacionOrdenes cotizacionId={documento.id_cotizacion} modo="B2C" datosComerciales={planificacionB2C} cerrar={()=>setPlanificacionB2C(null)} completado={(resultado)=>{setPlanificacionB2C(null);cambiarModo('');cambiarMensaje(resultado.mensaje||'Venta B2C consolidada y OT generadas');window.location.reload();}}/>}</>;
 }

@@ -1,4 +1,4 @@
-const { test, after } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { readFileSync } = require('node:fs');
@@ -12,6 +12,22 @@ const autorizado = { id: 1n, permisos: ['CU259'] };
 const denegado = { id: 2n, permisos: [] };
 const ids = { solicitudes: [], notas: [], cotizaciones: [], fichas: [], clientes: [] };
 let fichas; let cotizacion; let nota;
+
+async function limpiarFixturesM8Huerfanos() {
+  const clientes = await prisma.cliente_financiero.findMany({
+    where: { OR: [{ nombre_razon_social_referencia: { startsWith: 'Cliente M8 0 ' } }, { nombre_razon_social_referencia: { startsWith: 'Cliente M8 1 ' } }] },
+    select: { id_cliente_financiero: true, ficha_cliente: { select: { id_ficha_cliente: true } } },
+  });
+  const fichasFixture = clientes.flatMap(fila => fila.ficha_cliente ? [fila.ficha_cliente.id_ficha_cliente] : []);
+  if (!fichasFixture.length) return;
+  await prisma.solicitud_crediticia_m8.deleteMany({ where: { id_ficha_cliente: { in: fichasFixture } } });
+  await prisma.nota_venta.deleteMany({ where: { id_ficha_cliente: { in: fichasFixture } } });
+  await prisma.cotizacion.deleteMany({ where: { id_ficha_cliente: { in: fichasFixture } } });
+  await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: fichasFixture } } });
+  await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: clientes.map(fila => fila.id_cliente_financiero) } } });
+}
+
+before(limpiarFixturesM8Huerfanos);
 
 async function preparar() {
   if (fichas) return;
@@ -40,6 +56,7 @@ after(async () => {
   await prisma.cotizacion.deleteMany({ where: { id_cotizacion: { in: ids.cotizaciones } } });
   await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: ids.fichas } } });
   await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: ids.clientes } } });
+  await limpiarFixturesM8Huerfanos();
   await prisma.$disconnect();
 });
 

@@ -1,4 +1,4 @@
-const { test, after } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { readFileSync, existsSync } = require('node:fs');
@@ -9,6 +9,35 @@ const { M7Controller } = require('../dist/controladores/M7Controller');
 const modulo = new M7Controller();
 const ids = { clientes: [], fichas: [], notas: [], pagos: [], proveedores: [], documentos: [], obligaciones: [], movimientos: [], origenes: [] };
 let cliente; let notaFutura; let proveedor; let obligacionFutura; let obligacionVencida;
+
+async function limpiarFixturesCierreHuerfanos() {
+  const clientes = await prisma.cliente_financiero.findMany({ where: { nombre_razon_social_referencia: { startsWith: 'Cliente cierre ' } }, select: { id_cliente_financiero: true, ficha_cliente: { select: { id_ficha_cliente: true } } } });
+  const fichas = clientes.flatMap(fila => fila.ficha_cliente ? [fila.ficha_cliente.id_ficha_cliente] : []);
+  if (fichas.length) {
+    const pagos = await prisma.pago_cliente.findMany({ where: { id_ficha_cliente: { in: fichas } }, select: { id_pago_cliente: true } });
+    const notas = await prisma.nota_venta.findMany({ where: { id_ficha_cliente: { in: fichas } }, select: { id_nota_venta: true } });
+    await prisma.asignacion_pago_cliente.deleteMany({ where: { OR: [{ id_pago_cliente: { in: pagos.map(fila => fila.id_pago_cliente) } }, { id_nota_venta: { in: notas.map(fila => fila.id_nota_venta) } }] } });
+    await prisma.pago_cliente.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+    await prisma.nota_venta.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+    await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+    await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: clientes.map(fila => fila.id_cliente_financiero) } } });
+  }
+  const proveedores = await prisma.proveedor.findMany({ where: { nombre_razon_social: { startsWith: 'Proveedor cierre ' } }, select: { id_proveedor: true } });
+  const idsProveedores = proveedores.map(fila => fila.id_proveedor);
+  if (idsProveedores.length) {
+    await prisma.obligacion_proveedor_m5.deleteMany({ where: { id_proveedor: { in: idsProveedores } } });
+    await prisma.documento_proveedor_m5.deleteMany({ where: { id_proveedor: { in: idsProveedores } } });
+    await prisma.proveedor.deleteMany({ where: { id_proveedor: { in: idsProveedores } } });
+  }
+  const movimientos = await prisma.movimiento_financiero.findMany({ where: { tipo_movimiento_financiero: 'categoria_cierre' }, select: { id_movimiento_financiero: true } });
+  const idsMovimientos = movimientos.map(fila => fila.id_movimiento_financiero);
+  if (idsMovimientos.length) {
+    await prisma.origen_movimiento_financiero.deleteMany({ where: { id_movimiento_financiero: { in: idsMovimientos } } });
+    await prisma.movimiento_financiero.deleteMany({ where: { id_movimiento_financiero: { in: idsMovimientos } } });
+  }
+}
+
+before(limpiarFixturesCierreHuerfanos);
 
 async function preparar() {
   if (cliente) return;
@@ -51,7 +80,8 @@ after(async () => {
   await prisma.documento_proveedor_m5.deleteMany({ where: { id_documento_m5: { in: ids.documentos } } });
   await prisma.proveedor.deleteMany({ where: { id_proveedor: { in: ids.proveedores } } });
   await prisma.asignacion_pago_cliente.deleteMany({ where: { id_pago_cliente: { in: ids.pagos } } }); await prisma.pago_cliente.deleteMany({ where: { id_pago_cliente: { in: ids.pagos } } });
-  await prisma.nota_venta.deleteMany({ where: { id_nota_venta: { in: ids.notas } } }); await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: ids.fichas } } }); await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: ids.clientes } } }); await prisma.$disconnect();
+  await prisma.nota_venta.deleteMany({ where: { id_nota_venta: { in: ids.notas } } }); await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: ids.fichas } } }); await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: ids.clientes } } });
+  await limpiarFixturesCierreHuerfanos();
 });
 
 test('M7 cierre de hallazgos CU225 CU226 CU227 CU230 CU231 CU232 y navegación', async t => {

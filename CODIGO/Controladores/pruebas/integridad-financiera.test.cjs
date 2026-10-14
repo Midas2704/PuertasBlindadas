@@ -67,7 +67,7 @@ test('cotización USD conserva materiales CLP y convierte solamente el precio co
   const tasa=900;const m2=new M2Controller({obtenerTipoCambio:async()=>tasa});
   const cliente=await prisma.cliente_financiero.findFirstOrThrow({where:{estado_financiero:'activo',nivel_formalizacion:'formal'},include:{ficha_cliente:true}});
   const clp=await prisma.moneda.findUniqueOrThrow({where:{codigo_moneda:'CLP'}});const usd=await prisma.moneda.findUniqueOrThrow({where:{codigo_moneda:'USD'}});
-  const item=await prisma.item_comercial.findFirstOrThrow({where:{estado_item:'activo'}});const precio=await prisma.historial_precio_material.findFirstOrThrow({where:{id_moneda:clp.id_moneda,estado_precio:'vigente'}});
+  let item=await prisma.item_comercial.findFirst({where:{estado_item:'activo',extensiones_comerciales:{none:{}}}});let itemCreado=false;if(!item){item=await prisma.item_comercial.create({data:{nombre_item:`Servicio USD ${randomUUID()}`,tipo_item:'servicio',estado_item:'activo'}});itemCreado=true;}const precio=await prisma.historial_precio_material.findFirstOrThrow({where:{id_moneda:clp.id_moneda,estado_precio:'vigente'}});
   const entrada={id_ficha_cliente:cliente.ficha_cliente.id_ficha_cliente,fecha_vigencia:'2030-01-01',margen_esperado:30,id_moneda:usd.id_moneda,exento_iva:false,productos:[{id_item_comercial:item.id_item_comercial,tipo_producto:item.nombre_item,cantidad:10,medidas:'210x90x5',materiales:[{id_historial_precio_material:precio.id_historial_precio_material,cantidad:1}]}]};
   let cotizacion;let idNota;
   try{
@@ -79,7 +79,7 @@ test('cotización USD conserva materiales CLP y convierte solamente el precio co
     await prisma.cotizacion.update({where:{id_cotizacion:cotizacion.id_cotizacion},data:{estado_cotizacion:'emitida'}});const aprobada=await m2.aprobarCotizacionB2B(cotizacion.id_cotizacion,{folioOrdenCompra:`TEST-${randomUUID()}`,respaldoOrdenCompra:'respaldo'});idNota=aprobada.idNota;
     const nota=await prisma.nota_venta.findUniqueOrThrow({where:{id_nota_venta:idNota}});assert.equal(nota.tipo_cambio_usado.toNumber(),tasa);assert.equal(nota.monto_convertido.toString(),nota.monto_total.mul(tasa).toDecimalPlaces(2).toString());
   }finally{
-    if(idNota)await prisma.nota_venta.delete({where:{id_nota_venta:idNota}});if(cotizacion){await prisma.orden_compra_b2b.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.cotizacion_version.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.detalle_costo_material_cotizacion.deleteMany({where:{detalle_cotizacion:{id_cotizacion:cotizacion.id_cotizacion}}});await prisma.detalle_cotizacion.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.cotizacion.delete({where:{id_cotizacion:cotizacion.id_cotizacion}});}
+    if(idNota)await prisma.nota_venta.delete({where:{id_nota_venta:idNota}});if(cotizacion){await prisma.orden_compra_b2b.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.cotizacion_version.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.detalle_costo_material_cotizacion.deleteMany({where:{detalle_cotizacion:{id_cotizacion:cotizacion.id_cotizacion}}});await prisma.detalle_cotizacion.deleteMany({where:{id_cotizacion:cotizacion.id_cotizacion}});await prisma.cotizacion.delete({where:{id_cotizacion:cotizacion.id_cotizacion}});}if(itemCreado)await prisma.item_comercial.delete({where:{id_item_comercial:item.id_item_comercial}});
   }
 });
 

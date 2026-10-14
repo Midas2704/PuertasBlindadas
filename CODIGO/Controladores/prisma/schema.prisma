@@ -176,22 +176,23 @@ model cotizacion {
   cotizacion_version      cotizacion_version[]
   orden_compra_b2b        orden_compra_b2b?
 
-  id_cotizacion              Int                       @id @default(autoincrement())
+  id_cotizacion              Int                           @id @default(autoincrement())
   id_ficha_cliente           Int
   id_moneda                  Int
-  fecha_emision              DateTime                  @db.Date
-  fecha_vigencia             DateTime?                 @db.Date
-  subtotal_costos_estimados  Decimal                   @default(0) @db.Decimal(14, 2)
-  margen_esperado            Decimal?                  @db.Decimal(5, 2)
-  precio_sugerido            Decimal?                  @db.Decimal(14, 2)
-  monto_total_estimado       Decimal?                  @db.Decimal(14, 2)
-  estado_cotizacion          String                    @default("emitida") @db.VarChar(30)
+  fecha_emision              DateTime                      @db.Date
+  fecha_vigencia             DateTime?                     @db.Date
+  subtotal_costos_estimados  Decimal                       @default(0) @db.Decimal(14, 2)
+  margen_esperado            Decimal?                      @db.Decimal(5, 2)
+  precio_sugerido            Decimal?                      @db.Decimal(14, 2)
+  monto_total_estimado       Decimal?                      @db.Decimal(14, 2)
+  estado_cotizacion          String                        @default("emitida") @db.VarChar(30)
   observacion                String?
-  ficha_cliente              ficha_cliente             @relation(fields: [id_ficha_cliente], references: [id_ficha_cliente], onUpdate: NoAction, map: "fk_cotizacion_ficha_cliente")
-  moneda                     moneda                    @relation(fields: [id_moneda], references: [id_moneda], onUpdate: NoAction, map: "fk_cotizacion_moneda")
+  ficha_cliente              ficha_cliente                 @relation(fields: [id_ficha_cliente], references: [id_ficha_cliente], onUpdate: NoAction, map: "fk_cotizacion_ficha_cliente")
+  moneda                     moneda                        @relation(fields: [id_moneda], references: [id_moneda], onUpdate: NoAction, map: "fk_cotizacion_moneda")
   detalle_cotizacion         detalle_cotizacion[]
   nota_venta                 nota_venta?
   solicitudes_crediticias_m8 solicitud_crediticia_m8[]
+  unidades_fisicas_ot        unidad_fisica_orden_trabajo[]
 
   @@index([id_ficha_cliente], map: "idx_cotizacion_ficha")
   @@schema("finanzas")
@@ -281,6 +282,7 @@ model detalle_cotizacion {
   detalle_costo_material_cotizacion detalle_costo_material_cotizacion[]
   item_comercial                    item_comercial                      @relation(fields: [id_item_comercial], references: [id_item_comercial], onUpdate: NoAction, map: "fk_det_cot_item_ext")
   cotizacion                        cotizacion                          @relation(fields: [id_cotizacion], references: [id_cotizacion], onUpdate: NoAction, map: "fk_detalle_cotizacion_cotizacion")
+  unidades_fisicas_ot               unidad_fisica_orden_trabajo[]
 
   @@index([id_cotizacion], map: "idx_detalle_cotizacion_cotizacion")
   @@index([id_item_comercial], map: "idx_detalle_cotizacion_item")
@@ -433,8 +435,43 @@ model empleado {
   remuneraciones_m6                    remuneracion[]
   anticipos_remuneracion_m6            anticipo_remuneracion[]
   cotizaciones_salud_m6                cotizacion_salud_empleado[]
+  asignaciones_area_trabajo            asignacion_area_empleado[]
+  rectificaciones_ot                   rectificacion_orden_trabajo[]
+  tareas_planificadas_ejecutables      tarea_ejecutable_unidad_ot[]
+  tareas_produccion_responsables       estado_tarea_produccion_ot[]
+  cambios_produccion_involucrados      historial_cambio_produccion_ot[]
+  ejecuciones_productivas_realizadas   atribucion_ejecucion_tarea_ot[]
 
   @@index([id_cargo], map: "idx_empleado_cargo")
+  @@schema("finanzas")
+}
+
+model asignacion_area_empleado {
+  id_asignacion_area_empleado Int          @id @default(autoincrement())
+  id_empleado                 Int
+  id_area_trabajo             BigInt
+  vigencia_desde              DateTime     @default(now()) @db.Timestamptz(6)
+  vigencia_hasta              DateTime?    @db.Timestamptz(6)
+  motivo                      String
+  asignado_por                BigInt
+  finalizado_por              BigInt?
+  empleado                    empleado     @relation(fields: [id_empleado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  area                        area_trabajo @relation(fields: [id_area_trabajo], references: [area_trabajo_id_area], onDelete: Restrict, onUpdate: NoAction)
+  asignador                   usuario      @relation("area_empleado_asignador", fields: [asignado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  finalizador                 usuario?     @relation("area_empleado_finalizador", fields: [finalizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_empleado, vigencia_desde])
+  @@index([id_area_trabajo, vigencia_hasta])
+  @@schema("finanzas")
+}
+
+model configuracion_area_trabajo {
+  id_area_trabajo BigInt       @id
+  descripcion     String?
+  revision        Int          @default(1)
+  actualizado_en  DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
+  area            area_trabajo @relation(fields: [id_area_trabajo], references: [area_trabajo_id_area], onDelete: Restrict, onUpdate: NoAction)
+
   @@schema("finanzas")
 }
 
@@ -2643,9 +2680,9 @@ model notificacion {
 }
 
 model orden_trabajo {
-  orden_trabajo_id_orden                           BigInt                   @id(map: "pk_orden_trabajo") @default(autoincrement())
-  orden_trabajo_fecha_hora                         DateTime?                @db.Timestamptz(6)
-  orden_trabajo_estado                             String?                  @db.VarChar(50)
+  orden_trabajo_id_orden                           BigInt                       @id(map: "pk_orden_trabajo") @default(autoincrement())
+  orden_trabajo_fecha_hora                         DateTime?                    @db.Timestamptz(6)
+  orden_trabajo_estado                             String?                      @db.VarChar(50)
   especificaciones_puerta_id_especificacion_puerta BigInt?
   proyecto_id_proyecto                             BigInt?
   area_trabajo_id_area                             BigInt?
@@ -2653,11 +2690,12 @@ model orden_trabajo {
   tarea_remunerable                                tarea_remunerable[]
   tareas_produccion                                tarea[]
   material_orden_trabajo                           material_orden_trabajo[]
-  area_trabajo                                     area_trabajo?            @relation(fields: [area_trabajo_id_area], references: [area_trabajo_id_area], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_area_trabajo_id_area")
-  especificaciones_puerta                          especificaciones_puerta? @relation(fields: [especificaciones_puerta_id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_especificaciones_puerta_id_especif_6a769728")
-  proyecto                                         proyecto?                @relation(fields: [proyecto_id_proyecto], references: [proyecto_proyecto_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_proyecto_id_proyecto")
-  usuario                                          usuario?                 @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_usuario_id_usuario")
+  area_trabajo                                     area_trabajo?                @relation(fields: [area_trabajo_id_area], references: [area_trabajo_id_area], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_area_trabajo_id_area")
+  especificaciones_puerta                          especificaciones_puerta?     @relation(fields: [especificaciones_puerta_id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_especificaciones_puerta_id_especif_6a769728")
+  proyecto                                         proyecto?                    @relation(fields: [proyecto_id_proyecto], references: [proyecto_proyecto_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_proyecto_id_proyecto")
+  usuario                                          usuario?                     @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_orden_trabajo_usuario_id_usuario")
   reserva_inventario                               reserva_inventario[]
+  unidad_fisica_comercial                          unidad_fisica_orden_trabajo?
 
   @@schema("inventario")
 }
@@ -2778,13 +2816,18 @@ model adicionales_pagados {
 }
 
 model area_trabajo {
-  area_trabajo_id_area       BigInt                       @id(map: "pk_area_trabajo") @default(autoincrement())
-  area_trabajo_clasificacion String?                      @db.VarChar(150)
+  area_trabajo_id_area       BigInt                          @id(map: "pk_area_trabajo") @default(autoincrement())
+  area_trabajo_clasificacion String?                         @db.VarChar(150)
   area_trabajo_activo        Boolean?
-  area_trabajo_nombre_area   String?                      @db.VarChar(150)
+  area_trabajo_nombre_area   String?                         @db.VarChar(150)
   insumo_estandar_proceso    insumo_estandar_proceso[]
   orden_trabajo              orden_trabajo[]
   incidencias                incidencia_retrabajo_tarea[]
+  asignaciones_empleados     asignacion_area_empleado[]
+  configuracion              configuracion_area_trabajo?
+  tareas_fabricacion         catalogo_tarea_fabricacion[]
+  estados_tareas_produccion  estado_tarea_produccion_ot[]
+  etapas_adicionales_ot      etapa_adicional_orden_trabajo[]
 
   @@schema("terreno")
 }
@@ -2941,6 +2984,7 @@ model especificaciones_puerta {
   medidas_puerta                                  medidas_puerta[]
   obra                                            obra[]
   tarea                                           tarea[]
+  rectificaciones_ot                              rectificacion_orden_trabajo[]
 
   @@schema("terreno")
 }
@@ -3238,17 +3282,17 @@ model servicio_tterreno_herramientas_materiales {
 }
 
 model tarea {
-  tarea_tarea_id                      BigInt                   @id(map: "pk_tarea") @default(autoincrement())
+  tarea_tarea_id                      BigInt                      @id(map: "pk_tarea") @default(autoincrement())
   tarea_descripcion                   String?
-  tarea_fecha_de_visita               DateTime?                @db.Date
-  tarea_fecha_de_termino              DateTime?                @db.Date
-  tarea_bloque_horario                DateTime?                @db.Timestamptz(6)
-  tarea_fecha_de_creacion             DateTime?                @db.Date
-  tarea_fecha_de_ultima_actualizacion DateTime?                @db.Date
-  tarea_fecha_de_inicio               DateTime?                @db.Date
-  tarea_fecha_de_inicio_en_terreno    DateTime?                @db.Date
+  tarea_fecha_de_visita               DateTime?                   @db.Date
+  tarea_fecha_de_termino              DateTime?                   @db.Date
+  tarea_bloque_horario                DateTime?                   @db.Timestamptz(6)
+  tarea_fecha_de_creacion             DateTime?                   @db.Date
+  tarea_fecha_de_ultima_actualizacion DateTime?                   @db.Date
+  tarea_fecha_de_inicio               DateTime?                   @db.Date
+  tarea_fecha_de_inicio_en_terreno    DateTime?                   @db.Date
   tarea_titulo                        String?
-  tarea_horario_limite                DateTime?                @db.Timestamptz(6)
+  tarea_horario_limite                DateTime?                   @db.Timestamptz(6)
   tarea_instrucciones_de_oficina      String?
   tarea_urgencia                      String?
   tarea_estado_de_tarea               String?
@@ -3259,12 +3303,13 @@ model tarea {
   formulario_de_cierre                formulario_de_cierre[]
   notificacion_terreno                notificacion_terreno[]
   receptor                            receptor[]
-  especificaciones_puerta             especificaciones_puerta? @relation(fields: [id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_especificacion_puerta")
-  servicio_terreno                    servicio_terreno?        @relation(fields: [id_servicio_terreno], references: [servicio_terreno_servicio_terreno_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_servicio_terreno")
-  usuario                             usuario?                 @relation(fields: [id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_usuario")
-  orden_trabajo                       orden_trabajo?           @relation(fields: [id_orden_trabajo], references: [orden_trabajo_id_orden], onDelete: Restrict, onUpdate: NoAction, map: "fk_tarea_orden_trabajo")
+  especificaciones_puerta             especificaciones_puerta?    @relation(fields: [id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_especificacion_puerta")
+  servicio_terreno                    servicio_terreno?           @relation(fields: [id_servicio_terreno], references: [servicio_terreno_servicio_terreno_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_servicio_terreno")
+  usuario                             usuario?                    @relation(fields: [id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_tarea_id_usuario")
+  orden_trabajo                       orden_trabajo?              @relation(fields: [id_orden_trabajo], references: [orden_trabajo_id_orden], onDelete: Restrict, onUpdate: NoAction, map: "fk_tarea_orden_trabajo")
   tarea_tipo                          tarea_tipo[]
   ejecuciones                         ejecucion_tarea[]
+  origen_planificacion_ot             tarea_ejecutable_unidad_ot?
 
   @@index([id_orden_trabajo], map: "idx_tarea_orden_trabajo")
   @@schema("terreno")
@@ -3301,6 +3346,7 @@ model ejecucion_tarea {
   ejecutor                     usuario                               @relation("ejecucion_tarea_ejecutor", fields: [id_usuario_ejecutor], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
   incidencias                  incidencia_retrabajo_tarea[]
   tratamiento_remuneracional   tratamiento_remuneracional_ejecucion?
+  atribucion_productiva        atribucion_ejecucion_tarea_ot?
 
   @@index([estado_ejecucion, estado_validacion_productiva, fecha_ejecucion], map: "idx_ejecucion_tarea_revision_m6")
   @@index([id_usuario_ejecutor, fecha_ejecucion], map: "idx_ejecucion_tarea_ejecutor")
@@ -3348,45 +3394,69 @@ model categoria_incidencia_terreno {
 }
 
 model usuario {
-  acceso_m4                                        String?                                @unique
-  empleado_m4                                      String?                                @unique @db.VarChar(15)
-  configuracion_particular                         Boolean                                @default(false)
-  administrador_original                           Boolean                                @default(false)
-  version_seguridad                                Int                                    @default(0)
-  empleado_seguridad                               empleado?                              @relation("empleado_m4", fields: [empleado_m4], references: [rut_empleado])
+  acceso_m4                                        String?                                 @unique
+  empleado_m4                                      String?                                 @unique @db.VarChar(15)
+  configuracion_particular                         Boolean                                 @default(false)
+  administrador_original                           Boolean                                 @default(false)
+  version_seguridad                                Int                                     @default(0)
+  empleado_seguridad                               empleado?                               @relation("empleado_m4", fields: [empleado_m4], references: [rut_empleado])
   particulares                                     usuario_permiso_particular[]
-  proyecciones_m7_creadas                          proyeccion_financiera_m7[]             @relation("proyeccion_m7_creador")
-  cuentas_bancarias_m7_creadas                     cuenta_bancaria_m7[]                   @relation("cuenta_bancaria_m7_creador")
-  cuentas_bancarias_m7_actualizadas                cuenta_bancaria_m7[]                   @relation("cuenta_bancaria_m7_actualizador")
-  saldos_bancarios_m7_creados                      saldo_inicial_bancario_m7[]            @relation("saldo_inicial_bancario_m7_creador")
-  saldos_bancarios_m7_actualizados                 saldo_inicial_bancario_m7[]            @relation("saldo_inicial_bancario_m7_actualizador")
-  proyecciones_m7_actualizadas                     proyeccion_financiera_m7[]             @relation("proyeccion_m7_actualizador")
-  familias_comerciales_creadas                     familia_producto_comercial[]           @relation("familia_producto_creador")
-  familias_comerciales_actualizadas                familia_producto_comercial[]           @relation("familia_producto_actualizador")
+  proyecciones_m7_creadas                          proyeccion_financiera_m7[]              @relation("proyeccion_m7_creador")
+  cuentas_bancarias_m7_creadas                     cuenta_bancaria_m7[]                    @relation("cuenta_bancaria_m7_creador")
+  cuentas_bancarias_m7_actualizadas                cuenta_bancaria_m7[]                    @relation("cuenta_bancaria_m7_actualizador")
+  saldos_bancarios_m7_creados                      saldo_inicial_bancario_m7[]             @relation("saldo_inicial_bancario_m7_creador")
+  saldos_bancarios_m7_actualizados                 saldo_inicial_bancario_m7[]             @relation("saldo_inicial_bancario_m7_actualizador")
+  proyecciones_m7_actualizadas                     proyeccion_financiera_m7[]              @relation("proyeccion_m7_actualizador")
+  familias_comerciales_creadas                     familia_producto_comercial[]            @relation("familia_producto_creador")
+  familias_comerciales_actualizadas                familia_producto_comercial[]            @relation("familia_producto_actualizador")
   historial_familias_comerciales                   historial_familia_producto_comercial[]
-  productos_comerciales_creados                    extension_producto_comercial[]         @relation("producto_comercial_creador")
-  productos_comerciales_actualizados               extension_producto_comercial[]         @relation("producto_comercial_actualizador")
+  productos_comerciales_creados                    extension_producto_comercial[]          @relation("producto_comercial_creador")
+  productos_comerciales_actualizados               extension_producto_comercial[]          @relation("producto_comercial_actualizador")
   historial_productos_comerciales                  historial_producto_comercial[]
   versiones_productos_comerciales                  producto_comercial_version[]
-  documentos_logicos_creados                       documento_logico[]                     @relation("documento_logico_creador")
-  versiones_documentales_creadas                   version_documento[]                    @relation("version_documento_creador")
-  intenciones_documentales                         intencion_carga_documental[]           @relation("intencion_documental_solicitante")
-  asociaciones_documentales_producto               producto_comercial_documento[]         @relation("producto_documento_responsable")
+  tareas_fabricacion_creadas                       catalogo_tarea_fabricacion[]            @relation("tarea_fabricacion_creador")
+  tareas_fabricacion_actualizadas                  catalogo_tarea_fabricacion[]            @relation("tarea_fabricacion_actualizador")
+  plantillas_fabricacion_creadas                   plantilla_fabricacion_familia[]         @relation("plantilla_fabricacion_creador")
+  plantillas_fabricacion_actualizadas              plantilla_fabricacion_familia[]         @relation("plantilla_fabricacion_actualizador")
+  versiones_plantilla_fabricacion_publicadas       version_plantilla_fabricacion[]         @relation("version_plantilla_publicador")
+  ajustes_plantilla_producto_creados               ajuste_producto_plantilla_fabricacion[] @relation("ajuste_plantilla_creador")
+  ajustes_plantilla_producto_actualizados          ajuste_producto_plantilla_fabricacion[] @relation("ajuste_plantilla_actualizador")
+  unidades_fisicas_ot_creadas                      unidad_fisica_orden_trabajo[]           @relation("unidad_fisica_ot_creador")
+  historial_unidades_fisicas_ot                    historial_unidad_fisica_ot[]
+  rectificaciones_ot_asignadas                     rectificacion_orden_trabajo[]           @relation("rectificacion_ot_asignador")
+  rectificaciones_ot_actualizadas                  rectificacion_orden_trabajo[]           @relation("rectificacion_ot_actualizador")
+  versiones_rectificacion_enviadas                 version_rectificacion_orden_trabajo[]   @relation("rectificacion_version_enviador")
+  historial_rectificaciones_ot                     historial_rectificacion_orden_trabajo[] @relation("rectificacion_historial_actor")
+  decisiones_rectificacion_ot                      decision_rectificacion_orden_trabajo[]  @relation("decision_rectificacion_actor")
+  liberaciones_ot                                  liberacion_orden_trabajo[]              @relation("liberacion_ot_actor")
+  estados_tareas_produccion_actualizados           estado_tarea_produccion_ot[]            @relation("estado_tarea_produccion_actualizador")
+  cambios_produccion_ot                            historial_cambio_produccion_ot[]        @relation("historial_produccion_actor")
+  etapas_adicionales_ot_creadas                    etapa_adicional_orden_trabajo[]         @relation("etapa_adicional_ot_creador")
+  ejecuciones_productivas_registradas              atribucion_ejecucion_tarea_ot[]         @relation("atribucion_ejecucion_registrador")
+  solicitudes_correccion_tecnica_ot                solicitud_correccion_tecnica_ot[]       @relation("solicitud_correccion_actor")
+  aplicaciones_revision_tecnica_ot                 aplicacion_revision_tecnica_ot[]        @relation("aplicacion_revision_actor")
+  cierres_ot                                       cierre_orden_trabajo_produccion[]       @relation("cierre_ot_actor")
+  documentos_logicos_creados                       documento_logico[]                      @relation("documento_logico_creador")
+  versiones_documentales_creadas                   version_documento[]                     @relation("version_documento_creador")
+  intenciones_documentales                         intencion_carga_documental[]            @relation("intencion_documental_solicitante")
+  asociaciones_documentales_producto               producto_comercial_documento[]          @relation("producto_documento_responsable")
+  asignaciones_area_empleado_creadas               asignacion_area_empleado[]              @relation("area_empleado_asignador")
+  asignaciones_area_empleado_finalizadas           asignacion_area_empleado[]              @relation("area_empleado_finalizador")
   seguridad                                        estado_seguridad_usuario?
   sesiones                                         sesion_usuario[]
   recuperaciones                                   token_recuperacion[]
-  usuario_id_usuario                               BigInt                                 @id(map: "pk_usuario") @default(autoincrement())
-  usuario_fecha_de_ultima_edicion                  DateTime?                              @db.Timestamptz(6)
-  usuario_rut_usuario                              String?                                @db.VarChar(12)
-  usuario_fecha_de_creacion                        DateTime?                              @db.Timestamptz(6)
-  usuario_correo                                   String?                                @db.VarChar(254)
-  usuario_username                                 String?                                @db.VarChar(100)
-  usuario_estado_cuenta                            String?                                @db.VarChar(50)
-  usuario_fecha_ultima_conexion                    DateTime?                              @db.Timestamptz(6)
-  usuario_nombre_completo_primer_nombre_usuario    String?                                @db.VarChar(100)
-  usuario_nombre_completo_segundo_nombre_usuario   String?                                @db.VarChar(100)
-  usuario_nombre_completo_primer_apellido_usuario  String?                                @db.VarChar(100)
-  usuario_nombre_completo_segundo_apellido_usuario String?                                @db.VarChar(100)
+  usuario_id_usuario                               BigInt                                  @id(map: "pk_usuario") @default(autoincrement())
+  usuario_fecha_de_ultima_edicion                  DateTime?                               @db.Timestamptz(6)
+  usuario_rut_usuario                              String?                                 @db.VarChar(12)
+  usuario_fecha_de_creacion                        DateTime?                               @db.Timestamptz(6)
+  usuario_correo                                   String?                                 @db.VarChar(254)
+  usuario_username                                 String?                                 @db.VarChar(100)
+  usuario_estado_cuenta                            String?                                 @db.VarChar(50)
+  usuario_fecha_ultima_conexion                    DateTime?                               @db.Timestamptz(6)
+  usuario_nombre_completo_primer_nombre_usuario    String?                                 @db.VarChar(100)
+  usuario_nombre_completo_segundo_nombre_usuario   String?                                 @db.VarChar(100)
+  usuario_nombre_completo_primer_apellido_usuario  String?                                 @db.VarChar(100)
+  usuario_nombre_completo_segundo_apellido_usuario String?                                 @db.VarChar(100)
   usuario_es_gerencia                              Boolean?
   gerencia                                         String?
   usuario_es_tecnico                               Boolean?
@@ -3398,7 +3468,7 @@ model usuario {
   usuario_es_secretaria                            Boolean?
   secretaria                                       String?
   perfil_id_perfil                                 BigInt?
-  empleado_rut_empleado                            String?                                @db.VarChar(12)
+  empleado_rut_empleado                            String?                                 @db.VarChar(12)
   evento_auditoria                                 evento_auditoria[]
   alerta_faltante_pedido                           alerta_faltante_pedido[]
   movimiento_inventario                            movimiento_inventario[]
@@ -3410,29 +3480,29 @@ model usuario {
   notificacion_terreno                             notificacion_terreno[]
   servicio_terreno                                 servicio_terreno[]
   tarea                                            tarea[]
-  ejecuciones_tarea                                ejecucion_tarea[]                      @relation("ejecucion_tarea_ejecutor")
-  decisiones_retrabajo_resueltas                   decision_remuneracional_retrabajo[]    @relation("decision_retrabajo_resolutor")
-  incidencias_terreno_creadas                      incidencia_retrabajo_tarea[]           @relation("incidencia_creador")
-  incidencias_terreno_revisadas                    incidencia_retrabajo_tarea[]           @relation("incidencia_revisor")
-  remuneraciones_creadas                           remuneracion[]                         @relation("remuneracion_creador")
-  periodos_remuneracion_cerrados                   periodo_remuneracion[]                 @relation("periodo_remuneracion_cerrador")
-  remuneraciones_calculadas                        remuneracion[]                         @relation("remuneracion_calculador")
-  remuneraciones_cerradas                          remuneracion[]                         @relation("remuneracion_cerrador")
-  reaperturas_remuneracion_solicitadas             remuneracion[]                         @relation("remuneracion_reapertura_solicitante")
-  reaperturas_remuneracion_aprobadas               remuneracion[]                         @relation("remuneracion_reapertura_aprobador")
-  componentes_remuneracion_creados                 componente_remuneracion[]              @relation("componente_remuneracion_creador")
-  componentes_remuneracion_revisados               componente_remuneracion[]              @relation("componente_remuneracion_revisor")
-  empleado                                         empleado?                              @relation(fields: [empleado_rut_empleado], references: [rut_empleado], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_empleado_rut_empleado")
-  perfil                                           perfil?                                @relation(fields: [perfil_id_perfil], references: [perfil_id_perfil], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_perfil_id_perfil")
+  ejecuciones_tarea                                ejecucion_tarea[]                       @relation("ejecucion_tarea_ejecutor")
+  decisiones_retrabajo_resueltas                   decision_remuneracional_retrabajo[]     @relation("decision_retrabajo_resolutor")
+  incidencias_terreno_creadas                      incidencia_retrabajo_tarea[]            @relation("incidencia_creador")
+  incidencias_terreno_revisadas                    incidencia_retrabajo_tarea[]            @relation("incidencia_revisor")
+  remuneraciones_creadas                           remuneracion[]                          @relation("remuneracion_creador")
+  periodos_remuneracion_cerrados                   periodo_remuneracion[]                  @relation("periodo_remuneracion_cerrador")
+  remuneraciones_calculadas                        remuneracion[]                          @relation("remuneracion_calculador")
+  remuneraciones_cerradas                          remuneracion[]                          @relation("remuneracion_cerrador")
+  reaperturas_remuneracion_solicitadas             remuneracion[]                          @relation("remuneracion_reapertura_solicitante")
+  reaperturas_remuneracion_aprobadas               remuneracion[]                          @relation("remuneracion_reapertura_aprobador")
+  componentes_remuneracion_creados                 componente_remuneracion[]               @relation("componente_remuneracion_creador")
+  componentes_remuneracion_revisados               componente_remuneracion[]               @relation("componente_remuneracion_revisor")
+  empleado                                         empleado?                               @relation(fields: [empleado_rut_empleado], references: [rut_empleado], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_empleado_rut_empleado")
+  perfil                                           perfil?                                 @relation(fields: [perfil_id_perfil], references: [perfil_id_perfil], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_perfil_id_perfil")
   usuario_contrasena                               usuario_contrasena[]
   historial_proveedor_m5                           historial_proveedor_m5[]
-  orden_compra_servicio_m5                         orden_compra_servicio_m5[]             @relation("ocs_m5_creador")
-  solicitudes_crediticias_m8                       solicitud_crediticia_m8[]              @relation("solicitud_crediticia_m8_solicitante")
-  resoluciones_crediticias_m8                      resolucion_solicitud_crediticia_m8[]   @relation("resolucion_crediticia_m8_responsable")
-  eventos_credito_m8                               evento_credito_m8[]                    @relation("evento_credito_m8_responsable")
+  orden_compra_servicio_m5                         orden_compra_servicio_m5[]              @relation("ocs_m5_creador")
+  solicitudes_crediticias_m8                       solicitud_crediticia_m8[]               @relation("solicitud_crediticia_m8_solicitante")
+  resoluciones_crediticias_m8                      resolucion_solicitud_crediticia_m8[]    @relation("resolucion_crediticia_m8_responsable")
+  eventos_credito_m8                               evento_credito_m8[]                     @relation("evento_credito_m8_responsable")
   historial_orden_compra_servicio_m5               historial_orden_compra_servicio_m5[]
-  ajustes_ocs_solicitados                          ajuste_orden_compra_servicio_m5[]      @relation("ajuste_ocs_solicitante")
-  ajustes_ocs_confirmados                          ajuste_orden_compra_servicio_m5[]      @relation("ajuste_ocs_confirmante")
+  ajustes_ocs_solicitados                          ajuste_orden_compra_servicio_m5[]       @relation("ajuste_ocs_solicitante")
+  ajustes_ocs_confirmados                          ajuste_orden_compra_servicio_m5[]       @relation("ajuste_ocs_confirmante")
 
   @@schema("terreno")
 }
@@ -3640,6 +3710,8 @@ model familia_producto_comercial {
   productos                     extension_producto_comercial[]
   versiones                     producto_comercial_version[]
   historial                     historial_familia_producto_comercial[]
+  plantilla_fabricacion         plantilla_fabricacion_familia?
+  unidades_fisicas_ot           unidad_fisica_orden_trabajo[]
 
   @@index([estado, nombre])
   @@schema("finanzas")
@@ -3662,40 +3734,453 @@ model historial_familia_producto_comercial {
 }
 
 model extension_producto_comercial {
-  id_extension_producto_comercial Int                            @id @default(autoincrement())
-  codigo_comercial                String                         @unique @db.VarChar(60)
-  nombre_comercial                String                         @db.VarChar(200)
+  id_extension_producto_comercial Int                                    @id @default(autoincrement())
+  codigo_comercial                String                                 @unique @db.VarChar(60)
+  nombre_comercial                String                                 @db.VarChar(200)
   id_familia_producto_comercial   Int
-  subfamilia                      String?                        @db.VarChar(120)
-  tipo_producto                   String?                        @db.VarChar(100)
+  subfamilia                      String?                                @db.VarChar(120)
+  tipo_producto                   String?                                @db.VarChar(100)
   descripcion_general             String?
   descripcion_b2b                 String?
   descripcion_b2c                 String?
   observaciones                   String?
   garantia_referencial            String?
   condiciones_particulares        String?
-  caracteristicas_destacadas      Json                           @default("[]")
-  caracteristicas_tecnicas        Json                           @default("{}")
-  estado                          String                         @default("BORRADOR") @db.VarChar(20)
-  id_item_comercial               Int?                           @unique
-  producto_terminado_id_producto  BigInt?                        @unique
+  caracteristicas_destacadas      Json                                   @default("[]")
+  caracteristicas_tecnicas        Json                                   @default("{}")
+  estado                          String                                 @default("BORRADOR") @db.VarChar(20)
+  id_item_comercial               Int?                                   @unique
+  producto_terminado_id_producto  BigInt?                                @unique
   numero_version_vigente          Int?
-  revision                        Int                            @default(1)
-  creado_en                       DateTime                       @default(now()) @db.Timestamp(6)
-  actualizado_en                  DateTime                       @default(now()) @db.Timestamp(6)
+  revision                        Int                                    @default(1)
+  creado_en                       DateTime                               @default(now()) @db.Timestamp(6)
+  actualizado_en                  DateTime                               @default(now()) @db.Timestamp(6)
   creado_por                      BigInt
   actualizado_por                 BigInt
-  familia                         familia_producto_comercial     @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict)
-  item_comercial                  item_comercial?                @relation(fields: [id_item_comercial], references: [id_item_comercial], onDelete: Restrict)
-  producto_terminado              producto_terminado?            @relation(fields: [producto_terminado_id_producto], references: [producto_terminado_id_producto], onDelete: Restrict)
-  creador                         usuario                        @relation("producto_comercial_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict)
-  actualizador                    usuario                        @relation("producto_comercial_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict)
+  familia                         familia_producto_comercial             @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict)
+  item_comercial                  item_comercial?                        @relation(fields: [id_item_comercial], references: [id_item_comercial], onDelete: Restrict)
+  producto_terminado              producto_terminado?                    @relation(fields: [producto_terminado_id_producto], references: [producto_terminado_id_producto], onDelete: Restrict)
+  creador                         usuario                                @relation("producto_comercial_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict)
+  actualizador                    usuario                                @relation("producto_comercial_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict)
   versiones                       producto_comercial_version[]
   historial                       historial_producto_comercial[]
   documentos                      producto_comercial_documento[]
+  ajuste_plantilla_fabricacion    ajuste_producto_plantilla_fabricacion?
+  unidades_fisicas_ot             unidad_fisica_orden_trabajo[]
 
   @@index([id_familia_producto_comercial, estado])
   @@index([nombre_comercial])
+  @@schema("finanzas")
+}
+
+/// Catálogo operacional independiente del catálogo remuneracional de M6.
+model catalogo_tarea_fabricacion {
+  id_tarea_fabricacion Int          @id @default(autoincrement())
+  nombre               String       @db.VarChar(150)
+  descripcion          String?
+  id_area_trabajo      BigInt
+  tiempo_estimado_min  Int?
+  estado               String       @default("ACTIVA") @db.VarChar(20)
+  revision             Int          @default(1)
+  creado_en            DateTime     @default(now()) @db.Timestamptz(6)
+  actualizado_en       DateTime     @default(now()) @db.Timestamptz(6)
+  creado_por           BigInt
+  actualizado_por      BigInt
+  area                 area_trabajo @relation(fields: [id_area_trabajo], references: [area_trabajo_id_area], onDelete: Restrict, onUpdate: NoAction)
+  creador              usuario      @relation("tarea_fabricacion_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  actualizador         usuario      @relation("tarea_fabricacion_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_area_trabajo, estado])
+  @@index([estado, nombre])
+  @@schema("finanzas")
+}
+
+/// Raíz estable de la plantilla familiar. El borrador es editable y nunca reemplaza versiones publicadas.
+model plantilla_fabricacion_familia {
+  id_plantilla_fabricacion      Int                                     @id @default(autoincrement())
+  id_familia_producto_comercial Int                                     @unique
+  borrador                      Json                                    @default("{\"etapas\":[]}")
+  numero_version_vigente        Int?
+  revision                      Int                                     @default(1)
+  creado_en                     DateTime                                @default(now()) @db.Timestamptz(6)
+  actualizado_en                DateTime                                @default(now()) @db.Timestamptz(6)
+  creado_por                    BigInt
+  actualizado_por               BigInt
+  familia                       familia_producto_comercial              @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict, onUpdate: NoAction)
+  creador                       usuario                                 @relation("plantilla_fabricacion_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  actualizador                  usuario                                 @relation("plantilla_fabricacion_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  versiones                     version_plantilla_fabricacion[]
+  ajustes_producto              ajuste_producto_plantilla_fabricacion[]
+
+  @@schema("finanzas")
+}
+
+/// Copia inmutable y autosuficiente del contenido publicado.
+model version_plantilla_fabricacion {
+  id_version_plantilla     Int                                     @id @default(autoincrement())
+  id_plantilla_fabricacion Int
+  numero_version           Int
+  contenido                Json
+  motivo                   String
+  publicado_por            BigInt
+  publicado_en             DateTime                                @default(now()) @db.Timestamptz(6)
+  plantilla                plantilla_fabricacion_familia           @relation(fields: [id_plantilla_fabricacion], references: [id_plantilla_fabricacion], onDelete: Restrict, onUpdate: NoAction)
+  publicador               usuario                                 @relation("version_plantilla_publicador", fields: [publicado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  ajustes_producto         ajuste_producto_plantilla_fabricacion[]
+  unidades_fisicas_ot      unidad_fisica_orden_trabajo[]
+
+  @@unique([id_plantilla_fabricacion, numero_version])
+  @@index([id_plantilla_fabricacion, publicado_en])
+  @@schema("finanzas")
+}
+
+/// Punto de extensión para futuros ajustes puntuales por producto, sin copiar la plantilla completa.
+model ajuste_producto_plantilla_fabricacion {
+  id_ajuste_plantilla             Int                           @id @default(autoincrement())
+  id_extension_producto_comercial Int                           @unique
+  id_plantilla_fabricacion        Int
+  id_version_plantilla_base       Int
+  cambios                         Json                          @default("{\"operaciones\":[]}")
+  estado                          String                        @default("BORRADOR") @db.VarChar(20)
+  revision                        Int                           @default(1)
+  creado_en                       DateTime                      @default(now()) @db.Timestamptz(6)
+  actualizado_en                  DateTime                      @default(now()) @db.Timestamptz(6)
+  creado_por                      BigInt
+  actualizado_por                 BigInt
+  producto                        extension_producto_comercial  @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction)
+  plantilla                       plantilla_fabricacion_familia @relation(fields: [id_plantilla_fabricacion], references: [id_plantilla_fabricacion], onDelete: Restrict, onUpdate: NoAction)
+  version_base                    version_plantilla_fabricacion @relation(fields: [id_version_plantilla_base], references: [id_version_plantilla], onDelete: Restrict, onUpdate: NoAction)
+  creador                         usuario                       @relation("ajuste_plantilla_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  actualizador                    usuario                       @relation("ajuste_plantilla_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_plantilla_fabricacion, estado])
+  @@schema("finanzas")
+}
+
+/// Identidad comercial de una puerta física y complemento de su OT real en Inventario.
+model unidad_fisica_orden_trabajo {
+  id_unidad_fisica_ot             BigInt                            @id @default(autoincrement())
+  id_cotizacion                   Int
+  id_detalle_cotizacion           Int
+  id_extension_producto_comercial Int
+  id_familia_producto_comercial   Int
+  numero_unidad                   Int
+  id_version_plantilla            Int
+  id_orden_trabajo                BigInt                            @unique
+  estado                          String                            @default("PENDIENTE_RECTIFICACION") @db.VarChar(40)
+  planificacion_inicial           Json
+  planificacion_actual            Json
+  revision                        Int                               @default(1)
+  creado_por                      BigInt
+  creado_en                       DateTime                          @default(now()) @db.Timestamptz(6)
+  actualizado_en                  DateTime                          @default(now()) @db.Timestamptz(6)
+  cotizacion                      cotizacion                        @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict, onUpdate: NoAction)
+  detalle                         detalle_cotizacion                @relation(fields: [id_detalle_cotizacion], references: [id_detalle_cotizacion], onDelete: Restrict, onUpdate: NoAction)
+  producto                        extension_producto_comercial      @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction)
+  familia                         familia_producto_comercial        @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict, onUpdate: NoAction)
+  version_plantilla               version_plantilla_fabricacion     @relation(fields: [id_version_plantilla], references: [id_version_plantilla], onDelete: Restrict, onUpdate: NoAction)
+  orden_trabajo                   orden_trabajo                     @relation(fields: [id_orden_trabajo], references: [orden_trabajo_id_orden], onDelete: Restrict, onUpdate: NoAction)
+  creador                         usuario                           @relation("unidad_fisica_ot_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  historial                       historial_unidad_fisica_ot[]
+  rectificacion                   rectificacion_orden_trabajo?
+  liberacion                      liberacion_orden_trabajo?
+  tareas_ejecutables              tarea_ejecutable_unidad_ot[]
+  historial_produccion            historial_cambio_produccion_ot[]
+  etapas_adicionales              etapa_adicional_orden_trabajo[]
+  solicitudes_correccion_tecnica  solicitud_correccion_tecnica_ot[]
+  aplicaciones_revision_tecnica   aplicacion_revision_tecnica_ot[]
+  cierre_produccion               cierre_orden_trabajo_produccion?
+
+  @@unique([id_detalle_cotizacion, numero_unidad])
+  @@index([id_cotizacion, estado])
+  @@index([id_extension_producto_comercial, id_familia_producto_comercial])
+  @@schema("finanzas")
+}
+
+/// Registro funcional inmutable para futuras rectificaciones de la planificación.
+model historial_unidad_fisica_ot {
+  id_historial_unidad_fisica_ot BigInt                      @id @default(autoincrement())
+  id_unidad_fisica_ot           BigInt
+  evento                        String                      @db.VarChar(50)
+  valor_anterior                Json?
+  valor_nuevo                   Json?
+  motivo                        String?
+  usuario_id_usuario            BigInt
+  fecha_evento                  DateTime                    @default(now()) @db.Timestamptz(6)
+  unidad                        unidad_fisica_orden_trabajo @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  usuario                       usuario                     @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_unidad_fisica_ot, fecha_evento])
+  @@schema("finanzas")
+}
+
+/// Borrador vigente del proceso técnico asociado a una única puerta física y a su OT real.
+model rectificacion_orden_trabajo {
+  id_rectificacion_ot          BigInt                                  @id @default(autoincrement())
+  id_unidad_fisica_ot          BigInt                                  @unique
+  id_empleado_rectificador     Int?
+  id_especificacion_puerta     BigInt?                                 @unique
+  estado                       String                                  @default("PENDIENTE_RECTIFICACION") @db.VarChar(50)
+  fecha_asignacion             DateTime?                               @db.Timestamptz(6)
+  fecha_inicio                 DateTime?                               @db.Timestamptz(6)
+  fecha_rectificacion          DateTime?                               @db.Date
+  observaciones_tecnicas       String?
+  caracteristicas_particulares Json                                    @default("{}")
+  necesita_tareas_adicionales  Boolean                                 @default(false)
+  comentarios_fabricacion      String?
+  comentarios_instalacion      String?
+  revision                     Int                                     @default(1)
+  asignado_por                 BigInt?
+  actualizado_por              BigInt
+  creado_en                    DateTime                                @default(now()) @db.Timestamptz(6)
+  actualizado_en               DateTime                                @default(now()) @db.Timestamptz(6)
+  unidad                       unidad_fisica_orden_trabajo             @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  empleado_rectificador        empleado?                               @relation(fields: [id_empleado_rectificador], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  especificacion               especificaciones_puerta?                @relation(fields: [id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: Restrict, onUpdate: NoAction)
+  asignador                    usuario?                                @relation("rectificacion_ot_asignador", fields: [asignado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  actualizador                 usuario                                 @relation("rectificacion_ot_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  versiones                    version_rectificacion_orden_trabajo[]
+  historial                    historial_rectificacion_orden_trabajo[]
+  decisiones                   decision_rectificacion_orden_trabajo[]
+
+  @@index([estado, id_empleado_rectificador])
+  @@schema("finanzas")
+}
+
+/// Copia inmutable de la rectificación y planificación enviadas a aprobación técnica.
+model version_rectificacion_orden_trabajo {
+  id_version_rectificacion BigInt                                @id @default(autoincrement())
+  id_rectificacion_ot      BigInt
+  numero_version           Int
+  datos_rectificacion      Json
+  planificacion            Json
+  enviado_por              BigInt
+  enviado_en               DateTime                              @default(now()) @db.Timestamptz(6)
+  rectificacion            rectificacion_orden_trabajo           @relation(fields: [id_rectificacion_ot], references: [id_rectificacion_ot], onDelete: Restrict, onUpdate: NoAction)
+  enviador                 usuario                               @relation("rectificacion_version_enviador", fields: [enviado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  decision                 decision_rectificacion_orden_trabajo?
+  liberacion               liberacion_orden_trabajo?
+  tareas_ejecutables       tarea_ejecutable_unidad_ot[]
+  cambios_produccion       historial_cambio_produccion_ot[]
+  solicitudes_correccion   solicitud_correccion_tecnica_ot[]     @relation("solicitud_correccion_version_base")
+  aplicaciones_produccion  aplicacion_revision_tecnica_ot[]
+  cierres_produccion       cierre_orden_trabajo_produccion[]
+
+  @@unique([id_rectificacion_ot, numero_version])
+  @@schema("finanzas")
+}
+
+/// Bitácora técnica inmutable de asignaciones, medidas, planificación y transiciones.
+model historial_rectificacion_orden_trabajo {
+  id_historial_rectificacion BigInt                      @id @default(autoincrement())
+  id_rectificacion_ot        BigInt
+  entidad                    String                      @db.VarChar(50)
+  tipo_modificacion          String                      @db.VarChar(60)
+  valor_anterior             Json?
+  valor_nuevo                Json?
+  motivo                     String?
+  usuario_id_usuario         BigInt
+  fecha_evento               DateTime                    @default(now()) @db.Timestamptz(6)
+  rectificacion              rectificacion_orden_trabajo @relation(fields: [id_rectificacion_ot], references: [id_rectificacion_ot], onDelete: Restrict, onUpdate: NoAction)
+  usuario                    usuario                     @relation("rectificacion_historial_actor", fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_rectificacion_ot, fecha_evento])
+  @@schema("finanzas")
+}
+
+/// Decisión inmutable del revisor sobre una versión enviada.
+model decision_rectificacion_orden_trabajo {
+  id_decision_rectificacion BigInt                              @id @default(autoincrement())
+  id_rectificacion_ot       BigInt
+  id_version_rectificacion  BigInt                              @unique
+  decision                  String                              @db.VarChar(20)
+  motivo                    String?
+  observaciones_tecnicas    String?
+  decidido_por              BigInt
+  decidido_en               DateTime                            @default(now()) @db.Timestamptz(6)
+  rectificacion             rectificacion_orden_trabajo         @relation(fields: [id_rectificacion_ot], references: [id_rectificacion_ot], onDelete: Restrict, onUpdate: NoAction)
+  version                   version_rectificacion_orden_trabajo @relation(fields: [id_version_rectificacion], references: [id_version_rectificacion], onDelete: Restrict, onUpdate: NoAction)
+  actor                     usuario                             @relation("decision_rectificacion_actor", fields: [decidido_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_rectificacion_ot, decidido_en])
+  @@schema("finanzas")
+}
+
+/// Liberación técnica inmutable, independiente de la aprobación.
+model liberacion_orden_trabajo {
+  id_liberacion_ot         BigInt                              @id @default(autoincrement())
+  id_unidad_fisica_ot      BigInt                              @unique
+  id_version_rectificacion BigInt                              @unique
+  liberado_por             BigInt
+  liberado_en              DateTime                            @default(now()) @db.Timestamptz(6)
+  unidad                   unidad_fisica_orden_trabajo         @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  version                  version_rectificacion_orden_trabajo @relation(fields: [id_version_rectificacion], references: [id_version_rectificacion], onDelete: Restrict, onUpdate: NoAction)
+  actor                    usuario                             @relation("liberacion_ot_actor", fields: [liberado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@schema("finanzas")
+}
+
+/// Vincula la tarea planificada de una versión aprobada con su tarea ejecutable real.
+model tarea_ejecutable_unidad_ot {
+  id_tarea_ejecutable_ot     BigInt                              @id @default(autoincrement())
+  id_unidad_fisica_ot        BigInt
+  id_version_rectificacion   BigInt
+  id_tarea                   BigInt                              @unique
+  id_etapa_planificacion     String                              @db.VarChar(120)
+  id_tarea_planificacion     String                              @db.VarChar(120)
+  orden_etapa                Int
+  orden_tarea                Int
+  id_empleado_planificado    Int?
+  origen                     String                              @default("PLAN_APROBADO") @db.VarChar(30)
+  id_etapa_adicional_ot      BigInt?
+  clave_idempotencia         String?                             @unique @db.VarChar(120)
+  id_tarea_origen_correctiva BigInt?
+  creado_en                  DateTime                            @default(now()) @db.Timestamptz(6)
+  unidad                     unidad_fisica_orden_trabajo         @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  version                    version_rectificacion_orden_trabajo @relation(fields: [id_version_rectificacion], references: [id_version_rectificacion], onDelete: Restrict, onUpdate: NoAction)
+  tarea                      tarea                               @relation(fields: [id_tarea], references: [tarea_tarea_id], onDelete: Restrict, onUpdate: NoAction)
+  empleado_planificado       empleado?                           @relation(fields: [id_empleado_planificado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  etapa_adicional            etapa_adicional_orden_trabajo?      @relation(fields: [id_etapa_adicional_ot], references: [id_etapa_adicional_ot], onDelete: Restrict, onUpdate: NoAction)
+  tarea_origen_correctiva    tarea_ejecutable_unidad_ot?         @relation("tarea_correctiva_origen", fields: [id_tarea_origen_correctiva], references: [id_tarea_ejecutable_ot], onDelete: Restrict, onUpdate: NoAction)
+  tareas_correctivas         tarea_ejecutable_unidad_ot[]        @relation("tarea_correctiva_origen")
+  estado_operacional         estado_tarea_produccion_ot?
+  historial_produccion       historial_cambio_produccion_ot[]
+
+  @@unique([id_unidad_fisica_ot, id_version_rectificacion, id_tarea_planificacion])
+  @@index([id_unidad_fisica_ot, orden_etapa, orden_tarea])
+  @@schema("finanzas")
+}
+
+/// Estado operativo mutable y con revisión optimista; nunca reemplaza el origen aprobado.
+model estado_tarea_produccion_ot {
+  id_estado_tarea_produccion BigInt                     @id @default(autoincrement())
+  id_tarea_ejecutable_ot     BigInt                     @unique
+  id_area_trabajo            BigInt
+  id_empleado_responsable    Int?
+  estado                     String                     @default("PENDIENTE") @db.VarChar(30)
+  prioridad                  String?                    @db.VarChar(30)
+  tiempo_estimado_min        Int?
+  instrucciones              String?
+  observaciones              String?
+  fecha_planificada          DateTime?                  @db.Date
+  revision                   Int                        @default(1)
+  actualizado_por            BigInt
+  actualizado_en             DateTime                   @default(now()) @db.Timestamptz(6)
+  tarea_ejecutable           tarea_ejecutable_unidad_ot @relation(fields: [id_tarea_ejecutable_ot], references: [id_tarea_ejecutable_ot], onDelete: Restrict, onUpdate: NoAction)
+  area                       area_trabajo               @relation(fields: [id_area_trabajo], references: [area_trabajo_id_area], onDelete: Restrict, onUpdate: NoAction)
+  empleado_responsable       empleado?                  @relation(fields: [id_empleado_responsable], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  actualizador               usuario                    @relation("estado_tarea_produccion_actualizador", fields: [actualizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_area_trabajo, estado])
+  @@index([id_empleado_responsable, estado])
+  @@schema("finanzas")
+}
+
+/// Línea de tiempo productiva inmutable para cambios posteriores a la liberación.
+model historial_cambio_produccion_ot {
+  id_historial_cambio      BigInt                               @id @default(autoincrement())
+  id_unidad_fisica_ot      BigInt
+  id_tarea_ejecutable_ot   BigInt?
+  id_version_rectificacion BigInt?
+  entidad                  String                               @db.VarChar(40)
+  evento                   String                               @db.VarChar(60)
+  valor_anterior           Json?
+  valor_nuevo              Json?
+  motivo                   String
+  id_empleado_involucrado  Int?
+  usuario_id_usuario       BigInt
+  fecha_evento             DateTime                             @default(now()) @db.Timestamptz(6)
+  unidad                   unidad_fisica_orden_trabajo          @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  tarea_ejecutable         tarea_ejecutable_unidad_ot?          @relation(fields: [id_tarea_ejecutable_ot], references: [id_tarea_ejecutable_ot], onDelete: Restrict, onUpdate: NoAction)
+  version                  version_rectificacion_orden_trabajo? @relation(fields: [id_version_rectificacion], references: [id_version_rectificacion], onDelete: Restrict, onUpdate: NoAction)
+  empleado_involucrado     empleado?                            @relation(fields: [id_empleado_involucrado], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  actor                    usuario                              @relation("historial_produccion_actor", fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_unidad_fisica_ot, fecha_evento])
+  @@index([id_tarea_ejecutable_ot, fecha_evento])
+  @@schema("finanzas")
+}
+
+model etapa_adicional_orden_trabajo {
+  id_etapa_adicional_ot BigInt                       @id @default(autoincrement())
+  id_unidad_fisica_ot   BigInt
+  id_area_trabajo       BigInt
+  nombre                String                       @db.VarChar(150)
+  descripcion           String?
+  orden                 Int
+  motivo                String
+  clave_idempotencia    String                       @unique @db.VarChar(120)
+  creado_por            BigInt
+  creado_en             DateTime                     @default(now()) @db.Timestamptz(6)
+  unidad                unidad_fisica_orden_trabajo  @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  area                  area_trabajo                 @relation(fields: [id_area_trabajo], references: [area_trabajo_id_area], onDelete: Restrict, onUpdate: NoAction)
+  creador               usuario                      @relation("etapa_adicional_ot_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  tareas                tarea_ejecutable_unidad_ot[]
+
+  @@unique([id_unidad_fisica_ot, orden])
+  @@schema("finanzas")
+}
+
+/// Separa al empleado que hizo el trabajo del usuario que registró la ejecución.
+model atribucion_ejecucion_tarea_ot {
+  id_atribucion_ejecucion BigInt          @id @default(autoincrement())
+  id_ejecucion_tarea      BigInt          @unique
+  id_empleado_ejecutor    Int
+  registrado_por          BigInt
+  registrado_en           DateTime        @default(now()) @db.Timestamptz(6)
+  ejecucion               ejecucion_tarea @relation(fields: [id_ejecucion_tarea], references: [id_ejecucion_tarea], onDelete: Restrict, onUpdate: NoAction)
+  empleado_ejecutor       empleado        @relation(fields: [id_empleado_ejecutor], references: [id_empleado], onDelete: Restrict, onUpdate: NoAction)
+  registrador             usuario         @relation("atribucion_ejecucion_registrador", fields: [registrado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_empleado_ejecutor, registrado_en])
+  @@schema("finanzas")
+}
+
+model solicitud_correccion_tecnica_ot {
+  id_solicitud_correccion BigInt                              @id @default(autoincrement())
+  id_unidad_fisica_ot     BigInt
+  id_version_base         BigInt
+  medida_original         Json
+  medida_propuesta        Json
+  motivo                  String
+  solicitado_por          BigInt
+  solicitado_en           DateTime                            @default(now()) @db.Timestamptz(6)
+  unidad                  unidad_fisica_orden_trabajo         @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  version_base            version_rectificacion_orden_trabajo @relation("solicitud_correccion_version_base", fields: [id_version_base], references: [id_version_rectificacion], onDelete: Restrict, onUpdate: NoAction)
+  solicitante             usuario                             @relation("solicitud_correccion_actor", fields: [solicitado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([id_unidad_fisica_ot, solicitado_en])
+  @@schema("finanzas")
+}
+
+model aplicacion_revision_tecnica_ot {
+  id_aplicacion_revision   BigInt                              @id @default(autoincrement())
+  id_unidad_fisica_ot      BigInt
+  id_version_rectificacion BigInt                              @unique
+  aplicado_por             BigInt
+  aplicado_en              DateTime                            @default(now()) @db.Timestamptz(6)
+  unidad                   unidad_fisica_orden_trabajo         @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  version                  version_rectificacion_orden_trabajo @relation(fields: [id_version_rectificacion], references: [id_version_rectificacion], onDelete: Restrict, onUpdate: NoAction)
+  actor                    usuario                             @relation("aplicacion_revision_actor", fields: [aplicado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([id_unidad_fisica_ot, id_version_rectificacion])
+  @@schema("finanzas")
+}
+
+model cierre_orden_trabajo_produccion {
+  id_cierre_ot             BigInt                              @id @default(autoincrement())
+  id_unidad_fisica_ot      BigInt                              @unique
+  id_version_rectificacion BigInt
+  resumen_tareas           Json
+  observaciones            String?
+  estado_anterior          String                              @db.VarChar(40)
+  estado_final             String                              @db.VarChar(40)
+  finalizado_por           BigInt
+  finalizado_en            DateTime                            @default(now()) @db.Timestamptz(6)
+  unidad                   unidad_fisica_orden_trabajo         @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction)
+  version                  version_rectificacion_orden_trabajo @relation(fields: [id_version_rectificacion], references: [id_version_rectificacion], onDelete: Restrict, onUpdate: NoAction)
+  actor                    usuario                             @relation("cierre_ot_actor", fields: [finalizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+
   @@schema("finanzas")
 }
 
@@ -3828,25 +4313,25 @@ model variante_documento {
 }
 
 model intencion_carga_documental {
-  id_intencion_carga      BigInt    @id @default(autoincrement())
-  id_publico              String    @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id_intencion_carga      BigInt            @id @default(autoincrement())
+  id_publico              String            @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   id_documento_logico     BigInt?
   usuario_solicitante     BigInt
-  clasificacion           String    @db.VarChar(60)
-  nombre_declarado        String    @db.VarChar(255)
-  mime_declarado          String    @db.VarChar(150)
+  clasificacion           String            @db.VarChar(60)
+  nombre_declarado        String            @db.VarChar(255)
+  mime_declarado          String            @db.VarChar(150)
   tamano_esperado         BigInt
-  clave_temporal          String    @unique @db.VarChar(700)
-  clave_idempotencia      String    @db.VarChar(160)
-  estado                  String    @default("PENDIENTE") @db.VarChar(20)
-  creado_en               DateTime  @default(now()) @db.Timestamptz(6)
-  expira_en               DateTime  @db.Timestamptz(6)
-  confirmado_en           DateTime? @db.Timestamptz(6)
-  identificador_multipart String?   @db.VarChar(500)
-  cantidad_reintentos     Int       @default(0)
-  codigo_error            String?   @db.VarChar(100)
-  revision                Int       @default(1)
-  solicitante             usuario   @relation("intencion_documental_solicitante", fields: [usuario_solicitante], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_intencion_documental_solicitante")
+  clave_temporal          String            @unique @db.VarChar(700)
+  clave_idempotencia      String            @db.VarChar(160)
+  estado                  String            @default("PENDIENTE") @db.VarChar(20)
+  creado_en               DateTime          @default(now()) @db.Timestamptz(6)
+  expira_en               DateTime          @db.Timestamptz(6)
+  confirmado_en           DateTime?         @db.Timestamptz(6)
+  identificador_multipart String?           @db.VarChar(500)
+  cantidad_reintentos     Int               @default(0)
+  codigo_error            String?           @db.VarChar(100)
+  revision                Int               @default(1)
+  solicitante             usuario           @relation("intencion_documental_solicitante", fields: [usuario_solicitante], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_intencion_documental_solicitante")
   documento               documento_logico? @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_intencion_documental_documento")
 
   @@unique([usuario_solicitante, clave_idempotencia], map: "uq_intencion_documental_idempotencia")

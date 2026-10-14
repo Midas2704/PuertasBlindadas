@@ -11,7 +11,7 @@ import { AuditoriaDocumental, AuditoriaDocumentalLegacyPrisma, CondicionDocument
 import { calcularPrevisionLegal } from '../m6/calculoPrevisional';
 
 interface ActorDocumentoM6 { id: bigint; alcanceEmpleadoId?: number | null }
-interface ActorTerrenoM6 { id: bigint; administrador: boolean }
+interface ActorTerrenoM6 { id: bigint; administrador: boolean; permisos?: string[]; alcanceEmpleadoId?: number | null }
 interface ActorIncidenciaM6 { id: bigint; permisos: string[] }
 
 type Direccion = 'asc' | 'desc';
@@ -24,6 +24,7 @@ const nombreCompleto = (empleado: {
 
 const nombreUsuario = (usuario: { usuario_username: string | null; usuario_nombre_completo_primer_nombre_usuario: string | null; usuario_nombre_completo_primer_apellido_usuario: string | null } | null) => usuario ? [usuario.usuario_nombre_completo_primer_nombre_usuario, usuario.usuario_nombre_completo_primer_apellido_usuario].filter(Boolean).join(' ') || usuario.usuario_username || 'Usuario' : null;
 const conAuditoriaIncidencia = <T extends object>(salida: T, anterior: Record<string, unknown> | undefined, nuevo: Record<string, unknown>) => { Object.defineProperty(salida, '__auditoriaM9', { enumerable: false, value: { anterior, nuevo } }); return salida; };
+const conAuditoriaRectificacion = <T extends object>(salida: T, anterior: Record<string, unknown> | undefined, nuevo: Record<string, unknown>) => { Object.defineProperty(salida, '__auditoriaM9', { enumerable: false, value: { anterior, nuevo } }); return salida; };
 const leerEvidenciaIncidencia = (valor: unknown) => {
   if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return null;
   const evidencia = valor as Record<string, unknown>;
@@ -141,6 +142,7 @@ export class M6Controller {
     const estado = texto(consulta.estado || 'todos', 30).toLowerCase();
     const ordenar = texto(consulta.ordenar || 'nombre', 20);
     const direccion = texto(consulta.direccion || 'asc', 4).toLowerCase() as Direccion;
+    const area = texto(consulta.area, 30);
     if (!['todos', 'activo', 'inactivo', 'desvinculado', 'suspendido'].includes(estado)) {
       throw new ErrorAplicacion(400, 'Estado de empleado inválido');
     }
@@ -166,6 +168,9 @@ export class M6Controller {
           { apellido_paterno: { contains: busqueda, mode: 'insensitive' } },
           { apellido_materno: { contains: busqueda, mode: 'insensitive' } },
         ] : undefined,
+        asignaciones_area_trabajo: area === 'sin-asignar'
+          ? { none: { vigencia_hasta: null } }
+          : area ? { some: { id_area_trabajo: BigInt(enteroPositivo(area, 'Área')), vigencia_hasta: null } } : undefined,
       },
       select: {
         id_empleado: true,
@@ -175,6 +180,7 @@ export class M6Controller {
         apellido_materno: true,
         estado_laboral: true,
         cargo: { select: { nombre_cargo: true } },
+        asignaciones_area_trabajo: { where: { vigencia_hasta: null }, take: 1, select: { area: { select: { area_trabajo_id_area: true, area_trabajo_nombre_area: true } } } },
       },
       orderBy,
     });
@@ -185,6 +191,7 @@ export class M6Controller {
       nombreCompleto: nombreCompleto(empleado),
       estado: empleado.estado_laboral,
       cargoActual: empleado.cargo?.nombre_cargo || null,
+      areaActual: empleado.asignaciones_area_trabajo[0] ? { id: empleado.asignaciones_area_trabajo[0].area.area_trabajo_id_area.toString(), nombre: empleado.asignaciones_area_trabajo[0].area.area_trabajo_nombre_area } : null,
     }));
   }
 
@@ -200,6 +207,7 @@ export class M6Controller {
         fecha_nacimiento: true,
         estado_laboral: true,
         cargo: { select: { nombre_cargo: true } },
+        asignaciones_area_trabajo: { where: { vigencia_hasta: null }, take: 1, select: { area: { select: { area_trabajo_id_area: true, area_trabajo_nombre_area: true } } } },
       },
     });
     if (!empleado) throw new ErrorAplicacion(404, 'Empleado no encontrado');
@@ -213,7 +221,117 @@ export class M6Controller {
       fechaNacimiento: empleado.fecha_nacimiento,
       estado: empleado.estado_laboral,
       cargoActual: empleado.cargo?.nombre_cargo || null,
+      areaActual: empleado.asignaciones_area_trabajo[0] ? { id: empleado.asignaciones_area_trabajo[0].area.area_trabajo_id_area.toString(), nombre: empleado.asignaciones_area_trabajo[0].area.area_trabajo_nombre_area } : null,
     };
+  }
+
+  async listarAreasTrabajo(incluirInactivas = true) {
+    const areas = await prisma.area_trabajo.findMany({
+      where: incluirInactivas ? undefined : { area_trabajo_activo: true },
+      include: { configuracion: true, asignaciones_empleados: { where: { vigencia_hasta: null, empleado: { estado_laboral: 'activo' } }, select: { id_asignacion_area_empleado: true } } },
+      orderBy: { area_trabajo_nombre_area: 'asc' },
+    });
+    return areas.map(area => ({
+      id: area.area_trabajo_id_area.toString(),
+      nombre: area.area_trabajo_nombre_area || `Área ${area.area_trabajo_id_area.toString()}`,
+      descripcion: area.configuracion?.descripcion || '',
+      activa: area.area_trabajo_activo === true,
+      empleadosActivos: area.asignaciones_empleados.length,
+    }));
+  }
+
+  async crearAreaTrabajo(entrada: Record<string, unknown>) {
+    const nombre = texto(entrada.nombre, 150);
+    const descripcion = texto(entrada.descripcion, 150) || null;
+    if (!nombre) throw new ErrorAplicacion(400, 'El nombre del área es obligatorio');
+    try {
+      await prisma.$transaction(async tx => {
+        const existentes = await tx.area_trabajo.findMany({ select: { area_trabajo_nombre_area: true } });
+        if (existentes.some(area => area.area_trabajo_nombre_area?.trim().toLocaleLowerCase('es') === nombre.toLocaleLowerCase('es'))) throw new ErrorAplicacion(409, 'Ya existe un área con ese nombre');
+        const area = await tx.area_trabajo.create({ data: { area_trabajo_nombre_area: nombre, area_trabajo_activo: true } });
+        await tx.configuracion_area_trabajo.create({ data: { id_area_trabajo: area.area_trabajo_id_area, descripcion } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      if (esConflictoSerializable(error) || error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe un área con ese nombre');
+      throw error;
+    }
+    return this.listarAreasTrabajo();
+  }
+
+  async actualizarAreaTrabajo(id: bigint, entrada: Record<string, unknown>) {
+    const actual = await prisma.area_trabajo.findUnique({ where: { area_trabajo_id_area: id } });
+    if (!actual) throw new ErrorAplicacion(404, 'Área de trabajo no encontrada');
+    const nombre = entrada.nombre === undefined ? actual.area_trabajo_nombre_area : texto(entrada.nombre, 150);
+    const descripcion = entrada.descripcion === undefined ? undefined : texto(entrada.descripcion, 150) || null;
+    if (!nombre) throw new ErrorAplicacion(400, 'El nombre del área es obligatorio');
+    try {
+      await prisma.$transaction(async tx => {
+        const existentes = await tx.area_trabajo.findMany({ where: { area_trabajo_id_area: { not: id } }, select: { area_trabajo_nombre_area: true } });
+        if (existentes.some(area => area.area_trabajo_nombre_area?.trim().toLocaleLowerCase('es') === nombre.toLocaleLowerCase('es'))) throw new ErrorAplicacion(409, 'Ya existe un área con ese nombre');
+        await tx.area_trabajo.update({ where: { area_trabajo_id_area: id }, data: { area_trabajo_nombre_area: nombre } });
+        if (descripcion !== undefined) await tx.configuracion_area_trabajo.upsert({ where: { id_area_trabajo: id }, create: { id_area_trabajo: id, descripcion }, update: { descripcion, revision: { increment: 1 } } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      if (esConflictoSerializable(error) || error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe un área con ese nombre');
+      throw error;
+    }
+    return this.listarAreasTrabajo();
+  }
+
+  async cambiarEstadoAreaTrabajo(id: bigint, activa: boolean) {
+    const resultado = await prisma.area_trabajo.updateMany({ where: { area_trabajo_id_area: id }, data: { area_trabajo_activo: activa } });
+    if (!resultado.count) throw new ErrorAplicacion(404, 'Área de trabajo no encontrada');
+    return this.listarAreasTrabajo();
+  }
+
+  async listarEmpleadosArea(idArea: bigint) {
+    const area = await prisma.area_trabajo.findUnique({ where: { area_trabajo_id_area: idArea }, select: { area_trabajo_id_area: true } });
+    if (!area) throw new ErrorAplicacion(404, 'Área de trabajo no encontrada');
+    const asignaciones = await prisma.asignacion_area_empleado.findMany({
+      where: { id_area_trabajo: idArea, vigencia_hasta: null, empleado: { estado_laboral: 'activo' } },
+      include: { empleado: { include: { cargo: true } } },
+      orderBy: [{ empleado: { apellido_paterno: 'asc' } }, { empleado: { nombres: 'asc' } }],
+    });
+    return asignaciones.map(item => ({ id: item.empleado.id_empleado, rut: item.empleado.rut_empleado, nombreCompleto: nombreCompleto(item.empleado), cargoActual: item.empleado.cargo?.nombre_cargo || null }));
+  }
+
+  async obtenerHistorialAreaEmpleado(idEmpleado: number) {
+    const existe = await prisma.empleado.findUnique({ where: { id_empleado: idEmpleado }, select: { id_empleado: true } });
+    if (!existe) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+    const filas = await prisma.asignacion_area_empleado.findMany({
+      where: { id_empleado: idEmpleado }, include: { area: true, asignador: true, finalizador: true }, orderBy: { vigencia_desde: 'desc' },
+    });
+    return filas.map(item => ({ id: item.id_asignacion_area_empleado, area: { id: item.id_area_trabajo.toString(), nombre: item.area.area_trabajo_nombre_area }, vigenciaDesde: item.vigencia_desde, vigenciaHasta: item.vigencia_hasta, motivo: item.motivo, asignadoPor: nombreUsuario(item.asignador), finalizadoPor: nombreUsuario(item.finalizador) }));
+  }
+
+  async asignarAreaEmpleado(idEmpleado: number, entrada: Record<string, unknown>, actorId: bigint) {
+    const idArea = BigInt(enteroPositivo(entrada.idArea, 'Área'));
+    const motivo = texto(entrada.motivo, 1000);
+    if (!motivo) throw new ErrorAplicacion(400, 'El motivo del cambio es obligatorio');
+    try {
+      await prisma.$transaction(async tx => {
+        const [empleado, area, vigente] = await Promise.all([
+          tx.empleado.findUnique({ where: { id_empleado: idEmpleado }, select: { estado_laboral: true } }),
+          tx.area_trabajo.findUnique({ where: { area_trabajo_id_area: idArea }, select: { area_trabajo_activo: true } }),
+          tx.asignacion_area_empleado.findFirst({ where: { id_empleado: idEmpleado, vigencia_hasta: null } }),
+        ]);
+        if (!empleado) throw new ErrorAplicacion(404, 'Empleado no encontrado');
+        if (empleado.estado_laboral !== 'activo') throw new ErrorAplicacion(409, 'Sólo los empleados activos pueden asignarse a producción');
+        if (!area) throw new ErrorAplicacion(404, 'Área de trabajo no encontrada');
+        if (area.area_trabajo_activo !== true) throw new ErrorAplicacion(409, 'No se permiten nuevas asignaciones a un área inactiva');
+        if (vigente?.id_area_trabajo === idArea) throw new ErrorAplicacion(409, 'El empleado ya pertenece a esta área');
+        const ahora = new Date();
+        if (vigente) await tx.asignacion_area_empleado.update({ where: { id_asignacion_area_empleado: vigente.id_asignacion_area_empleado }, data: { vigencia_hasta: ahora, finalizado_por: actorId } });
+        await tx.asignacion_area_empleado.create({ data: { id_empleado: idEmpleado, id_area_trabajo: idArea, vigencia_desde: ahora, motivo, asignado_por: actorId } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      if (esConflictoSerializable(error) || error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'La asignación cambió concurrentemente; vuelve a intentarlo');
+      throw error;
+    }
+    return this.obtenerHistorialAreaEmpleado(idEmpleado);
   }
 
   async obtenerHistorialRemuneracional(idEmpleado: number, consulta: Record<string, unknown> = {}) {
@@ -2347,12 +2465,13 @@ export class M6Controller {
       include: {
         servicio_terreno: { include: this.incluirVisitaTerreno },
         especificaciones_puerta: true,
+        origen_planificacion_ot: { include: { estado_operacional: true } },
       },
       orderBy: [{ tarea_fecha_de_visita: 'asc' }, { tarea_tarea_id: 'asc' }],
     });
     return tareas.map((tarea) => ({
       id: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, descripcion: tarea.tarea_descripcion,
-      estado: tarea.tarea_estado_de_tarea, urgencia: tarea.tarea_urgencia,
+      estado: tarea.origen_planificacion_ot?.estado_operacional?.estado || tarea.tarea_estado_de_tarea, urgencia: tarea.tarea_urgencia,
       fecha: tarea.tarea_fecha_de_visita || tarea.tarea_fecha_de_inicio, bloqueHorario: tarea.tarea_bloque_horario,
       visita: tarea.servicio_terreno ? this.presentarVisitaTerreno(tarea.servicio_terreno) : null,
       especificacion: tarea.especificaciones_puerta ? { id: tarea.especificaciones_puerta.especificacion_puerta_especificacion_puerta_id.toString(), modelo: tarea.especificaciones_puerta.especificacion_puerta_modelo_puerta, zona: tarea.especificaciones_puerta.especificacion_puerta_zona } : null,
@@ -2384,6 +2503,14 @@ export class M6Controller {
     alojamientoHorizontalAlto: 'medidas_puerta_medidas_alojamiento_horizontal_alto', alojamientoHorizontalAncho: 'medidas_puerta_medidas_alojamiento_horizontal_ancho', alojamientoHorizontalEspesor: 'medidas_puerta_medidas_alojamiento_horizontal_espesor',
     alojamientoVertical: 'medidas_puerta_alojamiento_vertical', medidaMarcoAncho: 'medidas_puerta_medidas_de_marco_ancho', medidaMarcoAlto: 'medidas_puerta_medidas_de_marco_alto', medidaMarcoEspesor: 'medidas_puerta_medidas_de_marco_espesor',
   };
+
+  private medidasObligatoriasOt(contenido: Prisma.JsonValue): string[] {
+    if (!contenido || typeof contenido !== 'object' || Array.isArray(contenido)) return ['marcoAncho','marcoAlto'];
+    const configuradas = (contenido as Prisma.JsonObject).medidasObligatorias;
+    if (!Array.isArray(configuradas)) return ['marcoAncho','marcoAlto'];
+    const validas = configuradas.filter((campo): campo is string => typeof campo === 'string' && Object.prototype.hasOwnProperty.call(this.camposMedidasLevantamiento,campo));
+    return validas.length ? [...new Set(validas)] : ['marcoAncho','marcoAlto'];
+  }
 
   private async resolverLevantamientoTerreno(id: number, actor: ActorTerrenoM6, cliente: Prisma.TransactionClient | typeof prisma = prisma) {
     const tarea = await cliente.tarea.findUnique({ where: { tarea_tarea_id: BigInt(id) }, include: this.incluirLevantamientoTerreno });
@@ -2572,6 +2699,196 @@ export class M6Controller {
     }
   }
 
+  private readonly estadosEditablesRectificacion = ['PENDIENTE_RECTIFICACION','RECTIFICACION_ASIGNADA','RECTIFICACION_EN_PROCESO','RECTIFICACION_DEVUELTA'];
+
+  private estadoVisibleOrden(unidad: { estado:string; orden_trabajo:{ orden_trabajo_estado:string|null }; rectificacion:{ estado:string }|null }) {
+    if (unidad.orden_trabajo.orden_trabajo_estado === 'completada') return 'FINALIZADA';
+    if (unidad.estado === 'LIBERADA') return 'LIBERADA';
+    if (unidad.orden_trabajo.orden_trabajo_estado === 'en_progreso') return 'EN_PRODUCCION';
+    return unidad.rectificacion?.estado || unidad.estado;
+  }
+
+  private puedeGestionarTodasLasRectificaciones(actor:ActorTerrenoM6) {
+    return actor.administrador || Boolean(actor.permisos?.some(permiso=>permiso==='CU205'||permiso==='CU207'||permiso==='CU209'));
+  }
+
+  private verificarAccesoRectificacion(unidad:{rectificacion:{id_empleado_rectificador:number|null}|null},actor:ActorTerrenoM6) {
+    if (this.puedeGestionarTodasLasRectificaciones(actor)) return;
+    if (!actor.alcanceEmpleadoId || unidad.rectificacion?.id_empleado_rectificador !== actor.alcanceEmpleadoId) throw new ErrorAplicacion(403,'La Orden de Trabajo no está asignada al empleado autenticado');
+  }
+
+  private readonly incluirGestionOrdenTrabajo = {
+    orden_trabajo:true,
+    liberacion:{include:{actor:true}},
+    cierre_produccion:{include:{actor:true}},
+    etapas_adicionales:{include:{area:true},orderBy:{orden:'asc' as const}},
+    historial_produccion:{include:{actor:true,empleado_involucrado:true},orderBy:{fecha_evento:'desc' as const}},
+    tareas_ejecutables:{include:{estado_operacional:{include:{area:true,empleado_responsable:true}},tarea:{include:{ejecuciones:true}},etapa_adicional:true},orderBy:[{orden_etapa:'asc' as const},{orden_tarea:'asc' as const}]},
+    producto:{include:{familia:true}},
+    version_plantilla:true,
+    detalle:true,
+    cotizacion:{include:{ficha_cliente:{include:{cliente_financiero:true}},nota_venta:true}},
+    rectificacion:{include:{
+      empleado_rectificador:true,
+      actualizador:true,
+      especificacion:{include:{medidas_puerta:{orderBy:{medidas_puerta_medidas_id:'asc' as const}}}},
+      versiones:{include:{enviador:true,decision:{include:{actor:true}}},orderBy:{numero_version:'desc' as const}},
+      historial:{include:{usuario:true},orderBy:{fecha_evento:'desc' as const}},
+    }},
+  };
+
+  private presentarGestionOrdenTrabajo(unidad:any) {
+    const rectificacion=unidad.rectificacion;
+    const especificacion=rectificacion?.especificacion;
+    const medida=especificacion ? (especificacion.medidas_puerta.find((item:any)=>item.medidas_puerta_medidas_id===especificacion.id_medidas)||null) : null;
+    const medidaSalida=medida?Object.fromEntries(Object.entries(this.camposMedidasLevantamiento).map(([campo,columna])=>[campo,medida[columna]?.toString()||null])):null;
+    const planificacion=unidad.planificacion_actual as {etapas?:Array<any>};
+    const empleadosProduccion=[...new Set([...(planificacion?.etapas||[]).flatMap(etapa=>(etapa.tareas||[]).map((tarea:any)=>tarea.idEmpleado).filter(Boolean)),...(unidad.tareas_ejecutables||[]).map((item:any)=>item.estado_operacional?.id_empleado_responsable).filter(Boolean)])];
+    const tareasProduccion=(unidad.tareas_ejecutables||[]).map((item:any)=>({id:item.id_tarea.toString(),idEjecutable:item.id_tarea_ejecutable_ot.toString(),titulo:item.tarea.tarea_titulo,origen:item.origen,ordenEtapa:item.orden_etapa,ordenTarea:item.orden_tarea,idEtapaPlanificacion:item.id_etapa_planificacion,idEtapaAdicional:item.id_etapa_adicional_ot?.toString()||null,etapaAdicional:item.etapa_adicional?.nombre||null,estado:item.estado_operacional?.estado||'PENDIENTE',revision:item.estado_operacional?.revision||0,prioridad:item.estado_operacional?.prioridad||null,tiempoEstimadoMin:item.estado_operacional?.tiempo_estimado_min||null,instrucciones:item.estado_operacional?.instrucciones||item.tarea.tarea_instrucciones_de_oficina,observaciones:item.estado_operacional?.observaciones||null,fechaPlanificada:item.estado_operacional?.fecha_planificada||null,area:item.estado_operacional?{id:item.estado_operacional.id_area_trabajo.toString(),nombre:item.estado_operacional.area.area_trabajo_nombre_area||`Área ${item.estado_operacional.id_area_trabajo}`}:null,responsable:item.estado_operacional?.empleado_responsable?{id:item.estado_operacional.empleado_responsable.id_empleado,nombre:nombreCompleto(item.estado_operacional.empleado_responsable)}:null,ejecuciones:item.tarea.ejecuciones.map((e:any)=>({id:e.id_ejecucion_tarea.toString(),estado:e.estado_ejecucion,validacion:e.estado_validacion_productiva,fecha:e.fecha_ejecucion}))}));
+    const grupos=new Map<number,{orden:number,nombre:string,total:number,cerradas:number}>();for(const tarea of tareasProduccion){const nombreEtapa=tarea.etapaAdicional||(planificacion?.etapas||[]).find((etapa:any)=>etapa.orden===tarea.ordenEtapa||etapa.id===tarea.idEtapaPlanificacion)?.nombre||`Etapa ${tarea.ordenEtapa}`;const actual=grupos.get(tarea.ordenEtapa)||{orden:tarea.ordenEtapa,nombre:nombreEtapa,total:0,cerradas:0};actual.total++;if(tarea.estado==='CERRADA')actual.cerradas++;grupos.set(tarea.ordenEtapa,actual);}const avance={total:tareasProduccion.length,pendientes:tareasProduccion.filter((t:any)=>t.estado==='PENDIENTE'||t.estado==='ASIGNADA').length,enEjecucion:tareasProduccion.filter((t:any)=>t.estado==='EN_EJECUCION'||t.estado==='PENDIENTE_VALIDACION').length,cerradas:tareasProduccion.filter((t:any)=>t.estado==='CERRADA').length,etapas:[...grupos.values()]};
+    return {
+      idOrdenTrabajo:unidad.id_orden_trabajo.toString(),idUnidad:unidad.id_unidad_fisica_ot.toString(),estado:this.estadoVisibleOrden(unidad),fechaCreacion:unidad.creado_en,
+      cotizacion:{id:unidad.id_cotizacion,cliente:unidad.cotizacion.ficha_cliente.cliente_financiero.nombre_razon_social_referencia,fecha:unidad.cotizacion.fecha_emision,notaVenta:unidad.cotizacion.nota_venta?.numero_nota_venta||null},
+      producto:{id:unidad.id_extension_producto_comercial,nombre:unidad.producto.nombre_comercial,codigo:unidad.producto.codigo_comercial,familia:unidad.producto.familia.nombre,numeroUnidad:unidad.numero_unidad,caracteristicas:unidad.producto.caracteristicas_tecnicas},
+      referencia:{alto:unidad.detalle.medida_alto_referencial?.toString()||null,ancho:unidad.detalle.medida_ancho_referencial?.toString()||null,espesor:unidad.detalle.medida_espesor_referencial?.toString()||null,descripcion:unidad.detalle.descripcion_item_cotizado},
+      rectificacion:rectificacion?{id:rectificacion.id_rectificacion_ot.toString(),revision:rectificacion.revision,estado:rectificacion.estado,fechaAsignacion:rectificacion.fecha_asignacion,fechaInicio:rectificacion.fecha_inicio,fechaRectificacion:rectificacion.fecha_rectificacion,observacionesTecnicas:rectificacion.observaciones_tecnicas,caracteristicasParticulares:rectificacion.caracteristicas_particulares,necesitaTareasAdicionales:rectificacion.necesita_tareas_adicionales,comentariosFabricacion:rectificacion.comentarios_fabricacion,comentariosInstalacion:rectificacion.comentarios_instalacion,registradoPor:nombreUsuario(rectificacion.actualizador),empleado:rectificacion.empleado_rectificador?{id:rectificacion.empleado_rectificador.id_empleado,nombre:nombreCompleto(rectificacion.empleado_rectificador),rut:rectificacion.empleado_rectificador.rut_empleado}:null}:null,
+      especificacion:especificacion?{id:especificacion.especificacion_puerta_especificacion_puerta_id.toString(),modeloPuerta:especificacion.especificacion_puerta_modelo_puerta,zona:especificacion.especificacion_puerta_zona,sentidoApertura:especificacion.especificacion_puerta_sentido_apertura,materialidadVano:especificacion.especificacion_puerta_materialidad_vano,materialidadMarcoActual:especificacion.especificacion_puerta_materialidad_marco_actual,solucionMarco:especificacion.especificacion_puerta_solucion_marco,hojaPasiva:especificacion.especificacion_puerta_hoja_pasiva,hojaActiva:especificacion.especificacion_puerta_hoja_activa,disenoPuerta:especificacion.especificacion_puerta_diseno_puerta,observacionesDiseno:especificacion.especificacion_puerta_observaciones_de_diseno,cubrejuntas:especificacion.especificacion_puerta_cubrejuntas,bisagras:especificacion.especificacion_puerta_bisagras,observaciones:especificacion.especificacion_puerta_observaciones}:null,
+      medidas:medidaSalida,medidasObligatorias:this.medidasObligatoriasOt(unidad.version_plantilla.contenido),planificacion:unidad.planificacion_actual,planificacionInicial:unidad.planificacion_inicial,empleadosProduccion,
+      versiones:(rectificacion?.versiones||[]).map((version:any)=>({id:version.id_version_rectificacion.toString(),numero:version.numero_version,fecha:version.enviado_en,enviadoPor:nombreUsuario(version.enviador),datos:version.datos_rectificacion,planificacion:version.planificacion,decision:version.decision?{tipo:version.decision.decision,motivo:version.decision.motivo,observacionesTecnicas:version.decision.observaciones_tecnicas,fecha:version.decision.decidido_en,usuario:nombreUsuario(version.decision.actor)}:null})),
+      liberacion:unidad.liberacion?{id:unidad.liberacion.id_liberacion_ot.toString(),fecha:unidad.liberacion.liberado_en,usuario:nombreUsuario(unidad.liberacion.actor)}:null,
+      historial:(rectificacion?.historial||[]).map((evento:any)=>({id:evento.id_historial_rectificacion.toString(),entidad:evento.entidad,tipo:evento.tipo_modificacion,anterior:evento.valor_anterior,nuevo:evento.valor_nuevo,motivo:evento.motivo,fecha:evento.fecha_evento,usuario:nombreUsuario(evento.usuario)})),
+      tareasProduccion,avance,etapasAdicionales:(unidad.etapas_adicionales||[]).map((etapa:any)=>({id:etapa.id_etapa_adicional_ot.toString(),nombre:etapa.nombre,descripcion:etapa.descripcion,orden:etapa.orden,idArea:etapa.id_area_trabajo.toString(),area:etapa.area.area_trabajo_nombre_area,motivo:etapa.motivo})),
+      historialProduccion:(unidad.historial_produccion||[]).map((evento:any)=>({id:evento.id_historial_cambio.toString(),entidad:evento.entidad,tipo:evento.evento,anterior:evento.valor_anterior,nuevo:evento.valor_nuevo,motivo:evento.motivo,fecha:evento.fecha_evento,usuario:nombreUsuario(evento.actor),empleado:evento.empleado_involucrado?nombreCompleto(evento.empleado_involucrado):null})),
+      cierre:unidad.cierre_produccion?{fecha:unidad.cierre_produccion.finalizado_en,usuario:nombreUsuario(unidad.cierre_produccion.actor),observaciones:unidad.cierre_produccion.observaciones,resumen:unidad.cierre_produccion.resumen_tareas}:null,
+    };
+  }
+
+  async listarOrdenesTrabajoRectificacion(consulta:Record<string,unknown>,actor:ActorTerrenoM6) {
+    const where:Prisma.unidad_fisica_orden_trabajoWhereInput={};
+    const busqueda=texto(consulta.busqueda,80);if(busqueda){if(!/^\d+$/.test(busqueda))return[];where.id_orden_trabajo=BigInt(busqueda);}
+    if(consulta.cotizacion!==undefined&&consulta.cotizacion!=='')where.id_cotizacion=identificador(consulta.cotizacion);
+    const cliente=texto(consulta.cliente,150);if(cliente)where.cotizacion={ficha_cliente:{cliente_financiero:{nombre_razon_social_referencia:{contains:cliente,mode:'insensitive'}}}};
+    const producto=texto(consulta.producto,150);if(producto)where.producto={OR:[{nombre_comercial:{contains:producto,mode:'insensitive'}},{codigo_comercial:{contains:producto,mode:'insensitive'}}]};
+    const idEmpleadoFiltro=consulta.empleado!==undefined&&consulta.empleado!==''?identificador(consulta.empleado):null;
+    if(!this.puedeGestionarTodasLasRectificaciones(actor)){if(!actor.alcanceEmpleadoId)return[];where.rectificacion={is:{id_empleado_rectificador:actor.alcanceEmpleadoId}};}
+    else if(idEmpleadoFiltro)where.rectificacion={is:{id_empleado_rectificador:idEmpleadoFiltro}};
+    const desde=consulta.desde?fechaEntrada(consulta.desde,'Fecha desde'):null;const hasta=consulta.hasta?fechaEntrada(consulta.hasta,'Fecha hasta'):null;
+    if(desde||hasta)where.creado_en={...(desde?{gte:desde}:{}),...(hasta?{lt:new Date(hasta.getTime()+86400000)}:{})};
+    const unidades=await prisma.unidad_fisica_orden_trabajo.findMany({where,include:this.incluirGestionOrdenTrabajo,orderBy:{creado_en:'desc'}});
+    const estado=texto(consulta.estado,60).toUpperCase();const presentadas=unidades.map(unidad=>this.presentarGestionOrdenTrabajo(unidad)).filter(item=>!estado||item.estado===estado);const idsEmpleados=[...new Set(presentadas.flatMap(item=>item.empleadosProduccion))];const responsables=idsEmpleados.length?await prisma.empleado.findMany({where:{id_empleado:{in:idsEmpleados}},select:{id_empleado:true,nombres:true,apellido_paterno:true,apellido_materno:true}}):[];const nombres=new Map(responsables.map(empleado=>[empleado.id_empleado,nombreCompleto(empleado)]));return presentadas.map(item=>({...item,responsablesProduccion:item.empleadosProduccion.map(id=>({id,nombre:nombres.get(id)||`Empleado ${id}`}))}));
+  }
+
+  async obtenerOrdenTrabajoRectificacion(idOrden:number,actor:ActorTerrenoM6) {
+    const unidad=await prisma.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:this.incluirGestionOrdenTrabajo});
+    if(!unidad)throw new ErrorAplicacion(404,'Orden de Trabajo del flujo comercial no encontrada');this.verificarAccesoRectificacion(unidad,actor);
+    const areas=await prisma.area_trabajo.findMany({where:{area_trabajo_activo:true},select:{area_trabajo_id_area:true,area_trabajo_nombre_area:true},orderBy:{area_trabajo_nombre_area:'asc'}});
+    const areaTerreno=await prisma.area_trabajo.findFirst({where:{area_trabajo_activo:true,OR:[{area_trabajo_nombre_area:{contains:'terreno',mode:'insensitive'}},{area_trabajo_clasificacion:{contains:'terreno',mode:'insensitive'}}]}});
+    const empleados=areaTerreno?await prisma.asignacion_area_empleado.findMany({where:{id_area_trabajo:areaTerreno.area_trabajo_id_area,vigencia_hasta:null,empleado:{estado_laboral:'activo'}},include:{empleado:true},orderBy:{empleado:{apellido_paterno:'asc'}}}):[];
+    const asignacionesActivas=await prisma.asignacion_area_empleado.findMany({where:{vigencia_hasta:null,empleado:{estado_laboral:'activo'},area:{area_trabajo_activo:true}},include:{empleado:true},orderBy:{empleado:{apellido_paterno:'asc'}}});
+    const tareas=await prisma.catalogo_tarea_fabricacion.findMany({where:{estado:'ACTIVA'},orderBy:{nombre:'asc'}});
+    return {...this.presentarGestionOrdenTrabajo(unidad),catalogos:{areas:areas.map(area=>({id:area.area_trabajo_id_area.toString(),nombre:area.area_trabajo_nombre_area||`Área ${area.area_trabajo_id_area}`})),empleadosTerreno:empleados.map(item=>({id:item.empleado.id_empleado,nombre:nombreCompleto(item.empleado),rut:item.empleado.rut_empleado})),empleadosPorArea:asignacionesActivas.map(item=>({id:item.empleado.id_empleado,nombre:nombreCompleto(item.empleado),idArea:item.id_area_trabajo.toString()})),tareas:tareas.map(tarea=>({id:tarea.id_tarea_fabricacion,nombre:tarea.nombre,descripcion:tarea.descripcion,idArea:tarea.id_area_trabajo.toString(),tiempoEstimadoMin:tarea.tiempo_estimado_min}))}};
+  }
+
+  async asignarRectificadorOrdenTrabajo(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6) {
+    const idEmpleado=identificador(entrada.idEmpleado);const motivo=texto(entrada.motivo,1000);if(!motivo)throw new ErrorAplicacion(400,'El motivo de la asignación es obligatorio');
+    return prisma.$transaction(async tx=>{
+      const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{rectificacion:true}});if(!unidad)throw new ErrorAplicacion(404,'Orden de Trabajo no encontrada');
+      const asignacion=await tx.asignacion_area_empleado.findFirst({where:{id_empleado:idEmpleado,vigencia_hasta:null,empleado:{estado_laboral:'activo'},area:{area_trabajo_activo:true,OR:[{area_trabajo_nombre_area:{contains:'terreno',mode:'insensitive'}},{area_trabajo_clasificacion:{contains:'terreno',mode:'insensitive'}}]}},include:{empleado:true}});if(!asignacion)throw new ErrorAplicacion(409,'El empleado debe estar activo y asignado actualmente al área Terreno');
+      if(unidad.rectificacion&&!this.estadosEditablesRectificacion.includes(unidad.rectificacion.estado))throw new ErrorAplicacion(409,'La rectificación enviada ya no admite reasignación silenciosa');
+      const anterior=unidad.rectificacion?.id_empleado_rectificador||null;
+      const rectificacion=unidad.rectificacion?await tx.rectificacion_orden_trabajo.update({where:{id_rectificacion_ot:unidad.rectificacion.id_rectificacion_ot},data:{id_empleado_rectificador:idEmpleado,estado:'RECTIFICACION_ASIGNADA',fecha_asignacion:new Date(),asignado_por:actor.id,actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}}):await tx.rectificacion_orden_trabajo.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_empleado_rectificador:idEmpleado,estado:'RECTIFICACION_ASIGNADA',fecha_asignacion:new Date(),asignado_por:actor.id,actualizado_por:actor.id}});
+      await tx.unidad_fisica_orden_trabajo.update({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},data:{estado:'RECTIFICACION_ASIGNADA',actualizado_en:new Date()}});await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'RECTIFICACION_ASIGNADA'}});
+      await tx.historial_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rectificacion.id_rectificacion_ot,entidad:'ASIGNACION',tipo_modificacion:'RECTIFICADOR_ASIGNADO',valor_anterior:{idEmpleado:anterior},valor_nuevo:{idEmpleado,nombre:nombreCompleto(asignacion.empleado)},motivo,usuario_id_usuario:actor.id}});
+      return conAuditoriaRectificacion({mensaje:'Rectificador asignado',idOrdenTrabajo:idOrden,idEmpleado,estado:'RECTIFICACION_ASIGNADA'}, {idEmpleado:anterior},{idEmpleado,estado:'RECTIFICACION_ASIGNADA'});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  private async normalizarPlanificacionRectificacion(tx:Prisma.TransactionClient,valor:unknown) {
+    if(!valor||typeof valor!=='object'||Array.isArray(valor))throw new ErrorAplicacion(400,'Planificación inválida');const plan=valor as Record<string,any>;
+    if(!Array.isArray(plan.etapas)||!plan.etapas.length)throw new ErrorAplicacion(400,'La planificación requiere al menos una etapa');
+    const paresEmpleado:Array<{idEmpleado:number;idArea:bigint}>=[];const referenciasTarea:Array<{id:number;idArea:bigint}>=[];
+    const etapas=plan.etapas.map((etapa:any,indice:number)=>{if(!etapa||typeof etapa!=='object'||!Array.isArray(etapa.tareas))throw new ErrorAplicacion(400,`Etapa ${indice+1} inválida`);const idArea=BigInt(identificador(etapa.idAreaTrabajo));const nombre=texto(etapa.nombre,150);if(!nombre)throw new ErrorAplicacion(400,`Etapa ${indice+1} sin nombre`);const tareas=etapa.tareas.map((tarea:any,posicion:number)=>{const nombreTarea=texto(tarea?.nombre,150);if(!nombreTarea)throw new ErrorAplicacion(400,`Tarea ${posicion+1} sin nombre`);const idEmpleado=tarea.idEmpleado?identificador(tarea.idEmpleado):null;const idCatalogo=tarea.idTareaFabricacion?identificador(tarea.idTareaFabricacion):null;if(idEmpleado)paresEmpleado.push({idEmpleado,idArea});if(idCatalogo)referenciasTarea.push({id:idCatalogo,idArea});return{id:typeof tarea.id==='string'?tarea.id:`tarea-${indice+1}-${posicion+1}`,orden:posicion+1,idTareaFabricacion:idCatalogo,nombre:nombreTarea,descripcion:texto(tarea.descripcion,4000)||null,instrucciones:texto(tarea.instrucciones,4000)||null,tiempoEstimadoMin:tarea.tiempoEstimadoMin===null||tarea.tiempoEstimadoMin===undefined||tarea.tiempoEstimadoMin===''?null:enteroPositivo(tarea.tiempoEstimadoMin,'Tiempo estimado'),idEmpleado};});return{id:typeof etapa.id==='string'?etapa.id:`etapa-${indice+1}`,orden:indice+1,idAreaTrabajo:idArea.toString(),nombre,descripcion:texto(etapa.descripcion,4000)||null,instrucciones:texto(etapa.instrucciones,4000)||null,tiempoEstimadoMin:etapa.tiempoEstimadoMin===null||etapa.tiempoEstimadoMin===undefined||etapa.tiempoEstimadoMin===''?null:enteroPositivo(etapa.tiempoEstimadoMin,'Tiempo estimado'),tareas};});
+    if(!etapas.some(etapa=>etapa.tareas.length))throw new ErrorAplicacion(400,'La planificación no puede quedar sin tareas');const idsArea=[...new Set(etapas.map(etapa=>etapa.idAreaTrabajo))];const areas=await tx.area_trabajo.count({where:{area_trabajo_id_area:{in:idsArea.map(BigInt)},area_trabajo_activo:true}});if(areas!==idsArea.length)throw new ErrorAplicacion(409,'La planificación contiene áreas inactivas');
+    for(const referencia of referenciasTarea){if(!await tx.catalogo_tarea_fabricacion.findFirst({where:{id_tarea_fabricacion:referencia.id,estado:'ACTIVA',id_area_trabajo:referencia.idArea}}))throw new ErrorAplicacion(409,'Una tarea de catálogo ya no está activa en el área seleccionada');}
+    for(const par of paresEmpleado){if(!await tx.asignacion_area_empleado.findFirst({where:{id_empleado:par.idEmpleado,id_area_trabajo:par.idArea,vigencia_hasta:null,empleado:{estado_laboral:'activo'}}}))throw new ErrorAplicacion(409,'Un responsable de tarea ya no está activo en el área seleccionada');}
+    return {etapas};
+  }
+
+  async guardarRectificacionOrdenTrabajo(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6) {
+    const motivo=texto(entrada.motivo,1000);if(!motivo)throw new ErrorAplicacion(400,'El motivo del registro o modificación es obligatorio');
+    return prisma.$transaction(async tx=>{
+      const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{rectificacion:{include:{especificacion:{include:{medidas_puerta:true}}}}}});if(!unidad||!unidad.rectificacion)throw new ErrorAplicacion(409,'Asigna un empleado rectificador antes de registrar información');this.verificarAccesoRectificacion(unidad,actor);const rect=unidad.rectificacion;if(!this.estadosEditablesRectificacion.includes(rect.estado))throw new ErrorAplicacion(409,'La versión enviada no puede editarse silenciosamente');const revision=identificador(entrada.revision);if(revision!==rect.revision)throw new ErrorAplicacion(409,'La rectificación fue modificada por otro usuario; recarga la ficha');
+      const especificacionEntrada=entrada.especificacion&&typeof entrada.especificacion==='object'?entrada.especificacion as Record<string,unknown>:{};const medidasEntrada=entrada.medidas&&typeof entrada.medidas==='object'?entrada.medidas as Record<string,unknown>:{};
+      let especificacion=rect.especificacion;if(!especificacion){especificacion=await tx.especificaciones_puerta.create({data:{especificacion_puerta_modelo_puerta:texto(especificacionEntrada.modeloPuerta,200)||null},include:{medidas_puerta:true}});await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{especificaciones_puerta_id_especificacion_puerta:especificacion.especificacion_puerta_especificacion_puerta_id}});}
+      const especificacionActual=especificacion;
+      const datosEspecificacion:Record<string,unknown>={};for(const[campo,columna]of Object.entries(this.camposTextoLevantamiento))if(Object.prototype.hasOwnProperty.call(especificacionEntrada,campo))datosEspecificacion[columna]=texto(especificacionEntrada[campo],campo==='observaciones'||campo==='observacionesDiseno'?2000:200)||null;if(Object.prototype.hasOwnProperty.call(especificacionEntrada,'cubrejuntas')){const valor=especificacionEntrada.cubrejuntas;if(valor!==null&&typeof valor!=='boolean')throw new ErrorAplicacion(400,'Cubrejuntas inválido');datosEspecificacion.especificacion_puerta_cubrejuntas=valor;}if(Object.keys(datosEspecificacion).length)await tx.especificaciones_puerta.update({where:{especificacion_puerta_especificacion_puerta_id:especificacionActual.especificacion_puerta_especificacion_puerta_id},data:datosEspecificacion});
+      const actual=especificacionActual.id_medidas?especificacionActual.medidas_puerta.find(item=>item.medidas_puerta_medidas_id===especificacionActual.id_medidas)||null:null;const datosMedidas:Record<string,unknown>={};for(const[campo,columna]of Object.entries(this.camposMedidasLevantamiento))datosMedidas[columna]=Object.prototype.hasOwnProperty.call(medidasEntrada,campo)?decimalOpcional(medidasEntrada[campo],campo):(actual as any)?.[columna]??null;let nuevaMedida=actual;if(Object.keys(medidasEntrada).length){const cambio=await tx.historial_cambio_orden_trabajo.create({data:{id_especificaciones_puerta:especificacionActual.especificacion_puerta_especificacion_puerta_id,historial_cambio_orden_trabajo_version_antigua:`r${rect.revision}`,historial_cambio_orden_trabajo_version_nueva:`r${rect.revision+1}`,historial_cambio_orden_trabajo_fecha_hora:new Date(),historial_cambio_orden_trabajo_descripcion:motivo}});nuevaMedida=await tx.medidas_puerta.create({data:{...datosMedidas,id_especificacion_puerta:especificacionActual.especificacion_puerta_especificacion_puerta_id,id_cambio:cambio.historial_cambio_orden_trabajo_id_cambio}});await tx.especificaciones_puerta.update({where:{especificacion_puerta_especificacion_puerta_id:especificacionActual.especificacion_puerta_especificacion_puerta_id},data:{id_medidas:nuevaMedida.medidas_puerta_medidas_id}});}
+      const planificacion=entrada.planificacion===undefined?unidad.planificacion_actual:await this.normalizarPlanificacionRectificacion(tx,entrada.planificacion);const anterior={estado:rect.estado,revision:rect.revision,planificacion:unidad.planificacion_actual,idMedidas:actual?.medidas_puerta_medidas_id.toString()||null};const fecha=fechaEntrada(entrada.fechaRectificacion,'Fecha de rectificación',false);
+      const actualizada=await tx.rectificacion_orden_trabajo.updateMany({where:{id_rectificacion_ot:rect.id_rectificacion_ot,revision:rect.revision},data:{id_especificacion_puerta:especificacionActual.especificacion_puerta_especificacion_puerta_id,estado:'RECTIFICACION_EN_PROCESO',fecha_inicio:rect.fecha_inicio||new Date(),fecha_rectificacion:fecha,observaciones_tecnicas:texto(entrada.observacionesTecnicas,5000)||null,caracteristicas_particulares:(entrada.caracteristicasParticulares&&typeof entrada.caracteristicasParticulares==='object'?entrada.caracteristicasParticulares:{}) as Prisma.InputJsonValue,necesita_tareas_adicionales:entrada.necesitaTareasAdicionales===true,comentarios_fabricacion:texto(entrada.comentariosFabricacion,5000)||null,comentarios_instalacion:texto(entrada.comentariosInstalacion,5000)||null,actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});if(actualizada.count!==1)throw new ErrorAplicacion(409,'La rectificación fue modificada concurrentemente');
+      await tx.unidad_fisica_orden_trabajo.update({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},data:{estado:'RECTIFICACION_EN_PROCESO',planificacion_actual:planificacion as Prisma.InputJsonValue,revision:{increment:1},actualizado_en:new Date()}});await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'RECTIFICACION_EN_PROCESO'}});
+      const nuevo={estado:'RECTIFICACION_EN_PROCESO',revision:rect.revision+1,planificacion,idMedidas:nuevaMedida?.medidas_puerta_medidas_id.toString()||null};await tx.historial_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rect.id_rectificacion_ot,entidad:'RECTIFICACION',tipo_modificacion:'BORRADOR_ACTUALIZADO',valor_anterior:anterior as Prisma.InputJsonValue,valor_nuevo:nuevo as Prisma.InputJsonValue,motivo,usuario_id_usuario:actor.id}});return conAuditoriaRectificacion({mensaje:'Rectificación guardada',idOrdenTrabajo:idOrden,estado:'RECTIFICACION_EN_PROCESO',revision:rect.revision+1},anterior,nuevo);
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  async enviarRectificacionAprobacion(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6) {
+    const motivo=texto(entrada.motivo,1000)||'Envío a aprobación técnica';
+    return prisma.$transaction(async tx=>{
+      const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{version_plantilla:true,rectificacion:{include:{especificacion:{include:{medidas_puerta:true}},versiones:true}}}});if(!unidad||!unidad.rectificacion)throw new ErrorAplicacion(409,'La OT no tiene rectificación registrada');this.verificarAccesoRectificacion(unidad,actor);const rect=unidad.rectificacion;if(rect.estado!=='RECTIFICACION_EN_PROCESO')throw new ErrorAplicacion(409,'La rectificación debe estar en proceso antes de enviarse');if(identificador(entrada.revision)!==rect.revision)throw new ErrorAplicacion(409,'La rectificación cambió; recarga antes de enviar');if(!rect.id_empleado_rectificador||!rect.fecha_rectificacion||!rect.especificacion)throw new ErrorAplicacion(409,'Completa empleado, fecha y especificación técnica');const medida=rect.especificacion.medidas_puerta.find(item=>item.medidas_puerta_medidas_id===rect.especificacion!.id_medidas);if(!medida)throw new ErrorAplicacion(409,'Registra medidas reales antes de enviar');
+      const configuradas=this.medidasObligatoriasOt(unidad.version_plantilla.contenido);const faltantes=configuradas.filter(campo=>{const columna=this.camposMedidasLevantamiento[campo];return(medida as any)[columna]===null;});if(faltantes.length)throw new ErrorAplicacion(409,`Faltan medidas obligatorias: ${faltantes.join(', ')}`);const plan=unidad.planificacion_actual as any;if(!Array.isArray(plan?.etapas)||!plan.etapas.length||!plan.etapas.some((etapa:any)=>Array.isArray(etapa.tareas)&&etapa.tareas.length))throw new ErrorAplicacion(409,'La planificación actual no contiene tareas válidas');
+      const numeroVersion=rect.versiones.reduce((max,item)=>Math.max(max,item.numero_version),0)+1;const datos={fechaRectificacion:rect.fecha_rectificacion,idEmpleadoRectificador:rect.id_empleado_rectificador,idEspecificacion:rect.id_especificacion_puerta,idMedidas:medida.medidas_puerta_medidas_id.toString(),medidasObligatorias:configuradas,registradoPor:rect.actualizado_por.toString(),especificacion:{modeloPuerta:rect.especificacion.especificacion_puerta_modelo_puerta,zona:rect.especificacion.especificacion_puerta_zona,sentidoApertura:rect.especificacion.especificacion_puerta_sentido_apertura,materialidadVano:rect.especificacion.especificacion_puerta_materialidad_vano,solucionMarco:rect.especificacion.especificacion_puerta_solucion_marco},medidas:Object.fromEntries(Object.entries(this.camposMedidasLevantamiento).map(([campo,columna])=>[campo,(medida as any)[columna]?.toString()||null])),observacionesTecnicas:rect.observaciones_tecnicas,caracteristicasParticulares:rect.caracteristicas_particulares,necesitaTareasAdicionales:rect.necesita_tareas_adicionales,comentariosFabricacion:rect.comentarios_fabricacion,comentariosInstalacion:rect.comentarios_instalacion};await tx.version_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rect.id_rectificacion_ot,numero_version:numeroVersion,datos_rectificacion:datos as Prisma.InputJsonValue,planificacion:unidad.planificacion_actual as Prisma.InputJsonValue,enviado_por:actor.id}});
+      await tx.rectificacion_orden_trabajo.update({where:{id_rectificacion_ot:rect.id_rectificacion_ot},data:{estado:'PENDIENTE_APROBACION_TECNICA',actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});await tx.unidad_fisica_orden_trabajo.update({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},data:{estado:'PENDIENTE_APROBACION_TECNICA',actualizado_en:new Date()}});await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'PENDIENTE_APROBACION_TECNICA'}});const anterior={estado:rect.estado,revision:rect.revision};const nuevo={estado:'PENDIENTE_APROBACION_TECNICA',revision:rect.revision+1,numeroVersion};await tx.historial_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rect.id_rectificacion_ot,entidad:'RECTIFICACION',tipo_modificacion:'ENVIADA_APROBACION_TECNICA',valor_anterior:anterior,valor_nuevo:nuevo,motivo,usuario_id_usuario:actor.id}});return conAuditoriaRectificacion({mensaje:'Rectificación enviada a aprobación técnica',idOrdenTrabajo:idOrden,estado:nuevo.estado,numeroVersion},anterior,nuevo);
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  private async verificarSeparacionAprobacion(tx:Prisma.TransactionClient,rectificacion:{id_empleado_rectificador:number|null;actualizado_por:bigint},version:{enviado_por:bigint},actor:ActorTerrenoM6) {
+    if(version.enviado_por===actor.id||rectificacion.actualizado_por===actor.id)throw new ErrorAplicacion(403,'Quien registró o envió la rectificación no puede aprobarla');
+    if(rectificacion.id_empleado_rectificador===null)return;
+    const cuenta=await tx.usuario.findUnique({where:{usuario_id_usuario:actor.id},include:{empleado_seguridad:true,empleado:true}});
+    const ids=[cuenta?.empleado_seguridad?.id_empleado,cuenta?.empleado?.id_empleado].filter((id):id is number=>typeof id==='number');
+    if(ids.includes(rectificacion.id_empleado_rectificador))throw new ErrorAplicacion(403,'El empleado que realizó la rectificación no puede aprobarla');
+  }
+
+  async aprobarRectificacionOrdenTrabajo(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6) {
+    const idVersion=BigInt(identificador(entrada.idVersion));const observaciones=texto(entrada.observacionesTecnicas,5000)||null;
+    return prisma.$transaction(async tx=>{
+      const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{rectificacion:{include:{versiones:{include:{decision:true},orderBy:{numero_version:'desc'}}}}}});if(!unidad?.rectificacion)throw new ErrorAplicacion(404,'Rectificación no encontrada');const rect=unidad.rectificacion;const version=rect.versiones[0];if(!version||version.id_version_rectificacion!==idVersion)throw new ErrorAplicacion(409,'Sólo puede aprobarse la versión vigente enviada');
+      if(version.decision){if(version.decision.decision==='APROBADA'&&rect.estado==='RECTIFICACION_APROBADA')return conAuditoriaRectificacion({mensaje:'La versión ya estaba aprobada',idOrdenTrabajo:idOrden,estado:rect.estado,numeroVersion:version.numero_version},{estado:rect.estado},{estado:rect.estado});throw new ErrorAplicacion(409,'La versión ya fue revisada');}
+      if(rect.estado!=='PENDIENTE_APROBACION_TECNICA'||unidad.estado!=='PENDIENTE_APROBACION_TECNICA')throw new ErrorAplicacion(409,'La rectificación no está pendiente de aprobación técnica');await this.verificarSeparacionAprobacion(tx,rect,version,actor);
+      await tx.decision_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rect.id_rectificacion_ot,id_version_rectificacion:version.id_version_rectificacion,decision:'APROBADA',observaciones_tecnicas:observaciones,decidido_por:actor.id}});
+      const cambio=await tx.rectificacion_orden_trabajo.updateMany({where:{id_rectificacion_ot:rect.id_rectificacion_ot,estado:'PENDIENTE_APROBACION_TECNICA',revision:rect.revision},data:{estado:'RECTIFICACION_APROBADA',actualizado_en:new Date(),revision:{increment:1}}});if(cambio.count!==1)throw new ErrorAplicacion(409,'La rectificación fue revisada concurrentemente');await tx.unidad_fisica_orden_trabajo.update({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},data:{estado:'RECTIFICACION_APROBADA',actualizado_en:new Date()}});await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'RECTIFICACION_APROBADA'}});const anterior={estado:'PENDIENTE_APROBACION_TECNICA',numeroVersion:version.numero_version};const nuevo={estado:'RECTIFICACION_APROBADA',numeroVersion:version.numero_version};await tx.historial_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rect.id_rectificacion_ot,entidad:'REVISION_TECNICA',tipo_modificacion:'RECTIFICACION_APROBADA',valor_anterior:anterior,valor_nuevo:nuevo,motivo:observaciones,usuario_id_usuario:actor.id}});return conAuditoriaRectificacion({mensaje:'Rectificación aprobada; la OT aún no está liberada',idOrdenTrabajo:idOrden,estado:nuevo.estado,numeroVersion:version.numero_version},anterior,nuevo);
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  async devolverRectificacionOrdenTrabajo(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6) {
+    const idVersion=BigInt(identificador(entrada.idVersion));const motivo=texto(entrada.motivo,2000);const observaciones=texto(entrada.observacionesTecnicas,5000);if(!motivo||!observaciones)throw new ErrorAplicacion(400,'El motivo y las observaciones técnicas son obligatorios');
+    return prisma.$transaction(async tx=>{
+      const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{rectificacion:{include:{versiones:{include:{decision:true},orderBy:{numero_version:'desc'}}}}}});if(!unidad?.rectificacion)throw new ErrorAplicacion(404,'Rectificación no encontrada');const rect=unidad.rectificacion;const version=rect.versiones[0];if(!version||version.id_version_rectificacion!==idVersion)throw new ErrorAplicacion(409,'Sólo puede devolverse la versión vigente enviada');if(version.decision){if(version.decision.decision==='DEVUELTA'&&rect.estado==='RECTIFICACION_DEVUELTA')return conAuditoriaRectificacion({mensaje:'La versión ya estaba devuelta',idOrdenTrabajo:idOrden,estado:rect.estado,numeroVersion:version.numero_version},{estado:rect.estado},{estado:rect.estado});throw new ErrorAplicacion(409,'La versión ya fue revisada');}if(rect.estado!=='PENDIENTE_APROBACION_TECNICA')throw new ErrorAplicacion(409,'La rectificación no está pendiente de revisión');
+      await tx.decision_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rect.id_rectificacion_ot,id_version_rectificacion:version.id_version_rectificacion,decision:'DEVUELTA',motivo,observaciones_tecnicas:observaciones,decidido_por:actor.id}});const cambio=await tx.rectificacion_orden_trabajo.updateMany({where:{id_rectificacion_ot:rect.id_rectificacion_ot,estado:'PENDIENTE_APROBACION_TECNICA',revision:rect.revision},data:{estado:'RECTIFICACION_DEVUELTA',actualizado_en:new Date(),revision:{increment:1}}});if(cambio.count!==1)throw new ErrorAplicacion(409,'La rectificación fue revisada concurrentemente');await tx.unidad_fisica_orden_trabajo.update({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},data:{estado:'RECTIFICACION_DEVUELTA',actualizado_en:new Date()}});await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'RECTIFICACION_DEVUELTA'}});const anterior={estado:'PENDIENTE_APROBACION_TECNICA',numeroVersion:version.numero_version};const nuevo={estado:'RECTIFICACION_DEVUELTA',numeroVersion:version.numero_version,motivo,observaciones};await tx.historial_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rect.id_rectificacion_ot,entidad:'REVISION_TECNICA',tipo_modificacion:'RECTIFICACION_DEVUELTA',valor_anterior:anterior,valor_nuevo:nuevo,motivo,usuario_id_usuario:actor.id}});return conAuditoriaRectificacion({mensaje:'Rectificación devuelta para corrección',idOrdenTrabajo:idOrden,estado:nuevo.estado,numeroVersion:version.numero_version},anterior,nuevo);
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  async liberarOrdenTrabajoRectificada(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6) {
+    const idVersion=BigInt(identificador(entrada.idVersion));
+    return prisma.$transaction(async tx=>{
+      const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{rectificacion:{include:{versiones:{include:{decision:true},orderBy:{numero_version:'desc'}}}},liberacion:true}});if(!unidad?.rectificacion)throw new ErrorAplicacion(404,'Rectificación no encontrada');const rect=unidad.rectificacion;const version=rect.versiones[0];if(!version||version.id_version_rectificacion!==idVersion)throw new ErrorAplicacion(409,'La versión aprobada ya no es la vigente');
+      if(unidad.liberacion){
+        if(unidad.liberacion.id_version_rectificacion===idVersion)return conAuditoriaRectificacion({mensaje:'La OT ya estaba liberada',idOrdenTrabajo:idOrden,estado:'LIBERADA',tareas:await tx.tarea_ejecutable_unidad_ot.count({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot}})},{estado:'LIBERADA'},{estado:'LIBERADA'});
+        if(rect.estado!=='RECTIFICACION_APROBADA'||unidad.estado!=='RECTIFICACION_APROBADA'||version.decision?.decision!=='APROBADA')throw new ErrorAplicacion(409,'La revisión técnica vigente debe estar aprobada antes de aplicarse');
+        const aplicada=await tx.aplicacion_revision_tecnica_ot.findUnique({where:{id_version_rectificacion:idVersion}});
+        if(!aplicada)await tx.aplicacion_revision_tecnica_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_rectificacion:idVersion,aplicado_por:actor.id}});
+        await tx.unidad_fisica_orden_trabajo.update({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},data:{estado:'LIBERADA',actualizado_en:new Date(),revision:{increment:1}}});
+        await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'en_progreso'}});
+        await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_rectificacion:idVersion,entidad:'REVISION_TECNICA',evento:'REVISION_TECNICA_APLICADA',valor_anterior:{idVersion:unidad.liberacion.id_version_rectificacion.toString()},valor_nuevo:{idVersion:idVersion.toString()},motivo:'Aplicación productiva de revisión técnica aprobada',usuario_id_usuario:actor.id}});
+        return conAuditoriaRectificacion({mensaje:'Revisión técnica aprobada aplicada; producción habilitada',idOrdenTrabajo:idOrden,estado:'LIBERADA'},{estado:'RECTIFICACION_APROBADA'},{estado:'LIBERADA',idVersion:idVersion.toString()});
+      }
+      if(rect.estado!=='RECTIFICACION_APROBADA'||unidad.estado!=='RECTIFICACION_APROBADA'||version.decision?.decision!=='APROBADA')throw new ErrorAplicacion(409,'La OT requiere una versión vigente aprobada antes de liberarse');
+      const plan=version.planificacion as any;if(!Array.isArray(plan?.etapas)||!plan.etapas.length)throw new ErrorAplicacion(409,'La versión aprobada no contiene etapas válidas');const tareas:Array<{etapa:any;tarea:any;ordenEtapa:number;ordenTarea:number}>=[];for(const[ie,etapa]of plan.etapas.entries()){if(!etapa||!etapa.idAreaTrabajo||!Array.isArray(etapa.tareas)||!etapa.tareas.length)throw new ErrorAplicacion(409,'Cada etapa requiere un área y al menos una tarea');for(const[it,tarea]of etapa.tareas.entries()){if(!texto(tarea?.nombre,150))throw new ErrorAplicacion(409,'La planificación aprobada contiene una tarea sin nombre');tareas.push({etapa,tarea,ordenEtapa:ie+1,ordenTarea:it+1});}}const idsArea:bigint[]=[...new Set<bigint>(plan.etapas.map((etapa:any)=>BigInt(identificador(etapa.idAreaTrabajo))) as bigint[])];if(await tx.area_trabajo.count({where:{area_trabajo_id_area:{in:idsArea},area_trabajo_activo:true}})!==idsArea.length)throw new ErrorAplicacion(409,'La planificación aprobada contiene áreas inactivas');
+      for(const item of tareas)if(item.tarea.idEmpleado&&!await tx.asignacion_area_empleado.findFirst({where:{id_empleado:identificador(item.tarea.idEmpleado),id_area_trabajo:BigInt(item.etapa.idAreaTrabajo),vigencia_hasta:null,empleado:{estado_laboral:'activo'}}}))throw new ErrorAplicacion(409,'Existe un responsable que ya no está activo en el área planificada');
+      for(const item of tareas){const creada=await tx.tarea.create({data:{tarea_titulo:texto(item.tarea.nombre,200),tarea_descripcion:texto(item.tarea.descripcion,2000)||null,tarea_instrucciones_de_oficina:texto(item.tarea.instrucciones,2000)||null,tarea_estado_de_tarea:'pendiente',tarea_fecha_de_creacion:new Date(),id_especificacion_puerta:rect.id_especificacion_puerta,id_orden_trabajo:unidad.id_orden_trabajo}});const idEmpleado=item.tarea.idEmpleado?identificador(item.tarea.idEmpleado):null;const ejecutable=await tx.tarea_ejecutable_unidad_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_rectificacion:version.id_version_rectificacion,id_tarea:creada.tarea_tarea_id,id_etapa_planificacion:typeof item.etapa.id==='string'?item.etapa.id:`etapa-${item.ordenEtapa}`,id_tarea_planificacion:typeof item.tarea.id==='string'?item.tarea.id:`tarea-${item.ordenEtapa}-${item.ordenTarea}`,orden_etapa:item.ordenEtapa,orden_tarea:item.ordenTarea,id_empleado_planificado:idEmpleado}});await tx.estado_tarea_produccion_ot.create({data:{id_tarea_ejecutable_ot:ejecutable.id_tarea_ejecutable_ot,id_area_trabajo:BigInt(identificador(item.etapa.idAreaTrabajo)),id_empleado_responsable:idEmpleado,estado:idEmpleado?'ASIGNADA':'PENDIENTE',tiempo_estimado_min:item.tarea.tiempoEstimadoMin?identificador(item.tarea.tiempoEstimadoMin):null,instrucciones:texto(item.tarea.instrucciones,4000)||null,actualizado_por:actor.id}});if(idEmpleado){const empleado=await tx.empleado.findUnique({where:{id_empleado:idEmpleado},include:{cuenta_m4:true,usuario:true}});const cuenta=empleado?.cuenta_m4||empleado?.usuario[0];if(cuenta)await tx.tarea_usuario.create({data:{tarea_usuario_tarea_id:creada.tarea_tarea_id,tarea_usuario_usuario_id:cuenta.usuario_id_usuario}});}}
+      await tx.liberacion_orden_trabajo.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_rectificacion:version.id_version_rectificacion,liberado_por:actor.id}});const cambio=await tx.unidad_fisica_orden_trabajo.updateMany({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,estado:'RECTIFICACION_APROBADA'},data:{estado:'LIBERADA',actualizado_en:new Date(),revision:{increment:1}}});if(cambio.count!==1)throw new ErrorAplicacion(409,'La OT fue liberada concurrentemente');await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'en_progreso'}});const anterior={estado:'RECTIFICACION_APROBADA',numeroVersion:version.numero_version};const nuevo={estado:'LIBERADA',numeroVersion:version.numero_version,tareas:tareas.length};await tx.historial_rectificacion_orden_trabajo.create({data:{id_rectificacion_ot:rect.id_rectificacion_ot,entidad:'ORDEN_TRABAJO',tipo_modificacion:'LIBERADA_A_PRODUCCION',valor_anterior:anterior,valor_nuevo:nuevo,motivo:'Liberación técnica de versión aprobada',usuario_id_usuario:actor.id}});return conAuditoriaRectificacion({mensaje:'OT liberada a producción',idOrdenTrabajo:idOrden,estado:'LIBERADA',tareas:tareas.length},anterior,nuevo);
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
   async ajustarOrdenTrabajoTerreno(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
     return this.corregirLevantamientoTerreno(id, entrada, actor, ['pendiente', 'activa']);
   }
@@ -2583,6 +2900,7 @@ export class M6Controller {
         if (!contexto.medidas || contexto.especificacion.id_medidas === null) throw new ErrorAplicacion(409, 'La Orden de Trabajo requiere una medida vigente antes de liberarse');
         const orden = await tx.orden_trabajo.findUnique({ where: { orden_trabajo_id_orden: BigInt(idOrden) } });
         if (!orden) throw new ErrorAplicacion(404, 'Orden de Trabajo no encontrada');
+        if (await tx.unidad_fisica_orden_trabajo.findUnique({ where: { id_orden_trabajo: orden.orden_trabajo_id_orden } })) throw new ErrorAplicacion(409, 'Las OT provenientes de cotizaciones requieren aprobación técnica antes de liberarse');
         if (orden.especificaciones_puerta_id_especificacion_puerta !== contexto.especificacion.especificacion_puerta_especificacion_puerta_id) throw new ErrorAplicacion(409, 'La Orden de Trabajo no pertenece al levantamiento indicado');
         const estado = orden.orden_trabajo_estado || '';
         if (!['pendiente', 'activa'].includes(estado)) throw new ErrorAplicacion(409, ['en_progreso', 'completada', 'cancelada'].includes(estado) ? `La Orden de Trabajo en estado ${estado} no puede liberarse nuevamente` : 'La Orden de Trabajo tiene un estado no reconocido');
@@ -2616,6 +2934,8 @@ export class M6Controller {
         const contexto = await this.resolverLevantamientoTerreno(id, actor, tx);
         const orden = await tx.orden_trabajo.findUnique({ where: { orden_trabajo_id_orden: idOrdenTrabajo } });
         if (!orden) throw new ErrorAplicacion(404, 'Orden de Trabajo no encontrada');
+        const unidadComercial=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:idOrdenTrabajo}});
+        if(unidadComercial&&unidadComercial.estado!=='LIBERADA')throw new ErrorAplicacion(409,'La OT requiere rectificación aprobada y liberación técnica antes de generar tareas productivas');
         if (orden.orden_trabajo_estado !== 'en_progreso') throw new ErrorAplicacion(409, 'La Orden de Trabajo debe estar liberada para generar tareas de producción');
         const idEspecificacion = orden.especificaciones_puerta_id_especificacion_puerta;
         if (idEspecificacion === null) throw new ErrorAplicacion(409, 'La Orden de Trabajo no tiene una especificación asociada');
@@ -2648,6 +2968,8 @@ export class M6Controller {
       include: { orden_trabajo: true, especificaciones_puerta: true },
     });
     if (!tarea || !tarea.orden_trabajo) throw new ErrorAplicacion(404, 'Tarea de producción no encontrada');
+    const unidadComercial=await cliente.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:tarea.orden_trabajo.orden_trabajo_id_orden}});
+    if(unidadComercial&&unidadComercial.estado!=='LIBERADA')throw new ErrorAplicacion(409,'La OT comercial todavía no está liberada para producción');
     if (tarea.orden_trabajo.orden_trabajo_estado !== 'en_progreso') throw new ErrorAplicacion(409, 'La Orden de Trabajo debe estar liberada');
     return tarea;
   }
@@ -2655,11 +2977,14 @@ export class M6Controller {
   private async presentarTareaProduccion(tarea: any, cliente: Prisma.TransactionClient | typeof prisma = prisma) {
     const asignaciones = await cliente.tarea_usuario.findMany({ where: { tarea_usuario_tarea_id: tarea.tarea_tarea_id }, orderBy: { tarea_usuario_usuario_id: 'asc' } });
     const usuarios = asignaciones.length ? await cliente.usuario.findMany({ where: { usuario_id_usuario: { in: asignaciones.map((item) => item.tarea_usuario_usuario_id) } } }) : [];
+    const origen=await cliente.tarea_ejecutable_unidad_ot.findUnique({where:{id_tarea:tarea.tarea_tarea_id},include:{estado_operacional:{include:{area:true,empleado_responsable:true}},etapa_adicional:true}});
+    const operativo=origen?.estado_operacional;
     return {
       id: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, descripcion: tarea.tarea_descripcion,
       instrucciones: tarea.tarea_instrucciones_de_oficina, estado: tarea.tarea_estado_de_tarea, prioridad: tarea.tarea_urgencia,
       idOrdenTrabajo: tarea.id_orden_trabajo?.toString() || null, idEspecificacion: tarea.id_especificacion_puerta?.toString() || null,
       asignados: usuarios.map((usuario) => this.presentarUsuarioTerreno(usuario)),
+      produccion:origen?{idEjecutable:origen.id_tarea_ejecutable_ot.toString(),origen:origen.origen,ordenEtapa:origen.orden_etapa,ordenTarea:origen.orden_tarea,idEtapaPlanificacion:origen.id_etapa_planificacion,idEtapaAdicional:origen.id_etapa_adicional_ot?.toString()||null,etapaAdicional:origen.etapa_adicional?.nombre||null,estado:operativo?.estado||'PENDIENTE',revision:operativo?.revision||0,prioridad:operativo?.prioridad||null,tiempoEstimadoMin:operativo?.tiempo_estimado_min||null,instrucciones:operativo?.instrucciones||tarea.tarea_instrucciones_de_oficina,observaciones:operativo?.observaciones||null,fechaPlanificada:operativo?.fecha_planificada||null,area:operativo?{id:operativo.id_area_trabajo.toString(),nombre:operativo.area.area_trabajo_nombre_area||`Área ${operativo.id_area_trabajo}`} : null,responsable:operativo?.empleado_responsable?{id:operativo.empleado_responsable.id_empleado,nombre:nombreCompleto(operativo.empleado_responsable),rut:operativo.empleado_responsable.rut_empleado}:null}:null,
     };
   }
 
@@ -2668,20 +2993,30 @@ export class M6Controller {
     return Promise.all(tareas.map((tarea) => this.presentarTareaProduccion(tarea)));
   }
 
-  async asignarTareaProduccion(id: number, entrada: Record<string, unknown>) {
-    if (!Array.isArray(entrada.idsUsuarios) || entrada.idsUsuarios.length === 0) throw new ErrorAplicacion(400, 'Debes seleccionar al menos un trabajador');
-    const ids = entrada.idsUsuarios.map((valor) => BigInt(identificador(valor)));
-    if (new Set(ids.map(String)).size !== ids.length) throw new ErrorAplicacion(400, 'No puedes repetir trabajadores');
-    const prioridad = entrada.prioridad === undefined ? undefined : texto(entrada.prioridad, 80) || null;
+  async asignarTareaProduccion(id: number, entrada: Record<string, unknown>, actor:ActorTerrenoM6) {
+    const motivo=texto(entrada.motivo,1000);if(!motivo)throw new ErrorAplicacion(400,'El motivo de la reasignación es obligatorio');
+    let idEmpleado=entrada.idEmpleado===null||entrada.idEmpleado===''?null:entrada.idEmpleado===undefined?undefined:identificador(entrada.idEmpleado);
     return prisma.$transaction(async (tx) => {
       const tarea = await this.obtenerTareaProduccion(id, tx);
-      const existentes = await tx.usuario.count({ where: { usuario_id_usuario: { in: ids } } });
-      if (existentes !== ids.length) throw new ErrorAplicacion(404, 'Uno o más trabajadores no existen');
+      const origen=await tx.tarea_ejecutable_unidad_ot.findUnique({where:{id_tarea:tarea.tarea_tarea_id},include:{estado_operacional:true}});if(!origen?.estado_operacional)throw new ErrorAplicacion(409,'La tarea no pertenece al flujo productivo versionado');const actual=origen.estado_operacional;
+      if(actual.estado==='CERRADA')throw new ErrorAplicacion(409,'Una tarea cerrada no puede reasignarse');
+      if(idEmpleado===undefined&&Array.isArray(entrada.idsUsuarios)&&entrada.idsUsuarios.length===1){const cuenta=await tx.usuario.findUnique({where:{usuario_id_usuario:BigInt(identificador(entrada.idsUsuarios[0]))},include:{empleado_seguridad:true,empleado:true}});idEmpleado=cuenta?.empleado_seguridad?.id_empleado??cuenta?.empleado?.id_empleado;if(idEmpleado===undefined)throw new ErrorAplicacion(409,'La cuenta seleccionada no está vinculada a un empleado');}
+      const revision=entrada.revision===undefined?actual.revision:identificador(entrada.revision);if(revision!==actual.revision)throw new ErrorAplicacion(409,'La tarea fue modificada por otro usuario; recarga la ficha');
+      let empleado:any=null;if(idEmpleado!==undefined&&idEmpleado!==null){const asignacion=await tx.asignacion_area_empleado.findFirst({where:{id_empleado:idEmpleado,id_area_trabajo:actual.id_area_trabajo,vigencia_hasta:null,empleado:{estado_laboral:'activo'},area:{area_trabajo_activo:true}},include:{empleado:{include:{cuenta_m4:true,usuario:true}}}});if(!asignacion)throw new ErrorAplicacion(409,'El empleado debe estar activo y pertenecer actualmente al área de la tarea');empleado=asignacion.empleado;}
+      const cambio=await tx.estado_tarea_produccion_ot.updateMany({where:{id_estado_tarea_produccion:actual.id_estado_tarea_produccion,revision:actual.revision,estado:{not:'CERRADA'}},data:{id_empleado_responsable:idEmpleado===undefined?actual.id_empleado_responsable:idEmpleado,estado:(idEmpleado===undefined?actual.id_empleado_responsable:idEmpleado)?'ASIGNADA':'PENDIENTE',actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});if(cambio.count!==1)throw new ErrorAplicacion(409,'La tarea fue reasignada concurrentemente');
       await tx.tarea_usuario.deleteMany({ where: { tarea_usuario_tarea_id: tarea.tarea_tarea_id } });
-      await tx.tarea_usuario.createMany({ data: ids.map((idUsuario) => ({ tarea_usuario_tarea_id: tarea.tarea_tarea_id, tarea_usuario_usuario_id: idUsuario })) });
-      const actualizada = prioridad === undefined ? tarea : await tx.tarea.update({ where: { tarea_tarea_id: tarea.tarea_tarea_id }, data: { tarea_urgencia: prioridad, tarea_fecha_de_ultima_actualizacion: new Date() }, include: { orden_trabajo: true, especificaciones_puerta: true } });
+      const cuenta=empleado?(empleado.cuenta_m4||empleado.usuario[0]):null;if(cuenta)await tx.tarea_usuario.create({data:{tarea_usuario_tarea_id:tarea.tarea_tarea_id,tarea_usuario_usuario_id:cuenta.usuario_id_usuario}});
+      await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:origen.id_unidad_fisica_ot,id_tarea_ejecutable_ot:origen.id_tarea_ejecutable_ot,entidad:'TAREA',evento:'RESPONSABLE_REASIGNADO',valor_anterior:{idEmpleado:actual.id_empleado_responsable},valor_nuevo:{idEmpleado:idEmpleado===undefined?actual.id_empleado_responsable:idEmpleado,nombre:empleado?nombreCompleto(empleado):null},motivo,id_empleado_involucrado:idEmpleado===undefined?actual.id_empleado_responsable:idEmpleado,usuario_id_usuario:actor.id}});
+      const actualizada = await tx.tarea.findUnique({where:{tarea_tarea_id:tarea.tarea_tarea_id},include:{orden_trabajo:true,especificaciones_puerta:true}});
       return this.presentarTareaProduccion(actualizada, tx);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async modificarTareaProduccion(id:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6){
+    const motivo=texto(entrada.motivo,1000);if(!motivo)throw new ErrorAplicacion(400,'El motivo del ajuste es obligatorio');
+    return prisma.$transaction(async tx=>{const tarea=await this.obtenerTareaProduccion(id,tx);const origen=await tx.tarea_ejecutable_unidad_ot.findUnique({where:{id_tarea:tarea.tarea_tarea_id},include:{estado_operacional:true}});if(!origen?.estado_operacional)throw new ErrorAplicacion(409,'La tarea no pertenece al flujo productivo versionado');const actual=origen.estado_operacional;if(actual.estado==='CERRADA')throw new ErrorAplicacion(409,'Una tarea cerrada no puede editarse; crea una tarea correctiva');const revision=identificador(entrada.revision);if(revision!==actual.revision)throw new ErrorAplicacion(409,'La tarea fue modificada por otro usuario; recarga la ficha');
+      const prioridad=Object.prototype.hasOwnProperty.call(entrada,'prioridad')?texto(entrada.prioridad,30)||null:actual.prioridad;const tiempo=Object.prototype.hasOwnProperty.call(entrada,'tiempoEstimadoMin')?(entrada.tiempoEstimadoMin?enteroPositivo(entrada.tiempoEstimadoMin,'Tiempo estimado'):null):actual.tiempo_estimado_min;const instrucciones=Object.prototype.hasOwnProperty.call(entrada,'instrucciones')?texto(entrada.instrucciones,4000)||null:actual.instrucciones;const observaciones=Object.prototype.hasOwnProperty.call(entrada,'observaciones')?texto(entrada.observaciones,4000)||null:actual.observaciones;const fechaPlanificada=Object.prototype.hasOwnProperty.call(entrada,'fechaPlanificada')?(entrada.fechaPlanificada?fechaEntrada(entrada.fechaPlanificada,'Fecha planificada'):null):actual.fecha_planificada;
+      const cambio=await tx.estado_tarea_produccion_ot.updateMany({where:{id_estado_tarea_produccion:actual.id_estado_tarea_produccion,revision:actual.revision,estado:{not:'CERRADA'}},data:{prioridad,tiempo_estimado_min:tiempo,instrucciones,observaciones,fecha_planificada:fechaPlanificada,actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});if(cambio.count!==1)throw new ErrorAplicacion(409,'La tarea fue modificada concurrentemente');await tx.tarea.update({where:{tarea_tarea_id:tarea.tarea_tarea_id},data:{tarea_urgencia:prioridad,tarea_instrucciones_de_oficina:instrucciones,tarea_fecha_de_ultima_actualizacion:new Date()}});const anterior={prioridad:actual.prioridad,tiempoEstimadoMin:actual.tiempo_estimado_min,instrucciones:actual.instrucciones,observaciones:actual.observaciones,fechaPlanificada:actual.fecha_planificada};const nuevo={prioridad,tiempoEstimadoMin:tiempo,instrucciones,observaciones,fechaPlanificada};await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:origen.id_unidad_fisica_ot,id_tarea_ejecutable_ot:origen.id_tarea_ejecutable_ot,entidad:'TAREA',evento:'AJUSTE_OPERATIVO',valor_anterior:anterior,valor_nuevo:nuevo,motivo,usuario_id_usuario:actor.id}});return this.presentarTareaProduccion(await tx.tarea.findUnique({where:{tarea_tarea_id:tarea.tarea_tarea_id},include:{orden_trabajo:true}}),tx);},{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
   }
 
   private presentarEjecucion(ejecucion: any) {
@@ -2691,12 +3026,15 @@ export class M6Controller {
       cantidad: ejecucion.cantidad?.toString() || null, unidad: ejecucion.unidad,
       tarea: ejecucion.tarea ? { id: ejecucion.tarea.tarea_tarea_id.toString(), titulo: ejecucion.tarea.tarea_titulo, idOrdenTrabajo: ejecucion.tarea.id_orden_trabajo?.toString() || null } : undefined,
       ejecutor: this.presentarUsuarioTerreno(ejecucion.ejecutor),
+      empleadoEjecutor:ejecucion.atribucion_productiva?.empleado_ejecutor?{id:ejecucion.atribucion_productiva.empleado_ejecutor.id_empleado,nombre:nombreCompleto(ejecucion.atribucion_productiva.empleado_ejecutor)}:null,
+      registradoPor:ejecucion.atribucion_productiva?.registrador?nombreUsuario(ejecucion.atribucion_productiva.registrador):null,
     };
   }
 
+  async iniciarTareaProduccion(id:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6){return prisma.$transaction(async tx=>{const tarea=await this.obtenerTareaProduccion(id,tx);const origen=await tx.tarea_ejecutable_unidad_ot.findUnique({where:{id_tarea:tarea.tarea_tarea_id},include:{estado_operacional:true}});if(!origen?.estado_operacional)throw new ErrorAplicacion(409,'La tarea no pertenece al flujo productivo versionado');const actual=origen.estado_operacional;if(actual.estado==='CERRADA'||actual.estado==='PENDIENTE_VALIDACION')throw new ErrorAplicacion(409,'La tarea no puede iniciarse en su estado actual');if(actual.estado==='EN_EJECUCION')return this.presentarTareaProduccion(tarea,tx);const anteriores=await tx.tarea_ejecutable_unidad_ot.findMany({where:{id_unidad_fisica_ot:origen.id_unidad_fisica_ot,OR:[{orden_etapa:{lt:origen.orden_etapa}},{orden_etapa:origen.orden_etapa,orden_tarea:{lt:origen.orden_tarea}}]},include:{estado_operacional:true}});if(anteriores.some(item=>item.estado_operacional?.estado!=='CERRADA'))throw new ErrorAplicacion(409,'Debes cerrar las tareas anteriores antes de iniciar esta etapa');let idEmpleado=entrada.idEmpleadoEjecutor?identificador(entrada.idEmpleadoEjecutor):null;if(idEmpleado===null){const cuenta=await tx.usuario.findUnique({where:{usuario_id_usuario:actor.id},include:{empleado_seguridad:true,empleado:true}});idEmpleado=cuenta?.empleado_seguridad?.id_empleado??cuenta?.empleado?.id_empleado??null;}if(idEmpleado===null)throw new ErrorAplicacion(400,'Debe identificar al empleado que inicia el trabajo');if(!await tx.asignacion_area_empleado.findFirst({where:{id_empleado:idEmpleado,id_area_trabajo:actual.id_area_trabajo,vigencia_hasta:null,empleado:{estado_laboral:'activo'}}}))throw new ErrorAplicacion(409,'El ejecutor debe estar activo en el área de la tarea');if(actual.id_empleado_responsable&&actual.id_empleado_responsable!==idEmpleado&&!actor.administrador)throw new ErrorAplicacion(403,'Sólo un encargado autorizado puede iniciar la tarea para otro responsable');const cambio=await tx.estado_tarea_produccion_ot.updateMany({where:{id_estado_tarea_produccion:actual.id_estado_tarea_produccion,revision:actual.revision,estado:{in:['PENDIENTE','ASIGNADA']}},data:{estado:'EN_EJECUCION',actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});if(cambio.count!==1)throw new ErrorAplicacion(409,'La tarea fue iniciada o modificada concurrentemente');await tx.tarea.update({where:{tarea_tarea_id:tarea.tarea_tarea_id},data:{tarea_estado_de_tarea:'en_ejecucion',tarea_fecha_de_ultima_actualizacion:new Date()}});await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:origen.id_unidad_fisica_ot,id_tarea_ejecutable_ot:origen.id_tarea_ejecutable_ot,entidad:'TAREA',evento:'TAREA_INICIADA',valor_anterior:{estado:actual.estado},valor_nuevo:{estado:'EN_EJECUCION'},motivo:texto(entrada.motivo,1000)||'Inicio de ejecución productiva',id_empleado_involucrado:idEmpleado,usuario_id_usuario:actor.id}});return this.presentarTareaProduccion(await tx.tarea.findUnique({where:{tarea_tarea_id:tarea.tarea_tarea_id},include:{orden_trabajo:true}}),tx);},{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});}
+
   async registrarEjecucionTarea(id: number, entrada: Record<string, unknown>, actor: ActorTerrenoM6) {
-    const idEjecutor = entrada.idUsuario === undefined || entrada.idUsuario === '' ? actor.id : BigInt(identificador(entrada.idUsuario));
-    if (!actor.administrador && idEjecutor !== actor.id) throw new ErrorAplicacion(403, 'Sólo un administrador puede registrar la ejecución de otro trabajador');
+    const idEmpleadoEntrada=entrada.idEmpleadoEjecutor===undefined||entrada.idEmpleadoEjecutor===''?null:identificador(entrada.idEmpleadoEjecutor);
     const tieneCantidad = entrada.cantidad !== undefined && entrada.cantidad !== null && entrada.cantidad !== '';
     const tieneUnidad = Boolean(texto(entrada.unidad, 30));
     if (tieneCantidad !== tieneUnidad) throw new ErrorAplicacion(400, 'Cantidad y unidad deben informarse juntas');
@@ -2704,32 +3042,49 @@ export class M6Controller {
     const unidad = tieneUnidad ? texto(entrada.unidad, 30) : null;
     return prisma.$transaction(async (tx) => {
       const tarea = await this.obtenerTareaProduccion(id, tx);
-      const [usuario, asignacion] = await Promise.all([
-        tx.usuario.findUnique({ where: { usuario_id_usuario: idEjecutor } }),
-        tx.tarea_usuario.findFirst({ where: { tarea_usuario_tarea_id: tarea.tarea_tarea_id, tarea_usuario_usuario_id: idEjecutor } }),
-      ]);
-      if (!usuario) throw new ErrorAplicacion(404, 'Trabajador ejecutor no encontrado');
-      if (!asignacion) throw new ErrorAplicacion(409, 'El trabajador no está asignado a la tarea');
-      const ejecucion = await tx.ejecucion_tarea.create({ data: { id_tarea: tarea.tarea_tarea_id, id_usuario_ejecutor: idEjecutor, fecha_ejecucion: new Date(), estado_ejecucion: 'terminada', estado_validacion_productiva: 'pendiente', cantidad, unidad }, include: { tarea: true, ejecutor: true } });
+      const origen=await tx.tarea_ejecutable_unidad_ot.findUnique({where:{id_tarea:tarea.tarea_tarea_id},include:{estado_operacional:true}});if(!origen?.estado_operacional){const idUsuario=entrada.idUsuario?BigInt(identificador(entrada.idUsuario)):actor.id;if(!actor.administrador&&idUsuario!==actor.id)throw new ErrorAplicacion(403,'Sólo un administrador puede registrar la ejecución de otro usuario');const asignacion=await tx.tarea_usuario.findFirst({where:{tarea_usuario_tarea_id:tarea.tarea_tarea_id,tarea_usuario_usuario_id:idUsuario}});if(!asignacion)throw new ErrorAplicacion(409,'El usuario no está asignado a la tarea histórica');const ejecucion=await tx.ejecucion_tarea.create({data:{id_tarea:tarea.tarea_tarea_id,id_usuario_ejecutor:idUsuario,fecha_ejecucion:new Date(),estado_ejecucion:'terminada',estado_validacion_productiva:'pendiente',cantidad,unidad},include:{tarea:true,ejecutor:true}});return this.presentarEjecucion(ejecucion);}if(origen.estado_operacional.estado==='CERRADA')throw new ErrorAplicacion(409,'La tarea ya está cerrada');
+      let idEmpleado=idEmpleadoEntrada;if(idEmpleado===null){const cuenta=await tx.usuario.findUnique({where:{usuario_id_usuario:actor.id},include:{empleado_seguridad:true,empleado:true}});idEmpleado=cuenta?.empleado_seguridad?.id_empleado??cuenta?.empleado?.id_empleado??null;}if(idEmpleado===null)throw new ErrorAplicacion(400,'Debe identificar al empleado que realizó el trabajo');const empleado=await tx.asignacion_area_empleado.findFirst({where:{id_empleado:idEmpleado,id_area_trabajo:origen.estado_operacional.id_area_trabajo,vigencia_hasta:null,empleado:{estado_laboral:'activo'}},include:{empleado:true}});if(!empleado)throw new ErrorAplicacion(409,'El ejecutor debe ser un empleado activo del área de la tarea');if(origen.estado_operacional.id_empleado_responsable&&origen.estado_operacional.id_empleado_responsable!==idEmpleado&&!actor.administrador)throw new ErrorAplicacion(403,'La ejecución de otro responsable requiere un encargado autorizado');
+      const anteriores=await tx.tarea_ejecutable_unidad_ot.findMany({where:{id_unidad_fisica_ot:origen.id_unidad_fisica_ot,OR:[{orden_etapa:{lt:origen.orden_etapa}},{orden_etapa:origen.orden_etapa,orden_tarea:{lt:origen.orden_tarea}}]},include:{estado_operacional:true}});if(anteriores.some(item=>item.estado_operacional?.estado!=='CERRADA'))throw new ErrorAplicacion(409,'Debes cerrar las tareas anteriores antes de ejecutar esta etapa');
+      const ejecucion = await tx.ejecucion_tarea.create({ data: { id_tarea: tarea.tarea_tarea_id, id_usuario_ejecutor: actor.id, fecha_ejecucion: new Date(), estado_ejecucion: 'terminada', estado_validacion_productiva: 'pendiente', cantidad, unidad }, include: { tarea: true, ejecutor: true } });
+      await tx.atribucion_ejecucion_tarea_ot.create({data:{id_ejecucion_tarea:ejecucion.id_ejecucion_tarea,id_empleado_ejecutor:idEmpleado,registrado_por:actor.id}});await tx.estado_tarea_produccion_ot.update({where:{id_tarea_ejecutable_ot:origen.id_tarea_ejecutable_ot},data:{estado:'PENDIENTE_VALIDACION',actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});
       return this.presentarEjecucion(ejecucion);
     });
   }
 
   async listarEjecucionesPendientes() {
-    const ejecuciones = await prisma.ejecucion_tarea.findMany({ where: { estado_ejecucion: 'terminada', estado_validacion_productiva: 'pendiente' }, include: { tarea: true, ejecutor: true }, orderBy: { fecha_ejecucion: 'asc' } });
+    const ejecuciones = await prisma.ejecucion_tarea.findMany({ where: { estado_ejecucion: 'terminada', estado_validacion_productiva: 'pendiente' }, include: { tarea: true, ejecutor: true,atribucion_productiva:{include:{empleado_ejecutor:true,registrador:true}} }, orderBy: { fecha_ejecucion: 'asc' } });
     return ejecuciones.map((item) => this.presentarEjecucion(item));
   }
 
-  async validarEjecucionProductiva(id: number, entrada: Record<string, unknown>) {
+  async validarEjecucionProductiva(id: number, entrada: Record<string, unknown>,actor:ActorTerrenoM6) {
     const decision = texto(entrada.decision, 20).toLowerCase();
     if (!['validada', 'rechazada', 'devuelta'].includes(decision)) throw new ErrorAplicacion(400, 'Decisión productiva inválida');
     return prisma.$transaction(async (tx) => {
       const cambio = await tx.ejecucion_tarea.updateMany({ where: { id_ejecucion_tarea: BigInt(id), estado_ejecucion: 'terminada', estado_validacion_productiva: 'pendiente' }, data: { estado_validacion_productiva: decision } });
       if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La ejecución no existe, no está terminada o ya fue revisada');
       const ejecucion = await tx.ejecucion_tarea.findUnique({ where: { id_ejecucion_tarea: BigInt(id) }, include: { tarea: true, ejecutor: true } });
+      if(ejecucion){const origen=await tx.tarea_ejecutable_unidad_ot.findUnique({where:{id_tarea:ejecucion.id_tarea},include:{estado_operacional:true}});if(origen?.estado_operacional){const estado=decision==='validada'?'PENDIENTE_VALIDACION':origen.estado_operacional.id_empleado_responsable?'ASIGNADA':'PENDIENTE';await tx.estado_tarea_produccion_ot.update({where:{id_tarea_ejecutable_ot:origen.id_tarea_ejecutable_ot},data:{estado,actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});}}
       return this.presentarEjecucion(ejecucion);
     });
   }
+
+  async agregarEtapaProduccion(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6){
+    const nombre=texto(entrada.nombre,150),descripcion=texto(entrada.descripcion,4000)||null,motivo=texto(entrada.motivo,1000),clave=texto(entrada.claveIdempotencia,120);if(!nombre||!motivo||!clave)throw new ErrorAplicacion(400,'Nombre, motivo y clave de idempotencia son obligatorios');const idArea=BigInt(identificador(entrada.idAreaTrabajo));const orden=enteroPositivo(entrada.orden,'Orden de etapa');
+    return prisma.$transaction(async tx=>{const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{cierre_produccion:true}});if(!unidad)throw new ErrorAplicacion(404,'Orden de Trabajo no encontrada');if(unidad.cierre_produccion||unidad.estado!=='LIBERADA')throw new ErrorAplicacion(409,'La OT debe estar liberada y abierta para agregar etapas');const existente=await tx.etapa_adicional_orden_trabajo.findUnique({where:{clave_idempotencia:clave}});if(existente){if(existente.id_unidad_fisica_ot!==unidad.id_unidad_fisica_ot)throw new ErrorAplicacion(409,'La clave de idempotencia ya fue utilizada');return{mensaje:'La etapa ya había sido incorporada',idEtapa:existente.id_etapa_adicional_ot.toString()};}const area=await tx.area_trabajo.findFirst({where:{area_trabajo_id_area:idArea,area_trabajo_activo:true}});if(!area)throw new ErrorAplicacion(409,'El área seleccionada no está activa');const cerradas=await tx.tarea_ejecutable_unidad_ot.findMany({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,estado_operacional:{is:{estado:'CERRADA'}}},select:{orden_etapa:true}});const maxCerrada=Math.max(0,...cerradas.map(item=>item.orden_etapa));if(orden<=maxCerrada)throw new ErrorAplicacion(409,'No se puede insertar una etapa antes de etapas ya cerradas');if(await tx.tarea_ejecutable_unidad_ot.count({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,orden_etapa:orden}}))throw new ErrorAplicacion(409,'La posición ya está ocupada; use una posición posterior sin reordenar etapas existentes');const etapa=await tx.etapa_adicional_orden_trabajo.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_area_trabajo:idArea,nombre,descripcion,orden,motivo,clave_idempotencia:clave,creado_por:actor.id}});await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,entidad:'ETAPA',evento:'ETAPA_INCORPORADA',valor_nuevo:{id:etapa.id_etapa_adicional_ot.toString(),nombre,orden,idAreaTrabajo:idArea.toString()},motivo,usuario_id_usuario:actor.id}});return{mensaje:'Etapa incorporada',idEtapa:etapa.id_etapa_adicional_ot.toString()};},{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  async agregarTareaProduccion(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6){
+    const motivo=texto(entrada.motivo,1000),clave=texto(entrada.claveIdempotencia,120);if(!motivo||!clave)throw new ErrorAplicacion(400,'Motivo y clave de idempotencia son obligatorios');const idCatalogo=entrada.idTareaFabricacion?identificador(entrada.idTareaFabricacion):null;const idEtapaAdicional=entrada.idEtapaAdicional?BigInt(identificador(entrada.idEtapaAdicional)):null;const idEtapaPlan=texto(entrada.idEtapaPlanificacion,120);const idTareaOrigen=entrada.idTareaOrigenCorrectiva?BigInt(identificador(entrada.idTareaOrigenCorrectiva)):null;
+    return prisma.$transaction(async tx=>{const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{cierre_produccion:true,rectificacion:{include:{versiones:{include:{decision:true},orderBy:{numero_version:'desc'}}}}}});if(!unidad?.rectificacion)throw new ErrorAplicacion(404,'Orden de Trabajo no encontrada');if(unidad.cierre_produccion||unidad.estado!=='LIBERADA')throw new ErrorAplicacion(409,'La OT debe estar liberada y abierta para agregar tareas');const repetida=await tx.tarea_ejecutable_unidad_ot.findUnique({where:{clave_idempotencia:clave}});if(repetida){if(repetida.id_unidad_fisica_ot!==unidad.id_unidad_fisica_ot)throw new ErrorAplicacion(409,'La clave de idempotencia ya fue utilizada');return this.presentarTareaProduccion(await tx.tarea.findUnique({where:{tarea_tarea_id:repetida.id_tarea},include:{orden_trabajo:true}}),tx);}const version=unidad.rectificacion.versiones.find(v=>v.decision?.decision==='APROBADA');if(!version)throw new ErrorAplicacion(409,'La OT no tiene una revisión técnica aprobada vigente');let idArea:bigint,ordenEtapa:number,idEtapa:string,origen='TAREA_ADICIONAL';if(idEtapaAdicional){const etapa=await tx.etapa_adicional_orden_trabajo.findFirst({where:{id_etapa_adicional_ot:idEtapaAdicional,id_unidad_fisica_ot:unidad.id_unidad_fisica_ot}});if(!etapa)throw new ErrorAplicacion(404,'Etapa adicional no encontrada');idArea=etapa.id_area_trabajo;ordenEtapa=etapa.orden;idEtapa=`adicional-${etapa.id_etapa_adicional_ot}`;origen='ETAPA_ADICIONAL';}else{const referencia=await tx.tarea_ejecutable_unidad_ot.findFirst({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_etapa_planificacion:idEtapaPlan},include:{estado_operacional:true}});if(!referencia?.estado_operacional)throw new ErrorAplicacion(404,'Etapa planificada no encontrada');idArea=referencia.estado_operacional.id_area_trabajo;ordenEtapa=referencia.orden_etapa;idEtapa=referencia.id_etapa_planificacion;}
+      const catalogo=idCatalogo?await tx.catalogo_tarea_fabricacion.findFirst({where:{id_tarea_fabricacion:idCatalogo,id_area_trabajo:idArea,estado:'ACTIVA'}}):null;if(idCatalogo&&!catalogo)throw new ErrorAplicacion(409,'La tarea de catálogo no está activa en el área de la etapa');const nombre=catalogo?.nombre||texto(entrada.nombre,150);if(!nombre)throw new ErrorAplicacion(400,'Debe seleccionar una tarea de catálogo o indicar un nombre particular');const idEmpleado=entrada.idEmpleado?identificador(entrada.idEmpleado):null;if(idEmpleado&&!await tx.asignacion_area_empleado.findFirst({where:{id_empleado:idEmpleado,id_area_trabajo:idArea,vigencia_hasta:null,empleado:{estado_laboral:'activo'}}}))throw new ErrorAplicacion(409,'El responsable debe estar activo en el área de la tarea');if(idTareaOrigen){const original=await tx.tarea_ejecutable_unidad_ot.findFirst({where:{id_tarea_ejecutable_ot:idTareaOrigen,id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},include:{estado_operacional:true}});if(!original||original.estado_operacional?.estado!=='CERRADA')throw new ErrorAplicacion(409,'Una tarea correctiva debe relacionarse con una tarea cerrada de la misma OT');origen='CORRECTIVA';}
+      const ultima=await tx.tarea_ejecutable_unidad_ot.aggregate({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,orden_etapa:ordenEtapa},_max:{orden_tarea:true}});const ordenTarea=(ultima._max.orden_tarea||0)+1;const instrucciones=texto(entrada.instrucciones,4000)||catalogo?.descripcion||null;const tiempo=entrada.tiempoEstimadoMin?enteroPositivo(entrada.tiempoEstimadoMin,'Tiempo estimado'):catalogo?.tiempo_estimado_min||null;const tarea=await tx.tarea.create({data:{tarea_titulo:nombre,tarea_descripcion:texto(entrada.descripcion,2000)||catalogo?.descripcion||null,tarea_instrucciones_de_oficina:instrucciones,tarea_urgencia:texto(entrada.prioridad,30)||null,tarea_estado_de_tarea:'pendiente',tarea_fecha_de_creacion:new Date(),id_especificacion_puerta:unidad.rectificacion.id_especificacion_puerta,id_orden_trabajo:unidad.id_orden_trabajo}});const ejecutable=await tx.tarea_ejecutable_unidad_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_rectificacion:version.id_version_rectificacion,id_tarea:tarea.tarea_tarea_id,id_etapa_planificacion:idEtapa,id_tarea_planificacion:`adicional-${clave}`.slice(0,120),orden_etapa:ordenEtapa,orden_tarea:ordenTarea,id_empleado_planificado:null,origen,id_etapa_adicional_ot:idEtapaAdicional,clave_idempotencia:clave,id_tarea_origen_correctiva:idTareaOrigen}});await tx.estado_tarea_produccion_ot.create({data:{id_tarea_ejecutable_ot:ejecutable.id_tarea_ejecutable_ot,id_area_trabajo:idArea,id_empleado_responsable:idEmpleado,estado:idEmpleado?'ASIGNADA':'PENDIENTE',prioridad:texto(entrada.prioridad,30)||null,tiempo_estimado_min:tiempo,instrucciones,observaciones:texto(entrada.observaciones,4000)||null,fecha_planificada:entrada.fechaPlanificada?fechaEntrada(entrada.fechaPlanificada,'Fecha planificada'):null,actualizado_por:actor.id}});await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_tarea_ejecutable_ot:ejecutable.id_tarea_ejecutable_ot,id_version_rectificacion:version.id_version_rectificacion,entidad:'TAREA',evento:origen==='CORRECTIVA'?'TAREA_CORRECTIVA_INCORPORADA':'TAREA_INCORPORADA',valor_nuevo:{nombre,origen,ordenEtapa,ordenTarea,idEmpleado},motivo,id_empleado_involucrado:idEmpleado,usuario_id_usuario:actor.id}});return this.presentarTareaProduccion(await tx.tarea.findUnique({where:{tarea_tarea_id:tarea.tarea_tarea_id},include:{orden_trabajo:true}}),tx);},{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  async cerrarTareaProduccion(id:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6){const motivo=texto(entrada.motivo,1000);if(!motivo)throw new ErrorAplicacion(400,'La observación o motivo de cierre es obligatorio');return prisma.$transaction(async tx=>{const tarea=await this.obtenerTareaProduccion(id,tx);const origen=await tx.tarea_ejecutable_unidad_ot.findUnique({where:{id_tarea:tarea.tarea_tarea_id},include:{estado_operacional:true}});if(!origen?.estado_operacional)throw new ErrorAplicacion(409,'La tarea no pertenece al flujo productivo versionado');const actual=origen.estado_operacional;if(actual.estado==='CERRADA')return{mensaje:'La tarea ya estaba cerrada',idTarea:id};const ejecuciones=await tx.ejecucion_tarea.findMany({where:{id_tarea:tarea.tarea_tarea_id}});if(!ejecuciones.some(e=>e.estado_validacion_productiva==='validada'))throw new ErrorAplicacion(409,'La tarea requiere al menos una ejecución validada antes del cierre');if(ejecuciones.some(e=>e.estado_validacion_productiva==='pendiente'))throw new ErrorAplicacion(409,'La tarea tiene ejecuciones pendientes de validación');const cambio=await tx.estado_tarea_produccion_ot.updateMany({where:{id_estado_tarea_produccion:actual.id_estado_tarea_produccion,revision:actual.revision,estado:{not:'CERRADA'}},data:{estado:'CERRADA',actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});if(cambio.count!==1)throw new ErrorAplicacion(409,'La tarea fue cerrada o modificada concurrentemente');await tx.tarea.update({where:{tarea_tarea_id:tarea.tarea_tarea_id},data:{tarea_estado_de_tarea:'cerrada',tarea_fecha_de_ultima_actualizacion:new Date()}});await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:origen.id_unidad_fisica_ot,id_tarea_ejecutable_ot:origen.id_tarea_ejecutable_ot,entidad:'TAREA',evento:'TAREA_CERRADA',valor_anterior:{estado:actual.estado},valor_nuevo:{estado:'CERRADA',ejecucionesValidadas:ejecuciones.filter(e=>e.estado_validacion_productiva==='validada').map(e=>e.id_ejecucion_tarea.toString())},motivo,id_empleado_involucrado:actual.id_empleado_responsable,usuario_id_usuario:actor.id}});return{mensaje:'Tarea cerrada',idTarea:id,estado:'CERRADA'};},{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});}
+
+  async solicitarCorreccionTecnicaProduccion(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6){const motivo=texto(entrada.motivo,2000);const propuesta=entrada.medidaPropuesta;if(!motivo||!propuesta||typeof propuesta!=='object'||Array.isArray(propuesta))throw new ErrorAplicacion(400,'Motivo y medida propuesta son obligatorios');return prisma.$transaction(async tx=>{const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{cierre_produccion:true,rectificacion:{include:{versiones:{include:{decision:true},orderBy:{numero_version:'desc'}}}}}});if(!unidad?.rectificacion)throw new ErrorAplicacion(404,'Orden de Trabajo no encontrada');if(unidad.cierre_produccion||unidad.estado!=='LIBERADA')throw new ErrorAplicacion(409,'Sólo una OT liberada y abierta admite corrección técnica');const version=unidad.rectificacion.versiones.find(v=>v.decision?.decision==='APROBADA');if(!version)throw new ErrorAplicacion(409,'No existe una versión técnica aprobada como base');const datos=version.datos_rectificacion as any;const solicitud=await tx.solicitud_correccion_tecnica_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_base:version.id_version_rectificacion,medida_original:datos?.medidas||{},medida_propuesta:propuesta as Prisma.InputJsonValue,motivo,solicitado_por:actor.id}});await tx.rectificacion_orden_trabajo.update({where:{id_rectificacion_ot:unidad.rectificacion.id_rectificacion_ot},data:{estado:'RECTIFICACION_DEVUELTA',actualizado_por:actor.id,actualizado_en:new Date(),revision:{increment:1}}});await tx.unidad_fisica_orden_trabajo.update({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},data:{estado:'RECTIFICACION_DEVUELTA',actualizado_en:new Date(),revision:{increment:1}}});await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'RECTIFICACION_DEVUELTA'}});await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_rectificacion:version.id_version_rectificacion,entidad:'REVISION_TECNICA',evento:'CORRECCION_TECNICA_SOLICITADA',valor_anterior:{medidas:datos?.medidas||{},version:version.numero_version},valor_nuevo:{medidas:propuesta,idSolicitud:solicitud.id_solicitud_correccion.toString()},motivo,usuario_id_usuario:actor.id}});return conAuditoriaRectificacion({mensaje:'Corrección técnica registrada; la producción quedó bloqueada hasta nueva aprobación y aplicación',idSolicitud:solicitud.id_solicitud_correccion.toString(),estado:'RECTIFICACION_DEVUELTA'},{estado:'LIBERADA',version:version.numero_version},{estado:'RECTIFICACION_DEVUELTA'});},{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});}
+
+  async finalizarOrdenTrabajoProduccion(idOrden:number,entrada:Record<string,unknown>,actor:ActorTerrenoM6){const observaciones=texto(entrada.observaciones,4000)||null;return prisma.$transaction(async tx=>{const unidad=await tx.unidad_fisica_orden_trabajo.findUnique({where:{id_orden_trabajo:BigInt(idOrden)},include:{cierre_produccion:true,liberacion:true,etapas_adicionales:true,rectificacion:{include:{versiones:{include:{decision:true},orderBy:{numero_version:'desc'}}}},tareas_ejecutables:{include:{estado_operacional:true,tarea:{include:{ejecuciones:{include:{incidencias:true}}}}}}}});if(!unidad?.rectificacion||!unidad.liberacion)throw new ErrorAplicacion(409,'La OT no cuenta con liberación técnica');if(unidad.cierre_produccion)return{mensaje:'La OT ya estaba finalizada',idOrdenTrabajo:idOrden,estado:'FINALIZADA'};if(unidad.estado!=='LIBERADA')throw new ErrorAplicacion(409,'La OT debe estar liberada y sin correcciones técnicas pendientes');const version=unidad.rectificacion.versiones[0];if(!version||version.decision?.decision!=='APROBADA')throw new ErrorAplicacion(409,'La rectificación técnica vigente no está aprobada');if(!unidad.tareas_ejecutables.length)throw new ErrorAplicacion(409,'La OT no tiene tareas ejecutables');if(unidad.etapas_adicionales.some(etapa=>!unidad.tareas_ejecutables.some(tarea=>tarea.id_etapa_adicional_ot===etapa.id_etapa_adicional_ot)))throw new ErrorAplicacion(409,'Existen etapas adicionales sin tareas productivas');if(unidad.tareas_ejecutables.some(t=>t.estado_operacional?.estado!=='CERRADA'))throw new ErrorAplicacion(409,'Todas las tareas obligatorias y adicionales deben estar cerradas');const ejecuciones=unidad.tareas_ejecutables.flatMap(t=>t.tarea.ejecuciones);if(ejecuciones.some(e=>e.estado_validacion_productiva==='pendiente'))throw new ErrorAplicacion(409,'Existen ejecuciones pendientes de validación');if(ejecuciones.some(e=>e.incidencias.some(i=>i.estado==='pendiente'||i.estado_revision==='pendiente_revision')))throw new ErrorAplicacion(409,'Existen incidencias productivas bloqueantes');const resumen={total:unidad.tareas_ejecutables.length,cerradas:unidad.tareas_ejecutables.length,ejecucionesValidadas:ejecuciones.filter(e=>e.estado_validacion_productiva==='validada').length};await tx.cierre_orden_trabajo_produccion.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_rectificacion:version.id_version_rectificacion,resumen_tareas:resumen,observaciones,estado_anterior:'LIBERADA',estado_final:'FINALIZADA',finalizado_por:actor.id}});await tx.unidad_fisica_orden_trabajo.update({where:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot},data:{estado:'FINALIZADA',actualizado_en:new Date(),revision:{increment:1}}});await tx.orden_trabajo.update({where:{orden_trabajo_id_orden:unidad.id_orden_trabajo},data:{orden_trabajo_estado:'completada'}});await tx.historial_cambio_produccion_ot.create({data:{id_unidad_fisica_ot:unidad.id_unidad_fisica_ot,id_version_rectificacion:version.id_version_rectificacion,entidad:'ORDEN_TRABAJO',evento:'ORDEN_TRABAJO_FINALIZADA',valor_anterior:{estado:'LIBERADA'},valor_nuevo:{estado:'FINALIZADA',resumen},motivo:observaciones||'Cierre productivo explícito',usuario_id_usuario:actor.id}});return conAuditoriaRectificacion({mensaje:'Orden de Trabajo finalizada',idOrdenTrabajo:idOrden,estado:'FINALIZADA',resumen},{estado:'LIBERADA'},{estado:'FINALIZADA',resumen});},{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});}
 
   async obtenerPreparacionSalida(id: number) {
     const visita = await prisma.servicio_terreno.findUnique({ where: { servicio_terreno_servicio_terreno_id: BigInt(id) }, include: { ...this.incluirVisitaTerreno, checklist_de_materiales: true } });

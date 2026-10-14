@@ -28,7 +28,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'bandeja' | 'historial' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
   | 'descartarBorrador' | 'aprobarCotizacion' | 'aprobarVenta' | 'editarCotizacion' | 'tipoCambio'
   | 'consultarPago' | 'consultarSaldo' | 'catalogosPago'
-  | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
+  | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'obtenerPlanificacionAprobacionCotizacion' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
   | 'iniciarSesion' | 'solicitarRecuperacion' | 'recuperarClave' | 'validarRecuperacion' | 'miSesion' | 'cambiarClave' | 'cerrarSesion'
   | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
   | 'asignarPermisos' | 'retirarPermisos' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
@@ -50,6 +50,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'registrarComisionBancaria' | 'listarEnviosImportaciones' | 'obtenerEnvioImportacion' | 'crearEnvioImportacion' | 'asociarOrdenEnvio' | 'registrarCostoEnvio' | 'actualizarCostoEnvio'
   | 'pasarEnvioRevision' | 'cerrarFinancieramenteEnvio' | 'reabrirEnvio' | 'consultarCajaChica' | 'obtenerGastoCajaChica' | 'configurarFondoCajaChica' | 'registrarGastoCajaChica' | 'adjuntarRespaldoCajaChica' | 'aprobarGastoCajaChica' | 'rechazarGastoCajaChica'
   | 'listarEmpleados' | 'obtenerEmpleado' | 'crearEmpleado' | 'actualizarDatosBaseEmpleado' | 'catalogosLaborales' | 'listarRelacionesLaborales' | 'crearRelacionLaboral' | 'actualizarRelacionLaboral'
+  | 'listarAreasTrabajo' | 'crearAreaTrabajo' | 'actualizarAreaTrabajo' | 'activarAreaTrabajo' | 'desactivarAreaTrabajo' | 'listarEmpleadosArea' | 'obtenerHistorialAreaEmpleado' | 'asignarAreaEmpleado'
   | 'catalogosRemuneracionales' | 'obtenerPerfilRemuneracional' | 'actualizarPerfilRemuneracional' | 'obtenerHistorialRemuneracionalEmpleado'
   | 'catalogosAsignacionEsquemas' | 'listarAsignacionesEsquemaEmpleado' | 'asignarEsquemaEmpleado' | 'finalizarAsignacionEsquemaEmpleado'
   | 'catalogoHaberes' | 'listarAsignacionesHaberEmpleado' | 'asignarHaberEmpleado' | 'finalizarAsignacionHaberEmpleado'
@@ -81,8 +82,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'crearVisitaTerreno' | 'listarObrasTerreno' | 'listarVisitasTerreno' | 'obtenerVisitaTerreno' | 'listarUsuariosTerreno' | 'asignarResponsableVisita' | 'listarMisTareasTerreno'
   | 'obtenerLevantamientoTerreno' | 'guardarLevantamientoTerreno' | 'corregirLevantamientoTerreno' | 'generarOrdenTrabajoLevantamiento'
   | 'ajustarOrdenTrabajoTerreno' | 'liberarOrdenTrabajoTerreno' | 'generarTareasProduccion'
-  | 'listarTareasProduccion' | 'asignarTareaProduccion' | 'registrarEjecucionTarea'
-  | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida'
+  | 'listarOrdenesTrabajoRectificacion' | 'obtenerOrdenTrabajoRectificacion' | 'asignarRectificadorOrdenTrabajo' | 'guardarRectificacionOrdenTrabajo' | 'enviarRectificacionAprobacion' | 'aprobarRectificacionOrdenTrabajo' | 'devolverRectificacionOrdenTrabajo' | 'liberarOrdenTrabajoRectificada'
+  | 'listarTareasProduccion' | 'asignarTareaProduccion' | 'modificarTareaProduccion' | 'agregarEtapaProduccion' | 'agregarTareaProduccion' | 'iniciarTareaProduccion' | 'registrarEjecucionTarea'
+  | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'cerrarTareaProduccion' | 'solicitarCorreccionTecnicaProduccion' | 'finalizarOrdenTrabajoProduccion' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida'
   | 'registrarResultadoVisita' | 'registrarIncidenciaRetrabajo' | 'listarIncidenciasOperativas' | 'catalogosIncidenciaOperativa' | 'obtenerEvidenciaIncidencia' | 'adjuntarEvidenciaIncidencia' | 'actualizarIncidenciaOperativa' | 'aprobarIncidenciaOperativa' | 'rechazarIncidenciaOperativa'
   | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
   | 'consultarPanelGeneralM7' | 'consultarHistoricoPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
@@ -97,7 +99,9 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consultarExposicionCreditoM8' | 'consultarSituacionCreditoM8' | 'consultarHistorialCreditoM8' | 'exportarCreditoM8' | 'consultarDistribucionCreditoM8' | 'consultarComposicionCreditoM8' | 'validarFormalizacionCreditoM8'
   | 'consultarAuditoriaM9' | 'obtenerDetalleAuditoriaM9' | 'exportarAuditoriaM9' | 'consultarResumenAuditoriaM9'
   | 'listarFamiliasProductoComercial' | 'crearFamiliaProductoComercial' | 'actualizarFamiliaProductoComercial' | 'desactivarFamiliaProductoComercial' | 'reactivarFamiliaProductoComercial' | 'historialFamiliaProductoComercial'
-  | 'listarProductosComerciales' | 'crearProductoComercial' | 'obtenerProductoComercial' | 'actualizarProductoComercial' | 'desactivarProductoComercial' | 'reactivarProductoComercial' | 'vincularProductoComercial' | 'publicarVersionProductoComercial' | 'historialProductoComercial' | 'catalogosVinculacionProductoComercial';
+  | 'listarProductosComerciales' | 'crearProductoComercial' | 'obtenerProductoComercial' | 'actualizarProductoComercial' | 'desactivarProductoComercial' | 'reactivarProductoComercial' | 'vincularProductoComercial' | 'publicarVersionProductoComercial' | 'historialProductoComercial' | 'catalogosVinculacionProductoComercial'
+  | 'listarTareasFabricacion' | 'crearTareaFabricacion' | 'actualizarTareaFabricacion' | 'desactivarTareaFabricacion' | 'reactivarTareaFabricacion'
+  | 'obtenerPlantillaFabricacionFamilia' | 'historialPlantillaFabricacionFamilia' | 'guardarBorradorPlantillaFabricacion' | 'publicarPlantillaFabricacionFamilia';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -189,6 +193,14 @@ export class C_Finanzas {
       case 'obtenerEmpleado': return this.m6.obtenerEmpleado(identificador(parametros.id));
       case 'crearEmpleado': return this.m6.crearEmpleado(cuerpo);
       case 'actualizarDatosBaseEmpleado': return this.m6.actualizarDatosBaseEmpleado(identificador(parametros.id), cuerpo);
+      case 'listarAreasTrabajo': return this.m6.listarAreasTrabajo(solicitud.consulta?.incluirInactivas !== 'false');
+      case 'crearAreaTrabajo': return this.m6.crearAreaTrabajo(cuerpo);
+      case 'actualizarAreaTrabajo': return this.m6.actualizarAreaTrabajo(BigInt(identificador(parametros.id)), cuerpo);
+      case 'activarAreaTrabajo': return this.m6.cambiarEstadoAreaTrabajo(BigInt(identificador(parametros.id)), true);
+      case 'desactivarAreaTrabajo': return this.m6.cambiarEstadoAreaTrabajo(BigInt(identificador(parametros.id)), false);
+      case 'listarEmpleadosArea': return this.m6.listarEmpleadosArea(BigInt(identificador(parametros.id)));
+      case 'obtenerHistorialAreaEmpleado': return this.m6.obtenerHistorialAreaEmpleado(identificador(parametros.id));
+      case 'asignarAreaEmpleado': return this.m6.asignarAreaEmpleado(identificador(parametros.id), cuerpo, actor.id);
       case 'catalogosLaborales': return this.m6.catalogosLaborales();
       case 'listarRelacionesLaborales': return this.m6.listarRelacionesLaborales(identificador(parametros.id));
       case 'crearRelacionLaboral': return this.m6.crearRelacionLaboral(identificador(parametros.id), cuerpo);
@@ -319,14 +331,29 @@ export class C_Finanzas {
       case 'guardarLevantamientoTerreno': return this.m6.guardarLevantamientoTerreno(identificador(parametros.id), cuerpo, actor);
       case 'corregirLevantamientoTerreno': return this.m6.corregirLevantamientoTerreno(identificador(parametros.id), cuerpo, actor);
       case 'generarOrdenTrabajoLevantamiento': return this.m6.generarOrdenTrabajoLevantamiento(identificador(parametros.id), actor);
+      case 'listarOrdenesTrabajoRectificacion': return this.m6.listarOrdenesTrabajoRectificacion(solicitud.consulta || {}, actor);
+      case 'obtenerOrdenTrabajoRectificacion': return this.m6.obtenerOrdenTrabajoRectificacion(identificador(parametros.ordenId), actor);
+      case 'asignarRectificadorOrdenTrabajo': return this.m6.asignarRectificadorOrdenTrabajo(identificador(parametros.ordenId), cuerpo, actor);
+      case 'guardarRectificacionOrdenTrabajo': return this.m6.guardarRectificacionOrdenTrabajo(identificador(parametros.ordenId), cuerpo, actor);
+      case 'enviarRectificacionAprobacion': return this.m6.enviarRectificacionAprobacion(identificador(parametros.ordenId), cuerpo, actor);
+      case 'aprobarRectificacionOrdenTrabajo': return this.m6.aprobarRectificacionOrdenTrabajo(identificador(parametros.ordenId), cuerpo, actor);
+      case 'devolverRectificacionOrdenTrabajo': return this.m6.devolverRectificacionOrdenTrabajo(identificador(parametros.ordenId), cuerpo, actor);
+      case 'liberarOrdenTrabajoRectificada': return this.m6.liberarOrdenTrabajoRectificada(identificador(parametros.ordenId), cuerpo, actor);
       case 'ajustarOrdenTrabajoTerreno': return this.m6.ajustarOrdenTrabajoTerreno(identificador(parametros.id), cuerpo, actor);
       case 'liberarOrdenTrabajoTerreno': return this.m6.liberarOrdenTrabajoTerreno(identificador(parametros.id), identificador(parametros.ordenId), actor);
       case 'generarTareasProduccion': return this.m6.generarTareasProduccion(identificador(parametros.id), identificador(parametros.ordenId), cuerpo, actor);
       case 'listarTareasProduccion': return this.m6.listarTareasProduccion(identificador(parametros.ordenId));
-      case 'asignarTareaProduccion': return this.m6.asignarTareaProduccion(identificador(parametros.id), cuerpo);
+      case 'asignarTareaProduccion': return this.m6.asignarTareaProduccion(identificador(parametros.id), cuerpo, actor);
+      case 'modificarTareaProduccion': return this.m6.modificarTareaProduccion(identificador(parametros.id), cuerpo, actor);
+      case 'agregarEtapaProduccion': return this.m6.agregarEtapaProduccion(identificador(parametros.ordenId), cuerpo, actor);
+      case 'agregarTareaProduccion': return this.m6.agregarTareaProduccion(identificador(parametros.ordenId), cuerpo, actor);
+      case 'iniciarTareaProduccion': return this.m6.iniciarTareaProduccion(identificador(parametros.id), cuerpo, actor);
       case 'registrarEjecucionTarea': return this.m6.registrarEjecucionTarea(identificador(parametros.id), cuerpo, actor);
       case 'listarEjecucionesPendientes': return this.m6.listarEjecucionesPendientes();
-      case 'validarEjecucionProductiva': return this.m6.validarEjecucionProductiva(identificador(parametros.id), cuerpo);
+      case 'validarEjecucionProductiva': return this.m6.validarEjecucionProductiva(identificador(parametros.id), cuerpo, actor);
+      case 'cerrarTareaProduccion': return this.m6.cerrarTareaProduccion(identificador(parametros.id), cuerpo, actor);
+      case 'solicitarCorreccionTecnicaProduccion': return this.m6.solicitarCorreccionTecnicaProduccion(identificador(parametros.ordenId), cuerpo, actor);
+      case 'finalizarOrdenTrabajoProduccion': return this.m6.finalizarOrdenTrabajoProduccion(identificador(parametros.ordenId), cuerpo, actor);
       case 'obtenerPreparacionSalida': return this.m6.obtenerPreparacionSalida(identificador(parametros.id));
       case 'actualizarChecklistSalida': return this.m6.actualizarChecklistSalida(identificador(parametros.id), cuerpo);
       case 'registrarResultadoVisita': return this.m6.registrarResultadoVisita(identificador(parametros.id), cuerpo);
@@ -466,12 +493,22 @@ export class C_Finanzas {
       case 'publicarVersionProductoComercial': return this.m2.publicarVersionProductoComercial(identificador(parametros.id), cuerpo, actor.id);
       case 'historialProductoComercial': return this.m2.obtenerProductoComercial(identificador(parametros.id), true);
       case 'catalogosVinculacionProductoComercial': return this.m2.catalogosVinculacionProductoComercial();
+      case 'listarTareasFabricacion': return this.m2.listarTareasFabricacion(solicitud.consulta || {});
+      case 'crearTareaFabricacion': return this.m2.crearTareaFabricacion(cuerpo, actor.id);
+      case 'actualizarTareaFabricacion': return this.m2.actualizarTareaFabricacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'desactivarTareaFabricacion': return this.m2.cambiarEstadoTareaFabricacion(identificador(parametros.id), false, cuerpo, actor.id);
+      case 'reactivarTareaFabricacion': return this.m2.cambiarEstadoTareaFabricacion(identificador(parametros.id), true, cuerpo, actor.id);
+      case 'obtenerPlantillaFabricacionFamilia': return this.m2.obtenerPlantillaFabricacionFamilia(identificador(parametros.id));
+      case 'historialPlantillaFabricacionFamilia': return this.m2.obtenerPlantillaFabricacionFamilia(identificador(parametros.id), true);
+      case 'guardarBorradorPlantillaFabricacion': return this.m2.guardarBorradorPlantillaFabricacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'publicarPlantillaFabricacionFamilia': return this.m2.publicarPlantillaFabricacion(identificador(parametros.id), cuerpo, actor.id);
       case 'monedas': return this.m2.listarMonedas();
       case 'bandeja': return this.m2.consultarBandeja();
       case 'historial': return this.m2.consultarBandeja(true);
-      case 'consolidarB2C': return this.m2.consolidarB2C(identificador(parametros.id),cuerpo,actor.id.toString());
-      case 'aprobarCotizacionB2B': return this.m2.aprobarCotizacionB2B(identificador(parametros.id), cuerpo);
-      case 'aprobarCotizacion': return cuerpo.folioOrdenCompra ? this.m2.aprobarCotizacionB2B(identificador(parametros.id), cuerpo) : this.m2.operacionPendiente(operacion);
+      case 'consolidarB2C': return this.m2.consolidarB2C(identificador(parametros.id),cuerpo,actor.id);
+      case 'obtenerPlanificacionAprobacionCotizacion': return this.m2.obtenerPlanificacionAprobacionCotizacion(identificador(parametros.id));
+      case 'aprobarCotizacionB2B': return this.m2.aprobarCotizacionB2B(identificador(parametros.id), cuerpo, actor.id);
+      case 'aprobarCotizacion': return cuerpo.folioOrdenCompra ? this.m2.aprobarCotizacionB2B(identificador(parametros.id), cuerpo, actor.id) : this.m2.operacionPendiente(operacion);
       case 'registrarClienteDesdeCotizacion': return this.m2.registrarClienteDesdeCotizacion(cuerpo);
       case 'emitirCotizacion': return this.m2.emitirCotizacion(identificador(parametros.id));
       case 'reactivarCotizacion': return this.m2.reactivarCotizacion(identificador(parametros.id), cuerpo);

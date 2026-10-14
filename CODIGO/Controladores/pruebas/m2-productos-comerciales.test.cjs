@@ -36,8 +36,8 @@ test('M2 mantenedor comercial de productos y familias', async t => {
   const vista = readFileSync(resolve('../Vistas/src/views/Mantenedores/ProductosFamilias.tsx'), 'utf8');
   const panel = readFileSync(resolve('../Vistas/src/views/Mantenedores/Mantenedores.tsx'), 'utf8');
   usuario = await prisma.usuario.findFirstOrThrow();
-  item = await prisma.item_comercial.findFirstOrThrow({ where: { estado_item: 'activo' } });
-  inventario = await prisma.producto_terminado.findFirst({ where: { producto_terminado_activo: { not: false } } });
+  item = await prisma.item_comercial.findFirstOrThrow({ where: { estado_item: 'activo', extensiones_comerciales: { none: {} } } });
+  inventario = await prisma.producto_terminado.findFirst({ where: { producto_terminado_activo: { not: false }, extensiones_comerciales: { none: {} } } });
 
   await t.test('01 migración es incremental y crea sólo tablas en Finanzas', () => { assert.match(migracion,/CREATE TABLE "finanzas"\."familia_producto_comercial"/); assert.doesNotMatch(migracion,/CREATE TABLE "(?:terreno|inventario)"/); });
   await t.test('02 reutiliza item_comercial por FK real', () => assert.match(migracion,/REFERENCES "terreno"\."item_comercial"\("id_item_comercial"\)/));

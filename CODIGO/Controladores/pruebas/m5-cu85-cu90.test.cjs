@@ -1,4 +1,4 @@
-const { test, after } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { prisma } = require('../dist/db');
 const { C_Finanzas } = require('../dist/controladores/C_Finanzas');
@@ -17,6 +17,23 @@ let moneda;
 let tipoDocumento;
 let medioPago;
 let secuencia = 0;
+
+async function limpiarFixturesCu86Huerfanos() {
+  const filas = await prisma.proveedor.findMany({
+    where: { nombre_razon_social: { in: ['Orden CU86 Alfa', 'Orden CU86 Zeta'] } },
+    select: { id_proveedor: true },
+  });
+  const ids = filas.map(fila => fila.id_proveedor);
+  if (!ids.length) return;
+  const documentosFixture = await prisma.documento_compra_proveedor.findMany({ where: { id_proveedor: { in: ids } }, select: { id_documento_compra_proveedor: true } });
+  const idsDocumentos = documentosFixture.map(documento => documento.id_documento_compra_proveedor);
+  if (idsDocumentos.length) await prisma.asignacion_pago_proveedor.deleteMany({ where: { id_documento_compra_proveedor: { in: idsDocumentos } } });
+  await prisma.documento_compra_proveedor.deleteMany({ where: { id_proveedor: { in: ids } } });
+  await prisma.historial_proveedor_m5.deleteMany({ where: { id_proveedor: { in: ids } } });
+  await prisma.proveedor.deleteMany({ where: { id_proveedor: { in: ids } } });
+}
+
+before(limpiarFixturesCu86Huerfanos);
 
 function dv(cuerpo) {
   let suma = 0; let multiplicador = 2;
@@ -88,7 +105,7 @@ after(async () => {
     await prisma.historial_proveedor_m5.deleteMany({ where: { id_proveedor: { in: proveedores } } });
     await prisma.proveedor.deleteMany({ where: { id_proveedor: { in: proveedores } } });
   }
-  await prisma.$disconnect();
+  await limpiarFixturesCu86Huerfanos();
 });
 
 test('CU85 filtra tipos y ordena antecedentes ascendente y descendente', async () => {

@@ -1,4 +1,4 @@
-const { test, after } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { readFileSync } = require('node:fs');
@@ -11,6 +11,21 @@ const modulo = new M7Controller();
 const consulta = { anio: 2045, mes: 5 };
 const ids = { clientes: [], fichas: [], cotizaciones: [], notas: [] };
 let clienteA; let clienteB; let cotizacionPendiente; let cotizacionSinMonto; let cotizacionFormalizada;
+
+async function limpiarFixturesM7BaseHuerfanos() {
+  const clientes = await prisma.cliente_financiero.findMany({
+    where: { OR: [{ nombre_razon_social_referencia: { startsWith: 'Cliente Alfa M7 ' } }, { nombre_razon_social_referencia: { startsWith: 'Cliente Beta M7 ' } }] },
+    select: { id_cliente_financiero: true, ficha_cliente: { select: { id_ficha_cliente: true } } },
+  });
+  const fichas = clientes.flatMap(fila => fila.ficha_cliente ? [fila.ficha_cliente.id_ficha_cliente] : []);
+  if (!fichas.length) return;
+  await prisma.nota_venta.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+  await prisma.cotizacion.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+  await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: fichas } } });
+  await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: clientes.map(fila => fila.id_cliente_financiero) } } });
+}
+
+before(limpiarFixturesM7BaseHuerfanos);
 
 const indicador = (estado, valor, detalle = 'prueba') => ({ estado, valor, detalle, actualizadoEn: new Date() });
 
@@ -56,7 +71,7 @@ after(async () => {
   await prisma.cotizacion.deleteMany({ where: { id_cotizacion: { in: ids.cotizaciones } } });
   await prisma.ficha_cliente.deleteMany({ where: { id_ficha_cliente: { in: ids.fichas } } });
   await prisma.cliente_financiero.deleteMany({ where: { id_cliente_financiero: { in: ids.clientes } } });
-  await prisma.$disconnect();
+  await limpiarFixturesM7BaseHuerfanos();
 });
 
 class CentroCompleto extends M7Controller {
