@@ -23,8 +23,8 @@ export const crearCsvAdministrativo = <T>(filas: T[], columnas: ColumnaCsv<T>[],
   return `\uFEFF${lineas.join('\r\n')}`;
 };
 
-export const archivoCsvAdministrativo = <T>(nombre: string, filas: T[], columnas: ColumnaCsv<T>[]) => {
-  const csv = crearCsvAdministrativo(filas, columnas);
+export const archivoCsvAdministrativo = <T>(nombre: string, filas: T[], columnas: ColumnaCsv<T>[], separador = ',') => {
+  const csv = crearCsvAdministrativo(filas, columnas, separador);
   return { nombre, tipo: 'text/csv;charset=utf-8', mime: 'text/csv;charset=utf-8', contenido: `data:text/csv;base64,${Buffer.from(csv, 'utf8').toString('base64')}` };
 };
 

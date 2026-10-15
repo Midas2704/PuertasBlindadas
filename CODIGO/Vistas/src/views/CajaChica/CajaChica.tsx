@@ -6,6 +6,7 @@ import { usarSesion } from '../../seguridad/Sesion';
 
 interface Gasto {id:number;monto:number;descripcion:string;fechaGasto:string;fechaRegistro:string;comercioEmisor:string|null;estado:string;registradoPor:string;condicionAprobacion:string|null;motivoRechazo:string|null;respaldos:Array<{id:number;nombreArchivo:string;tipo:string|null}>}
 interface Caja {periodo:string;fondo:number;reservado:number;aprobado:number;disponibleProyectado:number;fondoConfigurado:boolean;gastos:Gasto[]}
+export const esCajaChicaCompleta=(valor:unknown):valor is Caja=>Boolean(valor&&typeof valor==='object'&&Array.isArray((valor as Caja).gastos)&&typeof (valor as Caja).fondo==='number');
 const periodoActual=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit'}).format(new Date());
 const hoy=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const dinero=(valor:number)=>valor.toLocaleString('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0});
@@ -15,9 +16,9 @@ const leerArchivo=async(file:File)=>new Promise<string>((resolver,rechazar)=>{co
 
 export default function CajaChica(){
  const {sesion}=usarSesion();const puede=(cu:string)=>!!sesion?.permisos.includes(cu);const [periodo,setPeriodo]=useState(periodoActual());const [caja,setCaja]=useState<Caja|null>(null);const [fondo,setFondo]=useState('');const [nuevo,setNuevo]=useState({monto:'',descripcion:'',fecha:hoy(),comercioEmisor:''});const [error,setError]=useState('');const [mensaje,setMensaje]=useState('');
- const cargar=async()=>{try{const resultado:Caja=await api(`/caja-chica?periodo=${periodo}`);setCaja(resultado);setFondo(String(resultado.fondo));setError('')}catch(e){setError((e as Error).message)}};
+ const cargar=async()=>{try{const resultado:Caja=await api(`/caja-chica?periodo=${periodo}`);setCaja(resultado);setFondo(String(resultado.fondo));setError('');return true}catch(e){setError((e as Error).message);return false}};
  useEffect(()=>{let activo=true;void api(`/caja-chica?periodo=${periodo}`).then((resultado:Caja)=>{if(activo){setCaja(resultado);setFondo(String(resultado.fondo));setError('')}}).catch(e=>{if(activo)setError(e.message)});return()=>{activo=false}},[periodo]);
- const ejecutar=async(ruta:string,opciones:RequestInit,mensajeExito:string)=>{try{const resultado:Caja=await api(ruta,opciones);setCaja(resultado);setMensaje(mensajeExito);setError('')}catch(e){setError((e as Error).message)}};
+ const ejecutar=async(ruta:string,opciones:RequestInit,mensajeExito:string)=>{try{const resultado:unknown=await api(ruta,opciones);if(esCajaChicaCompleta(resultado)){setCaja(resultado);setFondo(String(resultado.fondo))}else if(!await cargar()){return}setMensaje(mensajeExito);setError('')}catch(e){setError((e as Error).message)}};
  const configurar=()=>void ejecutar(`/caja-chica/fondo/${periodo}`,json('PUT',{monto:Number(fondo)}),'Fondo mensual actualizado.');
  const registrar=async()=>{await ejecutar('/caja-chica/gastos',json('POST',{...nuevo,monto:Number(nuevo.monto)}),'Gasto registrado y reservado.');setNuevo({monto:'',descripcion:'',fecha:hoy(),comercioEmisor:''})};
  const adjuntar=async(gasto:Gasto)=>{const selector=document.createElement('input');selector.type='file';selector.onchange=async()=>{const archivo=selector.files?.[0];if(!archivo)return;await ejecutar(`/caja-chica/gastos/${gasto.id}/respaldo`,json('POST',{nombreArchivo:archivo.name,contenido:await leerArchivo(archivo),tipoRespaldo:archivo.name.toLowerCase().includes('factura')?'factura':'evidencia',comercioEmisor:gasto.comercioEmisor}),'Respaldo adjuntado.')};selector.click()};

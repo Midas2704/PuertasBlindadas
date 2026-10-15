@@ -9,4 +9,4 @@ export const archivoAuditoriaM9Csv = (eventos: EventoPresentadoM9[]) => archivoC
   { encabezado: 'Resultado', valor: evento => humanizarM9(evento.resultado) },
   { encabezado: 'Referencia', valor: evento => referenciaInformeM9(evento) },
   { encabezado: 'Ejecutor', valor: evento => ejecutorInformeM9(evento) },
-]);
+], ';');

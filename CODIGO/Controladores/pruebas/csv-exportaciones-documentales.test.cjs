@@ -36,7 +36,8 @@ test('CSV administrativos M8 y M9 son legibles y seguros para planillas', async 
       { ocurrencia: '2026-10-03T15:25:00Z', modulo: 'M7', operacion: 'EXPORTACION_DASHBOARD_CONFIRMADA', resultado: 'RECHAZADO', referencia: null, ejecutor: { tipo: 'SISTEMA', referencia: 'SISTEMA' } },
     ];
     const csv = decodificar(archivoAuditoriaM9Csv(eventos));
-    assert.ok(csv.startsWith('\uFEFFFecha y hora,Módulo,Operación,Resultado,Referencia,Ejecutor'));
+    assert.ok(csv.startsWith('\uFEFFFecha y hora;Módulo;Operación;Resultado;Referencia;Ejecutor'));
+    assert.doesNotMatch(csv.split('\r\n')[0], /,/);
     for (const texto of ['Consulta de evidencia', 'Exportación de Dashboard confirmada', 'Exitoso', 'Rechazado', 'María Ñancupil', "'=CMD()", 'Sistema']) assert.match(csv, new RegExp(texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(csv, /identidadLogica|hash|payload|metadatos|\{"|undefined|null/);
     assert.equal(csv.split('\r\n').length, 3);

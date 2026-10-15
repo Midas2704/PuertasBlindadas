@@ -166,7 +166,7 @@ const CatalogoClientes: React.FC = () => {
                 clientes.map((c) => (
                   <tr key={c.id_cliente_financiero} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="py-4 px-6 text-sm font-medium text-gray-900">{c.rut || 'Sin RUT'}</td>
-                    <td className="py-4 px-6 text-sm text-gray-700">{c.razonSocial}{c.incompleto && <span className="block text-xs text-orange-600 mt-1">Incompleto</span>}{c.estado === 'inactivo' && <span className="block text-xs text-gray-500 mt-1">Inactivo</span>}</td>
+                    <td className="py-4 px-6 text-sm text-gray-700">{c.razonSocial}<div className="mt-1 flex flex-wrap gap-1">{c.incompleto && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700">Incompleto</span>}<span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${c.estado === 'activo' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>{c.estado === 'activo' ? 'Activo' : 'Inactivo'}</span></div></td>
                     <td className="py-4 px-6 text-sm text-gray-500">
                       <div>{c.telefono || '-'}</div>
                       <div className="text-xs">{c.correo || '-'}</div>

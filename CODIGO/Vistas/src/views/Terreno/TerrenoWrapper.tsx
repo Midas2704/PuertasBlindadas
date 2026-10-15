@@ -4,7 +4,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import { operar, usarSesion } from '../../seguridad/Sesion';
 
 const opciones = [
-  { ruta:'/terreno', etiqueta:'Home', icono:Home },
+  { ruta:'/terreno', etiqueta:'Inicio de Terreno', icono:Home },
   { ruta:'/terreno/ordenes-trabajo', etiqueta:'OT', icono:ClipboardList, permisos:['CU202','CU205','CU207','CU209'] },
   { ruta:'/terreno/visitas', etiqueta:'Visitas', icono:MapPinned, permisos:['CU199','CU200','CU210','CU211'] },
   { ruta:'/terreno/mis-tareas', etiqueta:'Mis Tareas', icono:ListTodo, permisos:['CU201','CU208'] },

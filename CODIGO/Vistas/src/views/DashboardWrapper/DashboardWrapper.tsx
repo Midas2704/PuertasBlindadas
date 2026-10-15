@@ -58,7 +58,7 @@ type MenuGroupProps = {
 
 const dashboardItem: MenuItem = {
   path: '/finanzas',
-  label: 'Dashboard',
+  label: 'Inicio de Finanzas',
   icon: LayoutDashboard,
   permission: 'CU05',
 };
