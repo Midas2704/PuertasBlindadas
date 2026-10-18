@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const { validarRevisionIncidenciaM6 } = require('../dist/controladores/M6Controller');
+const { validarRevisionIncidenciaM6, validarTransicionResolucionIncidenciaM6 } = require('../dist/controladores/M6Controller');
 const { resumirIncidenciasRevisionM7 } = require('../dist/controladores/M7Controller');
 const { operacionesPermiso, permiteOperacion } = require('../dist/validaciones/permisos');
 const { CATALOGO_PRODUCTORES_M9 } = require('../dist/m9/contratoProductor');
@@ -26,5 +26,13 @@ test('M6/M7 incidencias categorizadas y revisión gerencial', async t => {
   await t.test('M7 separa aprobadas pendientes y rechazadas', () => { const resumen = resumirIncidenciasRevisionM7([{ estadoRevision: 'aprobada', categoria: { codigo: 'ATRASO', nombre: 'Atraso' } }, { estadoRevision: 'pendiente_revision', categoria: { codigo: 'ATRASO', nombre: 'Atraso' } }, { estadoRevision: 'rechazada', categoria: null }]); assert.deepEqual(resumen.estadosRevision.map(f => f.cantidad), [1,1,1]); assert.equal(resumen.aprobadas, 1); assert.equal(resumen.sinCategoriaEstructurada, 1); });
   await t.test('M7 no infiere categoría desde descripción libre', () => { const resumen = resumirIncidenciasRevisionM7([{ estadoRevision: 'aprobada', categoria: null }]); assert.deepEqual(resumen.categorias, []); assert.doesNotMatch(m7, /descripcion.*ATRASO|ATRASO.*descripcion/i); });
   await t.test('evita autoaprobación y autorechazo', () => assert.throws(() => validarRevisionIncidenciaM6({ estadoRevision: 'pendiente_revision', idCreador: 7n, idRevisor: 7n, idCategoria: 1, cantidadEvidencias: 1, decision: 'rechazada' }), /propia incidencia/i));
+  await t.test('aprobación y resolución son estados independientes', () => {
+    assert.throws(() => validarTransicionResolucionIncidenciaM6({ accion: 'corregir', estado: 'pendiente', estadoRevision: 'pendiente_revision' }), /aprobada/i);
+    assert.throws(() => validarTransicionResolucionIncidenciaM6({ accion: 'corregir', estado: 'pendiente', estadoRevision: 'rechazada' }), /aprobada/i);
+    assert.doesNotThrow(() => validarTransicionResolucionIncidenciaM6({ accion: 'corregir', estado: 'pendiente', estadoRevision: 'aprobada' }));
+    assert.throws(() => validarTransicionResolucionIncidenciaM6({ accion: 'cerrar', estado: 'corregida', estadoRevision: 'aprobada', confirmado: false }), /confirmarse/i);
+    assert.doesNotThrow(() => validarTransicionResolucionIncidenciaM6({ accion: 'cerrar', estado: 'corregida', estadoRevision: 'aprobada', confirmado: true }));
+  });
+  await t.test('bandeja usa filtros y paginación sin inventar acciones correctivas', () => { assert.match(m6, /tamano=Math\.min\(50/); assert.match(m6, /estadoResolucion/); assert.match(m6, /accionesCorrectivas:\{disponibles:false/); assert.match(m6, /responsableSeguimiento:null/); });
   await t.test('evidencia y navegación owner tienen acciones reales', () => { assert.match(schema, /id_incidencia_retrabajo\s+BigInt\?/); assert.match(vistaOwner, /verEvidencia/); assert.match(vistaOwner, /Aprobación requiere evidencia/); assert.match(vistaM7, /Ver detalle/); assert.match(m7, /\/terreno\/incidencias\?incidencia=/); });
 });

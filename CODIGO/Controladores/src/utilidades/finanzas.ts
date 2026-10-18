@@ -12,11 +12,18 @@ export const incluirNota = {
   cotizacion: { include: { detalle_cotizacion: { include: { item_comercial: true } } } },
 } satisfies Prisma.nota_ventaInclude;
 export const incluirCotizacion = {
-  moneda: true, ficha_cliente: { include: { cliente_financiero: true } },
+  moneda: true, ficha_cliente: { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } },
+  tarifa_instalacion: { include: { moneda: true } }, condicion_comercial: { include: { condicion: true } },
+  obra_contexto: true,
   detalle_cotizacion: { include: {
-    item_comercial: true,
+    item_comercial: true, producto_comercial: true, producto_version: true, precio_comercial: true,
     detalle_costo_material_cotizacion: { include: { historial_precio_material: { include: { material: true } } } },
   } },
+  grupos_alternativas_b2c: { include: {
+    alternativas: { include: { opcionales: true }, orderBy: { numero_alternativa: 'asc' } },
+  }, orderBy: { numero_grupo: 'asc' } },
+  contactos_b2b: { where: { estado: 'ACTIVO' }, orderBy: [{ es_principal: 'desc' }, { creado_en: 'asc' }] },
+  detalles_servicio: { include: { servicio: true, precio: true } },
 } satisfies Prisma.cotizacionInclude;
 export type PagoFinanciero = Prisma.pago_clienteGetPayload<{ include: typeof incluirPago }>;
 export type NotaFinanciera = Prisma.nota_ventaGetPayload<{ include: typeof incluirNota }>;

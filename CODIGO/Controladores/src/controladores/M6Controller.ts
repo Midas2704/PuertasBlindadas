@@ -9,6 +9,8 @@ import { archivoCalculoPreliminarM6, archivoComprobanteAnticipoM6, archivoLiquid
 import { CorreoDesarrollo, CorreoDocumental } from '../utilidades/correo';
 import { AuditoriaDocumental, AuditoriaDocumentalLegacyPrisma, CondicionDocumento } from '../servicios/AuditoriaDocumental';
 import { calcularPrevisionLegal } from '../m6/calculoPrevisional';
+import { archivoCsvAdministrativo } from '../utilidades/csv';
+import { resumirIncidenciasTerreno, resumirOperacionTerreno, type OtDashboard, type TareaDashboard } from '../m6/dashboardTerreno';
 
 interface ActorDocumentoM6 { id: bigint; alcanceEmpleadoId?: number | null }
 interface ActorTerrenoM6 { id: bigint; administrador: boolean; permisos?: string[]; alcanceEmpleadoId?: number | null }
@@ -42,6 +44,24 @@ export function validarRevisionIncidenciaM6(entrada: { estadoRevision: string; i
   if (entrada.idCreador === entrada.idRevisor) throw new ErrorAplicacion(409, 'El creador no puede aprobar ni rechazar su propia incidencia');
   if (!entrada.idCategoria) throw new ErrorAplicacion(409, 'La incidencia requiere categoría estructurada antes de revisión');
   if (entrada.decision === 'aprobada' && !entrada.cantidadEvidencias) throw new ErrorAplicacion(409, 'Aprobación requiere evidencia');
+}
+
+export function validarTransicionResolucionIncidenciaM6(entrada:{accion:'corregir'|'cerrar';estado:string;estadoRevision:string;confirmado?:boolean}) {
+  if(entrada.estadoRevision!=='aprobada')throw new ErrorAplicacion(409,'Sólo una incidencia aprobada puede avanzar a corrección o cierre');
+  const esperado=entrada.accion==='corregir'?'pendiente':'corregida';
+  if(entrada.estado!==esperado)throw new ErrorAplicacion(409,'La transición de resolución no es válida');
+  if(entrada.accion==='cerrar'&&entrada.confirmado!==true)throw new ErrorAplicacion(400,'La validación de cierre debe confirmarse');
+}
+
+export function clasificarResultadoInstalacion(estadoVisita: string | null, resultado: string | null) {
+  const estado = (estadoVisita || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const textoResultado = (resultado || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (/reprogram/.test(textoResultado)) return 'REPROGRAMACION_NECESARIA';
+  if (/parcial/.test(textoResultado)) return 'PARCIALMENTE_REALIZADA';
+  if (/no ejecut|no realizada|cancelad/.test(textoResultado) || /cancelad|no ejecut/.test(estado)) return 'VISITA_NO_EJECUTADA';
+  if (/instalacion completada|instalacion realizada/.test(textoResultado)) return 'INSTALACION_COMPLETADA';
+  if (resultado) return 'RESULTADO_REGISTRADO';
+  return 'PENDIENTE';
 }
 
 const fechaEntrada = (valor: unknown, nombre: string, obligatoria = true) => {
@@ -2404,6 +2424,30 @@ export class M6Controller {
     };
   }
 
+  private presentarDetalleVisitaTerreno(visita: any) {
+    const tareas = Array.isArray(visita.tarea) ? visita.tarea : [];
+    const cierresPorTarea = tareas.flatMap((tarea: any) => Array.isArray(tarea.formulario_de_cierre) ? tarea.formulario_de_cierre : []);
+    const cierresPorEvidencia = (Array.isArray(visita.evidencia_terreno) ? visita.evidencia_terreno : []).map((evidencia: any) => evidencia.formulario_de_cierre).filter(Boolean);
+    const cierres = new Map<string, any>();
+    for (const cierre of [...cierresPorTarea, ...cierresPorEvidencia]) cierres.set(cierre.formulario_de_cierre_formulario_de_cierre_id.toString(), cierre);
+    const ultimoCierre = [...cierres.values()].sort((a: any, b: any) => a.formulario_de_cierre_formulario_de_cierre_id > b.formulario_de_cierre_formulario_de_cierre_id ? -1 : 1)[0] || null;
+    const ordenes = new Map<string, { id: string; estado: string | null }>();
+    for (const tarea of tareas) {
+      if (!tarea.orden_trabajo) continue;
+      const id = tarea.orden_trabajo.orden_trabajo_id_orden.toString();
+      ordenes.set(id, { id, estado: tarea.orden_trabajo.orden_trabajo_estado });
+    }
+    return {
+      ...this.presentarVisitaTerreno(visita),
+      resultadoRegistrado: ultimoCierre ? {
+        id: ultimoCierre.formulario_de_cierre_formulario_de_cierre_id.toString(),
+        resultado: ultimoCierre.formulario_de_cierre_resultado_finalizado,
+        observaciones: ultimoCierre.formulario_de_cierre_detalle_de_observaciones,
+      } : null,
+      ordenesRelacionadas: [...ordenes.values()],
+    };
+  }
+
   async crearVisitaTerreno(entrada: Record<string, unknown>) {
     const idObra = BigInt(identificador(entrada.idObra));
     const tipoServicio = texto(entrada.tipoServicio, 50);
@@ -2435,9 +2479,70 @@ export class M6Controller {
   }
 
   async obtenerVisitaTerreno(id: number) {
-    const visita = await prisma.servicio_terreno.findUnique({ where: { servicio_terreno_servicio_terreno_id: BigInt(id) }, include: this.incluirVisitaTerreno });
+    const visita = await prisma.servicio_terreno.findUnique({
+      where: { servicio_terreno_servicio_terreno_id: BigInt(id) },
+      include: {
+        ...this.incluirVisitaTerreno,
+        tarea: {
+          include: {
+            orden_trabajo: true,
+            formulario_de_cierre: { orderBy: { formulario_de_cierre_formulario_de_cierre_id: 'desc' } },
+          },
+        },
+        evidencia_terreno: { include: { formulario_de_cierre: true } },
+      },
+    });
     if (!visita) throw new ErrorAplicacion(404, 'Visita no encontrada');
-    return this.presentarVisitaTerreno(visita);
+    return this.presentarDetalleVisitaTerreno(visita);
+  }
+
+  async listarInstalacionesTerreno() {
+    const tareas = await prisma.tarea.findMany({
+      where: {
+        id_orden_trabajo: { not: null }, id_servicio_terreno: { not: null },
+        servicio_terreno: { is: { servicio_terreno_tipo_servicio: { contains: 'instal', mode: 'insensitive' } } },
+      },
+      include: {
+        servicio_terreno: { include: { ...this.incluirVisitaTerreno, checklist_de_materiales: true } },
+        orden_trabajo: { include: { unidad_fisica_comercial: { include: { producto: { include: { familia: true } }, cierre_produccion: true } } } },
+        formulario_de_cierre: { orderBy: { formulario_de_cierre_formulario_de_cierre_id: 'desc' } },
+        ejecuciones: { include: { incidencias: { include: { categoria: true, area_responsable: true, evidencias: true } } }, orderBy: { fecha_ejecucion: 'desc' } },
+      },
+      orderBy: [{ tarea_fecha_de_visita: 'desc' }, { tarea_tarea_id: 'desc' }],
+    });
+    const instalaciones = new Map<string, any>();
+    for (const tarea of tareas) {
+      if (!tarea.servicio_terreno || !tarea.orden_trabajo) continue;
+      const idVisita = tarea.servicio_terreno.servicio_terreno_servicio_terreno_id.toString();
+      const idOrden = tarea.orden_trabajo.orden_trabajo_id_orden.toString();
+      const clave = `${idVisita}:${idOrden}`;
+      const existente = instalaciones.get(clave);
+      const cierre = tarea.formulario_de_cierre[0] || null;
+      const unidad = tarea.orden_trabajo.unidad_fisica_comercial;
+      const incidencias = tarea.ejecuciones.flatMap((ejecucion) => ejecucion.incidencias.map((incidencia) => ({
+        id: incidencia.id_incidencia_retrabajo.toString(), descripcion: incidencia.descripcion, estado: incidencia.estado,
+        estadoRevision: incidencia.estado_revision, categoria: incidencia.categoria?.nombre || null,
+        areaSenalada: incidencia.area_responsable?.area_trabajo_nombre_area || null, evidencias: incidencia.evidencias.length,
+      })));
+      const base = existente || {
+        id: clave, idVisita, idOrdenTrabajo: idOrden,
+        puerta: unidad ? { idUnidad: unidad.id_unidad_fisica_ot.toString(), numeroUnidad: unidad.numero_unidad, producto: unidad.producto.nombre_comercial, codigo: unidad.producto.codigo_comercial, familia: unidad.producto.familia.nombre } : null,
+        cliente: tarea.servicio_terreno.obra?.cliente ? { rut: tarea.servicio_terreno.obra.cliente.cliente_cliente_rut, nombre: tarea.servicio_terreno.obra.cliente.cliente_razon_social || tarea.servicio_terreno.obra.cliente.cliente_cliente_b2b_razon_social || null } : null,
+        obra: this.presentarObraTerreno(tarea.servicio_terreno.obra), visita: this.presentarVisitaTerreno(tarea.servicio_terreno),
+        fabricacion: { estado: unidad?.estado || tarea.orden_trabajo.orden_trabajo_estado || null, finalizada: Boolean(unidad?.cierre_produccion) },
+        preparacion: { checklist: tarea.servicio_terreno.checklist_de_materiales ? { id: tarea.servicio_terreno.checklist_de_materiales.checklist_de_materiales_checklist_de_materials_id.toString(), item: tarea.servicio_terreno.checklist_de_materiales.checklist_de_materiales_item, marcado: tarea.servicio_terreno.checklist_de_materiales.checklist_de_materiales_es_marcado, noMarcado: tarea.servicio_terreno.checklist_de_materiales.checklist_de_materiales_es_no_marcado, detalleMarcado: tarea.servicio_terreno.checklist_de_materiales.checklist_de_materiales_marcado, detalleNoMarcado: tarea.servicio_terreno.checklist_de_materiales.checklist_de_materiales_no_marcado } : null, direccionDisponible: Boolean(tarea.servicio_terreno.obra?.obra_direccion_obra), responsableAsignado: Boolean(tarea.servicio_terreno.id_usuario), visitaProgramada: Boolean(tarea.servicio_terreno.servicio_terreno_fecha_real) },
+        tareas: [], incidencias: [], resultado: null,
+        entrega: { estado: 'NO_REGISTRADA', detalle: 'Entrega no registrada' },
+      };
+      base.tareas.push({ id: tarea.tarea_tarea_id.toString(), titulo: tarea.tarea_titulo, estado: tarea.tarea_estado_de_tarea });
+      base.incidencias.push(...incidencias);
+      if (cierre && (!base.resultado || BigInt(cierre.formulario_de_cierre_formulario_de_cierre_id) > BigInt(base.resultado.id))) {
+        const resultado = cierre.formulario_de_cierre_resultado_finalizado;
+        base.resultado = { id: cierre.formulario_de_cierre_formulario_de_cierre_id.toString(), resultado, observaciones: cierre.formulario_de_cierre_detalle_de_observaciones, clasificacion: clasificarResultadoInstalacion(tarea.servicio_terreno.servicio_terreno_estado, resultado) };
+      }
+      instalaciones.set(clave, base);
+    }
+    return [...instalaciones.values()].map((instalacion) => ({ ...instalacion, clasificacion: instalacion.resultado?.clasificacion || clasificarResultadoInstalacion(instalacion.visita.estado, null) }));
   }
 
   async listarUsuariosTerreno() {
@@ -2719,11 +2824,18 @@ export class M6Controller {
 
   private readonly incluirGestionOrdenTrabajo = {
     orden_trabajo:true,
+    creador:true,
+    historial:{include:{usuario:true},orderBy:{fecha_evento:'desc' as const}},
     liberacion:{include:{actor:true}},
     cierre_produccion:{include:{actor:true}},
     etapas_adicionales:{include:{area:true},orderBy:{orden:'asc' as const}},
     historial_produccion:{include:{actor:true,empleado_involucrado:true},orderBy:{fecha_evento:'desc' as const}},
-    tareas_ejecutables:{include:{estado_operacional:{include:{area:true,empleado_responsable:true}},tarea:{include:{ejecuciones:true}},etapa_adicional:true},orderBy:[{orden_etapa:'asc' as const},{orden_tarea:'asc' as const}]},
+    tareas_ejecutables:{include:{estado_operacional:{include:{area:true,empleado_responsable:true}},tarea:{include:{
+      usuario:true,
+      servicio_terreno:{include:{usuario:true,obra:{include:{cliente:true,especificaciones_puerta:true}}}},
+      formulario_de_cierre:true,
+      ejecuciones:{include:{ejecutor:true,incidencias:{include:{categoria:true,area_responsable:true,creador:true,revisor:true,evidencias:true}}},orderBy:{fecha_ejecucion:'desc' as const}},
+    }},etapa_adicional:true},orderBy:[{orden_etapa:'asc' as const},{orden_tarea:'asc' as const}]},
     producto:{include:{familia:true}},
     version_plantilla:true,
     detalle:true,
@@ -2744,8 +2856,36 @@ export class M6Controller {
     const medidaSalida=medida?Object.fromEntries(Object.entries(this.camposMedidasLevantamiento).map(([campo,columna])=>[campo,medida[columna]?.toString()||null])):null;
     const planificacion=unidad.planificacion_actual as {etapas?:Array<any>};
     const empleadosProduccion=[...new Set([...(planificacion?.etapas||[]).flatMap(etapa=>(etapa.tareas||[]).map((tarea:any)=>tarea.idEmpleado).filter(Boolean)),...(unidad.tareas_ejecutables||[]).map((item:any)=>item.estado_operacional?.id_empleado_responsable).filter(Boolean)])];
-    const tareasProduccion=(unidad.tareas_ejecutables||[]).map((item:any)=>({id:item.id_tarea.toString(),idEjecutable:item.id_tarea_ejecutable_ot.toString(),titulo:item.tarea.tarea_titulo,origen:item.origen,ordenEtapa:item.orden_etapa,ordenTarea:item.orden_tarea,idEtapaPlanificacion:item.id_etapa_planificacion,idEtapaAdicional:item.id_etapa_adicional_ot?.toString()||null,etapaAdicional:item.etapa_adicional?.nombre||null,estado:item.estado_operacional?.estado||'PENDIENTE',revision:item.estado_operacional?.revision||0,prioridad:item.estado_operacional?.prioridad||null,tiempoEstimadoMin:item.estado_operacional?.tiempo_estimado_min||null,instrucciones:item.estado_operacional?.instrucciones||item.tarea.tarea_instrucciones_de_oficina,observaciones:item.estado_operacional?.observaciones||null,fechaPlanificada:item.estado_operacional?.fecha_planificada||null,area:item.estado_operacional?{id:item.estado_operacional.id_area_trabajo.toString(),nombre:item.estado_operacional.area.area_trabajo_nombre_area||`Área ${item.estado_operacional.id_area_trabajo}`}:null,responsable:item.estado_operacional?.empleado_responsable?{id:item.estado_operacional.empleado_responsable.id_empleado,nombre:nombreCompleto(item.estado_operacional.empleado_responsable)}:null,ejecuciones:item.tarea.ejecuciones.map((e:any)=>({id:e.id_ejecucion_tarea.toString(),estado:e.estado_ejecucion,validacion:e.estado_validacion_productiva,fecha:e.fecha_ejecucion}))}));
-    const grupos=new Map<number,{orden:number,nombre:string,total:number,cerradas:number}>();for(const tarea of tareasProduccion){const nombreEtapa=tarea.etapaAdicional||(planificacion?.etapas||[]).find((etapa:any)=>etapa.orden===tarea.ordenEtapa||etapa.id===tarea.idEtapaPlanificacion)?.nombre||`Etapa ${tarea.ordenEtapa}`;const actual=grupos.get(tarea.ordenEtapa)||{orden:tarea.ordenEtapa,nombre:nombreEtapa,total:0,cerradas:0};actual.total++;if(tarea.estado==='CERRADA')actual.cerradas++;grupos.set(tarea.ordenEtapa,actual);}const avance={total:tareasProduccion.length,pendientes:tareasProduccion.filter((t:any)=>t.estado==='PENDIENTE'||t.estado==='ASIGNADA').length,enEjecucion:tareasProduccion.filter((t:any)=>t.estado==='EN_EJECUCION'||t.estado==='PENDIENTE_VALIDACION').length,cerradas:tareasProduccion.filter((t:any)=>t.estado==='CERRADA').length,etapas:[...grupos.values()]};
+    const incidencias=new Map<string,any>();
+    const visitas=new Map<string,any>();
+    const tareasProduccion=(unidad.tareas_ejecutables||[]).map((item:any)=>{
+      const ejecuciones=(item.tarea.ejecuciones||[]).map((e:any)=>{
+        for(const incidencia of e.incidencias||[]){
+          const id=incidencia.id_incidencia_retrabajo.toString();
+          incidencias.set(id,{id,descripcion:incidencia.descripcion,causa:incidencia.causa_referencia,estado:incidencia.estado,estadoRevision:incidencia.estado_revision,responsabilidad:incidencia.responsabilidad,fecha:incidencia.fecha_registro,categoria:incidencia.categoria?.nombre||null,areaSenalada:incidencia.area_responsable?.area_trabajo_nombre_area||null,participante:nombreUsuario(e.ejecutor),responsabilidadConfirmada:incidencia.estado_revision==='aprobada'?incidencia.responsabilidad:null,creadoPor:nombreUsuario(incidencia.creador),revisadoPor:incidencia.revisor?nombreUsuario(incidencia.revisor):null,observacionRevision:incidencia.observacion_revision,evidencias:(incidencia.evidencias||[]).map((evidencia:any)=>({id:evidencia.evidencia_terreno_evidencia_terreno_id.toString(),tipo:evidencia.evidencia_terreno_tipo_evidencia,fecha:evidencia.evidencia_terreno_fecha_captura})),tarea:{id:item.tarea.tarea_tarea_id.toString(),titulo:item.tarea.tarea_titulo}});
+        }
+        return{id:e.id_ejecucion_tarea.toString(),estado:e.estado_ejecucion,validacion:e.estado_validacion_productiva,fecha:e.fecha_ejecucion,ejecutor:nombreUsuario(e.ejecutor)};
+      });
+      const visita=item.tarea.servicio_terreno;
+      if(visita){
+        const cierres=(item.tarea.formulario_de_cierre||[]).sort((a:any,b:any)=>a.formulario_de_cierre_formulario_de_cierre_id>b.formulario_de_cierre_formulario_de_cierre_id?-1:1);
+        visitas.set(visita.servicio_terreno_servicio_terreno_id.toString(),{...this.presentarVisitaTerreno(visita),resultadoRegistrado:cierres[0]?{id:cierres[0].formulario_de_cierre_formulario_de_cierre_id.toString(),resultado:cierres[0].formulario_de_cierre_resultado_finalizado,observaciones:cierres[0].formulario_de_cierre_detalle_de_observaciones}:null,ordenesRelacionadas:[{id:unidad.id_orden_trabajo.toString(),estado:unidad.orden_trabajo?.orden_trabajo_estado||null}]});
+      }
+      const resultadoValidado=ejecuciones.find((ejecucion:any)=>ejecucion.validacion==='validada')||null;
+      return{id:item.id_tarea.toString(),idEjecutable:item.id_tarea_ejecutable_ot.toString(),titulo:item.tarea.tarea_titulo,origen:item.origen,ordenEtapa:item.orden_etapa,ordenTarea:item.orden_tarea,idEtapaPlanificacion:item.id_etapa_planificacion,idEtapaAdicional:item.id_etapa_adicional_ot?.toString()||null,etapaAdicional:item.etapa_adicional?.nombre||null,estado:item.estado_operacional?.estado||'PENDIENTE',revision:item.estado_operacional?.revision||0,prioridad:item.estado_operacional?.prioridad||null,tiempoEstimadoMin:item.estado_operacional?.tiempo_estimado_min||null,instrucciones:item.estado_operacional?.instrucciones||item.tarea.tarea_instrucciones_de_oficina,observaciones:item.estado_operacional?.observaciones||null,fechaPlanificada:item.estado_operacional?.fecha_planificada||null,fechaInicio:item.tarea.tarea_fecha_de_inicio_en_terreno||item.tarea.tarea_fecha_de_inicio||null,fechaTermino:item.tarea.tarea_fecha_de_termino||null,area:item.estado_operacional?{id:item.estado_operacional.id_area_trabajo.toString(),nombre:item.estado_operacional.area.area_trabajo_nombre_area||`Área ${item.estado_operacional.id_area_trabajo}`}:null,responsable:item.estado_operacional?.empleado_responsable?{id:item.estado_operacional.empleado_responsable.id_empleado,nombre:nombreCompleto(item.estado_operacional.empleado_responsable)}:null,ejecuciones,resultadoValidado};
+    });
+    const grupos=new Map<number,{orden:number,nombre:string,total:number,cerradas:number}>();for(const tarea of tareasProduccion){const nombreEtapa=tarea.etapaAdicional||(planificacion?.etapas||[]).find((etapa:any)=>etapa.orden===tarea.ordenEtapa||etapa.id===tarea.idEtapaPlanificacion)?.nombre||`Etapa ${tarea.ordenEtapa}`;const actual=grupos.get(tarea.ordenEtapa)||{orden:tarea.ordenEtapa,nombre:nombreEtapa,total:0,cerradas:0};actual.total++;if(tarea.estado==='CERRADA')actual.cerradas++;grupos.set(tarea.ordenEtapa,actual);}const cerradas=tareasProduccion.filter((t:any)=>t.estado==='CERRADA').length;const avance={total:tareasProduccion.length,pendientes:tareasProduccion.filter((t:any)=>t.estado==='PENDIENTE'||t.estado==='ASIGNADA').length,enEjecucion:tareasProduccion.filter((t:any)=>t.estado==='EN_EJECUCION'||t.estado==='PENDIENTE_VALIDACION').length,cerradas,porcentaje:tareasProduccion.length?Math.round(cerradas*100/tareasProduccion.length):0,etapas:[...grupos.values()]};
+    for(const tarea of tareasProduccion){
+      (tarea as any).cambiosResponsable=(unidad.historial_produccion||[]).filter((evento:any)=>evento.id_tarea_ejecutable_ot?.toString()===tarea.idEjecutable&&evento.evento==='RESPONSABLE_REASIGNADO').map((evento:any)=>({fecha:evento.fecha_evento,usuario:nombreUsuario(evento.actor),empleado:evento.empleado_involucrado?nombreCompleto(evento.empleado_involucrado):null,motivo:evento.motivo}));
+      (tarea as any).correcciones=[...incidencias.values()].filter((incidencia:any)=>incidencia.tarea.id===tarea.id);
+    }
+    const historialOperacional=[
+      ...((unidad.historial||[]).some((evento:any)=>/CREAD/.test(evento.evento))?[]:[{id:`creacion-${unidad.id_unidad_fisica_ot}`,tipo:'OT_CREADA',detalle:'Orden de Trabajo creada',fecha:unidad.creado_en,usuario:nombreUsuario(unidad.creador)}]),
+      ...(unidad.historial||[]).map((evento:any)=>({id:`unidad-${evento.id_historial_unidad_fisica_ot}`,tipo:evento.evento,detalle:evento.motivo,fecha:evento.fecha_evento,usuario:nombreUsuario(evento.usuario)})),
+      ...(rectificacion?.historial||[]).map((evento:any)=>({id:`rect-${evento.id_historial_rectificacion}`,tipo:evento.tipo_modificacion,detalle:evento.motivo,fecha:evento.fecha_evento,usuario:nombreUsuario(evento.usuario)})),
+      ...(unidad.historial_produccion||[]).map((evento:any)=>({id:`prod-${evento.id_historial_cambio}`,tipo:evento.evento,detalle:evento.motivo,fecha:evento.fecha_evento,usuario:nombreUsuario(evento.actor)})),
+      ...tareasProduccion.flatMap((tarea:any)=>tarea.ejecuciones.map((ejecucion:any)=>({id:`ejec-${ejecucion.id}`,tipo:ejecucion.validacion==='validada'?'RESULTADO_VALIDADO':'EJECUCION_REGISTRADA',detalle:`${tarea.titulo} · ${ejecucion.estado}`,fecha:ejecucion.fecha,usuario:ejecucion.ejecutor}))),
+    ].filter(evento=>evento.fecha).sort((a,b)=>new Date(b.fecha).getTime()-new Date(a.fecha).getTime());
     return {
       idOrdenTrabajo:unidad.id_orden_trabajo.toString(),idUnidad:unidad.id_unidad_fisica_ot.toString(),estado:this.estadoVisibleOrden(unidad),fechaCreacion:unidad.creado_en,
       cotizacion:{id:unidad.id_cotizacion,cliente:unidad.cotizacion.ficha_cliente.cliente_financiero.nombre_razon_social_referencia,fecha:unidad.cotizacion.fecha_emision,notaVenta:unidad.cotizacion.nota_venta?.numero_nota_venta||null},
@@ -2757,7 +2897,7 @@ export class M6Controller {
       versiones:(rectificacion?.versiones||[]).map((version:any)=>({id:version.id_version_rectificacion.toString(),numero:version.numero_version,fecha:version.enviado_en,enviadoPor:nombreUsuario(version.enviador),datos:version.datos_rectificacion,planificacion:version.planificacion,decision:version.decision?{tipo:version.decision.decision,motivo:version.decision.motivo,observacionesTecnicas:version.decision.observaciones_tecnicas,fecha:version.decision.decidido_en,usuario:nombreUsuario(version.decision.actor)}:null})),
       liberacion:unidad.liberacion?{id:unidad.liberacion.id_liberacion_ot.toString(),fecha:unidad.liberacion.liberado_en,usuario:nombreUsuario(unidad.liberacion.actor)}:null,
       historial:(rectificacion?.historial||[]).map((evento:any)=>({id:evento.id_historial_rectificacion.toString(),entidad:evento.entidad,tipo:evento.tipo_modificacion,anterior:evento.valor_anterior,nuevo:evento.valor_nuevo,motivo:evento.motivo,fecha:evento.fecha_evento,usuario:nombreUsuario(evento.usuario)})),
-      tareasProduccion,avance,etapasAdicionales:(unidad.etapas_adicionales||[]).map((etapa:any)=>({id:etapa.id_etapa_adicional_ot.toString(),nombre:etapa.nombre,descripcion:etapa.descripcion,orden:etapa.orden,idArea:etapa.id_area_trabajo.toString(),area:etapa.area.area_trabajo_nombre_area,motivo:etapa.motivo})),
+      tareasProduccion,avance,visitasRelacionadas:[...visitas.values()],incidencias:[...incidencias.values()],historialOperacional,etapasAdicionales:(unidad.etapas_adicionales||[]).map((etapa:any)=>({id:etapa.id_etapa_adicional_ot.toString(),nombre:etapa.nombre,descripcion:etapa.descripcion,orden:etapa.orden,idArea:etapa.id_area_trabajo.toString(),area:etapa.area.area_trabajo_nombre_area,motivo:etapa.motivo})),
       historialProduccion:(unidad.historial_produccion||[]).map((evento:any)=>({id:evento.id_historial_cambio.toString(),entidad:evento.entidad,tipo:evento.evento,anterior:evento.valor_anterior,nuevo:evento.valor_nuevo,motivo:evento.motivo,fecha:evento.fecha_evento,usuario:nombreUsuario(evento.actor),empleado:evento.empleado_involucrado?nombreCompleto(evento.empleado_involucrado):null})),
       cierre:unidad.cierre_produccion?{fecha:unidad.cierre_produccion.finalizado_en,usuario:nombreUsuario(unidad.cierre_produccion.actor),observaciones:unidad.cierre_produccion.observaciones,resumen:unidad.cierre_produccion.resumen_tareas}:null,
     };
@@ -2775,7 +2915,7 @@ export class M6Controller {
     const desde=consulta.desde?fechaEntrada(consulta.desde,'Fecha desde'):null;const hasta=consulta.hasta?fechaEntrada(consulta.hasta,'Fecha hasta'):null;
     if(desde||hasta)where.creado_en={...(desde?{gte:desde}:{}),...(hasta?{lt:new Date(hasta.getTime()+86400000)}:{})};
     const unidades=await prisma.unidad_fisica_orden_trabajo.findMany({where,include:this.incluirGestionOrdenTrabajo,orderBy:{creado_en:'desc'}});
-    const estado=texto(consulta.estado,60).toUpperCase();const presentadas=unidades.map(unidad=>this.presentarGestionOrdenTrabajo(unidad)).filter(item=>!estado||item.estado===estado);const idsEmpleados=[...new Set(presentadas.flatMap(item=>item.empleadosProduccion))];const responsables=idsEmpleados.length?await prisma.empleado.findMany({where:{id_empleado:{in:idsEmpleados}},select:{id_empleado:true,nombres:true,apellido_paterno:true,apellido_materno:true}}):[];const nombres=new Map(responsables.map(empleado=>[empleado.id_empleado,nombreCompleto(empleado)]));return presentadas.map(item=>({...item,responsablesProduccion:item.empleadosProduccion.map(id=>({id,nombre:nombres.get(id)||`Empleado ${id}`}))}));
+    const estado=texto(consulta.estado,60).toUpperCase();const grupoRectificacion=['PENDIENTE_RECTIFICACION','RECTIFICACION_ASIGNADA','RECTIFICACION_EN_PROCESO'];const presentadas=unidades.map(unidad=>this.presentarGestionOrdenTrabajo(unidad)).filter(item=>!estado||(estado==='PENDIENTE_RECTIFICACION'?grupoRectificacion.includes(item.estado):item.estado===estado));const idsEmpleados=[...new Set(presentadas.flatMap(item=>item.empleadosProduccion))];const responsables=idsEmpleados.length?await prisma.empleado.findMany({where:{id_empleado:{in:idsEmpleados}},select:{id_empleado:true,nombres:true,apellido_paterno:true,apellido_materno:true}}):[];const nombres=new Map(responsables.map(empleado=>[empleado.id_empleado,nombreCompleto(empleado)]));return presentadas.map(item=>({...item,responsablesProduccion:item.empleadosProduccion.map(id=>({id,nombre:nombres.get(id)||`Empleado ${id}`}))}));
   }
 
   async obtenerOrdenTrabajoRectificacion(idOrden:number,actor:ActorTerrenoM6) {
@@ -3231,9 +3371,58 @@ export class M6Controller {
     return conAuditoriaIncidencia(salida, undefined, { id: salida.id, estado: salida.estado, estadoRevision: salida.estadoRevision, categoria: salida.categoria.codigo, area: salida.area?.id || null, tieneEvidencia: salida.tieneEvidencia });
   }
 
-  async listarIncidenciasOperativas() {
-    const filas = await prisma.incidencia_retrabajo_tarea.findMany({ include: { categoria: true, area_responsable: true, creador: true, revisor: true, evidencias: { select: { evidencia_terreno_evidencia_terreno_id: true, evidencia_terreno_tipo_evidencia: true, evidencia_terreno_metadata_dispositivo: true, evidencia_terreno_fecha_captura: true } }, ejecucion: { include: { ejecutor: true, tarea: { include: { orden_trabajo: { include: { proyecto: true } }, servicio_terreno: true } } } } }, orderBy: { fecha_registro: 'desc' } });
-    return filas.map(i => ({ id: i.id_incidencia_retrabajo.toString(), referencia: `INC-${i.id_incidencia_retrabajo.toString().padStart(5, '0')}`, descripcion: i.descripcion, categoria: i.categoria ? { id: i.categoria.id_categoria_incidencia, codigo: i.categoria.codigo, nombre: i.categoria.nombre } : null, area: i.area_responsable ? { id: i.area_responsable.area_trabajo_id_area.toString(), nombre: i.area_responsable.area_trabajo_nombre_area || i.area_responsable.area_trabajo_clasificacion } : null, causaReferencia: i.causa_referencia, responsabilidad: i.responsabilidad, responsableOwner: { id: i.ejecucion.id_usuario_ejecutor.toString(), nombre: nombreUsuario(i.ejecucion.ejecutor) }, estado: i.estado, estadoRevision: i.estado_revision, fecha: i.fecha_registro, creador: { id: i.id_usuario_creador?.toString() || null, nombre: nombreUsuario(i.creador) }, revision: i.id_usuario_revisor ? { idUsuario: i.id_usuario_revisor.toString(), nombre: nombreUsuario(i.revisor), fecha: i.fecha_revision, observacion: i.observacion_revision } : null, evidencias: i.evidencias.map(e => ({ id: e.evidencia_terreno_evidencia_terreno_id.toString(), tipo: e.evidencia_terreno_tipo_evidencia, nombre: e.evidencia_terreno_metadata_dispositivo, fecha: e.evidencia_terreno_fecha_captura })), ejecucion: { id: i.id_ejecucion_tarea.toString(), tarea: i.ejecucion.tarea ? { id: i.ejecucion.tarea.tarea_tarea_id.toString(), titulo: i.ejecucion.tarea.tarea_titulo, idOrdenTrabajo: i.ejecucion.tarea.id_orden_trabajo?.toString() || null, idServicio: i.ejecucion.tarea.id_servicio_terreno?.toString() || null, proyecto: i.ejecucion.tarea.orden_trabajo?.proyecto ? { id: i.ejecucion.tarea.orden_trabajo.proyecto.proyecto_proyecto_id.toString(), codigo: i.ejecucion.tarea.orden_trabajo.proyecto.proyecto_codigo_proyecto, nombre: i.ejecucion.tarea.orden_trabajo.proyecto.proyecto_nombre_referencia } : null } : null } }));
+  async listarIncidenciasOperativas(consulta:Record<string,unknown>={}) {
+    const pagina=Math.max(1,Number(consulta.pagina)||1);
+    const tamano=Math.min(50,Math.max(5,Number(consulta.tamano)||10));
+    const where:Prisma.incidencia_retrabajo_tareaWhereInput={};
+    const fecha=texto(consulta.fecha,10);
+    if(fecha){
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(fecha))throw new ErrorAplicacion(400,'Fecha de incidencia inválida');
+      const desde=new Date(`${fecha}T00:00:00.000Z`);const hasta=new Date(desde);hasta.setUTCDate(hasta.getUTCDate()+1);where.fecha_registro={gte:desde,lt:hasta};
+    }
+    const categoria=Number(consulta.categoria);if(Number.isInteger(categoria)&&categoria>0)where.id_categoria_incidencia=categoria;
+    const area=String(consulta.area||'').trim();if(area){if(!/^\d+$/.test(area))throw new ErrorAplicacion(400,'Área inválida');where.id_area_responsable=BigInt(area);}
+    const ot=String(consulta.ot||'').trim();if(ot){if(!/^\d+$/.test(ot))throw new ErrorAplicacion(400,'Orden de Trabajo inválida');where.ejecucion={tarea:{id_orden_trabajo:BigInt(ot)}};}
+    const revision=texto(consulta.estadoRevision,30);if(revision&&revision!=='TODOS'){if(!['pendiente_revision','aprobada','rechazada'].includes(revision))throw new ErrorAplicacion(400,'Estado de revisión inválido');where.estado_revision=revision;}
+    const resolucion=texto(consulta.estadoResolucion,20);if(resolucion&&resolucion!=='TODOS'){if(!['pendiente','corregida','cerrada'].includes(resolucion))throw new ErrorAplicacion(400,'Estado de resolución inválido');where.estado=resolucion;}
+    const busqueda=texto(consulta.busqueda,100);if(busqueda){
+      const idReferencia=/^(?:INC-)?0*(\d+)$/i.exec(busqueda)?.[1];
+      where.OR=[
+        {descripcion:{contains:busqueda,mode:'insensitive'}},{causa_referencia:{contains:busqueda,mode:'insensitive'}},{responsabilidad:{contains:busqueda,mode:'insensitive'}},
+        {ejecucion:{tarea:{tarea_titulo:{contains:busqueda,mode:'insensitive'}}}},
+        ...(idReferencia?[{id_incidencia_retrabajo:BigInt(idReferencia)}]:[]),
+      ];
+    }
+    const include={
+      categoria:true,area_responsable:true,creador:true,revisor:true,
+      evidencias:{select:{evidencia_terreno_evidencia_terreno_id:true,evidencia_terreno_tipo_evidencia:true,evidencia_terreno_metadata_dispositivo:true,evidencia_terreno_fecha_captura:true,evidencia_terreno_estado_evidencia:true}},
+      ejecucion:{include:{
+        ejecutor:true,
+        atribucion_productiva:{include:{empleado_ejecutor:true}},
+        tarea:{include:{
+          servicio_terreno:true,
+          orden_trabajo:{include:{
+            proyecto:{include:{cliente:true}},
+            unidad_fisica_comercial:{include:{producto:true,familia:true}},
+          }},
+        }},
+      }},
+    } as const;
+    const [total,filas,baseIndicadores]=await prisma.$transaction([
+      prisma.incidencia_retrabajo_tarea.count({where}),
+      prisma.incidencia_retrabajo_tarea.findMany({where,include,orderBy:{fecha_registro:'desc'},skip:(pagina-1)*tamano,take:tamano}),
+      prisma.incidencia_retrabajo_tarea.findMany({where,select:{estado:true,estado_revision:true,categoria:{select:{codigo:true,nombre:true}},area_responsable:{select:{area_trabajo_id_area:true,area_trabajo_nombre_area:true,area_trabajo_clasificacion:true}}}}),
+    ]);
+    const contar=(valores:(string|null)[])=>[...valores.reduce((mapa,valor)=>mapa.set(valor||'SIN_INFORMACION',(mapa.get(valor||'SIN_INFORMACION')||0)+1),new Map<string,number>())].map(([nombre,cantidad])=>({nombre,cantidad}));
+    const items=filas.map(i=>{
+      const tarea=i.ejecucion.tarea;const orden=tarea?.orden_trabajo;const unidad=orden?.unidad_fisica_comercial;const proyecto=orden?.proyecto;const cliente=proyecto?.cliente;
+      const participante=i.ejecucion.atribucion_productiva?.empleado_ejecutor;
+      const evidencias=i.evidencias.map(e=>({id:e.evidencia_terreno_evidencia_terreno_id.toString(),tipo:e.evidencia_terreno_tipo_evidencia,nombre:e.evidencia_terreno_metadata_dispositivo,fecha:e.evidencia_terreno_fecha_captura,estado:e.evidencia_terreno_estado_evidencia,registrador:null}));
+      const trazabilidad=[{tipo:'CREACION',fecha:i.fecha_registro,usuario:nombreUsuario(i.creador),detalle:'Incidencia registrada'},...evidencias.filter(e=>e.fecha).map(e=>({tipo:'EVIDENCIA',fecha:e.fecha,usuario:null,detalle:`Evidencia agregada: ${e.nombre||e.id}`})),...(i.fecha_revision?[{tipo:i.estado_revision==='aprobada'?'APROBACION':'RECHAZO',fecha:i.fecha_revision,usuario:nombreUsuario(i.revisor),detalle:i.observacion_revision||'Decisión gerencial registrada'}]:[])].sort((a,b)=>new Date(b.fecha!).getTime()-new Date(a.fecha!).getTime());
+      return{id:i.id_incidencia_retrabajo.toString(),referencia:`INC-${i.id_incidencia_retrabajo.toString().padStart(5,'0')}`,descripcion:i.descripcion,categoria:i.categoria?{id:i.categoria.id_categoria_incidencia,codigo:i.categoria.codigo,nombre:i.categoria.nombre}:null,area:i.area_responsable?{id:i.area_responsable.area_trabajo_id_area.toString(),nombre:i.area_responsable.area_trabajo_nombre_area||i.area_responsable.area_trabajo_clasificacion}:null,causaReferencia:i.causa_referencia,responsabilidad:i.responsabilidad,responsableSeguimiento:null,responsableOwner:{id:i.ejecucion.id_usuario_ejecutor.toString(),nombre:nombreUsuario(i.ejecucion.ejecutor)},participantes:[participante?{tipo:'EMPLEADO_EJECUTOR',id:String(participante.id_empleado),nombre:nombreCompleto(participante)}:{tipo:'USUARIO_REGISTRADOR_EJECUCION',id:i.ejecucion.id_usuario_ejecutor.toString(),nombre:nombreUsuario(i.ejecucion.ejecutor)}],estado:i.estado,estadoRevision:i.estado_revision,fecha:i.fecha_registro,creador:{id:i.id_usuario_creador?.toString()||null,nombre:nombreUsuario(i.creador)},revision:i.id_usuario_revisor?{idUsuario:i.id_usuario_revisor.toString(),nombre:nombreUsuario(i.revisor),fecha:i.fecha_revision,observacion:i.observacion_revision}:null,evidencias,trazabilidad,origen:tarea?.id_servicio_terreno?{tipo:/postventa/i.test(tarea.servicio_terreno?.servicio_terreno_tipo_servicio||'')?'VISITA_POSTVENTA':'VISITA_TERRENO',id:tarea.id_servicio_terreno.toString(),descripcion:tarea.servicio_terreno?.servicio_terreno_tipo_servicio||null}:{tipo:'EJECUCION_PRODUCCION',id:i.ejecucion.id_ejecucion_tarea.toString(),descripcion:tarea?.tarea_titulo||null},ejecucion:{id:i.id_ejecucion_tarea.toString(),tarea:tarea?{id:tarea.tarea_tarea_id.toString(),titulo:tarea.tarea_titulo,idOrdenTrabajo:tarea.id_orden_trabajo?.toString()||null,idServicio:tarea.id_servicio_terreno?.toString()||null,proyecto:proyecto?{id:proyecto.proyecto_proyecto_id.toString(),codigo:proyecto.proyecto_codigo_proyecto,nombre:proyecto.proyecto_nombre_referencia}:null}:null},cliente:cliente?{rut:cliente.cliente_cliente_rut,nombre:cliente.cliente_razon_social||cliente.cliente_cliente_b2b_razon_social||[cliente.cliente_cliente_b2c_primer_nombre,cliente.cliente_cliente_b2c_primer_apellido].filter(Boolean).join(' ')||null}:null,puerta:unidad?{numeroUnidad:unidad.numero_unidad,producto:unidad.producto.nombre_comercial,codigo:unidad.producto.codigo_comercial,familia:unidad.familia.nombre}:null,accionesCorrectivas:{disponibles:false,detalle:'El modelo actual sólo conserva el estado operativo pendiente, corregida o cerrada; no registra múltiples acciones correctivas.'}};
+    });
+    const categoriasIndicador=contar(baseIndicadores.map(i=>i.categoria?.nombre||null));const areasIndicador=contar(baseIndicadores.map(i=>i.area_responsable?.area_trabajo_nombre_area||i.area_responsable?.area_trabajo_clasificacion||null));
+    return{items,paginacion:{pagina,tamano,total,totalPaginas:Math.max(1,Math.ceil(total/tamano))},indicadores:{registradas:total,pendientesRevision:baseIndicadores.filter(i=>i.estado_revision==='pendiente_revision').length,aprobadas:baseIndicadores.filter(i=>i.estado_revision==='aprobada').length,rechazadas:baseIndicadores.filter(i=>i.estado_revision==='rechazada').length,pendientesResolucion:baseIndicadores.filter(i=>i.estado!=='cerrada').length,resueltas:baseIndicadores.filter(i=>i.estado==='cerrada').length,categorias:categoriasIndicador,areas:areasIndicador},fuentes:{estadoResolucion:'Estado operativo existente: pendiente, corregida o cerrada',accionesCorrectivas:'NO_DISPONIBLE',responsableSeguimiento:'NO_DISPONIBLE'}};
   }
 
   async obtenerEvidenciaIncidencia(idIncidencia: number, idEvidencia: number) {
@@ -3272,9 +3461,9 @@ export class M6Controller {
         return conAuditoriaIncidencia({ id: actual.id_incidencia_retrabajo.toString(), estado: actual.estado, categoria: categoria.codigo, idArea: idArea?.toString() || null }, { categoria: actual.id_categoria_incidencia, idArea: actual.id_area_responsable?.toString() || null }, { categoria: categoria.codigo, idArea: idArea?.toString() || null });
       }
       const esperado = accion === 'corregir' ? 'pendiente' : 'corregida'; const siguiente = accion === 'corregir' ? 'corregida' : 'cerrada';
+      validarTransicionResolucionIncidenciaM6({accion:accion as 'corregir'|'cerrar',estado:actual.estado,estadoRevision:actual.estado_revision,confirmado:entrada.confirmado===true});
       const causa = texto(entrada.causaReferencia, 500) || actual.causa_referencia; const responsabilidad = texto(entrada.responsabilidad, 120) || actual.responsabilidad;
       if (accion === 'corregir' && (!actual.descripcion.trim() || (!causa && !responsabilidad))) throw new ErrorAplicacion(400, 'La corrección requiere contexto, causa o responsabilidad');
-      if (accion === 'cerrar' && entrada.confirmado !== true) throw new ErrorAplicacion(400, 'La validación de cierre debe confirmarse');
       const cambio = await tx.incidencia_retrabajo_tarea.updateMany({ where: { id_incidencia_retrabajo: actual.id_incidencia_retrabajo, estado: esperado }, data: { estado: siguiente, causa_referencia: causa, responsabilidad } });
       if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La incidencia cambió concurrentemente o la transición no es válida');
       return conAuditoriaIncidencia({ id: actual.id_incidencia_retrabajo.toString(), estado: siguiente, causaReferencia: causa, responsabilidad }, { estado: actual.estado, causaReferencia: actual.causa_referencia, responsabilidad: actual.responsabilidad }, { estado: siguiente, causaReferencia: causa, responsabilidad });
@@ -3329,5 +3518,98 @@ export class M6Controller {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       return this.listarDeduccionesEmpleado(idEmpleado);
     } catch (error) { this.conflictoConcurrente(error, 'La deducción fue finalizada o modificada concurrentemente'); }
+  }
+
+  async consultarDashboardTerreno(consulta: Record<string, unknown>, actor: ActorTerrenoM6) {
+    const permisos = new Set(actor.permisos || []);
+    const autorizado = (...codigos: string[]) => actor.administrador || codigos.some((codigo) => permisos.has(codigo));
+    const desde = consulta.desde ? fechaEntrada(consulta.desde, 'Fecha desde')! : new Date(Date.now() - 30 * 86_400_000);
+    const hastaBase = consulta.hasta ? fechaEntrada(consulta.hasta, 'Fecha hasta')! : new Date();
+    const hasta = new Date(hastaBase.getTime() + 86_400_000);
+    if (desde > hastaBase) throw new ErrorAplicacion(400, 'La fecha desde no puede ser posterior a la fecha hasta');
+    const idArea = consulta.area ? BigInt(identificador(consulta.area)) : null;
+    const idResponsable = consulta.responsable ? identificador(consulta.responsable) : null;
+    const estadoFiltro = texto(consulta.estado, 60).toUpperCase();
+    const tipoActividad = texto(consulta.tipoActividad, 60).toUpperCase();
+    const hoyChile = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
+    const puedeOt = autorizado('CU202', 'CU205', 'CU207', 'CU209');
+    const puedeVisitas = autorizado('CU199', 'CU200', 'CU210', 'CU211');
+    const puedeIncidencias = autorizado('CU212', 'CU213');
+    const whereOt: Prisma.unidad_fisica_orden_trabajoWhereInput = {};
+    if (puedeOt && !this.puedeGestionarTodasLasRectificaciones(actor)) {
+      if (!actor.alcanceEmpleadoId) Object.assign(whereOt, { id_unidad_fisica_ot: BigInt(-1) });
+      else whereOt.rectificacion = { is: { id_empleado_rectificador: actor.alcanceEmpleadoId } };
+    }
+
+    const [unidades, tareasDb, visitasDb, instalacionesDb, incidenciasDb] = await Promise.all([
+      puedeOt ? prisma.unidad_fisica_orden_trabajo.findMany({
+        where: whereOt,
+        select: {
+          id_unidad_fisica_ot: true, id_orden_trabajo: true, estado: true, creado_en: true,
+          orden_trabajo: { select: { orden_trabajo_estado: true } },
+          rectificacion: { select: { estado: true, fecha_rectificacion: true, versiones: { select: { enviado_en: true, decision: { select: { decidido_en: true } } }, orderBy: { numero_version: 'desc' }, take: 1 } } },
+          liberacion: { select: { liberado_en: true } }, cierre_produccion: { select: { finalizado_en: true } },
+        }, orderBy: { creado_en: 'desc' },
+      }) : Promise.resolve([]),
+      puedeOt ? prisma.tarea_ejecutable_unidad_ot.findMany({
+        where: { unidad: whereOt, ...(idArea || idResponsable ? { estado_operacional: { is: { ...(idArea ? { id_area_trabajo: idArea } : {}), ...(idResponsable ? { id_empleado_responsable: idResponsable } : {}) } } } : {}) },
+        select: {
+          id_tarea_ejecutable_ot: true, id_unidad_fisica_ot: true, id_tarea_origen_correctiva: true,
+          estado_operacional: { select: { estado: true, area: { select: { area_trabajo_id_area: true, area_trabajo_nombre_area: true } }, empleado_responsable: { select: { id_empleado: true, nombres: true, apellido_paterno: true, apellido_materno: true } } } },
+          tarea: { select: { ejecuciones: { select: { estado_validacion_productiva: true } } } },
+        }, orderBy: [{ id_unidad_fisica_ot: 'asc' }, { orden_etapa: 'asc' }, { orden_tarea: 'asc' }],
+      }) : Promise.resolve([]),
+      puedeVisitas ? prisma.servicio_terreno.findMany({
+        where: { OR: [{ servicio_terreno_fecha_real: { gte: desde, lt: hasta } }, { servicio_terreno_fecha_real: null }], ...(tipoActividad ? { servicio_terreno_tipo_servicio: { contains: tipoActividad, mode: 'insensitive' } } : {}) },
+        select: { servicio_terreno_servicio_terreno_id: true, servicio_terreno_tipo_servicio: true, servicio_terreno_fecha_real: true, servicio_terreno_estado: true, obra: { select: { obra_nombre_obra: true } } },
+        orderBy: [{ servicio_terreno_fecha_real: 'asc' }, { servicio_terreno_servicio_terreno_id: 'asc' }],
+      }) : Promise.resolve([]),
+      puedeVisitas ? prisma.tarea.findMany({
+        where: { id_orden_trabajo: { not: null }, id_servicio_terreno: { not: null }, servicio_terreno: { is: { servicio_terreno_tipo_servicio: { contains: 'instal', mode: 'insensitive' }, servicio_terreno_fecha_real: { gte: desde, lt: hasta } } } },
+        select: { id_orden_trabajo: true, id_servicio_terreno: true, servicio_terreno: { select: { servicio_terreno_estado: true } }, formulario_de_cierre: { select: { formulario_de_cierre_resultado_finalizado: true }, orderBy: { formulario_de_cierre_formulario_de_cierre_id: 'desc' }, take: 1 } },
+      }) : Promise.resolve([]),
+      puedeIncidencias ? prisma.incidencia_retrabajo_tarea.findMany({
+        where: { fecha_registro: { gte: desde, lt: hasta }, ...(idArea ? { id_area_responsable: idArea } : {}) },
+        select: { id_incidencia_retrabajo: true, estado: true, estado_revision: true, fecha_registro: true, categoria: { select: { nombre: true } }, area_responsable: { select: { area_trabajo_nombre_area: true } } },
+        orderBy: { fecha_registro: 'asc' },
+      }) : Promise.resolve([]),
+    ]);
+
+    const ots: OtDashboard[] = unidades.map((unidad: any) => ({ id: unidad.id_orden_trabajo.toString(), estadoUnidad: unidad.estado, estadoOrden: unidad.orden_trabajo.orden_trabajo_estado, estadoRectificacion: unidad.rectificacion?.estado || null, creada: unidad.creado_en, rectificada: unidad.rectificacion?.fecha_rectificacion || null, enviada: unidad.rectificacion?.versiones[0]?.enviado_en || null, decidida: unidad.rectificacion?.versiones[0]?.decision?.decidido_en || null, liberada: unidad.liberacion?.liberado_en || null, cerrada: unidad.cierre_produccion?.finalizado_en || null }));
+    const tareas: TareaDashboard[] = tareasDb.map((item: any) => ({ id: item.id_tarea_ejecutable_ot.toString(), idOt: item.id_unidad_fisica_ot.toString(), estado: item.estado_operacional?.estado || 'PENDIENTE', areaId: item.estado_operacional?.area?.area_trabajo_id_area?.toString() || null, area: item.estado_operacional?.area?.area_trabajo_nombre_area || null, responsableId: item.estado_operacional?.empleado_responsable?.id_empleado || null, responsable: item.estado_operacional?.empleado_responsable ? nombreCompleto(item.estado_operacional.empleado_responsable) : null, ejecuciones: item.tarea.ejecuciones.map((ejecucion: any) => ({ validacion: ejecucion.estado_validacion_productiva })), esCorrectiva: item.id_tarea_origen_correctiva !== null }));
+    const otsConProduccion = new Set(tareas.filter((tarea) => !['PENDIENTE', 'ASIGNADA'].includes(tarea.estado.toUpperCase())).map((tarea) => tarea.idOt));
+    ots.forEach((ot) => { if (ot.estadoUnidad === 'LIBERADA' && otsConProduccion.has(ot.id) && !ot.cerrada) ot.estadoUnidad = 'EN_PRODUCCION'; });
+    const operacion = resumirOperacionTerreno(ots, tareas);
+    if (estadoFiltro) operacion.ordenes.estados = operacion.ordenes.estados.filter((item) => item.codigo === estadoFiltro);
+
+    const visitas = visitasDb.map((visita: any) => ({ id: visita.servicio_terreno_servicio_terreno_id.toString(), tipo: visita.servicio_terreno_tipo_servicio || 'Visita', fecha: visita.servicio_terreno_fecha_real, estado: visita.servicio_terreno_estado || 'sin_estado', obra: visita.obra?.obra_nombre_obra || null }));
+    const esFinalizada = (estado: string) => /finaliz|complet|realiz/.test(estado.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase());
+    const esReprogramada = (estado: string) => /reprogram/.test(estado.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase());
+    const resumenVisitas = { total: visitas.length, hoy: visitas.filter((v) => v.fecha?.toISOString().slice(0, 10) === hoyChile).length, proximas: visitas.filter((v) => v.fecha && v.fecha.toISOString().slice(0, 10) > hoyChile && !esFinalizada(v.estado)).length, sinProgramar: visitas.filter((v) => !v.fecha).length, pendientes: visitas.filter((v) => !esFinalizada(v.estado) && !esReprogramada(v.estado)).length, finalizadas: visitas.filter((v) => esFinalizada(v.estado)).length, reprogramadas: visitas.filter((v) => esReprogramada(v.estado)).length, proximasActividades: visitas.filter((v) => v.fecha && v.fecha.toISOString().slice(0, 10) >= hoyChile).slice(0, 5) };
+    const instalacionesUnicas = [...new Map(instalacionesDb.map((item: any) => [`${item.id_servicio_terreno}:${item.id_orden_trabajo}`, item])).values()] as any[];
+    const clasificaciones = instalacionesUnicas.map((item) => clasificarResultadoInstalacion(item.servicio_terreno?.servicio_terreno_estado || null, item.formulario_de_cierre[0]?.formulario_de_cierre_resultado_finalizado || null));
+    const instalaciones = { total: clasificaciones.length, programadas: clasificaciones.filter((c) => c === 'PENDIENTE').length, pendientes: clasificaciones.filter((c) => c === 'PENDIENTE').length, completadas: clasificaciones.filter((c) => c === 'INSTALACION_COMPLETADA').length, parciales: clasificaciones.filter((c) => c === 'PARCIALMENTE_REALIZADA').length, noEjecutadas: clasificaciones.filter((c) => c === 'VISITA_NO_EJECUTADA').length, reprogramaciones: clasificaciones.filter((c) => c === 'REPROGRAMACION_NECESARIA').length };
+
+    const incidencias = resumirIncidenciasTerreno(incidenciasDb.map((item: any) => ({ estado: item.estado, estadoRevision: item.estado_revision, categoria: item.categoria?.nombre || null, area: item.area_responsable?.area_trabajo_nombre_area || null, periodo: item.fecha_registro.toISOString().slice(0, 7) })));
+
+    return { filtros: { desde: desde.toISOString().slice(0, 10), hasta: hastaBase.toISOString().slice(0, 10), estado: estadoFiltro || null, area: idArea?.toString() || null, responsable: idResponsable, tipoActividad: tipoActividad || null }, alcance: { ordenes: 'ESTADO_ACTUAL', fabricacion: 'ESTADO_ACTUAL', visitas: 'EVENTOS_DEL_PERIODO', instalaciones: 'EVENTOS_DEL_PERIODO', incidencias: 'EVENTOS_DEL_PERIODO' }, permisos: { ordenes: puedeOt, visitas: puedeVisitas, incidencias: puedeIncidencias, responsables: autorizado('CU207', 'CU209') }, ...operacion, responsables: autorizado('CU207', 'CU209') ? operacion.responsables : null, visitas: puedeVisitas ? resumenVisitas : null, instalaciones: puedeVisitas ? instalaciones : null, incidencias: puedeIncidencias ? incidencias : null };
+  }
+
+  async exportarReporteTerreno(consulta: Record<string, unknown>, actor: ActorTerrenoM6) {
+    const panel = await this.consultarDashboardTerreno(consulta, actor);
+    const filas: Array<{ seccion: string; indicador: string; valor: string | number; alcance: string }> = [];
+    if (panel.permisos.ordenes) {
+      filas.push({ seccion: 'Órdenes de trabajo', indicador: 'Total de OT visibles', valor: panel.ordenes.total, alcance: panel.alcance.ordenes });
+      panel.ordenes.estados.forEach((item) => filas.push({ seccion: 'Órdenes de trabajo', indicador: item.nombre, valor: item.cantidad, alcance: panel.alcance.ordenes }));
+      panel.areas.forEach((item) => filas.push({ seccion: 'Producción por área', indicador: `${item.nombre} · tareas asignadas`, valor: item.asignadas, alcance: panel.alcance.fabricacion }));
+    }
+    if (panel.visitas) Object.entries(panel.visitas).filter(([, valor]) => typeof valor === 'number').forEach(([indicador, valor]) => filas.push({ seccion: 'Visitas', indicador, valor: valor as number, alcance: panel.alcance.visitas }));
+    if (panel.instalaciones) Object.entries(panel.instalaciones).forEach(([indicador, valor]) => filas.push({ seccion: 'Instalaciones', indicador, valor, alcance: panel.alcance.instalaciones }));
+    if (panel.incidencias) Object.entries(panel.incidencias).filter(([, valor]) => typeof valor === 'number').forEach(([indicador, valor]) => filas.push({ seccion: 'Incidencias', indicador, valor: valor as number, alcance: panel.alcance.incidencias }));
+    if (!filas.length) throw new ErrorAplicacion(409, 'No existe cobertura autorizada para exportar el reporte');
+    return archivoCsvAdministrativo(`reporte-terreno-${panel.filtros.desde}-${panel.filtros.hasta}.csv`, filas, [
+      { encabezado: 'Sección', valor: (fila) => fila.seccion }, { encabezado: 'Indicador', valor: (fila) => fila.indicador }, { encabezado: 'Valor', valor: (fila) => fila.valor }, { encabezado: 'Alcance', valor: (fila) => fila.alcance },
+    ], ';');
   }
 }

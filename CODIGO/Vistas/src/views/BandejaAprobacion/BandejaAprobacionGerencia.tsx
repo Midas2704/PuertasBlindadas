@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Check, X, AlertTriangle, Edit2 } from 'lucide-react';
 import ModalDetalleDocumento from '../../components/ModalDetalleDocumento';
 import ModalPlanificacionOrdenes from '../../components/ModalPlanificacionOrdenes';
+import DocumentosHistoricosCotizacion from '../../components/documental/DocumentosHistoricosCotizacion';
 
 const BandejaAprobacionGerencia: React.FC = () => {
   const [cotizaciones, setCotizaciones] = useState<any[]>([]);
@@ -356,11 +357,12 @@ const BandejaAprobacionGerencia: React.FC = () => {
                     <th className="py-2 px-6 font-semibold text-gray-600 text-xs">Cliente</th>
                     <th className="py-2 px-6 font-semibold text-gray-600 text-xs">Estado</th>
                     <th className="py-2 px-6 font-semibold text-gray-600 text-xs">Monto Total</th>
+                    <th className="py-2 px-6 font-semibold text-gray-600 text-xs text-right">Documento</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredHistoryCots.length === 0 ? (
-                    <tr><td colSpan={4} className="py-4 text-center text-gray-500 text-sm">No hay cotizaciones históricas.</td></tr>
+                    <tr><td colSpan={5} className="py-4 text-center text-gray-500 text-sm">No hay cotizaciones históricas.</td></tr>
                   ) : filteredHistoryCots.map(cot => (
                     <tr key={`hc-${cot.id_cotizacion}`} className="border-b border-gray-100 hover:bg-gray-50 text-sm">
                       <td className="py-2 px-6 font-medium text-orange-600 hover:underline cursor-pointer" onClick={() => setActiveModal({ tipo: 'cotizacion', data: cot })}>COT-{cot.id_cotizacion}</td>
@@ -371,6 +373,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-2 px-6">${Number(cot.monto_total_estimado).toLocaleString('es-CL')} {cot.estado_cotizacion==='vencida'&&<button onClick={()=>reactivar(cot.id_cotizacion)} className="ml-3 text-primary-700 underline">Reactivar</button>}</td>
+                      <td className="py-2 px-6 text-right"><DocumentosHistoricosCotizacion cotizacionId={cot.id_cotizacion} estadoCotizacion={cot.estado_cotizacion} compacto /></td>
                     </tr>
                   ))}
                 </tbody>

@@ -11,7 +11,7 @@ const { CoordinadorCargaDocumental } = require('../dist/documental/operaciones/C
 const { ServicioRecuperacionDocumental } = require('../dist/documental/operaciones/ServicioRecuperacionDocumental');
 const { ProcesadorOutboxDocumental } = require('../dist/documental/operaciones/ProcesadorOutboxDocumental');
 const { ReconciliadorDocumental } = require('../dist/documental/operaciones/ReconciliadorDocumental');
-const { cargarConfiguracionSeguridadDocumental } = require('../dist/documental/seguridad/configuracionSeguridadDocumental');
+const { cargarConfiguracionSeguridadDocumental, crearAntivirusAdapterDesdeEntorno } = require('../dist/documental/seguridad/configuracionSeguridadDocumental');
 const { cargarPoliticasActivacionDocumental } = require('../dist/documental/seguridad/PoliticasActivacionDocumental');
 
 const uuid = '11111111-1111-4111-8111-111111111111';
@@ -108,6 +108,15 @@ test('configuración valida límites y allowlist MIME', () => {
   assert.throws(() => cargarConfiguracionSeguridadDocumental({ DOCUMENTAL_POLITICAS_TECNICAS_JSON: JSON.stringify({ foto:{minimoBytes:'1',maximoBytes:'100',mimesPermitidos:['image/svg+xml']} }) }), /MIME/);
 });
 
+test('fábrica antivirus requiere activación explícita y configuración documental completa', () => {
+  assert.ok(crearAntivirusAdapterDesdeEntorno({}) instanceof AntivirusNoDisponible);
+  assert.ok(crearAntivirusAdapterDesdeEntorno({
+    DOCUMENTAL_ANTIVIRUS_ENABLED:'true', DOCUMENTAL_CLAMAV_HOST:'127.0.0.1',
+    DOCUMENTAL_CLAMAV_PORT:'3310', DOCUMENTAL_CLAMAV_TIMEOUT_MS:'30000', DOCUMENTAL_CLAMAV_MAX_BYTES:'20971520',
+  }) instanceof ClamAvDaemonAdapter);
+  assert.throws(() => crearAntivirusAdapterDesdeEntorno({ DOCUMENTAL_ANTIVIRUS_ENABLED:'true', DOCUMENTAL_CLAMAV_HOST:'127.0.0.1' }), /Configuración ClamAV inválida/);
+});
+
 test('política de activación falla cerrada si falta configuración empresarial',()=>{
   assert.throws(()=>cargarPoliticasActivacionDocumental({}),/Falta DOCUMENTAL_POLITICAS_ACTIVACION_JSON/);
 });
@@ -129,6 +138,12 @@ function socketClam(respuesta) {
   socket.end=b=>{if(b)socket.escrituras.push(Buffer.from(b));queueMicrotask(()=>{socket.emit('data',Buffer.from(respuesta));socket.emit('end');});};
   return socket;
 }
+
+test('probe clamd exige PONG y falla cerrado ante respuesta inválida', async () => {
+  const config={host:'127.0.0.1',puerto:3310,timeoutMs:1000,maximoBytes:100n};
+  assert.deepEqual(await new ClamAvDaemonAdapter(config,()=>socketClam('PONG\0')).comprobarDisponibilidad(),{disponible:true,motor:'CLAMAV_DAEMON'});
+  assert.deepEqual(await new ClamAvDaemonAdapter(config,()=>socketClam('OTRA\0')).comprobarDisponibilidad(),{disponible:false,motor:'CLAMAV_DAEMON',codigo:'RESPUESTA_NO_RECONOCIDA'});
+});
 
 test('adaptador clamd transmite INSTREAM y reconoce archivo limpio', async () => {
   const socket=socketClam('stream: OK\0');
@@ -161,15 +176,21 @@ test('adaptador clamd falla cerrado ante timeout sin exponer detalles internos',
 });
 
 const actor = { id: 7n, sesion: 's', permisos: ['CU360','CU366','CU367'], administrador: false };
-test('autorización usa permiso existente y alcance backend', async () => {
+test('autorización usa permiso de consulta existente y alcance backend', async () => {
   const autorizador = new AutorizadorDocumental(async (_actor, contexto) => contexto.idProducto === 8);
-  await autorizador.exigir(actor, 'ASOCIAR_PRODUCTO', { idProducto: 8 });
-  await assert.rejects(() => autorizador.exigir(actor, 'ASOCIAR_PRODUCTO', { idProducto: 9 }), error => error.codigo === 'ALCANCE_DOCUMENTAL_DENEGADO');
+  await autorizador.exigir(actor, 'CONSULTAR_METADATA', { idProducto: 8 });
+  await assert.rejects(() => autorizador.exigir(actor, 'CONSULTAR_METADATA', { idProducto: 9 }), error => error.codigo === 'ALCANCE_DOCUMENTAL_DENEGADO');
+  await assert.rejects(() => autorizador.exigir(actor, 'ASOCIAR_PRODUCTO', { idProducto: 8 }), error => error.codigo === 'ACCESO_DOCUMENTAL_DENEGADO');
 });
 
 test('acción sin CU aprobada queda cerrada incluso para administrador', async () => {
   const autorizador = new AutorizadorDocumental(async () => true);
-  await assert.rejects(() => autorizador.exigir({ ...actor, administrador: true }, 'DESCARGAR', {}), error => error.codigo === 'PERMISO_DOCUMENTAL_NO_DEFINIDO');
+  await assert.rejects(() => autorizador.exigir({ ...actor, administrador: true }, 'DESCARGAR', {}), error => error.codigo === 'ACCESO_DOCUMENTAL_DENEGADO');
+});
+
+test('administrador sin CU explícito tampoco consulta documentos', async () => {
+  const autorizador = new AutorizadorDocumental(async () => true);
+  await assert.rejects(() => autorizador.exigir({ ...actor, permisos: [], administrador: true }, 'CONSULTAR_METADATA', { idProducto: 8 }), error => error.codigo === 'ACCESO_DOCUMENTAL_DENEGADO');
 });
 
 test('auditoría rechaza URLs, tokens y secretos', () => {

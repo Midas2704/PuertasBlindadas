@@ -63,6 +63,8 @@ import SolicitudesCredito from './views/Credito/SolicitudesCredito';
 import Auditoria from './views/Auditoria/Auditoria';
 import Mantenedores from './views/Mantenedores/Mantenedores';
 import ProductosFamilias from './views/Mantenedores/ProductosFamilias';
+import CatalogosComerciales from './views/Mantenedores/CatalogosComerciales';
+import DocumentosComerciales from './views/Mantenedores/DocumentosComerciales';
 import AreasTrabajo from './views/Mantenedores/AreasTrabajo';
 import TareasFabricacion from './views/Mantenedores/TareasFabricacion';
 import { permisosAccesoMantenedores } from './views/Mantenedores/permisos';
@@ -70,6 +72,9 @@ import PortalPrincipal from './views/PortalPrincipal/PortalPrincipal';
 import InventarioPendiente from './views/PortalPrincipal/InventarioPendiente';
 import TerrenoWrapper from './views/Terreno/TerrenoWrapper';
 import InicioTerreno from './views/Terreno/InicioTerreno';
+import ReportesTerreno from './views/Terreno/ReportesTerreno';
+import AgendaTerreno from './views/Terreno/AgendaTerreno';
+import InstalacionesTerreno from './views/Terreno/InstalacionesTerreno';
 import { permisosTerreno } from './seguridad/accesosSistemas';
 
 const App: React.FC = () => {
@@ -129,6 +134,8 @@ const App: React.FC = () => {
           <Route path="auditoria" element={<Protegido permiso="CU355"><Auditoria /></Protegido>} />
           <Route path="mantenedores" element={<Protegido permiso={[...permisosAccesoMantenedores]}><Mantenedores /></Protegido>} />
           <Route path="mantenedores/productos" element={<Protegido permiso="CU360"><ProductosFamilias /></Protegido>} />
+          <Route path="mantenedores/comercial" element={<Protegido permiso="CU360"><CatalogosComerciales /></Protegido>} />
+          <Route path="mantenedores/documentos-comerciales" element={<Protegido permiso="CU360"><DocumentosComerciales /></Protegido>} />
           <Route path="mantenedores/areas-trabajo" element={<Protegido permiso={['CU155','CU157']}><AreasTrabajo /></Protegido>} />
           <Route path="mantenedores/tareas-fabricacion" element={<Protegido permiso="CU360"><TareasFabricacion /></Protegido>} />
           <Route path="cotizacion/nueva" element={<Protegido permiso={new URLSearchParams(window.location.search).has('borrador') ? 'CU20' : 'CU19'}><ArmarCotizacion /></Protegido>} />
@@ -139,6 +146,9 @@ const App: React.FC = () => {
         </Route>
         <Route path="/terreno" element={<Protegido permiso={[...permisosTerreno]}><TerrenoWrapper/></Protegido>}>
           <Route index element={<InicioTerreno/>}/>
+          <Route path="reportes" element={<Protegido permiso={['CU199','CU200','CU202','CU205','CU207','CU209','CU210','CU211','CU212','CU213']}><ReportesTerreno /></Protegido>} />
+          <Route path="agenda" element={<Protegido permiso={['CU199','CU200','CU210']}><AgendaTerreno /></Protegido>} />
+          <Route path="instalaciones" element={<Protegido permiso={['CU199','CU200','CU210','CU211']}><InstalacionesTerreno /></Protegido>} />
           <Route path="visitas" element={<Protegido permiso={['CU199','CU200','CU210','CU211']}><GestionTerreno /></Protegido>} />
           <Route path="mis-tareas" element={<Protegido permiso={['CU201','CU208']}><MisTareasTerreno /></Protegido>} />
           <Route path="produccion" element={<Protegido permiso={['CU207','CU209']}><ProduccionTerreno /></Protegido>} />

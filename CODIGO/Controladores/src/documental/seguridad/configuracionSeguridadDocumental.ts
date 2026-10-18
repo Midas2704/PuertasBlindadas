@@ -1,6 +1,6 @@
 import type { PoliticaTecnicaContenido, MimeDocumentalSoportado } from './IntegridadContenido';
 import { MIME_DOCUMENTALES_SOPORTADOS } from './IntegridadContenido';
-import type { ConfiguracionClamAv } from './AntivirusAdapter';
+import { AntivirusNoDisponible, ClamAvDaemonAdapter, type AntivirusAdapter, type ConfiguracionClamAv } from './AntivirusAdapter';
 
 export interface ConfiguracionSeguridadDocumental {
   politicasPorClasificacion: Readonly<Record<string, PoliticaTecnicaContenido>>;
@@ -31,4 +31,11 @@ export function cargarConfiguracionSeguridadDocumental(entorno: NodeJS.ProcessEn
   const maximoBytes = entorno.DOCUMENTAL_CLAMAV_MAX_BYTES ?? '';
   if (!Number.isInteger(puerto) || puerto < 1 || puerto > 65535 || !Number.isInteger(timeoutMs) || timeoutMs < 1000 || !ENTERO.test(maximoBytes) || BigInt(maximoBytes) < 1n) throw new Error('Configuración ClamAV inválida');
   return { politicasPorClasificacion: politicas, clamav: { host, puerto, timeoutMs, maximoBytes: BigInt(maximoBytes) } };
+}
+
+/** Construye el adaptador real sólo con activación explícita y configuración completa. */
+export function crearAntivirusAdapterDesdeEntorno(entorno: NodeJS.ProcessEnv = process.env): AntivirusAdapter {
+  if (entorno.DOCUMENTAL_ANTIVIRUS_ENABLED?.trim().toLowerCase() !== 'true') return new AntivirusNoDisponible();
+  const configuracion = cargarConfiguracionSeguridadDocumental(entorno);
+  return configuracion.clamav ? new ClamAvDaemonAdapter(configuracion.clamav) : new AntivirusNoDisponible();
 }

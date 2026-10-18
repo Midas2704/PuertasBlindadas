@@ -3,12 +3,30 @@
 export const operacionesPermiso: Record<string, string> = {
  buscarClientes:'CU06',filtrarEstado:'CU07',filtrarFinanzas:'CU08',listarClientes:'CU05', abrirFicha:'CU09', dashboard:'CU05', crearCliente:'CU01', actualizarCliente:'CU02', desactivarCliente:'CU03', reactivarCliente:'CU04', inventario:'CU15', productos:'CU14', monedas:'CU28',
  listarFamiliasProductoComercial:'CU360', listarProductosComerciales:'CU360', obtenerProductoComercial:'CU360', catalogosVinculacionProductoComercial:'CU360', obtenerPlanificacionAprobacionCotizacion:'CU24',
+ listarPreciosComerciales:'CU360', listarServiciosComerciales:'CU360', listarOpcionalesComerciales:'CU360', listarTarifasInstalacionComercial:'CU360', listarCondicionesComerciales:'CU360', resolverCoberturaInstalacionComercial:'CU360', obtenerResumenComercialProducto:'CU360',
+ crearServicioComercial:'CU368', versionarPrecioServicioComercial:'CU368', desactivarServicioComercial:'CU368',
+ listarProductosCatalogoCotizacion:'CU360', obtenerFichaProductoCatalogoCotizacion:'CU360', consultarDocumentosProducto:'CU360', consultarVersionesDocumentoProducto:'CU367', consultarCapacidadesDocumentosProducto:'CU360',
+ crearPrecioComercial:'CU368', versionarPrecioComercial:'CU368', desactivarPrecioComercial:'CU368',
+ crearOpcionalComercial:'CU369', actualizarOpcionalComercial:'CU369', configurarCompatibilidadOpcional:'CU369', versionarPrecioOpcional:'CU369', desactivarOpcionalComercial:'CU369',
+ crearTarifaInstalacionComercial:'CU370', versionarTarifaInstalacionComercial:'CU370', registrarExclusionComunal:'CU370', desactivarTarifaInstalacionComercial:'CU370',
+ crearCondicionComercial:'CU371', versionarCondicionComercial:'CU371', desactivarCondicionComercial:'CU371', publicarCondicionComercial:'CU372',
+ crearIntencionDocumentoComercial:'CU373', confirmarCargaDocumentoComercial:'CU373', reemplazarDocumentoComercial:'CU373',
+ asociarDocumentoProductoComercial:'CU374', definirImagenPrincipalComercial:'CU374', ordenarGaleriaComercial:'CU374', definirUsoDocumentoComercial:'CU374',
+ solicitarVistaPreviaDocumentoComercial:'CU375', descargarDocumentoComercial:'CU376',
+ estadoDocumentalComercial:'CU360', listarPlantillasDocumentalesComerciales:'CU360', listarCartasComercialesB2C:'CU360',
+ previsualizarCotizacionPdf:'CU375', previsualizarCartaComercialB2C:'CU375',
+ crearPlantillaDocumentalComercial:'CU378', editarPlantillaDocumentalComercial:'CU378', publicarPlantillaDocumentalComercial:'CU379',
+ crearCartaComercialB2C:'CU380', editarCartaComercialB2C:'CU380', publicarCartaComercialB2C:'CU381',
+ historialDocumentalCotizacion:'CU376', descargarPdfHistoricoCotizacion:'CU376',
+ descargarCartaComercialB2C:'CU376',
+ crearBorradorPlantillaDocumental:'CU378', editarBorradorPlantillaDocumental:'CU378', publicarPlantillaDocumental:'CU379',
+ crearBorradorCartaComercialB2C:'CU380', editarBorradorCartaComercialB2C:'CU380',
  crearFamiliaProductoComercial:'CU361', crearProductoComercial:'CU361', actualizarFamiliaProductoComercial:'CU362', actualizarProductoComercial:'CU362',
  desactivarFamiliaProductoComercial:'CU363', desactivarProductoComercial:'CU363', reactivarFamiliaProductoComercial:'CU364', reactivarProductoComercial:'CU364',
  publicarVersionProductoComercial:'CU365', vincularProductoComercial:'CU366', historialFamiliaProductoComercial:'CU367', historialProductoComercial:'CU367',
  listarTareasFabricacion:'CU360', obtenerPlantillaFabricacionFamilia:'CU360', crearTareaFabricacion:'CU361', actualizarTareaFabricacion:'CU362', guardarBorradorPlantillaFabricacion:'CU362',
  desactivarTareaFabricacion:'CU363', reactivarTareaFabricacion:'CU364', publicarPlantillaFabricacionFamilia:'CU365', historialPlantillaFabricacionFamilia:'CU367',
- bandeja:'CU20', historial:'CU20', guardarCotizacion:'CU19', editarCotizacion:'CU20', crearVentaDirecta:'CU27', registrarClienteDesdeCotizacion:'CU13', emitirCotizacion:'CU18', reactivarCotizacion:'CU21', formalizarClienteB2C:'CU23', aprobarCotizacionB2B:'CU24', configurarEtapasCobro:'CU40', modificarGuia:'CU35', definirCondicionesCobro:'CU39', configurarUmbral:'CU41', consultarUmbral:'CU41',
+ bandeja:'CU20', historial:'CU20', guardarCotizacion:'CU19', editarCotizacion:'CU20', buscarObrasCotizacion:'CU20', registrarObraDesdeCotizacion:'CU19', vincularObraCotizacion:'CU20', seleccionarAlternativaB2C:'CU20', aceptarAlternativaB2C:'CU24', rechazarAlternativaB2C:'CU22', crearVentaDirecta:'CU27', registrarClienteDesdeCotizacion:'CU13', emitirCotizacion:'CU18', reactivarCotizacion:'CU21', formalizarClienteB2C:'CU23', aprobarCotizacionB2B:'CU24', configurarEtapasCobro:'CU40', modificarGuia:'CU35', definirCondicionesCobro:'CU39', configurarUmbral:'CU41', consultarUmbral:'CU41',
  anularVenta:'CU37', registrarDocumento:'CU36', descartarBorrador:'CU22', aprobarCotizacion:'CU24', aprobarVenta:'CU27', tipoCambio:'CU47',
  consultarPago:'CU55', consultarSaldo:'CU49', catalogosPago:'CU45', contextoPago:'CU42', consolidarB2C:'CU25', revertirVenta:'CU38', registrarPago:'CU43', anularPago:'CU51', revertirPago:'CU52', aplicarSaldoFavor:'CU54', consultarMorosidad:'CU56', generarComprobante:'CU57', conciliarPago:'CU58',
  usuarios:'CU67', catalogosUsuarios:'CU59', registrarUsuario:'CU59', desactivarUsuario:'CU60', reactivarUsuario:'CU61',
@@ -69,7 +87,7 @@ export const operacionesPermiso: Record<string, string> = {
  listarPrestadoresHonorarios:'CU196', listarBoletasHonorarios:'CU196', obtenerBoletaHonorarios:'CU196',
  crearPrestadorHonorarios:'CU197', crearBoletaHonorarios:'CU197', actualizarBoletaHonorarios:'CU197',
  previsualizarConfirmacionBoletaHonorarios:'CU198', confirmarBoletaHonorarios:'CU198', consultarRetencionesHonorariosMensuales:'CU198',
- crearVisitaTerreno:'CU199', listarObrasTerreno:'CU199', listarVisitasTerreno:'CU199', obtenerVisitaTerreno:'CU199',
+ crearVisitaTerreno:'CU199', listarObrasTerreno:'CU199', listarVisitasTerreno:'CU199', obtenerVisitaTerreno:'CU199', listarInstalacionesTerreno:'CU210',
  listarUsuariosTerreno:'CU200', asignarResponsableVisita:'CU200',
  listarMisTareasTerreno:'CU201',
  obtenerLevantamientoTerreno:'CU202', guardarLevantamientoTerreno:'CU202',
@@ -87,6 +105,7 @@ export const operacionesPermiso: Record<string, string> = {
  registrarResultadoVisita:'CU211',
  registrarIncidenciaRetrabajo:'CU212',
  listarIncidenciasOperativas:'CU213', catalogosIncidenciaOperativa:'CU212', obtenerEvidenciaIncidencia:'CU213', adjuntarEvidenciaIncidencia:'CU212', actualizarIncidenciaOperativa:'CU213', aprobarIncidenciaOperativa:'CU213', rechazarIncidenciaOperativa:'CU213',
+ consultarDashboardTerreno:'CU202', exportarReporteTerreno:'CU202',
  catalogoDeduccionesEmpleado:'CU214', listarDeduccionesEmpleado:'CU214', asignarDeduccionEmpleado:'CU214', finalizarDeduccionEmpleado:'CU214',
  consultarPanelGeneralM7:'CU215', consultarHistoricoPanelGeneralM7:'CU215', consultarCentroAtencionM7:'CU216', consultarCotizacionesPendientesM7:'CU217', consultarContextoClienteM7:'CU221', consultarAnalisisVentasM7:'CU219', consultarCuentasCobrarM7:'CU222', consultarCuentasPagarM7:'CU226', consultarLiquidezM7:'CU230', consultarRiesgoDeficitM7:'CU232', consultarExposicionProyectosM7:'CU236', consultarContextoProyectoM7:'CU237',
  consultarMargenProyectosM7:'CU233', consultarResumenResultadosM7:'CU238', consultarSituacionFinancieraM7:'CU239', consultarCostoRemuneracionesM7:'CU242', descargarPdfDashboardM7:'CU245', descargarExcelDashboardM7:'CU245', consultarUmbralMargenM7:'CU246', configurarUmbralMargenM7:'CU246', crearProyeccionM7:'CU246', actualizarProyeccionM7:'CU246', desactivarProyeccionM7:'CU246',
@@ -105,6 +124,8 @@ export const operacionesPermiso: Record<string, string> = {
 };
 
 const permisosAlternativosOperacion: Record<string, string[]> = {
+ consultarDashboardTerreno: ['CU199','CU200','CU205','CU207','CU209','CU210','CU211','CU212','CU213'],
+ exportarReporteTerreno: ['CU199','CU200','CU205','CU207','CU209','CU210','CU211','CU212','CU213'],
  listarIncidenciasOperativas: ['CU212'],
  catalogosIncidenciaOperativa: ['CU213'],
  obtenerEvidenciaIncidencia: ['CU212'],
@@ -124,6 +145,7 @@ const permisosAlternativosOperacion: Record<string, string[]> = {
  listarMisTareasTerreno: ['CU208'],
  listarVisitasTerreno: ['CU200', 'CU210'],
  obtenerVisitaTerreno: ['CU200', 'CU210'],
+ listarInstalacionesTerreno: ['CU199', 'CU200', 'CU211'],
  consultarAnalisisVentasM7: ['CU218', 'CU220'],
  consultarCuentasCobrarM7: ['CU223', 'CU224', 'CU225'],
  consultarCuentasPagarM7: ['CU227'],
@@ -155,10 +177,10 @@ export const codigosImplementados = [...new Set([...Object.values(operacionesPer
 /** El perfil Administrador representa acceso integral a la matriz de CU implementados. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
 export const codigosTodosLosCU = Array.from({ length: 274 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
-export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', 'CU360', 'CU361', 'CU362', 'CU363', 'CU364', 'CU365', 'CU366', 'CU367'];
+export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({length:22},(_,i)=>`CU${360+i}`).filter(c=>c!=='CU377')];
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
- if (numero >= 360 && numero <= 367) return 'M2';
+ if (numero >= 360 && numero <= 381) return 'M2';
  return numero >= 275 ? 'M9' : numero >= 259 ? 'M8' : numero >= 215 ? 'M7' : numero >= 155 ? 'M6' : numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
 };
 export const dependenciasPermiso: Record<string, string[]> = {
@@ -232,7 +254,7 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU212:[],
  CU213:[],
  CU214:[],
- CU215:[],CU216:[],CU217:[],CU218:[],CU219:[],CU220:[],CU221:[],CU222:[],CU223:[],CU224:[],CU225:[],CU226:[],CU227:[],CU228:[],CU229:[],CU230:[],CU231:[],CU232:[],CU233:[],CU234:[],CU235:[],CU236:[],CU237:[],CU238:[],CU239:[],CU240:[],CU241:[],CU242:[],CU243:[],CU244:[],CU245:[],CU246:[],CU247:[],CU248:[],CU249:[],CU250:[],CU251:[],CU252:[],CU253:[],CU254:[],CU255:[],CU256:[],CU257:[],CU258:[],CU259:[],CU260:[],CU261:[],CU262:[],CU263:[],CU264:[],CU265:[],CU266:[],CU267:[],CU268:[],CU269:[],CU270:[],CU271:[],CU272:[],CU273:[],CU274:[],CU355:[],CU359:['CU355'],CU360:[],CU361:['CU360'],CU362:['CU360'],CU363:['CU360'],CU364:['CU360'],CU365:['CU360'],CU366:['CU360'],CU367:['CU360'],
+ CU215:[],CU216:[],CU217:[],CU218:[],CU219:[],CU220:[],CU221:[],CU222:[],CU223:[],CU224:[],CU225:[],CU226:[],CU227:[],CU228:[],CU229:[],CU230:[],CU231:[],CU232:[],CU233:[],CU234:[],CU235:[],CU236:[],CU237:[],CU238:[],CU239:[],CU240:[],CU241:[],CU242:[],CU243:[],CU244:[],CU245:[],CU246:[],CU247:[],CU248:[],CU249:[],CU250:[],CU251:[],CU252:[],CU253:[],CU254:[],CU255:[],CU256:[],CU257:[],CU258:[],CU259:[],CU260:[],CU261:[],CU262:[],CU263:[],CU264:[],CU265:[],CU266:[],CU267:[],CU268:[],CU269:[],CU270:[],CU271:[],CU272:[],CU273:[],CU274:[],CU355:[],CU359:['CU355'],CU360:[],CU361:['CU360'],CU362:['CU360'],CU363:['CU360'],CU364:['CU360'],CU365:['CU360'],CU366:['CU360'],CU367:['CU360'],CU368:['CU360'],CU369:['CU360'],CU370:['CU360'],CU371:['CU360'],CU372:['CU360','CU371'],CU373:['CU360'],CU374:['CU360'],CU375:['CU360'],CU376:['CU360'],CU377:[],CU378:['CU360'],CU379:['CU378'],CU380:['CU360'],CU381:['CU380'],
 };
 type PerfilFuncional = 'gerencia' | 'secretaria' | 'contador';
 const G: readonly PerfilFuncional[] = ['gerencia'];
@@ -272,7 +294,7 @@ export const matrizPermisosPorCU: Record<string, readonly PerfilFuncional[]> = {
  CU178:[],CU179:[],CU180:[],CU181:[],CU182:[],CU183:[],CU184:[],CU185:[],CU186:[],CU187:[],CU188:[],CU189:[],CU190:[],
  CU191:[],CU192:[],CU193:[],CU194:[],CU195:[],CU196:[],CU197:[],CU198:[],CU199:[],CU200:[],CU201:[],CU202:[],CU203:[],CU204:[],CU205:[],CU206:[],CU207:[],CU208:[],CU209:[],CU210:[],CU211:[],CU212:[],CU213:[],CU214:[],CU215:[],CU216:[],CU217:[],CU218:[],CU219:[],CU220:[],CU221:[],CU222:[],CU223:[],CU224:[],CU225:[],CU226:[],CU227:[],CU228:[],CU229:[],CU230:[],CU231:[],CU232:[],CU233:[],CU234:[],CU235:[],CU236:[],CU237:[],CU238:[],CU239:[],CU240:[],CU241:[],CU242:[],CU243:[],CU244:[],CU245:[],CU246:[],CU247:[],CU248:[],CU249:[],CU250:[],CU251:[],CU252:[],CU253:[],CU254:[],CU255:[],CU256:[],CU257:[],CU258:[],CU259:GS,
  CU260:S,CU261:S,CU262:GS,CU263:G,CU264:G,CU265:G,CU266:G,CU267:G,CU268:G,CU269:G,CU270:GSC,CU271:G,CU272:GSC,CU273:G,CU274:G,
- CU355:GSC,CU359:GC,CU360:[],CU361:[],CU362:[],CU363:[],CU364:[],CU365:[],CU366:[],CU367:[],
+ CU355:GSC,CU359:GC,CU360:[],CU361:[],CU362:[],CU363:[],CU364:[],CU365:[],CU366:[],CU367:[],CU368:[],CU369:[],CU370:[],CU371:[],CU372:[],CU373:[],CU374:[],CU375:[],CU376:[],CU377:[],CU378:[],CU379:[],CU380:[],CU381:[],
 };
 
 const operacionesPersonales = new Set(['CU68','CU69','CU70']);

@@ -62,6 +62,7 @@ export class M1Controller {
   async listarClientes(filtros: FiltrosClientes) {
     const condicion: Prisma.cliente_financieroWhereInput = {};
     if (filtros.estado !== 'todos') condicion.estado_financiero = filtros.estado === 'activos' ? 'activo' : 'inactivo';
+    if (filtros.segmento) condicion.tipo_cliente_financiero = { nombre_tipo_cliente_financiero: { equals: filtros.segmento, mode: 'insensitive' } };
     const clientes = await prisma.cliente_financiero.findMany({
       where: condicion, orderBy: [{ nombre_razon_social_referencia: 'asc' }, { id_cliente_financiero: 'asc' }],
       include: { tipo_cliente_financiero: true, ficha_cliente: { include: { nota_venta: { include: incluirNota } } } },

@@ -89,6 +89,20 @@ describe('PanelDocumentosProducto — interacción real',()=>{
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('distingue permisos pendientes, política, storage y antivirus no configurados',()=>{
+    render(<PanelDocumentosProducto modo="editar" productoId={7} estado="VACIO" capacidades={{...capacidadesDocumentalesDeshabilitadas,consultarMetadatos:true,diagnosticoActivacion:{permisoGestion:'APROBADO_C2_6',politicaComercial:'NO_CONFIGURADA',storage:'NO_CONFIGURADO',antivirus:'NO_CONFIGURADO'}}}/>);
+    expect(screen.getByLabelText('Estado de activación documental')).toHaveTextContent('Permiso de gestiónCU aprobados; asignación explícita');
+    expect(screen.getByLabelText('Estado de activación documental')).toHaveTextContent('StorageNo disponible');
+    expect(screen.getByLabelText('Estado de activación documental')).toHaveTextContent('AntivirusNo disponible');
+  });
+
+  it('una carga pendiente se informa sin presentarla como disponible',()=>{
+    const pendiente=documento({estado:'VALIDANDO',titulo:'Fotografía en validación'});
+    render(<PanelDocumentosProducto modo="editar" productoId={7} estado="LISTO" documentos={[pendiente]} capacidades={capacidadesDocumentalesDeshabilitadas}/>);
+    expect(screen.getByText(/carga pendiente de validación/i)).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Vista ampliada'})).toBeDisabled();
+  });
+
   it('los fixtures no contienen secretos, credenciales ni conexiones reales',()=>{
     const serializado=JSON.stringify(documento());
     expect(serializado).not.toMatch(/AKIA|secretAccessKey|authorization|cloudflarestorage|amazonaws|clouding/i);

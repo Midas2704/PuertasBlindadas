@@ -1,6 +1,7 @@
 import { prepararPago } from '../utilidades/pago';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { formalizarProyectoCotizacion } from '../comercial/ServicioObraProyectoComercial';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, consolidarNotasClp, estadoVisibleNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
@@ -8,6 +9,7 @@ import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitu
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 import { registrarCompromisoCredito, validarCreditoParaFormalizacion } from '../utilidades/creditoM8';
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
+import { normalizarUbicacion, resolverCoberturaDesdeTarifas, type SegmentoComercial, type TarifaResoluble } from '../comercial/contratosCatalogoComercial';
 
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 const ESTADOS_FAMILIA_COMERCIAL = ['ACTIVA', 'INACTIVA'] as const;
@@ -99,6 +101,15 @@ const auditableM9 = <T extends object>(resultado: T, anterior?: Prisma.InputJson
   Object.defineProperty(resultado, '__auditoriaM9', { enumerable: false, value: { anterior, nuevo } });
   return resultado;
 };
+async function resolverObraContexto(tx: Prisma.TransactionClient, valor: unknown, anterior: bigint | null = null) {
+  if (valor === undefined) return anterior;
+  if (valor === null || valor === '') return null;
+  const idObra = BigInt(identificador(valor));
+  const obra = await tx.obra.findUnique({ where: { obra_obra_id: idObra } });
+  if (!obra) throw new ErrorAplicacion(400, 'La Obra seleccionada no existe');
+  if (['inactiva', 'cerrada', 'eliminada'].includes(String(obra.obra_estado).toLowerCase())) throw new ErrorAplicacion(409, 'La Obra seleccionada no admite nuevas vinculaciones');
+  return idObra;
+}
 function importes(base: Prisma.Decimal, tipo: unknown, valor: unknown, exento: unknown) {
   if (typeof exento !== 'boolean') throw new ErrorAplicacion(400, 'Indica IVA o exención');
   const descuento = new Prisma.Decimal(numeroNoNegativo(valor ?? 0, 'Descuento'));
@@ -108,6 +119,41 @@ function importes(base: Prisma.Decimal, tipo: unknown, valor: unknown, exento: u
   const neto = base.minus(montoDescuento).toDecimalPlaces(2);
   const impuesto = exento ? new Prisma.Decimal(0) : neto.mul('0.19').toDecimalPlaces(2);
   return { neto, impuesto, total: neto.plus(impuesto), descuento: montoDescuento.toDecimalPlaces(2) };
+}
+
+const CORREO_COMERCIAL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+async function sincronizarContactosB2B(tx: Prisma.TransactionClient, idCotizacion: number, entrada: Entrada, segmento: SegmentoComercial|null, actorId?: bigint) {
+  if (entrada.contactos_b2b === undefined) return;
+  if (segmento !== 'B2B') {
+    if (Array.isArray(entrada.contactos_b2b) && entrada.contactos_b2b.length === 0) return;
+    throw new ErrorAplicacion(409, 'Sólo una cotización B2B puede guardar contactos propios');
+  }
+  if (!actorId) throw new ErrorAplicacion(401, 'Los contactos de la cotización requieren un actor autenticado');
+  if (!Array.isArray(entrada.contactos_b2b) || entrada.contactos_b2b.length > 20) throw new ErrorAplicacion(400, 'Los contactos B2B deben ser una lista de hasta 20 registros');
+  const permitirIncompleto = entrada.permitir_borrador_incompleto === true;
+  if (!permitirIncompleto && !entrada.contactos_b2b.length) throw new ErrorAplicacion(400, 'La cotización B2B requiere al menos un contacto propio');
+  const principales = entrada.contactos_b2b.filter((item:Entrada) => item.es_principal === true).length;
+  if (entrada.contactos_b2b.length && principales !== 1) throw new ErrorAplicacion(400, 'Debe existir exactamente un contacto principal');
+  const existentes = await tx.contacto_cotizacion_b2b.findMany({ where:{ id_cotizacion:idCotizacion } });
+  const idsExistentes = new Map(existentes.map(item => [item.id_contacto_cotizacion_b2b.toString(),item]));
+  const conservados = new Set<string>();
+  for (const item of entrada.contactos_b2b as Entrada[]) {
+    const nombre = texto(item.nombre,120); const correo = texto(item.correo,254).toLowerCase(); const telefono = texto(item.telefono,40);
+    if (!nombre || (!correo && !telefono)) throw new ErrorAplicacion(400, 'Cada contacto debe incluir nombre y correo o teléfono');
+    if (correo && !CORREO_COMERCIAL.test(correo)) throw new ErrorAplicacion(400, 'El correo de contacto no es válido');
+    const tipo = texto(item.tipo_contacto || 'COMERCIAL',30).toUpperCase();
+    if (!['COMERCIAL','TECNICO','OBRA','FACTURACION','OTRO'].includes(tipo)) throw new ErrorAplicacion(400, 'Tipo de contacto no válido');
+    const id = item.id_contacto_cotizacion_b2b ? BigInt(identificador(item.id_contacto_cotizacion_b2b)) : null;
+    const actual = id ? idsExistentes.get(id.toString()) : undefined;
+    if (id && !actual) throw new ErrorAplicacion(409, 'El contacto no pertenece a esta cotización');
+    if (actual && item.revision !== undefined && identificador(item.revision) !== actual.revision) throw new ErrorAplicacion(409, 'El contacto fue modificado por otra sesión');
+    const datos = { nombre, apellido:texto(item.apellido,120)||null, cargo:texto(item.cargo,120)||null, empresa_relacionada:texto(item.empresa_relacionada,200)||null, correo:correo||null, telefono:telefono||null, tipo_contacto:tipo, es_principal:item.es_principal===true, observaciones:texto(item.observaciones,2000)||null, estado:'ACTIVO' };
+    const guardado = actual
+      ? await tx.contacto_cotizacion_b2b.update({ where:{id_contacto_cotizacion_b2b:actual.id_contacto_cotizacion_b2b}, data:{...datos,revision:{increment:1},actualizado_en:new Date()} })
+      : await tx.contacto_cotizacion_b2b.create({ data:{...datos,id_cotizacion:idCotizacion,creado_por:actorId} });
+    conservados.add(guardado.id_contacto_cotizacion_b2b.toString());
+  }
+  for (const anterior of existentes) if (anterior.estado==='ACTIVO' && !conservados.has(anterior.id_contacto_cotizacion_b2b.toString())) await tx.contacto_cotizacion_b2b.update({ where:{id_contacto_cotizacion_b2b:anterior.id_contacto_cotizacion_b2b}, data:{estado:'INACTIVO',es_principal:false,revision:{increment:1},actualizado_en:new Date()} });
 }
 
 async function construirCosteoCotizacion(
@@ -158,6 +204,218 @@ async function construirCosteoCotizacion(
   }
   const precioSugerido = costoTotal.div(new Prisma.Decimal(1).minus(new Prisma.Decimal(margen).div(100))).toDecimalPlaces(2);
   return { costoTotal, precioSugerido, detalles };
+}
+
+type ContratoComercialCotizacion = {
+  segmento: SegmentoComercial;
+  completo: boolean;
+  precioBase: Prisma.Decimal;
+  instalacion: {
+    requiere: 'SI'|'NO'|'POR_DEFINIR';
+    estado: 'DISPONIBLE'|'NO_DISPONIBLE'|'REQUIERE_EVALUACION'|'NO_APLICA';
+    idTarifa: bigint|null;
+    precio: Prisma.Decimal|null;
+  };
+  idCondicion: bigint|null;
+  servicios: Prisma.detalle_servicio_cotizacionCreateWithoutCotizacionInput[];
+};
+
+const segmentoCotizacion = (valor: unknown): SegmentoComercial | null => {
+  if (valor === undefined || valor === null || valor === '') return null;
+  const normalizado = String(valor).toUpperCase();
+  if (normalizado !== 'B2B' && normalizado !== 'B2C') throw new ErrorAplicacion(400, 'El segmento comercial debe ser B2B o B2C');
+  return normalizado;
+};
+
+async function validarContratoComercialCotizacion(
+  tx: Prisma.TransactionClient,
+  entrada: Entrada,
+  productos: Entrada[],
+  detalles: Prisma.detalle_cotizacionCreateWithoutCotizacionInput[],
+  idMoneda: number,
+  fecha: Date,
+): Promise<ContratoComercialCotizacion|null> {
+  const segmento = segmentoCotizacion(entrada.segmento_comercial);
+  if (!segmento) return null;
+  const permitirIncompleto = entrada.permitir_borrador_incompleto === true;
+  let completo = true;
+  let precioBase = new Prisma.Decimal(0);
+  const servicios: Prisma.detalle_servicio_cotizacionCreateWithoutCotizacionInput[] = [];
+  for (let indice = 0; indice < productos.length; indice++) {
+    const producto = productos[indice];
+    const idProducto = identificador(producto.id_producto_comercial);
+    const idVersion = identificador(producto.id_producto_comercial_version);
+    const idPrecio = producto.id_precio_producto_comercial ? BigInt(identificador(producto.id_precio_producto_comercial)) : null;
+    const catalogado = await tx.extension_producto_comercial.findFirst({
+      where: { id_extension_producto_comercial: idProducto, estado: 'VINCULADO', id_item_comercial: identificador(producto.id_item_comercial) },
+      include: { versiones: { where: { id_producto_comercial_version: idVersion } } },
+    });
+    if (!catalogado || catalogado.versiones.length !== 1 || catalogado.numero_version_vigente !== catalogado.versiones[0].numero_version) throw new ErrorAplicacion(409, 'El producto o su versión comercial ya no están publicados');
+    const precio = idPrecio ? await tx.precio_producto_comercial.findFirst({ where: {
+      id_precio_producto_comercial: idPrecio, id_extension_producto_comercial: idProducto,
+      segmento_comercial: segmento, id_moneda: idMoneda, estado: 'ACTIVO', vigencia_desde: { lte: fecha },
+      OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }],
+    } }) : null;
+    if (!precio && !permitirIncompleto) throw new ErrorAplicacion(409, 'El producto no tiene un precio comercial vigente para el segmento y moneda seleccionados');
+    if (!precio) {
+      completo = false;
+      Object.assign(detalles[indice], { producto_comercial:{connect:{id_extension_producto_comercial:idProducto}}, producto_version:{connect:{id_producto_comercial_version:idVersion}}, tipo_linea_comercial:'PRODUCTO', descuento_elegible:true, snapshot_comercial:{segmento,idProducto,idVersion,numeroVersion:catalogado.versiones[0].numero_version,estadoPrecio:'SIN_PRECIO',opcionales:[]} });
+      continue;
+    }
+    const opcionalesEntrada = Array.isArray(producto.opcionales) ? producto.opcionales : [];
+    const opcionalesSnapshot: Prisma.InputJsonValue[] = [];
+    let totalOpcionales = new Prisma.Decimal(0);
+    const usados = new Set<string>();
+    for (const seleccion of opcionalesEntrada) {
+      const idCompatibilidad = BigInt(identificador(seleccion.id_compatibilidad_opcional));
+      if (usados.has(idCompatibilidad.toString())) throw new ErrorAplicacion(400, 'No repitas un opcional en el mismo producto');
+      usados.add(idCompatibilidad.toString());
+      const idPrecioOpcional = seleccion.id_precio_opcional_comercial ? BigInt(identificador(seleccion.id_precio_opcional_comercial)) : null;
+      const cantidad = identificador(seleccion.cantidad ?? 1);
+      const compatibilidad = await tx.compatibilidad_opcional_producto.findFirst({ where: {
+        id_compatibilidad_opcional: idCompatibilidad, id_extension_producto_comercial: idProducto, estado: 'ACTIVA',
+        ...(segmento === 'B2B' ? { habilitado_b2b: true } : { habilitado_b2c: true }),
+      }, include: { opcional: true } });
+      const precioOpcional = compatibilidad && idPrecioOpcional ? await tx.precio_opcional_comercial.findFirst({ where: {
+        id_precio_opcional_comercial: idPrecioOpcional, id_opcional_comercial: compatibilidad.id_opcional_comercial,
+        segmento_comercial: segmento, id_moneda: idMoneda, estado: 'ACTIVO', vigencia_desde: { lte: fecha },
+        OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }],
+      } }) : null;
+      if (!compatibilidad || compatibilidad.opcional.estado !== 'ACTIVO' || !precioOpcional) throw new ErrorAplicacion(409, 'Un opcional dejó de ser compatible o no tiene precio vigente');
+      totalOpcionales = totalOpcionales.plus(precioOpcional.monto.mul(cantidad));
+      opcionalesSnapshot.push({ idOpcional: compatibilidad.id_opcional_comercial.toString(), idCompatibilidad: idCompatibilidad.toString(), idPrecio: idPrecioOpcional!.toString(), codigo: compatibilidad.opcional.codigo, nombre: compatibilidad.opcional.nombre, cantidad, precioUnitario: precioOpcional.monto.toString(), versionPrecio: precioOpcional.revision });
+    }
+    const cantidadProducto = new Prisma.Decimal(String(producto.cantidad));
+    const unitario = precio.monto.plus(totalOpcionales);
+    const subtotal = unitario.mul(cantidadProducto).toDecimalPlaces(2);
+    precioBase = precioBase.plus(subtotal);
+    Object.assign(detalles[indice], {
+      producto_comercial: { connect: { id_extension_producto_comercial: idProducto } },
+      producto_version: { connect: { id_producto_comercial_version: idVersion } },
+      precio_comercial: { connect: { id_precio_producto_comercial: idPrecio } },
+      tipo_linea_comercial: 'PRODUCTO', precio_lista_aplicado: precio.monto,
+      precio_unitario_autorizado: unitario, descuento_elegible: true, subtotal_item_estimado: subtotal,
+      snapshot_comercial: { segmento, idProducto, idVersion, numeroVersion: catalogado.versiones[0].numero_version, idPrecio: idPrecio!.toString(), precioLista: precio.monto.toString(), precioUnitario: unitario.toString(), monedaId: idMoneda, opcionales: opcionalesSnapshot },
+    });
+  }
+
+  const serviciosEntrada = entrada.servicios === undefined ? [] : entrada.servicios;
+  if (!Array.isArray(serviciosEntrada) || serviciosEntrada.length > 30) throw new ErrorAplicacion(400, 'Los servicios deben ser una lista de hasta 30 partidas');
+  if (serviciosEntrada.length && segmento !== 'B2B') throw new ErrorAplicacion(409, 'Las partidas de servicios de C3.3 sólo están habilitadas para B2B');
+  for (const linea of serviciosEntrada as Entrada[]) {
+    const idServicio = BigInt(identificador(linea.id_servicio_comercial));
+    const idPrecio = BigInt(identificador(linea.id_precio_servicio_comercial));
+    const cantidad = new Prisma.Decimal(numeroNoNegativo(linea.cantidad ?? 1, 'Cantidad de servicio'));
+    if (cantidad.lte(0)) throw new ErrorAplicacion(400, 'La cantidad del servicio debe ser mayor a cero');
+    const tipoLinea = texto(linea.tipo_linea_comercial,30).toUpperCase();
+    if (!['FLETE','DESPACHO','TRANSPORTE','CARGA_DESCARGA','SERVICIO_ADICIONAL'].includes(tipoLinea)) throw new ErrorAplicacion(400, 'Tipo de partida de servicio no autorizado');
+    const precioServicio = await tx.precio_servicio_comercial.findFirst({ where:{
+      id_precio_servicio_comercial:idPrecio,id_servicio_comercial:idServicio,segmento_comercial:'B2B',id_moneda:idMoneda,estado:'ACTIVO',vigencia_desde:{lte:fecha},OR:[{vigencia_hasta:null},{vigencia_hasta:{gte:fecha}}],
+    }, include:{servicio:true} });
+    if (!precioServicio || precioServicio.servicio.estado!=='ACTIVO' || !precioServicio.servicio.habilitado_b2b) throw new ErrorAplicacion(409, 'El servicio no tiene un precio B2B vigente para la moneda seleccionada');
+    const subtotal = precioServicio.monto.mul(cantidad).toDecimalPlaces(2);
+    precioBase = precioBase.plus(subtotal);
+    servicios.push({
+      servicio:{connect:{id_servicio_comercial:idServicio}}, precio:{connect:{id_precio_servicio_comercial:idPrecio}},
+      cantidad, descripcion_cotizada:texto(linea.descripcion,500)||precioServicio.servicio.nombre,
+      subtotal, tipo_linea_comercial:tipoLinea,
+      precio_unitario_autorizado:precioServicio.monto, descuento_elegible:linea.descuento_elegible!==false,
+      unidad_cobro_cotizada:precioServicio.servicio.unidad_cobro,
+      snapshot_comercial:{segmento:'B2B',tipoLinea,idServicio:idServicio.toString(),codigo:precioServicio.servicio.codigo,nombre:precioServicio.servicio.nombre,descripcion:texto(linea.descripcion,500)||precioServicio.servicio.descripcion,idPrecio:idPrecio.toString(),versionPrecio:precioServicio.revision,precioUnitario:precioServicio.monto.toString(),monedaId:idMoneda,unidad:precioServicio.servicio.unidad_cobro},
+    });
+  }
+
+  const requiere = String(entrada.requiere_instalacion || 'NO').toUpperCase();
+  if (!['SI','NO','POR_DEFINIR'].includes(requiere)) throw new ErrorAplicacion(400, 'Indica si la cotización requiere instalación');
+  let estado: ContratoComercialCotizacion['instalacion']['estado'] = requiere === 'NO' ? 'NO_APLICA' : 'REQUIERE_EVALUACION';
+  let idTarifa: bigint|null = null;
+  let precioInstalacion: Prisma.Decimal|null = null;
+  if (requiere === 'SI') {
+    const region = texto(entrada.region_instalacion, 120);
+    const comuna = texto(entrada.comuna_instalacion, 120) || null;
+    if (!region) throw new ErrorAplicacion(400, 'La región es obligatoria cuando se solicita instalación');
+    const candidatas = await tx.tarifa_instalacion_comercial.findMany({ where: {
+      region_normalizada: normalizarUbicacion(region), estado: 'ACTIVA', vigencia_desde: { lte: fecha },
+      OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }],
+    }, include: { moneda: true }, orderBy: { vigencia_desde: 'desc' } });
+    const resolucion = resolverCoberturaDesdeTarifas(candidatas.map((item):TarifaResoluble => ({ id:item.id_tarifa_instalacion_comercial.toString(), alcance:item.alcance_geografico, regionNormalizada:item.region_normalizada, comunaNormalizada:item.comuna_normalizada, estadoCobertura:item.estado_cobertura, precio:item.precio_comercial?.toNumber() ?? null, moneda:item.moneda?.codigo_moneda ?? null, vigenciaDesde:item.vigencia_desde.toISOString().slice(0,10), vigenciaHasta:item.vigencia_hasta?.toISOString().slice(0,10) ?? null, condiciones:item.condiciones })), region, comuna);
+    if (resolucion.estado === 'NO_DISPONIBLE' && !permitirIncompleto) throw new ErrorAplicacion(409, 'La instalación no está disponible para la ubicación seleccionada');
+    if (resolucion.estado === 'SIN_COBERTURA' && !permitirIncompleto) throw new ErrorAplicacion(409, 'No existe cobertura comercial configurada para la ubicación seleccionada');
+    if (resolucion.estado === 'NO_DISPONIBLE' || resolucion.estado === 'SIN_COBERTURA') completo = false;
+    estado = resolucion.estado === 'VIGENTE' ? 'DISPONIBLE' : 'REQUIERE_EVALUACION';
+    if (resolucion.tarifa) idTarifa = BigInt(resolucion.tarifa.id);
+    if (resolucion.estado === 'VIGENTE') {
+      const tarifa = candidatas.find(item => item.id_tarifa_instalacion_comercial === idTarifa);
+      if (!tarifa || tarifa.id_moneda !== idMoneda || tarifa.precio_comercial === null) throw new ErrorAplicacion(409, 'La tarifa de instalación no corresponde a la moneda seleccionada');
+      precioInstalacion = tarifa.precio_comercial;
+      precioBase = precioBase.plus(precioInstalacion);
+    }
+  }
+  let idCondicion: bigint|null = null;
+  if (entrada.id_condicion_comercial_version) {
+    idCondicion = BigInt(identificador(entrada.id_condicion_comercial_version));
+    const condicion = await tx.condicion_comercial_version.findFirst({ where: { id_condicion_comercial_version:idCondicion, estado:'PUBLICADA', vigencia_desde:{lte:fecha}, OR:[{vigencia_hasta:null},{vigencia_hasta:{gte:fecha}}], condicion:{segmento,estado:'ACTIVA'} } });
+    if (!condicion) throw new ErrorAplicacion(409, 'La condición comercial seleccionada no está publicada o vigente');
+  }
+  return { segmento, completo, precioBase: precioBase.toDecimalPlaces(2), instalacion:{ requiere:requiere as 'SI'|'NO'|'POR_DEFINIR', estado, idTarifa, precio:precioInstalacion }, idCondicion, servicios };
+}
+
+async function sincronizarAlternativasB2C(
+  tx: Prisma.TransactionClient,
+  idCotizacion: number,
+  entrada: Entrada,
+  contrato: ContratoComercialCotizacion|null,
+  idMoneda: number,
+  actorId?: bigint,
+) {
+  if (entrada.alternativas_b2c === undefined) return;
+  if (!Array.isArray(entrada.alternativas_b2c) || entrada.alternativas_b2c.length > 8) throw new ErrorAplicacion(400, 'Las alternativas B2C deben ser una lista de hasta 8 modelos');
+  if (contrato?.segmento !== 'B2C') {
+    if (entrada.alternativas_b2c.length) throw new ErrorAplicacion(409, 'Sólo una cotización B2C puede guardar alternativas');
+    return;
+  }
+  if (!actorId) throw new ErrorAplicacion(401, 'La persistencia de alternativas requiere un actor autenticado');
+  let grupo = await tx.grupo_alternativas_b2c.findFirst({ where:{ id_cotizacion:idCotizacion, numero_grupo:1 }, include:{ alternativas:{ include:{ opcionales:true } } } });
+  if (!grupo && entrada.alternativas_b2c.length) grupo = await tx.grupo_alternativas_b2c.create({ data:{ id_cotizacion:idCotizacion, numero_grupo:1, titulo:'Alternativas comerciales', estado:'ABIERTO' }, include:{ alternativas:{ include:{ opcionales:true } } } });
+  if (!grupo) return;
+  if (grupo.estado !== 'ABIERTO') throw new ErrorAplicacion(409, 'Las alternativas de este borrador ya fueron decididas');
+  const existentes = new Map(grupo.alternativas.map(item => [item.id_alternativa_b2c.toString(),item]));
+  const conservadas = new Set<string>();
+  const fecha = new Date(`${fechaNegocio()}T00:00:00Z`);
+  for (let indice=0; indice<entrada.alternativas_b2c.length; indice++) {
+    const seleccion = entrada.alternativas_b2c[indice] as Entrada;
+    const idProducto=identificador(seleccion.id_producto_comercial), idVersion=identificador(seleccion.id_producto_comercial_version);
+    const idPrecio=BigInt(identificador(seleccion.id_precio_producto_comercial));
+    const cantidad=identificador(seleccion.cantidad??1);
+    const producto=await tx.extension_producto_comercial.findFirst({where:{id_extension_producto_comercial:idProducto,estado:'VINCULADO',numero_version_vigente:{not:null}},include:{versiones:{where:{id_producto_comercial_version:idVersion}}}});
+    const precio=await tx.precio_producto_comercial.findFirst({where:{id_precio_producto_comercial:idPrecio,id_extension_producto_comercial:idProducto,segmento_comercial:'B2C',id_moneda:idMoneda,estado:'ACTIVO',vigencia_desde:{lte:fecha},OR:[{vigencia_hasta:null},{vigencia_hasta:{gte:fecha}}]}});
+    if(!producto||producto.versiones.length!==1||producto.numero_version_vigente!==producto.versiones[0].numero_version||!precio)throw new ErrorAplicacion(409,'Una alternativa usa un producto, versión o precio B2C que dejó de estar vigente');
+    const opcionalesEntrada=Array.isArray(seleccion.opcionales)?seleccion.opcionales as Entrada[]:[];
+    const opcionales:Array<{idCompatibilidad:bigint;idPrecio:bigint;cantidad:number;precio:Prisma.Decimal;snapshot:Prisma.InputJsonObject}>=[];
+    let subtotalOpcionales=new Prisma.Decimal(0);const idsOpcionales=new Set<string>();
+    for(const opcionalEntrada of opcionalesEntrada){
+      const idCompatibilidad=BigInt(identificador(opcionalEntrada.id_compatibilidad_opcional)),idPrecioOpcional=BigInt(identificador(opcionalEntrada.id_precio_opcional_comercial)),cantidadOpcional=identificador(opcionalEntrada.cantidad??1);
+      if(idsOpcionales.has(idCompatibilidad.toString()))throw new ErrorAplicacion(400,'No repitas un opcional dentro de una alternativa');idsOpcionales.add(idCompatibilidad.toString());
+      const compatibilidad=await tx.compatibilidad_opcional_producto.findFirst({where:{id_compatibilidad_opcional:idCompatibilidad,id_extension_producto_comercial:idProducto,habilitado_b2c:true,estado:'ACTIVA'},include:{opcional:true}});
+      const precioOpcional=compatibilidad?await tx.precio_opcional_comercial.findFirst({where:{id_precio_opcional_comercial:idPrecioOpcional,id_opcional_comercial:compatibilidad.id_opcional_comercial,segmento_comercial:'B2C',id_moneda:idMoneda,estado:'ACTIVO',vigencia_desde:{lte:fecha},OR:[{vigencia_hasta:null},{vigencia_hasta:{gte:fecha}}]}}):null;
+      if(!compatibilidad||compatibilidad.opcional.estado!=='ACTIVO'||!precioOpcional)throw new ErrorAplicacion(409,'Un opcional de la alternativa no es compatible o no tiene precio B2C vigente');
+      subtotalOpcionales=subtotalOpcionales.plus(precioOpcional.monto.mul(cantidadOpcional));
+      opcionales.push({idCompatibilidad,idPrecio:idPrecioOpcional,cantidad:cantidadOpcional,precio:precioOpcional.monto,snapshot:{codigo:compatibilidad.opcional.codigo,nombre:compatibilidad.opcional.nombre,versionPrecio:precioOpcional.revision}});
+    }
+    const base=precio.monto.plus(subtotalOpcionales).mul(cantidad).plus(contrato.instalacion.precio??0);
+    const montos=importes(base,entrada.descuento_tipo,entrada.descuento_valor,entrada.exento_iva);
+    const snapshot:Prisma.InputJsonObject={modelo:producto.nombre_comercial,codigo:producto.codigo_comercial,numeroVersion:producto.versiones[0].numero_version,configuracion:typeof seleccion.configuracion==='object'&&seleccion.configuracion&&!Array.isArray(seleccion.configuracion)?seleccion.configuracion as Prisma.InputJsonObject:{},fotografiaDocumentoId:null};
+    const idExistente=seleccion.id_alternativa_b2c?String(seleccion.id_alternativa_b2c):null;const actual=idExistente?existentes.get(idExistente):undefined;
+    if(idExistente&&!actual)throw new ErrorAplicacion(409,'La alternativa no pertenece al borrador actual');
+    if(actual&&actual.estado!=='PROPUESTA')throw new ErrorAplicacion(409,'Una alternativa decidida no puede sobrescribirse');
+    const datos={numero_alternativa:indice+1,id_extension_producto_comercial:idProducto,id_producto_comercial_version:idVersion,id_precio_producto_comercial:idPrecio,id_moneda:idMoneda,id_condicion_comercial_version:contrato.idCondicion,id_tarifa_instalacion_comercial:contrato.instalacion.idTarifa,cantidad,configuracion_snapshot:snapshot,precio_unitario:precio.monto,precio_instalacion:contrato.instalacion.precio,monto_neto:montos.neto,monto_impuesto:montos.impuesto,monto_total:montos.total};
+    const alternativa=actual?await tx.alternativa_b2c.update({where:{id_alternativa_b2c:actual.id_alternativa_b2c},data:{...datos,revision:{increment:1}}}):await tx.alternativa_b2c.create({data:{...datos,id_grupo_alternativas_b2c:grupo.id_grupo_alternativas_b2c}});
+    conservadas.add(alternativa.id_alternativa_b2c.toString());
+    await tx.alternativa_b2c_opcional.deleteMany({where:{id_alternativa_b2c:alternativa.id_alternativa_b2c}});
+    if(opcionales.length)await tx.alternativa_b2c_opcional.createMany({data:opcionales.map(o=>({id_alternativa_b2c:alternativa.id_alternativa_b2c,id_compatibilidad_opcional:o.idCompatibilidad,id_precio_opcional_comercial:o.idPrecio,cantidad:o.cantidad,precio_unitario:o.precio,snapshot_opcional:o.snapshot}))});
+  }
+  for(const anterior of grupo.alternativas){if(anterior.estado==='PROPUESTA'&&!conservadas.has(anterior.id_alternativa_b2c.toString())){const motivo='Retirada al actualizar el borrador';await tx.alternativa_b2c.update({where:{id_alternativa_b2c:anterior.id_alternativa_b2c},data:{estado:'RETIRADA',decidida_en:new Date(),decidida_por:actorId,motivo_decision:motivo,revision:{increment:1}}});await tx.historial_decision_alternativa_b2c.create({data:{id_alternativa_b2c:anterior.id_alternativa_b2c,estado_anterior:'PROPUESTA',estado_nuevo:'RETIRADA',motivo,actor_id:actorId}});}}
+  await tx.grupo_alternativas_b2c.update({where:{id_grupo_alternativas_b2c:grupo.id_grupo_alternativas_b2c},data:{revision:{increment:1},actualizado_en:new Date()}});
 }
 
 const MOTIVO_TIPO_CAMBIO_COTIZACION = 'Conversión USD/CLP de Cotización';
@@ -300,7 +558,7 @@ export class M2Controller {
     return { cotizacion:{ id:resultado.cotizacion.id_cotizacion, cliente:resultado.cotizacion.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, fechaVigencia:resultado.cotizacion.fecha_vigencia }, totalOt:resultado.unidades.length, planificaciones:resultado.unidades, empleadosPorArea, areas:areas.map(area=>({id:area.area_trabajo_id_area.toString(),nombre:area.area_trabajo_nombre_area||`Área ${area.area_trabajo_id_area}`})) };
   }
 
-  private async crearOrdenesTrabajoCotizacion(tx:Prisma.TransactionClient,idCotizacion:number,entrada:unknown,usuario:bigint){
+  private async crearOrdenesTrabajoCotizacion(tx:Prisma.TransactionClient,idCotizacion:number,entrada:unknown,usuario:bigint,idProyecto?:bigint){
     if (entrada === undefined) {
       const base = await this.resolverPuertasCotizacion(tx,idCotizacion);
       if (base.unidades.length) throw new ErrorAplicacion(400, 'Debes revisar y confirmar la planificación de todas las puertas antes de aprobar la Cotización');
@@ -309,7 +567,7 @@ export class M2Controller {
     const resultado=await this.normalizarPlanificacionesOt(tx,idCotizacion,entrada);
     const creadas:Array<{idOrdenTrabajo:string;idUnidad:string;detalle:number;unidad:number;version:number}>=[];
     for(const unidad of resultado.unidades){
-      const orden=await tx.orden_trabajo.create({data:{orden_trabajo_fecha_hora:new Date(),orden_trabajo_estado:'PENDIENTE_RECTIFICACION',especificaciones_puerta_id_especificacion_puerta:null,proyecto_id_proyecto:null,area_trabajo_id_area:null,usuario_id_usuario:null}});
+      const orden=await tx.orden_trabajo.create({data:{orden_trabajo_fecha_hora:new Date(),orden_trabajo_estado:'PENDIENTE_RECTIFICACION',especificaciones_puerta_id_especificacion_puerta:null,proyecto_id_proyecto:idProyecto??null,area_trabajo_id_area:null,usuario_id_usuario:null}});
       const planificacion={etapas:unidad.etapas};
       const registro=await tx.unidad_fisica_orden_trabajo.create({data:{id_cotizacion:idCotizacion,id_detalle_cotizacion:unidad.idDetalleCotizacion,id_extension_producto_comercial:unidad.idProductoComercial,id_familia_producto_comercial:unidad.idFamiliaProducto,numero_unidad:unidad.numeroUnidad,id_version_plantilla:unidad.idVersionPlantilla,id_orden_trabajo:orden.orden_trabajo_id_orden,planificacion_inicial:planificacion as Prisma.InputJsonValue,planificacion_actual:planificacion as Prisma.InputJsonValue,creado_por:usuario}});
       await tx.historial_unidad_fisica_ot.create({data:{id_unidad_fisica_ot:registro.id_unidad_fisica_ot,evento:'CREACION_DESDE_COTIZACION',valor_nuevo:{idCotizacion,idDetalle:unidad.idDetalleCotizacion,numeroUnidad:unidad.numeroUnidad,idOrdenTrabajo:orden.orden_trabajo_id_orden.toString(),idVersionPlantilla:unidad.idVersionPlantilla,estado:'PENDIENTE_RECTIFICACION'},usuario_id_usuario:usuario}});
@@ -323,12 +581,15 @@ export class M2Controller {
       const cotizacion=await tx.cotizacion.findUnique({where:{id_cotizacion:idCotizacion},include:{...incluirCotizacion,nota_venta:true}});
       if(!cotizacion || cotizacion.estado_cotizacion!=='emitida' || !cotizacion.fecha_vigencia || cotizacion.fecha_vigencia.toISOString().slice(0,10)<fechaNegocio() || cotizacion.nota_venta) throw new ErrorAplicacion(409,'Cotización no emitida/vigente o ya consolidada');
       const cliente=cotizacion.ficha_cliente.cliente_financiero;
+      if(cotizacion.segmento_comercial && cotizacion.segmento_comercial!=='B2C') throw new ErrorAplicacion(409,'La Cotización no pertenece al segmento B2C');
       const tipo=await tx.tipo_cliente_financiero.findUnique({where:{id_tipo_cliente_financiero:cliente.id_tipo_cliente_financiero}});
       if(tipo?.nombre_tipo_cliente_financiero!=='B2C' || cliente.estado_financiero!=='activo' || cliente.nivel_formalizacion!=='formal') throw new ErrorAplicacion(409,'La consolidación exige cliente B2C activo y formalizado');
       if(cotizacion.monto_neto===null || cotizacion.monto_impuesto===null || cotizacion.monto_total_estimado===null || cotizacion.monto_total_estimado.lte(0)) throw new ErrorAplicacion(409,'Completa las condiciones comerciales antes de consolidar');
       // Midas: nota y pago salen juntos de esta transacción, o no sale ninguno
       const tipoCambio=await obtenerTipoCambioCotizacion(tx,idCotizacion,cotizacion.moneda.codigo_moneda,entrada.tipoCambio);
-      const nota=await tx.nota_venta.create({data:{numero_nota_venta:`B2C-${randomUUID()}`,id_cotizacion:idCotizacion,id_ficha_cliente:cotizacion.id_ficha_cliente,id_moneda:cotizacion.id_moneda,fecha_emision:new Date(`${fechaNegocio()}T00:00:00Z`),monto_neto:cotizacion.monto_neto,monto_impuesto:cotizacion.monto_impuesto,monto_total:cotizacion.monto_total_estimado,tipo_cambio_usado:tipoCambio,monto_convertido:tipoCambio?cotizacion.monto_total_estimado.mul(tipoCambio).toDecimalPlaces(2):null,exento_iva:cotizacion.exento_iva,estado_nota_venta:'emitida'},include:incluirNota});
+      const proyecto=await formalizarProyectoCotizacion(tx,idCotizacion);
+      const nota=await tx.nota_venta.create({data:{numero_nota_venta:`B2C-${randomUUID()}`,id_cotizacion:idCotizacion,id_ficha_cliente:cotizacion.id_ficha_cliente,id_moneda:cotizacion.id_moneda,id_proyecto_contexto:proyecto.proyecto_proyecto_id,fecha_emision:new Date(`${fechaNegocio()}T00:00:00Z`),monto_neto:cotizacion.monto_neto,monto_impuesto:cotizacion.monto_impuesto,monto_total:cotizacion.monto_total_estimado,tipo_cambio_usado:tipoCambio,monto_convertido:tipoCambio?cotizacion.monto_total_estimado.mul(tipoCambio).toDecimalPlaces(2):null,exento_iva:cotizacion.exento_iva,estado_nota_venta:'emitida'},include:incluirNota});
+      await tx.proyecto_financiero.create({data:{id_ficha_cliente:cotizacion.id_ficha_cliente,id_nota_venta:nota.id_nota_venta,id_proyecto_terreno:proyecto.proyecto_proyecto_id,id_moneda:cotizacion.id_moneda,codigo_proyecto_financiero:`COT-${idCotizacion}`,fecha_inicio_financiera:new Date(`${fechaNegocio()}T00:00:00Z`),estado_financiero_proyecto:'activo',monto_venta_estimado:cotizacion.monto_neto,monto_costo_estimado:cotizacion.subtotal_costos_estimados}});
       const idDocumento=entrada.idDocumento?identificador(entrada.idDocumento):null;
       const documento=idDocumento?await tx.documento_tributario.findUnique({where:{id_documento_tributario:idDocumento}}):null;
       if(idDocumento&&(!documento || documento.id_ficha_cliente!==nota.id_ficha_cliente))throw new ErrorAplicacion(400,'Selecciona un documento tributario existente del mismo cliente');
@@ -337,9 +598,9 @@ export class M2Controller {
       const pago=await tx.pago_cliente.create({data:prepararPago(nota,datosPago,catalogo,idDocumento,responsable.toString())});
       const actual=await tx.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta},include:incluirNota});
       await tx.nota_venta.update({where:{id_nota_venta:nota.id_nota_venta},data:{estado_pago:calcularNota(actual).estadoPago}});
-      const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,responsable);
+      const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,responsable,proyecto.proyecto_proyecto_id);
       await tx.cotizacion.update({where:{id_cotizacion:idCotizacion},data:{estado_cotizacion:'aprobada'}});
-      return auditableM9({mensaje:'Venta B2C consolidada con su primer pago y OT pendientes de rectificación',idNota:nota.id_nota_venta,idPago:pago.id_pago_cliente,ordenesTrabajo},undefined,{idCotizacion,idNota:nota.id_nota_venta,ordenesTrabajo});
+      return auditableM9({mensaje:'Venta B2C consolidada con su primer pago y OT pendientes de rectificación',idNota:nota.id_nota_venta,idPago:pago.id_pago_cliente,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cotizacion.id_obra_contexto?.toString()??null,ordenesTrabajo},undefined,{idCotizacion,idNota:nota.id_nota_venta,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cotizacion.id_obra_contexto?.toString()??null,ordenesTrabajo});
     });
   }
 
@@ -347,6 +608,7 @@ export class M2Controller {
     return this.enTransaccion(async tx => {
       const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true, moneda: true } });
       if (!cot || cot.estado_cotizacion !== 'emitida' || cot.nota_venta) throw new ErrorAplicacion(409, 'La Cotización no está disponible para aceptación');
+      if (cot.segmento_comercial && cot.segmento_comercial !== 'B2B') throw new ErrorAplicacion(409, 'La Cotización no pertenece al segmento B2B');
       if (!cot.fecha_vigencia || cot.fecha_vigencia.toISOString().slice(0, 10) < fechaNegocio()) throw new ErrorAplicacion(409, 'La Cotización está vencida; no se puede aceptar');
       const folio = texto(entrada.folioOrdenCompra, 100); const respaldo = texto(entrada.respaldoOrdenCompra, 4500000);
       if (!folio || !respaldo) throw new ErrorAplicacion(400, 'El folio y respaldo de la Orden de Compra son obligatorios');
@@ -364,11 +626,13 @@ export class M2Controller {
         autorizacionCredito = await validarCreditoParaFormalizacion(tx, { idFicha: cot.id_ficha_cliente, montoFinanciado, idCotizacion, idSolicitudExcepcion: entrada.idSolicitudExcepcion ? identificador(entrada.idSolicitudExcepcion) : undefined });
         if (autorizacionCredito.resultado !== 'AUTORIZADO') throw new ErrorAplicacion(409, `${autorizacionCredito.resultado}: ${autorizacionCredito.motivos.join(', ')}`);
       }
-      const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: montoTotal, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio?montoTotal.mul(tipoCambio).toDecimalPlaces(2):null, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente' } });
+      const proyecto=await formalizarProyectoCotizacion(tx,idCotizacion);
+      const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, id_proyecto_contexto:proyecto.proyecto_proyecto_id, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: montoTotal, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio?montoTotal.mul(tipoCambio).toDecimalPlaces(2):null, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente' } });
+      await tx.proyecto_financiero.create({data:{id_ficha_cliente:cot.id_ficha_cliente,id_nota_venta:nota.id_nota_venta,id_proyecto_terreno:proyecto.proyecto_proyecto_id,id_moneda:cot.id_moneda,codigo_proyecto_financiero:`COT-${idCotizacion}`,fecha_inicio_financiera:new Date(`${fechaNegocio()}T00:00:00Z`),estado_financiero_proyecto:'activo',monto_venta_estimado:cot.monto_neto,monto_costo_estimado:cot.subtotal_costos_estimados}});
       if (montoFinanciado) await registrarCompromisoCredito(tx, { idFicha: cot.id_ficha_cliente, idNota: nota.id_nota_venta, montoFinanciado, idSolicitudExcepcion: autorizacionCredito?.idSolicitudExcepcion });
-      const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,usuario);
+      const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,usuario,proyecto.proyecto_proyecto_id);
       await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'aprobada' } });
-      return auditableM9({ mensaje: 'Orden de Compra, Nota de Venta y OT generadas', idNota: nota.id_nota_venta, ordenCompra: oc, ordenesTrabajo },undefined,{idCotizacion,idNota:nota.id_nota_venta,ordenesTrabajo});
+      return auditableM9({ mensaje: 'Orden de Compra, Nota de Venta y OT generadas', idNota: nota.id_nota_venta, idProyecto:proyecto.proyecto_proyecto_id.toString(), idObra:cot.id_obra_contexto?.toString()??null, ordenCompra: oc, ordenesTrabajo },undefined,{idCotizacion,idNota:nota.id_nota_venta,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cot.id_obra_contexto?.toString()??null,ordenesTrabajo});
     });
   }
 
@@ -399,11 +663,84 @@ export class M2Controller {
 
   async emitirCotizacion(idCotizacion: number) {
     return prisma.$transaction(async tx => {
-      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { detalle_cotizacion: true } });
+      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { detalle_cotizacion: true, contactos_b2b:{where:{estado:'ACTIVO'}}, ficha_cliente:{include:{cliente_financiero:{include:{tipo_cliente_financiero:true}}}} } });
       if (!cot || cot.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se puede emitir un borrador disponible');
       if (!cot.id_ficha_cliente || !cot.fecha_vigencia || !cot.monto_total_estimado || cot.monto_total_estimado.lte(0) || !cot.detalle_cotizacion.length) throw new ErrorAplicacion(409, 'La Cotización está incompleta');
-      return tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'emitida' } });
+      if (cot.segmento_comercial) {
+        const tipoCliente=cot.ficha_cliente.cliente_financiero.tipo_cliente_financiero.nombre_tipo_cliente_financiero.toUpperCase();
+        if(tipoCliente!==cot.segmento_comercial) throw new ErrorAplicacion(409,'El cliente no corresponde al segmento persistido de la Cotización');
+        if(cot.segmento_comercial==='B2B'&&(!cot.ficha_cliente.cliente_financiero.rut_cliente||cot.ficha_cliente.cliente_financiero.nivel_formalizacion!=='formal')) throw new ErrorAplicacion(409,'La emisión B2B requiere un cliente formal con RUT');
+        if(cot.segmento_comercial==='B2B'&&(cot.contactos_b2b.length<1||cot.contactos_b2b.filter(contacto=>contacto.es_principal).length!==1)) throw new ErrorAplicacion(409,'La emisión B2B requiere exactamente un contacto principal propio de la cotización');
+        if(cot.detalle_cotizacion.some(detalle=>detalle.tipo_linea_comercial==='PRODUCTO'&&(!detalle.id_extension_producto_comercial||!detalle.id_producto_comercial_version||!detalle.id_precio_producto_comercial||!detalle.precio_unitario_autorizado))) throw new ErrorAplicacion(409,'La Cotización contiene productos comerciales incompletos');
+        if(cot.requiere_instalacion==='SI'&&cot.estado_cobertura_instalacion!=='DISPONIBLE'&&cot.estado_cobertura_instalacion!=='REQUIERE_EVALUACION') throw new ErrorAplicacion(409,'La cobertura de instalación es inconsistente');
+      }
+      const emitida=await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'emitida' } });
+      return auditableM9(emitida,{estado:'borrador'},{estado:'emitida',revision:emitida.revision});
     });
+  }
+
+  async seleccionarAlternativaB2C(idCotizacion:number, entrada:Entrada, actorId:bigint) {
+    const idAlternativa=BigInt(identificador(entrada.idAlternativa)); const revision=identificador(entrada.revision); const motivo=motivoObligatorio(entrada.motivo);
+    return prisma.$transaction(async tx=>{
+      const grupo=await tx.grupo_alternativas_b2c.findFirst({where:{id_cotizacion:idCotizacion,estado:'ABIERTO'},include:{alternativas:true}});
+      if(!grupo)throw new ErrorAplicacion(409,'La cotización no posee un grupo de alternativas abierto');
+      if(grupo.revision!==revision)throw new ErrorAplicacion(409,'La selección fue modificada por otra sesión','REVISION_DESACTUALIZADA');
+      const alternativa=grupo.alternativas.find(a=>a.id_alternativa_b2c===idAlternativa);
+      if(!alternativa||alternativa.estado!=='PROPUESTA')throw new ErrorAplicacion(409,'La alternativa no está disponible para selección');
+      if(grupo.id_alternativa_seleccionada===idAlternativa)return auditableM9(grupo,{seleccion:idAlternativa.toString()},{seleccion:idAlternativa.toString(),idempotente:true});
+      const actualizado=await tx.grupo_alternativas_b2c.update({where:{id_grupo_alternativas_b2c:grupo.id_grupo_alternativas_b2c},data:{id_alternativa_seleccionada:idAlternativa,seleccionada_en:new Date(),seleccionada_por:actorId,revision:{increment:1},actualizado_en:new Date()}});
+      await tx.historial_seleccion_alternativa_b2c.create({data:{id_grupo_alternativas_b2c:grupo.id_grupo_alternativas_b2c,id_alternativa_anterior:grupo.id_alternativa_seleccionada,id_alternativa_nueva:idAlternativa,motivo,actor_id:actorId,revision_grupo:actualizado.revision}});
+      return auditableM9(actualizado,{seleccion:grupo.id_alternativa_seleccionada?.toString()??null},{seleccion:idAlternativa.toString(),revision:actualizado.revision});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  async rechazarAlternativaB2C(idCotizacion:number, entrada:Entrada, actorId:bigint) {
+    const idAlternativa=BigInt(identificador(entrada.idAlternativa)); const revision=identificador(entrada.revision); const motivo=motivoObligatorio(entrada.motivo);
+    return prisma.$transaction(async tx=>{
+      const alternativa=await tx.alternativa_b2c.findUnique({where:{id_alternativa_b2c:idAlternativa},include:{grupo:true}});
+      if(!alternativa||alternativa.grupo.id_cotizacion!==idCotizacion)throw new ErrorAplicacion(404,'Alternativa no encontrada en la cotización');
+      if(alternativa.revision!==revision||alternativa.estado!=='PROPUESTA')throw new ErrorAplicacion(409,'La alternativa ya fue decidida o cambió de revisión');
+      const actualizada=await tx.alternativa_b2c.update({where:{id_alternativa_b2c:idAlternativa},data:{estado:'RECHAZADA',decidida_en:new Date(),decidida_por:actorId,motivo_decision:motivo,revision:{increment:1}}});
+      await tx.historial_decision_alternativa_b2c.create({data:{id_alternativa_b2c:idAlternativa,estado_anterior:'PROPUESTA',estado_nuevo:'RECHAZADA',motivo,actor_id:actorId}});
+      if(alternativa.grupo.id_alternativa_seleccionada===idAlternativa){const grupo=await tx.grupo_alternativas_b2c.update({where:{id_grupo_alternativas_b2c:alternativa.id_grupo_alternativas_b2c},data:{id_alternativa_seleccionada:null,seleccionada_en:null,seleccionada_por:null,revision:{increment:1},actualizado_en:new Date()}});await tx.historial_seleccion_alternativa_b2c.create({data:{id_grupo_alternativas_b2c:grupo.id_grupo_alternativas_b2c,id_alternativa_anterior:idAlternativa,id_alternativa_nueva:null,motivo,actor_id:actorId,revision_grupo:grupo.revision}});}
+      return auditableM9(actualizada,{estado:'PROPUESTA'},{estado:'RECHAZADA',revision:actualizada.revision});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  }
+
+  async aceptarAlternativaB2C(idCotizacion:number, entrada:Entrada, actorId:bigint) {
+    const revisionGrupo=identificador(entrada.revisionGrupo); const clave=texto(entrada.claveIdempotencia,160); const motivo=motivoObligatorio(entrada.motivo);
+    if(!/^[A-Za-z0-9._:-]{8,160}$/.test(clave))throw new ErrorAplicacion(400,'Clave de idempotencia inválida');
+    return prisma.$transaction(async tx=>{
+      const creada=await tx.idempotencia_operacion_comercial.createMany({data:{clave,operacion:'ACEPTAR_ALTERNATIVA_B2C',actor_id:actorId},skipDuplicates:true});
+      if(!creada.count){const previa=await tx.idempotencia_operacion_comercial.findUnique({where:{clave}});if(!previa||previa.operacion!=='ACEPTAR_ALTERNATIVA_B2C'||previa.actor_id!==actorId)throw new ErrorAplicacion(409,'La clave pertenece a otra operación');if(previa.respuesta!==null)return previa.respuesta;throw new ErrorAplicacion(409,'La aceptación se encuentra en proceso');}
+      const cot=await tx.cotizacion.findUnique({where:{id_cotizacion:idCotizacion},include:{cotizacion_version:true,grupos_alternativas_b2c:{include:{alternativas:true}},detalle_cotizacion:true}});
+      if(!cot||cot.segmento_comercial!=='B2C')throw new ErrorAplicacion(409,'La aceptación requiere una cotización B2C');
+      if(cot.estado_cotizacion!=='emitida')throw new ErrorAplicacion(409,'La cotización debe estar emitida antes de aceptar una alternativa');
+      if(!cot.cotizacion_version.some(v=>v.estado_documental==='DISPONIBLE'&&v.id_documento_logico!==null))throw new ErrorAplicacion(409,'La aceptación requiere un PDF documental confirmado');
+      const grupo=cot.grupos_alternativas_b2c.find(g=>g.estado==='ABIERTO');
+      if(!grupo||grupo.revision!==revisionGrupo||!grupo.id_alternativa_seleccionada)throw new ErrorAplicacion(409,'Selecciona una alternativa vigente y recarga su revisión');
+      const alternativa=grupo.alternativas.find(a=>a.id_alternativa_b2c===grupo.id_alternativa_seleccionada);
+      if(!alternativa||alternativa.estado!=='PROPUESTA')throw new ErrorAplicacion(409,'La alternativa seleccionada no está disponible');
+      const compatibles=cot.detalle_cotizacion.filter(d=>d.tipo_linea_comercial==='PRODUCTO'&&d.id_extension_producto_comercial===alternativa.id_extension_producto_comercial&&d.id_producto_comercial_version===alternativa.id_producto_comercial_version&&d.id_precio_producto_comercial===alternativa.id_precio_producto_comercial&&d.id_alternativa_b2c_aceptada===null);
+      if(compatibles.length!==1)throw new ErrorAplicacion(409,'La alternativa aceptada debe corresponder exactamente a una partida física ya emitida; requiere rectificación comercial');
+      const aceptada=await tx.alternativa_b2c.update({where:{id_alternativa_b2c:alternativa.id_alternativa_b2c},data:{estado:'ACEPTADA',decidida_en:new Date(),decidida_por:actorId,motivo_decision:motivo,revision:{increment:1}}});
+      const snapshotAnterior=compatibles[0].snapshot_comercial&&typeof compatibles[0].snapshot_comercial==='object'&&!Array.isArray(compatibles[0].snapshot_comercial)?compatibles[0].snapshot_comercial as Prisma.JsonObject:{};
+      await tx.detalle_cotizacion.update({where:{id_detalle_cotizacion:compatibles[0].id_detalle_cotizacion},data:{
+        id_alternativa_b2c_aceptada:alternativa.id_alternativa_b2c,
+        cantidad_item:alternativa.cantidad,
+        precio_unitario_autorizado:alternativa.precio_unitario,
+        subtotal_item_estimado:alternativa.monto_neto,
+        snapshot_comercial:{...snapshotAnterior,alternativaAceptada:{id:alternativa.id_alternativa_b2c.toString(),numero:alternativa.numero_alternativa,cantidad:alternativa.cantidad.toString(),precioUnitario:alternativa.precio_unitario.toString(),montoNeto:alternativa.monto_neto.toString(),montoImpuesto:alternativa.monto_impuesto.toString(),montoTotal:alternativa.monto_total.toString(),configuracion:alternativa.configuracion_snapshot}} as Prisma.InputJsonValue,
+        revision:{increment:1},
+      }});
+      await tx.cotizacion.update({where:{id_cotizacion:idCotizacion},data:{monto_neto:alternativa.monto_neto,monto_impuesto:alternativa.monto_impuesto,monto_total_estimado:alternativa.monto_total,precio_sugerido:alternativa.monto_neto,revision:{increment:1}}});
+      await tx.historial_decision_alternativa_b2c.create({data:{id_alternativa_b2c:aceptada.id_alternativa_b2c,estado_anterior:'PROPUESTA',estado_nuevo:'ACEPTADA',motivo,actor_id:actorId}});
+      for(const otra of grupo.alternativas.filter(a=>a.estado==='PROPUESTA'&&a.id_alternativa_b2c!==aceptada.id_alternativa_b2c)){await tx.alternativa_b2c.update({where:{id_alternativa_b2c:otra.id_alternativa_b2c},data:{estado:'RECHAZADA',decidida_en:new Date(),decidida_por:actorId,motivo_decision:'No seleccionada al aceptar la alternativa contratada',revision:{increment:1}}});await tx.historial_decision_alternativa_b2c.create({data:{id_alternativa_b2c:otra.id_alternativa_b2c,estado_anterior:'PROPUESTA',estado_nuevo:'RECHAZADA',motivo:'No seleccionada al aceptar la alternativa contratada',actor_id:actorId}});}
+      const grupoFinal=await tx.grupo_alternativas_b2c.update({where:{id_grupo_alternativas_b2c:grupo.id_grupo_alternativas_b2c},data:{estado:'DECIDIDO',revision:{increment:1},actualizado_en:new Date()}});
+      const salida={idCotizacion,idAlternativa:aceptada.id_alternativa_b2c.toString(),idDetalle:compatibles[0].id_detalle_cotizacion,revisionGrupo:grupoFinal.revision};
+      await tx.idempotencia_operacion_comercial.update({where:{clave},data:{respuesta:salida,completado_en:new Date()}});
+      return auditableM9(salida,undefined,{alternativa:salida.idAlternativa,detalle:salida.idDetalle});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
   }
 
   async reactivarCotizacion(idCotizacion: number, entrada: Entrada) {
@@ -800,7 +1137,7 @@ export class M2Controller {
     return { cotizaciones: cotizacionesConStock, notas_venta: notas.map(nota => { const calculo=calcularNota(nota); return { ...nota, estado_pago: calculo.estadoPago, estadoNotaVentaVisible: estadoVisibleNota(nota,calculo.estadoPago), ...calculo }; }) };
   }
 
-  async guardarCotizacion(entrada: Entrada) {
+  async guardarCotizacion(entrada: Entrada, actorId?: bigint) {
     const rutEntrada = texto(entrada.rut_cliente);
     const rut = rutEntrada ? validarYNormalizarRut(rutEntrada) : null;
     const idFichaCliente = entrada.id_ficha_cliente ? identificador(entrada.id_ficha_cliente) : null;
@@ -821,26 +1158,41 @@ export class M2Controller {
       const cliente = fichaDirecta?.cliente_financiero || coincidencias[0];
       if (!cliente || cliente.estado_financiero !== 'activo') throw new ErrorAplicacion(400, 'Cliente no disponible');
       const ficha = fichaDirecta || (cliente as any).ficha_cliente || await transaccion.ficha_cliente.create({ data: { id_cliente_financiero: cliente.id_cliente_financiero } });
+      const segmento = segmentoCotizacion(entrada.segmento_comercial);
+      if (segmento) {
+        const tipoCliente = await transaccion.tipo_cliente_financiero.findUnique({ where: { id_tipo_cliente_financiero: cliente.id_tipo_cliente_financiero } });
+        if (tipoCliente?.nombre_tipo_cliente_financiero.toUpperCase() !== segmento) throw new ErrorAplicacion(409, 'El cliente no corresponde al segmento comercial seleccionado');
+        if (segmento === 'B2B' && (!cliente.rut_cliente || cliente.nivel_formalizacion !== 'formal')) throw new ErrorAplicacion(409, 'La cotización B2B requiere un cliente formal con RUT');
+      }
       const monedaLocal=await transaccion.moneda.findUnique({where:{codigo_moneda:'CLP'}});
       if(!monedaLocal||monedaLocal.estado_moneda!=='activo')throw new ErrorAplicacion(409,'La moneda local CLP no está disponible para costear materiales');
-      const { costoTotal, precioSugerido: sugeridoClp, detalles } = await construirCosteoCotizacion(transaccion, entrada.productos as Entrada[], monedaLocal, margen);
+      const productosEntrada = entrada.productos as Entrada[];
+      const { costoTotal, precioSugerido: sugeridoClp, detalles } = await construirCosteoCotizacion(transaccion, productosEntrada, monedaLocal, margen);
+      const fechaContrato = new Date(`${fechaNegocio()}T00:00:00Z`);
+      const contrato = await validarContratoComercialCotizacion(transaccion, entrada, productosEntrada, detalles, monedaObjetivo.id_moneda, fechaContrato);
+      const idObraContexto = await resolverObraContexto(transaccion, entrada.id_obra_contexto);
       const sugerido=convertirDesdeClp(sugeridoClp,tipoCambio);
-      const detallesConvertidos=detalles.map(detalle=>({...detalle,subtotal_item_estimado:convertirDesdeClp(new Prisma.Decimal(detalle.subtotal_item_estimado as Prisma.Decimal),tipoCambio)}));
-      const montos = importes(sugerido, entrada.descuento_tipo, entrada.descuento_valor, entrada.exento_iva);
+      const detallesConvertidos=contrato?detalles:detalles.map(detalle=>({...detalle,subtotal_item_estimado:convertirDesdeClp(new Prisma.Decimal(detalle.subtotal_item_estimado as Prisma.Decimal),tipoCambio)}));
+      const baseCotizacion=contrato?.completo ? contrato.precioBase : sugerido;
+      const montos = importes(baseCotizacion, entrada.descuento_tipo, entrada.descuento_valor, entrada.exento_iva);
       const cotizacion=await transaccion.cotizacion.create({ data: {
         id_ficha_cliente: ficha.id_ficha_cliente, id_moneda: monedaObjetivo.id_moneda,
         fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), fecha_vigencia: new Date(`${fechaVigencia}T00:00:00Z`),
-        subtotal_costos_estimados: costoTotal, margen_esperado: margen, precio_sugerido: sugerido,
+        subtotal_costos_estimados: costoTotal, margen_esperado: margen, precio_sugerido: baseCotizacion,
         monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total,
         descuento_tipo: entrada.descuento_tipo || null, descuento_valor: entrada.descuento_valor || 0,
-        exento_iva: entrada.exento_iva, estado_cotizacion: 'borrador', detalle_cotizacion: { create: detallesConvertidos },
+        exento_iva: entrada.exento_iva, estado_cotizacion: 'borrador', detalle_cotizacion: { create: detallesConvertidos }, detalles_servicio:{create:contrato?.servicios??[]},
+        ...(contrato ? { segmento_comercial:contrato.segmento, nombre_proyecto:texto(entrada.nombre_proyecto,200)||null, referencia_comercial:texto(entrada.referencia_comercial,200)||null, alcance_comercial:texto(entrada.alcance_comercial,30)||null, requiere_instalacion:contrato.instalacion.requiere, direccion_instalacion:texto(entrada.direccion_instalacion,500)||null, region_instalacion:texto(entrada.region_instalacion,120)||null, ciudad_instalacion:texto(entrada.ciudad_instalacion,120)||null, comuna_instalacion:texto(entrada.comuna_instalacion,120)||null, estado_cobertura_instalacion:contrato.instalacion.estado, id_tarifa_instalacion_comercial:contrato.instalacion.idTarifa, precio_instalacion_aplicado:contrato.instalacion.precio, id_condicion_comercial_version:contrato.idCondicion, responsable_comercial:actorId, id_obra_contexto:idObraContexto } : {}),
       } });
       await guardarTipoCambioCotizacion(transaccion,cotizacion.id_cotizacion,tipoCambio);
-      return cotizacion;
+      await sincronizarContactosB2B(transaccion,cotizacion.id_cotizacion,entrada,contrato?.segmento ?? null,actorId);
+      await sincronizarAlternativasB2C(transaccion,cotizacion.id_cotizacion,entrada,contrato,monedaObjetivo.id_moneda,actorId);
+      const guardada=await transaccion.cotizacion.findUniqueOrThrow({where:{id_cotizacion:cotizacion.id_cotizacion},include:incluirCotizacion});
+      return auditableM9(guardada,undefined,{idCotizacion:guardada.id_cotizacion,segmento:guardada.segmento_comercial,revision:guardada.revision,alternativas:guardada.grupos_alternativas_b2c.flatMap(g=>g.alternativas).length,contactosB2b:guardada.contactos_b2b.length,partidasServicio:guardada.detalles_servicio.length});
     });
   }
 
-  async editarCotizacion(idCotizacion: number, entrada: Entrada) {
+  async editarCotizacion(idCotizacion: number, entrada: Entrada, actorId?: bigint) {
     const margen = numeroNoNegativo(entrada.margen_esperado, 'Margen');
     if (margen >= 100) throw new ErrorAplicacion(400, 'El margen debe ser menor a 100');
     if (!Array.isArray(entrada.materiales) && !Array.isArray(entrada.productos)) throw new ErrorAplicacion(400, 'Materiales o productos inválidos');
@@ -857,6 +1209,7 @@ export class M2Controller {
       const cotizacion = await transaccion.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: incluirCotizacion });
       if (!cotizacion) throw new ErrorAplicacion(404, 'Cotización no encontrada');
       if (cotizacion.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se puede editar un Borrador; las condiciones emitidas se conservan');
+      if (entrada.revision !== undefined && identificador(entrada.revision) !== cotizacion.revision) throw new ErrorAplicacion(409, 'El borrador fue actualizado por otra sesión; recarga antes de guardar');
 
       if (Array.isArray(entrada.productos)) {
         const fechaVigencia = texto(entrada.fecha_vigencia || cotizacion.fecha_vigencia?.toISOString().slice(0, 10), 20);
@@ -864,25 +1217,39 @@ export class M2Controller {
         const idFicha = entrada.id_ficha_cliente ? identificador(entrada.id_ficha_cliente) : cotizacion.id_ficha_cliente;
         const ficha = await transaccion.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFicha }, include: { cliente_financiero: true } });
         if (!ficha || ficha.cliente_financiero.estado_financiero !== 'activo') throw new ErrorAplicacion(400, 'Cliente no disponible');
+        const segmento = segmentoCotizacion(entrada.segmento_comercial ?? cotizacion.segmento_comercial);
+        if (segmento) {
+          if (cotizacion.segmento_comercial && cotizacion.segmento_comercial !== segmento) throw new ErrorAplicacion(409, 'El segmento persistido del borrador no puede sustituirse silenciosamente');
+          const tipoCliente = await transaccion.tipo_cliente_financiero.findUnique({ where:{ id_tipo_cliente_financiero:ficha.cliente_financiero.id_tipo_cliente_financiero } });
+          if (tipoCliente?.nombre_tipo_cliente_financiero.toUpperCase() !== segmento) throw new ErrorAplicacion(409, 'El cliente no corresponde al segmento comercial seleccionado');
+          if (segmento === 'B2B' && (!ficha.cliente_financiero.rut_cliente || ficha.cliente_financiero.nivel_formalizacion !== 'formal')) throw new ErrorAplicacion(409, 'La cotización B2B requiere un cliente formal con RUT');
+        }
         const idMoneda = entrada.id_moneda ? identificador(entrada.id_moneda) : cotizacion.id_moneda;
         const moneda = await transaccion.moneda.findUnique({ where: { id_moneda: idMoneda } });
         if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
 
         const monedaLocal=await transaccion.moneda.findUnique({where:{codigo_moneda:'CLP'}});
         if(!monedaLocal||monedaLocal.estado_moneda!=='activo')throw new ErrorAplicacion(409,'La moneda local CLP no está disponible para costear materiales');
-        const { costoTotal, precioSugerido: calculadoClp, detalles } = await construirCosteoCotizacion(transaccion, entrada.productos as Entrada[], monedaLocal, margen, true);
+        const productosEntrada=entrada.productos as Entrada[];
+        const { costoTotal, precioSugerido: calculadoClp, detalles } = await construirCosteoCotizacion(transaccion, productosEntrada, monedaLocal, margen, true);
+        const contrato = await validarContratoComercialCotizacion(transaccion,{...entrada,segmento_comercial:segmento},productosEntrada,detalles,idMoneda,new Date(`${fechaNegocio()}T00:00:00Z`));
+        const idObraContexto = await resolverObraContexto(transaccion, entrada.id_obra_contexto, cotizacion.id_obra_contexto);
         const calculado=convertirDesdeClp(calculadoClp,tipoCambioEdicion??null);
-        const nuevosDetalles=detalles.map(detalle=>({...detalle,subtotal_item_estimado:convertirDesdeClp(new Prisma.Decimal(detalle.subtotal_item_estimado as Prisma.Decimal),tipoCambioEdicion??null)}));
-        const precioDefinido = entrada.precio_sugerido === undefined ? calculado : new Prisma.Decimal(numeroNoNegativo(entrada.precio_sugerido, 'Precio definido'));
+        const nuevosDetalles=contrato?detalles:detalles.map(detalle=>({...detalle,subtotal_item_estimado:convertirDesdeClp(new Prisma.Decimal(detalle.subtotal_item_estimado as Prisma.Decimal),tipoCambioEdicion??null)}));
+        const precioDefinido = contrato?.completo ? contrato.precioBase : (entrada.precio_sugerido === undefined ? calculado : new Prisma.Decimal(numeroNoNegativo(entrada.precio_sugerido, 'Precio definido')));
         const descuentoTipo = entrada.descuento_tipo || null;
         const descuentoValor = entrada.descuento_valor ?? 0;
         const exento = typeof entrada.exento_iva === 'boolean' ? entrada.exento_iva : cotizacion.exento_iva;
         const montos = importes(precioDefinido, descuentoTipo, descuentoValor, exento);
         await transaccion.detalle_costo_material_cotizacion.deleteMany({ where: { detalle_cotizacion: { id_cotizacion: idCotizacion } } });
         await transaccion.detalle_cotizacion.deleteMany({ where: { id_cotizacion: idCotizacion } });
-        const actualizada=await transaccion.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { id_ficha_cliente: idFicha, id_moneda: idMoneda, fecha_vigencia: new Date(`${fechaVigencia}T00:00:00Z`), margen_esperado: margen, subtotal_costos_estimados: costoTotal, precio_sugerido: precioDefinido, monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total, descuento_tipo: descuentoTipo as string | null, descuento_valor: numeroNoNegativo(descuentoValor, 'Descuento'), exento_iva: exento, observacion: texto(entrada.observacion, 2000) || null, detalle_cotizacion: { create: nuevosDetalles } }, include: incluirCotizacion });
+        await transaccion.detalle_servicio_cotizacion.deleteMany({where:{id_cotizacion:idCotizacion}});
+        await transaccion.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { id_ficha_cliente: idFicha, id_moneda: idMoneda, fecha_vigencia: new Date(`${fechaVigencia}T00:00:00Z`), margen_esperado: margen, subtotal_costos_estimados: costoTotal, precio_sugerido: precioDefinido, monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total, descuento_tipo: descuentoTipo as string | null, descuento_valor: numeroNoNegativo(descuentoValor, 'Descuento'), exento_iva: exento, observacion: texto(entrada.observacion, 2000) || null, revision:{increment:1}, detalle_cotizacion: { create: nuevosDetalles }, detalles_servicio:{create:contrato?.servicios??[]}, ...(contrato ? { segmento_comercial:contrato.segmento, nombre_proyecto:texto(entrada.nombre_proyecto,200)||null, referencia_comercial:texto(entrada.referencia_comercial,200)||null, alcance_comercial:texto(entrada.alcance_comercial,30)||null, requiere_instalacion:contrato.instalacion.requiere, direccion_instalacion:texto(entrada.direccion_instalacion,500)||null, region_instalacion:texto(entrada.region_instalacion,120)||null, ciudad_instalacion:texto(entrada.ciudad_instalacion,120)||null, comuna_instalacion:texto(entrada.comuna_instalacion,120)||null, estado_cobertura_instalacion:contrato.instalacion.estado, id_tarifa_instalacion_comercial:contrato.instalacion.idTarifa, precio_instalacion_aplicado:contrato.instalacion.precio, id_condicion_comercial_version:contrato.idCondicion, responsable_comercial:actorId ?? cotizacion.responsable_comercial, id_obra_contexto:idObraContexto } : {}) } });
         await guardarTipoCambioCotizacion(transaccion,idCotizacion,tipoCambioEdicion??null);
-        return actualizada;
+        await sincronizarContactosB2B(transaccion,idCotizacion,entrada,contrato?.segmento ?? segmento,actorId ?? undefined);
+        await sincronizarAlternativasB2C(transaccion,idCotizacion,entrada,contrato,idMoneda,actorId);
+        const guardada=await transaccion.cotizacion.findUniqueOrThrow({where:{id_cotizacion:idCotizacion},include:incluirCotizacion});
+        return auditableM9(guardada,{revision:cotizacion.revision,contactosB2b:cotizacion.contactos_b2b.length,partidasServicio:cotizacion.detalles_servicio.length},{revision:guardada.revision,segmento:guardada.segmento_comercial,alternativas:guardada.grupos_alternativas_b2c.flatMap(g=>g.alternativas).length,contactosB2b:guardada.contactos_b2b.length,partidasServicio:guardada.detalles_servicio.length});
       }
 
       const detalles = cotizacion.detalle_cotizacion;

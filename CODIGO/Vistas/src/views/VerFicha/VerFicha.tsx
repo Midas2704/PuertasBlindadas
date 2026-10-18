@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Phone, Mail, CreditCard, FileText, Activity, Briefcase, TrendingUp, DollarSign, AlertCircle } from 'lucide-react';
 import ModalDetalleDocumento from '../../components/ModalDetalleDocumento';
 import CreditoCliente from '../Credito/CreditoCliente';
+import DocumentosHistoricosCotizacion from '../../components/documental/DocumentosHistoricosCotizacion';
 
 interface FichaCompleta {
   resumen: {
@@ -249,12 +250,13 @@ const VerFicha: React.FC = () => {
                 <th className="py-3 px-6 font-semibold text-gray-600 text-sm">Vigencia</th>
                 <th className="py-3 px-6 font-semibold text-gray-600 text-sm">Estado</th>
                 <th className="py-3 px-6 font-semibold text-gray-600 text-sm text-right">Monto Estimado</th>
+                <th className="py-3 px-6 font-semibold text-gray-600 text-sm text-right">Documento</th>
               </tr>
             </thead>
             <tbody>
               {cotizacionesVisibles.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-gray-500">No hay cotizaciones registradas.</td>
+                  <td colSpan={6} className="py-8 text-center text-gray-500">No hay cotizaciones registradas.</td>
                 </tr>
               ) : (
                 cotizacionesVisibles.map((cot, idx) => (
@@ -283,6 +285,7 @@ const VerFicha: React.FC = () => {
                     <td className="py-3 px-6 text-sm text-right font-medium text-gray-900">
                       {cot.moneda?.codigo_moneda} {Number(cot.monto_total_estimado).toLocaleString('es-CL')}
                     </td>
+                    <td className="py-3 px-6 text-right"><DocumentosHistoricosCotizacion cotizacionId={cot.id_cotizacion} estadoCotizacion={cot.estado_cotizacion} compacto /></td>
                   </tr>
                 ))
               )}

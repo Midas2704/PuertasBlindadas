@@ -73,6 +73,12 @@ export type CapacidadesDocumentalesProducto = {
   definirPrincipal: boolean;
   ordenar: boolean;
   definirUsoComercial: boolean;
+  diagnosticoActivacion?: {
+    permisoGestion: 'APROBADO_C2_6';
+    politicaComercial: 'CONFIGURADA' | 'NO_CONFIGURADA';
+    storage: 'CONFIGURADO' | 'NO_CONFIGURADO';
+    antivirus: 'CONFIGURADO' | 'NO_CONFIGURADO';
+  };
 };
 
 export type ModoFichaDocumental = 'crear' | 'editar' | 'consultar';

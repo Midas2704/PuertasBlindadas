@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ClipboardList, Eye, RefreshCw, Search } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { solicitarFinanzas } from '../../api/finanzas';
 
 type Orden={idOrdenTrabajo:string;estado:string;fechaCreacion:string;cotizacion:{id:number;cliente:string|null};producto:{nombre:string;codigo:string;familia:string;numeroUnidad:number};rectificacion:{fechaRectificacion:string|null;registradoPor:string;empleado:{id:number;nombre:string}|null}|null;versiones:{id:string;numero:number;fecha:string;enviadoPor:string}[];empleadosProduccion:number[];responsablesProduccion:{id:number;nombre:string}[];avance:{total:number;pendientes:number;enEjecucion:number;cerradas:number}};
@@ -11,12 +11,14 @@ const input='w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-
 async function api<T>(ruta:string):Promise<T>{const respuesta=await solicitarFinanzas(ruta);const datos=await respuesta.json();if(!respuesta.ok)throw new Error(datos.error||'No fue posible consultar las órdenes de trabajo');return datos;}
 
 export default function GestionOrdenesTrabajo(){
+  const [parametros]=useSearchParams();
   const [ordenes,setOrdenes]=useState<Orden[]>([]),[cargando,setCargando]=useState(false),[error,setError]=useState('');
-  const [filtros,setFiltros]=useState({busqueda:'',estado:'',cliente:'',cotizacion:'',producto:'',desde:'',hasta:'',empleado:''});
+  const [filtros,setFiltros]=useState({busqueda:'',estado:parametros.get('estado')||'',cliente:'',cotizacion:'',producto:'',desde:'',hasta:'',empleado:''});
   const empleados=useMemo(()=>Array.from(new Map(ordenes.flatMap(orden=>orden.rectificacion?.empleado?[orden.rectificacion.empleado]:[]).map(empleado=>[empleado.id,empleado])).values()).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es')),[ordenes]);
   const pendientes=useMemo(()=>ordenes.filter(orden=>orden.estado==='PENDIENTE_APROBACION_TECNICA'),[ordenes]);
   const cargar=async()=>{setCargando(true);setError('');try{const parametros=new URLSearchParams(Object.entries(filtros).filter(([,valor])=>valor));setOrdenes(await api<Orden[]>(`/terreno/ordenes-trabajo?${parametros}`));}catch(causa){setError((causa as Error).message);}finally{setCargando(false);}};
-  useEffect(()=>{void cargar();},[]);
+  const cargaInicial=useRef(cargar);
+  useEffect(()=>{queueMicrotask(()=>void cargaInicial.current());},[]);
   return <div className="min-h-full bg-gray-100 px-4 py-6 sm:px-6 lg:px-8"><div className="mx-auto max-w-7xl">
     <header className="border-t-4 border-[#FE8F01] bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-wide text-[#676767]">Terreno</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-black sm:text-3xl"><ClipboardList className="h-7 w-7 text-[#FE8F01]"/>Gestión de Órdenes de Trabajo</h1><p className="mt-2 text-sm text-[#676767]">Una ficha independiente por cada puerta física aprobada.</p></div><button onClick={()=>void cargar()} className="inline-flex items-center gap-2 rounded-lg border bg-white px-4 py-2 text-sm font-bold"><RefreshCw className={`h-4 w-4 ${cargando?'animate-spin':''}`}/>Recargar</button></div></header>
     {error&&<div role="alert" className="mt-4 border-l-4 border-red-500 bg-red-50 p-4 text-sm font-semibold text-red-800">{error}</div>}

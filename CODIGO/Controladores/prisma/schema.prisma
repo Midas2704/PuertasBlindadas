@@ -176,6 +176,24 @@ model cotizacion {
   cotizacion_version      cotizacion_version[]
   orden_compra_b2b        orden_compra_b2b?
 
+  /// Contrato comercial nuevo; permanece nullable para históricos que no puedan clasificarse inequívocamente.
+  segmento_comercial              String?  @db.VarChar(3)
+  nombre_proyecto                 String?  @db.VarChar(200)
+  referencia_comercial            String?  @db.VarChar(200)
+  alcance_comercial               String?  @db.VarChar(30)
+  requiere_instalacion            String?  @db.VarChar(20)
+  direccion_instalacion           String?  @db.VarChar(500)
+  region_instalacion              String?  @db.VarChar(120)
+  ciudad_instalacion              String?  @db.VarChar(120)
+  comuna_instalacion              String?  @db.VarChar(120)
+  estado_cobertura_instalacion    String?  @db.VarChar(30)
+  id_tarifa_instalacion_comercial BigInt?
+  precio_instalacion_aplicado     Decimal? @db.Decimal(14, 2)
+  id_condicion_comercial_version  BigInt?
+  responsable_comercial           BigInt?
+  id_obra_contexto                BigInt?
+  revision                        Int      @default(1)
+
   id_cotizacion              Int                           @id @default(autoincrement())
   id_ficha_cliente           Int
   id_moneda                  Int
@@ -193,8 +211,20 @@ model cotizacion {
   nota_venta                 nota_venta?
   solicitudes_crediticias_m8 solicitud_crediticia_m8[]
   unidades_fisicas_ot        unidad_fisica_orden_trabajo[]
+  tarifa_instalacion         tarifa_instalacion_comercial? @relation(fields: [id_tarifa_instalacion_comercial], references: [id_tarifa_instalacion_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_cotizacion_tarifa_instalacion_comercial")
+  condicion_comercial        condicion_comercial_version?  @relation(fields: [id_condicion_comercial_version], references: [id_condicion_comercial_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_cotizacion_condicion_comercial")
+  responsable                usuario?                      @relation("cotizacion_responsable_comercial", fields: [responsable_comercial], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_cotizacion_responsable_comercial")
+  obra_contexto              obra?                         @relation("cotizacion_obra_contexto", fields: [id_obra_contexto], references: [obra_obra_id], onDelete: Restrict, onUpdate: NoAction, map: "fk_cotizacion_obra_contexto")
+  proyecto_originado         proyecto?                     @relation("proyecto_cotizacion_origen")
+  grupos_alternativas_b2c    grupo_alternativas_b2c[]
+  contactos_b2b              contacto_cotizacion_b2b[]
+  detalles_servicio          detalle_servicio_cotizacion[]
 
   @@index([id_ficha_cliente], map: "idx_cotizacion_ficha")
+  @@index([segmento_comercial, estado_cotizacion], map: "idx_cotizacion_segmento_estado")
+  @@index([id_tarifa_instalacion_comercial], map: "idx_cotizacion_tarifa_instalacion")
+  @@index([id_condicion_comercial_version], map: "idx_cotizacion_condicion_comercial")
+  @@index([id_obra_contexto], map: "idx_cotizacion_obra_contexto")
   @@schema("finanzas")
 }
 
@@ -279,13 +309,33 @@ model detalle_cotizacion {
   descripcion_item_cotizado         String?
   observacion_medidas               String?
   subtotal_item_estimado            Decimal                             @default(0) @db.Decimal(14, 2)
+  id_extension_producto_comercial   Int?
+  id_producto_comercial_version     Int?
+  id_precio_producto_comercial      BigInt?
+  id_alternativa_b2c_aceptada       BigInt?                             @unique(map: "uq_detalle_cotizacion_alternativa_aceptada")
+  tipo_linea_comercial              String?                             @db.VarChar(30)
+  precio_lista_aplicado             Decimal?                            @db.Decimal(14, 2)
+  precio_unitario_autorizado        Decimal?                            @db.Decimal(14, 2)
+  descuento_elegible                Boolean?
+  es_precio_excepcional             Boolean                             @default(false)
+  motivo_precio_excepcional         String?
+  precio_excepcional_autorizado_por BigInt?
+  snapshot_comercial                Json?
+  revision                          Int                                 @default(1)
   detalle_costo_material_cotizacion detalle_costo_material_cotizacion[]
   item_comercial                    item_comercial                      @relation(fields: [id_item_comercial], references: [id_item_comercial], onUpdate: NoAction, map: "fk_det_cot_item_ext")
   cotizacion                        cotizacion                          @relation(fields: [id_cotizacion], references: [id_cotizacion], onUpdate: NoAction, map: "fk_detalle_cotizacion_cotizacion")
   unidades_fisicas_ot               unidad_fisica_orden_trabajo[]
+  producto_comercial                extension_producto_comercial?       @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_cotizacion_producto_comercial")
+  producto_version                  producto_comercial_version?         @relation(fields: [id_producto_comercial_version], references: [id_producto_comercial_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_cotizacion_producto_version")
+  precio_comercial                  precio_producto_comercial?          @relation(fields: [id_precio_producto_comercial], references: [id_precio_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_cotizacion_precio_comercial")
+  alternativa_aceptada              alternativa_b2c?                    @relation(fields: [id_alternativa_b2c_aceptada], references: [id_alternativa_b2c], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_cotizacion_alternativa_aceptada")
+  autorizador_precio_excepcional    usuario?                            @relation("detalle_cotizacion_precio_excepcional", fields: [precio_excepcional_autorizado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_cotizacion_autorizador_precio")
 
   @@index([id_cotizacion], map: "idx_detalle_cotizacion_cotizacion")
   @@index([id_item_comercial], map: "idx_detalle_cotizacion_item")
+  @@index([id_extension_producto_comercial, id_producto_comercial_version], map: "idx_detalle_cotizacion_producto_version")
+  @@index([id_precio_producto_comercial], map: "idx_detalle_cotizacion_precio_comercial")
   @@schema("finanzas")
 }
 
@@ -692,11 +742,11 @@ model medio_pago {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model moneda {
-  id_moneda                  Int                          @id @default(autoincrement())
-  codigo_moneda              String                       @unique @db.VarChar(10)
-  nombre_moneda              String                       @db.VarChar(80)
-  simbolo_moneda             String?                      @db.VarChar(10)
-  estado_moneda              String                       @default("activo") @db.VarChar(20)
+  id_moneda                  Int                            @id @default(autoincrement())
+  codigo_moneda              String                         @unique @db.VarChar(10)
+  nombre_moneda              String                         @db.VarChar(80)
+  simbolo_moneda             String?                        @db.VarChar(10)
+  estado_moneda              String                         @default("activo") @db.VarChar(20)
   costo_proyecto             costo_proyecto[]
   cotizacion                 cotizacion[]
   documento_compra_proveedor documento_compra_proveedor[]
@@ -711,6 +761,11 @@ model moneda {
   proyeccion_financiera_m7   proyeccion_financiera_m7[]
   proveedor                  proveedor[]
   proyecto_financiero        proyecto_financiero[]
+  precios_producto_comercial precio_producto_comercial[]
+  precios_opcional_comercial precio_opcional_comercial[]
+  tarifas_instalacion        tarifa_instalacion_comercial[]
+  alternativas_b2c           alternativa_b2c[]
+  precios_servicio_comercial precio_servicio_comercial[]
 
   @@schema("finanzas")
 }
@@ -3148,11 +3203,17 @@ model obra {
   obra_cantidad_puerta         Int?
   obra_referencia              String?
   obra_observaciones           String?
+  obra_edificio                String?                  @db.VarChar(150)
+  obra_unidad                  String?                  @db.VarChar(100)
+  clave_ubicacion_normalizada  String?                  @unique(map: "uq_obra_clave_ubicacion") @db.VarChar(700)
+  revision_comercial           Int                      @default(1)
   rut_cliente                  String?                  @db.VarChar(12)
   id_especificacion_puerta     BigInt?
   especificaciones_puerta      especificaciones_puerta? @relation(fields: [id_especificacion_puerta], references: [especificacion_puerta_especificacion_puerta_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_obra_id_especificacion_puerta")
   cliente                      cliente?                 @relation(fields: [rut_cliente], references: [cliente_cliente_rut], onDelete: NoAction, onUpdate: NoAction, map: "fk_obra_rut_cliente")
   servicios_terreno            servicio_terreno[]
+  cotizaciones_contexto        cotizacion[]             @relation("cotizacion_obra_contexto")
+  proyectos_vinculados         proyecto_obra[]
 
   @@schema("terreno")
 }
@@ -3224,6 +3285,7 @@ model proyecto {
   proyecto_estado_operacional String?
   proyecto_estado_produccion  String?
   rut_cliente                 String?                  @db.VarChar(12)
+  id_cotizacion_origen        Int?                     @unique(map: "uq_proyecto_cotizacion_origen")
   proyecto_financiero         proyecto_financiero[]
   alerta_faltante_pedido      alerta_faltante_pedido[]
   lote                        lote[]
@@ -3231,7 +3293,27 @@ model proyecto {
   orden_trabajo               orden_trabajo[]
   reserva_inventario          reserva_inventario[]
   cliente                     cliente?                 @relation(fields: [rut_cliente], references: [cliente_cliente_rut], onDelete: NoAction, onUpdate: NoAction, map: "fk_proyecto_rut_cliente")
+  cotizacion_origen           cotizacion?              @relation("proyecto_cotizacion_origen", fields: [id_cotizacion_origen], references: [id_cotizacion], onDelete: Restrict, onUpdate: NoAction, map: "fk_proyecto_cotizacion_origen")
+  obras                       proyecto_obra[]
 
+  @@index([rut_cliente, proyecto_fecha_ingreso], map: "idx_proyecto_cliente_fecha")
+
+  @@schema("terreno")
+}
+
+/// Relación explícita entre el pedido/proyecto y sus ubicaciones físicas. No impone una sola Obra por Proyecto.
+model proyecto_obra {
+  id_proyecto_obra BigInt   @id @default(autoincrement())
+  id_proyecto      BigInt
+  id_obra          BigInt
+  es_principal     Boolean  @default(false)
+  origen           String   @default("COTIZACION") @db.VarChar(30)
+  creado_en        DateTime @default(now()) @db.Timestamptz(6)
+  proyecto         proyecto @relation(fields: [id_proyecto], references: [proyecto_proyecto_id], onDelete: Restrict, onUpdate: NoAction, map: "fk_proyecto_obra_proyecto")
+  obra             obra     @relation(fields: [id_obra], references: [obra_obra_id], onDelete: Restrict, onUpdate: NoAction, map: "fk_proyecto_obra_obra")
+
+  @@unique([id_proyecto, id_obra], map: "uq_proyecto_obra")
+  @@index([id_obra, id_proyecto], map: "idx_proyecto_obra_obra")
   @@schema("terreno")
 }
 
@@ -3440,6 +3522,27 @@ model usuario {
   versiones_documentales_creadas                   version_documento[]                     @relation("version_documento_creador")
   intenciones_documentales                         intencion_carga_documental[]            @relation("intencion_documental_solicitante")
   asociaciones_documentales_producto               producto_comercial_documento[]          @relation("producto_documento_responsable")
+  cotizaciones_responsable_comercial               cotizacion[]                            @relation("cotizacion_responsable_comercial")
+  detalles_precio_excepcional_autorizados          detalle_cotizacion[]                    @relation("detalle_cotizacion_precio_excepcional")
+  precios_producto_creados                         precio_producto_comercial[]             @relation("precio_producto_creador")
+  opcionales_comerciales_creados                   opcional_comercial[]                    @relation("opcional_comercial_creador")
+  precios_opcional_creados                         precio_opcional_comercial[]             @relation("precio_opcional_creador")
+  tarifas_instalacion_creadas                      tarifa_instalacion_comercial[]          @relation("tarifa_instalacion_creador")
+  condiciones_comerciales_creadas                  condicion_comercial[]                   @relation("condicion_comercial_creador")
+  operaciones_comerciales_idempotentes             idempotencia_operacion_comercial[]
+  condiciones_comerciales_publicadas               condicion_comercial_version[]           @relation("condicion_comercial_publicador")
+  plantillas_documentales_creadas                  plantilla_documental_comercial[]        @relation("plantilla_documental_creador")
+  plantillas_documentales_publicadas               plantilla_documental_version[]          @relation("plantilla_documental_publicador")
+  cartas_b2c_creadas                               carta_comercial_b2c[]                   @relation("carta_b2c_creador")
+  cartas_b2c_publicadas                            carta_comercial_b2c_version[]           @relation("carta_b2c_publicador")
+  versiones_cotizacion_comercial                   cotizacion_version[]                    @relation("cotizacion_version_actor")
+  alternativas_b2c_decididas                       alternativa_b2c[]                       @relation("alternativa_b2c_decisor")
+  historial_alternativas_b2c                       historial_decision_alternativa_b2c[]    @relation("historial_alternativa_actor")
+  contactos_cotizacion_b2b_creados                 contacto_cotizacion_b2b[]              @relation("contacto_cotizacion_b2b_actor")
+  servicios_comerciales_creados                    servicio_comercial[]                   @relation("servicio_comercial_actor")
+  precios_servicio_comercial_creados               precio_servicio_comercial[]            @relation("precio_servicio_comercial_actor")
+  selecciones_alternativas_b2c                     grupo_alternativas_b2c[]                @relation("grupo_alternativa_selector")
+  historial_selecciones_alternativas_b2c            historial_seleccion_alternativa_b2c[]  @relation("historial_seleccion_alternativa_actor")
   asignaciones_area_empleado_creadas               asignacion_area_empleado[]              @relation("area_empleado_asignador")
   asignaciones_area_empleado_finalizadas           asignacion_area_empleado[]              @relation("area_empleado_finalizador")
   seguridad                                        estado_seguridad_usuario?
@@ -3767,6 +3870,10 @@ model extension_producto_comercial {
   documentos                      producto_comercial_documento[]
   ajuste_plantilla_fabricacion    ajuste_producto_plantilla_fabricacion?
   unidades_fisicas_ot             unidad_fisica_orden_trabajo[]
+  precios_comerciales             precio_producto_comercial[]
+  compatibilidades_opcionales     compatibilidad_opcional_producto[]
+  detalles_cotizacion             detalle_cotizacion[]
+  alternativas_b2c                alternativa_b2c[]
 
   @@index([id_familia_producto_comercial, estado])
   @@index([nombre_comercial])
@@ -4185,16 +4292,16 @@ model cierre_orden_trabajo_produccion {
 }
 
 model producto_comercial_version {
-  id_producto_comercial_version   Int                          @id @default(autoincrement())
+  id_producto_comercial_version   Int                                    @id @default(autoincrement())
   id_extension_producto_comercial Int
   numero_version                  Int
-  codigo_comercial                String                       @db.VarChar(60)
-  nombre_comercial                String                       @db.VarChar(200)
+  codigo_comercial                String                                 @db.VarChar(60)
+  nombre_comercial                String                                 @db.VarChar(200)
   id_familia_producto_comercial   Int
-  codigo_familia                  String                       @db.VarChar(40)
-  nombre_familia                  String                       @db.VarChar(150)
-  subfamilia                      String?                      @db.VarChar(120)
-  tipo_producto                   String?                      @db.VarChar(100)
+  codigo_familia                  String                                 @db.VarChar(40)
+  nombre_familia                  String                                 @db.VarChar(150)
+  subfamilia                      String?                                @db.VarChar(120)
+  tipo_producto                   String?                                @db.VarChar(100)
   descripcion_general             String?
   descripcion_b2b                 String?
   descripcion_b2c                 String?
@@ -4205,13 +4312,16 @@ model producto_comercial_version {
   caracteristicas_tecnicas        Json
   id_item_comercial               Int?
   producto_terminado_id_producto  BigInt?
-  vigencia_desde                  DateTime                     @db.Date
+  vigencia_desde                  DateTime                               @db.Date
   motivo                          String
   usuario_id_usuario              BigInt
-  creado_en                       DateTime                     @default(now()) @db.Timestamp(6)
-  producto                        extension_producto_comercial @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict)
-  familia                         familia_producto_comercial   @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict)
-  usuario                         usuario                      @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict)
+  creado_en                       DateTime                               @default(now()) @db.Timestamp(6)
+  producto                        extension_producto_comercial           @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict)
+  familia                         familia_producto_comercial             @relation(fields: [id_familia_producto_comercial], references: [id_familia_producto_comercial], onDelete: Restrict)
+  usuario                         usuario                                @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict)
+  detalles_cotizacion             detalle_cotizacion[]
+  alternativas_b2c                alternativa_b2c[]
+  productos_carta_b2c             carta_comercial_b2c_version_producto[]
 
   @@unique([id_extension_producto_comercial, numero_version])
   @@index([id_extension_producto_comercial, creado_en])
@@ -4255,6 +4365,8 @@ model documento_logico {
   intenciones_carga             intencion_carga_documental[]
   asociaciones_producto         producto_comercial_documento[]
   eventos_operacionales         evento_operacional_documental[]
+  versiones_cotizacion          cotizacion_version[]
+  versiones_carta_b2c           carta_comercial_b2c_version[]
 
   @@index([clasificacion, estado, creado_en], map: "idx_documento_logico_clasificacion_estado")
   @@index([id_configuracion_conservacion], map: "idx_documento_logico_conservacion")
@@ -4263,33 +4375,34 @@ model documento_logico {
 
 /// Metadatos de una incorporación inmutable de contenido. El objeto vive fuera de PostgreSQL.
 model version_documento {
-  id_version_documento   BigInt                          @id @default(autoincrement())
+  id_version_documento   BigInt                                   @id @default(autoincrement())
   id_documento_logico    BigInt
   numero_version         Int
-  proveedor_logico       String                          @db.VarChar(20)
-  contenedor_logico      String                          @db.VarChar(80)
-  clave_objeto           String                          @db.VarChar(700)
-  version_proveedor      String?                         @db.VarChar(300)
-  nombre_original        String                          @db.VarChar(255)
-  nombre_seguro          String                          @db.VarChar(255)
-  mime_declarado         String                          @db.VarChar(150)
-  mime_detectado         String?                         @db.VarChar(150)
+  proveedor_logico       String                                   @db.VarChar(20)
+  contenedor_logico      String                                   @db.VarChar(80)
+  clave_objeto           String                                   @db.VarChar(700)
+  version_proveedor      String?                                  @db.VarChar(300)
+  nombre_original        String                                   @db.VarChar(255)
+  nombre_seguro          String                                   @db.VarChar(255)
+  mime_declarado         String                                   @db.VarChar(150)
+  mime_detectado         String?                                  @db.VarChar(150)
   tamano_bytes           BigInt
-  sha256                 String?                         @db.Char(64)
-  estado                 String                          @default("PENDIENTE") @db.VarChar(20)
+  sha256                 String?                                  @db.Char(64)
+  estado                 String                                   @default("PENDIENTE") @db.VarChar(20)
   creado_por             BigInt
-  creado_en              DateTime                        @default(now()) @db.Timestamptz(6)
-  validado_en            DateTime?                       @db.Timestamptz(6)
-  id_version_reemplazada BigInt?                         @unique
+  creado_en              DateTime                                 @default(now()) @db.Timestamptz(6)
+  validado_en            DateTime?                                @db.Timestamptz(6)
+  id_version_reemplazada BigInt?                                  @unique
   resultado_validaciones Json?
-  revision               Int                             @default(1)
-  documento              documento_logico                @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_version_documento_logico")
-  creador                usuario                         @relation("version_documento_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_version_documento_creador")
-  version_reemplazada    version_documento?              @relation("version_documento_reemplazo", fields: [id_version_reemplazada], references: [id_version_documento], onDelete: Restrict, onUpdate: NoAction, map: "fk_version_documento_reemplazada")
-  reemplazo              version_documento?              @relation("version_documento_reemplazo")
-  variantes_origen       variante_documento[]            @relation("variante_documento_original")
-  variante_derivada      variante_documento?             @relation("variante_documento_derivada")
+  revision               Int                                      @default(1)
+  documento              documento_logico                         @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_version_documento_logico")
+  creador                usuario                                  @relation("version_documento_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_version_documento_creador")
+  version_reemplazada    version_documento?                       @relation("version_documento_reemplazo", fields: [id_version_reemplazada], references: [id_version_documento], onDelete: Restrict, onUpdate: NoAction, map: "fk_version_documento_reemplazada")
+  reemplazo              version_documento?                       @relation("version_documento_reemplazo")
+  variantes_origen       variante_documento[]                     @relation("variante_documento_original")
+  variante_derivada      variante_documento?                      @relation("variante_documento_derivada")
   eventos_operacionales  evento_operacional_documental[]
+  fotografias_carta_b2c  carta_comercial_b2c_version_fotografia[]
 
   @@unique([id_documento_logico, numero_version], map: "uq_version_documento_numero")
   @@unique([proveedor_logico, contenedor_logico, clave_objeto], map: "uq_version_documento_objeto")
@@ -4341,21 +4454,22 @@ model intencion_carga_documental {
 }
 
 model producto_comercial_documento {
-  id_producto_comercial_documento BigInt                       @id @default(autoincrement())
+  id_producto_comercial_documento BigInt                                   @id @default(autoincrement())
   id_extension_producto_comercial Int
   id_documento_logico             BigInt
-  tipo_documento                  String                       @db.VarChar(40)
-  orden_presentacion              Int                          @default(0)
-  es_imagen_principal             Boolean                      @default(false)
-  habilitado_b2b                  Boolean                      @default(false)
-  habilitado_b2c                  Boolean                      @default(false)
-  estado                          String                       @default("ACTIVO") @db.VarChar(20)
-  asociado_en                     DateTime                     @default(now()) @db.Timestamptz(6)
+  tipo_documento                  String                                   @db.VarChar(40)
+  orden_presentacion              Int                                      @default(0)
+  es_imagen_principal             Boolean                                  @default(false)
+  habilitado_b2b                  Boolean                                  @default(false)
+  habilitado_b2c                  Boolean                                  @default(false)
+  estado                          String                                   @default("ACTIVO") @db.VarChar(20)
+  asociado_en                     DateTime                                 @default(now()) @db.Timestamptz(6)
   usuario_responsable             BigInt
-  revision                        Int                          @default(1)
-  producto                        extension_producto_comercial @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_producto_documento_producto")
-  documento                       documento_logico             @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_producto_documento_documento")
-  responsable                     usuario                      @relation("producto_documento_responsable", fields: [usuario_responsable], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_producto_documento_responsable")
+  revision                        Int                                      @default(1)
+  producto                        extension_producto_comercial             @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_producto_documento_producto")
+  documento                       documento_logico                         @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_producto_documento_documento")
+  responsable                     usuario                                  @relation("producto_documento_responsable", fields: [usuario_responsable], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_producto_documento_responsable")
+  fotografias_carta_b2c           carta_comercial_b2c_version_fotografia[]
 
   @@unique([id_extension_producto_comercial, id_documento_logico, tipo_documento], map: "uq_producto_documento_asociacion")
   @@index([id_extension_producto_comercial, estado, orden_presentacion], map: "idx_producto_documento_presentacion")
@@ -4390,13 +4504,519 @@ model evento_operacional_documental {
 
 /// PROVISIONAL I2 — versiones comerciales, sin módulo de auditoría.
 model cotizacion_version {
-  id_cotizacion_version Int        @id @default(autoincrement())
-  id_cotizacion         Int
-  fecha                 DateTime   @default(now())
-  antecedentes          Json
-  motivo                String
-  cotizacion            cotizacion @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict)
+  id_cotizacion_version    Int               @id @default(autoincrement())
+  id_cotizacion            Int
+  fecha                    DateTime          @default(now())
+  antecedentes             Json
+  motivo                   String
+  numero_version_comercial Int?
+  tipo_version             String?           @db.VarChar(30)
+  snapshot_comercial       Json?
+  id_documento_logico      BigInt?           @unique(map: "uq_cotizacion_version_documento")
+  estado_documental        String?           @db.VarChar(30)
+  usuario_id_usuario       BigInt?
+  clave_idempotencia       String?           @unique(map: "uq_cotizacion_version_idempotencia") @db.VarChar(160)
+  cotizacion               cotizacion        @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict)
+  documento                documento_logico? @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_cotizacion_version_documento")
+  actor                    usuario?          @relation("cotizacion_version_actor", fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_cotizacion_version_actor")
 
+  @@unique([id_cotizacion, numero_version_comercial], map: "uq_cotizacion_version_comercial")
+  @@index([id_cotizacion, fecha], map: "idx_cotizacion_version_fecha")
+  @@index([estado_documental], map: "idx_cotizacion_version_estado_documental")
+  @@schema("finanzas")
+}
+
+/// Precio público/lista. Nunca representa costo de fabricación ni autoriza por sí solo una excepción.
+model precio_producto_comercial {
+  id_precio_producto_comercial    BigInt                                 @id @default(autoincrement())
+  id_extension_producto_comercial Int
+  segmento_comercial              String                                 @db.VarChar(3)
+  id_moneda                       Int
+  monto                           Decimal                                @db.Decimal(14, 2)
+  vigencia_desde                  DateTime                               @db.Date
+  vigencia_hasta                  DateTime?                              @db.Date
+  estado                          String                                 @default("ACTIVO") @db.VarChar(20)
+  motivo                          String?
+  revision                        Int                                    @default(1)
+  creado_por                      BigInt
+  creado_en                       DateTime                               @default(now()) @db.Timestamptz(6)
+  actualizado_en                  DateTime                               @default(now()) @db.Timestamptz(6)
+  producto                        extension_producto_comercial           @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_producto_comercial_producto")
+  moneda                          moneda                                 @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_producto_comercial_moneda")
+  creador                         usuario                                @relation("precio_producto_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_producto_comercial_creador")
+  detalles_cotizacion             detalle_cotizacion[]
+  alternativas_b2c                alternativa_b2c[]
+  publicaciones_carta             carta_comercial_b2c_version_producto[]
+
+  @@unique([id_extension_producto_comercial, segmento_comercial, id_moneda, vigencia_desde], map: "uq_precio_producto_inicio")
+  @@index([id_extension_producto_comercial, segmento_comercial, estado, vigencia_desde, vigencia_hasta], map: "idx_precio_producto_vigencia")
+  @@schema("finanzas")
+}
+
+model opcional_comercial {
+  id_opcional_comercial BigInt                             @id @default(autoincrement())
+  codigo                String                             @unique @db.VarChar(60)
+  nombre                String                             @db.VarChar(200)
+  descripcion_b2b       String?
+  descripcion_b2c       String?
+  estado                String                             @default("ACTIVO") @db.VarChar(20)
+  revision              Int                                @default(1)
+  creado_por            BigInt
+  creado_en             DateTime                           @default(now()) @db.Timestamptz(6)
+  actualizado_en        DateTime                           @default(now()) @db.Timestamptz(6)
+  creador               usuario                            @relation("opcional_comercial_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_opcional_comercial_creador")
+  compatibilidades      compatibilidad_opcional_producto[]
+  precios               precio_opcional_comercial[]
+
+  @@index([estado, nombre], map: "idx_opcional_comercial_estado")
+  @@schema("finanzas")
+}
+
+model compatibilidad_opcional_producto {
+  id_compatibilidad_opcional      BigInt                       @id @default(autoincrement())
+  id_extension_producto_comercial Int
+  id_opcional_comercial           BigInt
+  habilitado_b2b                  Boolean                      @default(false)
+  habilitado_b2c                  Boolean                      @default(false)
+  condiciones_compatibilidad      String?
+  estado                          String                       @default("ACTIVA") @db.VarChar(20)
+  revision                        Int                          @default(1)
+  producto                        extension_producto_comercial @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_compatibilidad_opcional_producto")
+  opcional                        opcional_comercial           @relation(fields: [id_opcional_comercial], references: [id_opcional_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_compatibilidad_opcional_catalogo")
+  alternativas                    alternativa_b2c_opcional[]
+
+  @@unique([id_extension_producto_comercial, id_opcional_comercial], map: "uq_compatibilidad_opcional_producto")
+  @@index([id_extension_producto_comercial, estado], map: "idx_compatibilidad_opcional_estado")
+  @@schema("finanzas")
+}
+
+model precio_opcional_comercial {
+  id_precio_opcional_comercial BigInt                     @id @default(autoincrement())
+  id_opcional_comercial        BigInt
+  segmento_comercial           String                     @db.VarChar(3)
+  id_moneda                    Int
+  monto                        Decimal                    @db.Decimal(14, 2)
+  vigencia_desde               DateTime                   @db.Date
+  vigencia_hasta               DateTime?                  @db.Date
+  estado                       String                     @default("ACTIVO") @db.VarChar(20)
+  motivo                       String?
+  revision                     Int                        @default(1)
+  creado_por                   BigInt
+  creado_en                    DateTime                   @default(now()) @db.Timestamptz(6)
+  actualizado_en               DateTime                   @default(now()) @db.Timestamptz(6)
+  opcional                     opcional_comercial         @relation(fields: [id_opcional_comercial], references: [id_opcional_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_opcional_catalogo")
+  moneda                       moneda                     @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_opcional_moneda")
+  creador                      usuario                    @relation("precio_opcional_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_opcional_creador")
+  alternativas                 alternativa_b2c_opcional[]
+
+  @@unique([id_opcional_comercial, segmento_comercial, id_moneda, vigencia_desde], map: "uq_precio_opcional_inicio")
+  @@index([id_opcional_comercial, segmento_comercial, estado, vigencia_desde, vigencia_hasta], map: "idx_precio_opcional_vigencia")
+  @@schema("finanzas")
+}
+
+/// Tarifa de venta M2. No sustituye ni replica el costo interno M7.
+model tarifa_instalacion_comercial {
+  id_tarifa_instalacion_comercial BigInt            @id @default(autoincrement())
+  alcance_geografico              String            @db.VarChar(20)
+  region                          String            @db.VarChar(120)
+  region_normalizada              String            @db.VarChar(120)
+  ciudad                          String?           @db.VarChar(120)
+  comuna                          String?           @db.VarChar(120)
+  comuna_normalizada              String?           @db.VarChar(120)
+  estado_cobertura                String            @db.VarChar(30)
+  id_moneda                       Int?
+  precio_comercial                Decimal?          @db.Decimal(14, 2)
+  vigencia_desde                  DateTime          @db.Date
+  vigencia_hasta                  DateTime?         @db.Date
+  condiciones                     String?
+  observaciones                   String?
+  estado                          String            @default("ACTIVA") @db.VarChar(20)
+  revision                        Int               @default(1)
+  creado_por                      BigInt
+  creado_en                       DateTime          @default(now()) @db.Timestamptz(6)
+  actualizado_en                  DateTime          @default(now()) @db.Timestamptz(6)
+  moneda                          moneda?           @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_tarifa_instalacion_moneda")
+  creador                         usuario           @relation("tarifa_instalacion_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_tarifa_instalacion_creador")
+  cotizaciones                    cotizacion[]
+  alternativas                    alternativa_b2c[]
+
+  @@unique([alcance_geografico, region_normalizada, comuna_normalizada, vigencia_desde], map: "uq_tarifa_instalacion_inicio")
+  @@index([region_normalizada, comuna_normalizada, estado, vigencia_desde, vigencia_hasta], map: "idx_tarifa_instalacion_busqueda")
+  @@schema("finanzas")
+}
+
+model condicion_comercial {
+  id_condicion_comercial BigInt                        @id @default(autoincrement())
+  codigo                 String                        @unique @db.VarChar(60)
+  nombre                 String                        @db.VarChar(200)
+  segmento               String                        @db.VarChar(20)
+  estado                 String                        @default("ACTIVA") @db.VarChar(20)
+  revision               Int                           @default(1)
+  creado_por             BigInt
+  creado_en              DateTime                      @default(now()) @db.Timestamptz(6)
+  actualizado_en         DateTime                      @default(now()) @db.Timestamptz(6)
+  creador                usuario                       @relation("condicion_comercial_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_condicion_comercial_creador")
+  versiones              condicion_comercial_version[]
+
+  @@index([segmento, estado], map: "idx_condicion_comercial_segmento")
+  @@schema("finanzas")
+}
+
+model condicion_comercial_version {
+  id_condicion_comercial_version BigInt                         @id @default(autoincrement())
+  id_condicion_comercial         BigInt
+  numero_version                 Int
+  contenido                      Json
+  vigencia_desde                 DateTime                       @db.Date
+  vigencia_hasta                 DateTime?                      @db.Date
+  estado                         String                         @default("BORRADOR") @db.VarChar(20)
+  motivo                         String
+  publicado_por                  BigInt?
+  publicado_en                   DateTime?                      @db.Timestamptz(6)
+  condicion                      condicion_comercial            @relation(fields: [id_condicion_comercial], references: [id_condicion_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_condicion_version_raiz")
+  publicador                     usuario?                       @relation("condicion_comercial_publicador", fields: [publicado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_condicion_version_publicador")
+  cotizaciones                   cotizacion[]
+  alternativas                   alternativa_b2c[]
+  versiones_plantilla            plantilla_documental_version[]
+  versiones_carta                carta_comercial_b2c_version[]
+
+  @@unique([id_condicion_comercial, numero_version], map: "uq_condicion_comercial_version")
+  @@index([id_condicion_comercial, estado, vigencia_desde, vigencia_hasta], map: "idx_condicion_version_vigencia")
+  @@schema("finanzas")
+}
+
+model idempotencia_operacion_comercial {
+  clave         String    @id @db.VarChar(160)
+  operacion     String    @db.VarChar(80)
+  actor_id      BigInt
+  respuesta     Json?
+  creado_en     DateTime  @default(now()) @db.Timestamptz(6)
+  completado_en DateTime? @db.Timestamptz(6)
+  actor         usuario   @relation(fields: [actor_id], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_idempotencia_operacion_actor")
+
+  @@index([actor_id, creado_en], map: "idx_idempotencia_operacion_actor")
+  @@schema("finanzas")
+}
+
+model plantilla_documental_comercial {
+  id_plantilla_documental BigInt                         @id @default(autoincrement())
+  codigo                  String                         @unique @db.VarChar(60)
+  nombre                  String                         @db.VarChar(200)
+  tipo_documento          String                         @db.VarChar(30)
+  segmento                String                         @db.VarChar(20)
+  estado                  String                         @default("ACTIVA") @db.VarChar(20)
+  revision                Int                            @default(1)
+  creado_por              BigInt
+  creado_en               DateTime                       @default(now()) @db.Timestamptz(6)
+  actualizado_en          DateTime                       @default(now()) @db.Timestamptz(6)
+  creador                 usuario                        @relation("plantilla_documental_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_plantilla_documental_creador")
+  versiones               plantilla_documental_version[]
+
+  @@index([tipo_documento, segmento, estado], map: "idx_plantilla_documental_tipo")
+  @@schema("finanzas")
+}
+
+model plantilla_documental_version {
+  id_plantilla_documental_version BigInt                         @id @default(autoincrement())
+  id_plantilla_documental         BigInt
+  numero_version                  Int
+  esquema_contenido               Json
+  id_condicion_comercial_version  BigInt?
+  estado                          String                         @default("BORRADOR") @db.VarChar(20)
+  motivo                          String
+  publicado_por                   BigInt?
+  publicado_en                    DateTime?                      @db.Timestamptz(6)
+  plantilla                       plantilla_documental_comercial @relation(fields: [id_plantilla_documental], references: [id_plantilla_documental], onDelete: Restrict, onUpdate: NoAction, map: "fk_plantilla_documental_version_raiz")
+  condicion                       condicion_comercial_version?   @relation(fields: [id_condicion_comercial_version], references: [id_condicion_comercial_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_plantilla_documental_condicion")
+  publicador                      usuario?                       @relation("plantilla_documental_publicador", fields: [publicado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_plantilla_documental_publicador")
+  cartas_b2c                      carta_comercial_b2c_version[]
+
+  @@unique([id_plantilla_documental, numero_version], map: "uq_plantilla_documental_version")
+  @@index([id_plantilla_documental, estado], map: "idx_plantilla_documental_version_estado")
+  @@schema("finanzas")
+}
+
+model carta_comercial_b2c {
+  id_carta_comercial_b2c BigInt                        @id @default(autoincrement())
+  codigo                 String                        @unique @db.VarChar(60)
+  titulo                 String                        @db.VarChar(200)
+  contenido_borrador     Json
+  estado                 String                        @default("BORRADOR") @db.VarChar(20)
+  revision               Int                           @default(1)
+  creado_por             BigInt
+  creado_en              DateTime                      @default(now()) @db.Timestamptz(6)
+  actualizado_en         DateTime                      @default(now()) @db.Timestamptz(6)
+  creador                usuario                       @relation("carta_b2c_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_creador")
+  versiones              carta_comercial_b2c_version[]
+
+  @@index([estado, actualizado_en], map: "idx_carta_b2c_estado")
+  @@schema("finanzas")
+}
+
+model carta_comercial_b2c_version {
+  id_carta_comercial_b2c_version  BigInt                                   @id @default(autoincrement())
+  id_carta_comercial_b2c          BigInt
+  numero_version                  Int
+  id_plantilla_documental_version BigInt
+  id_condicion_comercial_version  BigInt?
+  snapshot_publicacion            Json
+  id_documento_logico             BigInt?                                  @unique(map: "uq_carta_b2c_version_documento")
+  estado_documental               String                                   @default("PENDIENTE_DOCUMENTO") @db.VarChar(30)
+  clave_idempotencia              String                                   @unique @db.VarChar(160)
+  motivo                          String
+  publicado_por                   BigInt
+  creado_en                       DateTime                                 @default(now()) @db.Timestamptz(6)
+  confirmado_en                   DateTime?                                @db.Timestamptz(6)
+  carta                           carta_comercial_b2c                      @relation(fields: [id_carta_comercial_b2c], references: [id_carta_comercial_b2c], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_version_raiz")
+  plantilla                       plantilla_documental_version             @relation(fields: [id_plantilla_documental_version], references: [id_plantilla_documental_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_version_plantilla")
+  condicion                       condicion_comercial_version?             @relation(fields: [id_condicion_comercial_version], references: [id_condicion_comercial_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_version_condicion")
+  documento                       documento_logico?                        @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_version_documento")
+  publicador                      usuario                                  @relation("carta_b2c_publicador", fields: [publicado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_version_publicador")
+  productos                       carta_comercial_b2c_version_producto[]
+  fotografias                     carta_comercial_b2c_version_fotografia[]
+
+  @@unique([id_carta_comercial_b2c, numero_version], map: "uq_carta_b2c_version")
+  @@index([id_carta_comercial_b2c, estado_documental], map: "idx_carta_b2c_version_estado")
+  @@schema("finanzas")
+}
+
+model carta_comercial_b2c_version_producto {
+  id_carta_version_producto      BigInt                      @id @default(autoincrement())
+  id_carta_comercial_b2c_version BigInt
+  id_producto_comercial_version  Int
+  id_precio_producto_comercial   BigInt
+  orden_presentacion             Int
+  snapshot_producto              Json
+  carta_version                  carta_comercial_b2c_version @relation(fields: [id_carta_comercial_b2c_version], references: [id_carta_comercial_b2c_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_producto_version_carta")
+  producto_version               producto_comercial_version  @relation(fields: [id_producto_comercial_version], references: [id_producto_comercial_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_producto_version_producto")
+  precio                         precio_producto_comercial   @relation(fields: [id_precio_producto_comercial], references: [id_precio_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_producto_version_precio")
+
+  @@unique([id_carta_comercial_b2c_version, id_producto_comercial_version], map: "uq_carta_b2c_version_producto")
+  @@unique([id_carta_comercial_b2c_version, orden_presentacion], map: "uq_carta_b2c_version_orden")
+  @@schema("finanzas")
+}
+
+model carta_comercial_b2c_version_fotografia {
+  id_carta_version_fotografia     BigInt                       @id @default(autoincrement())
+  id_carta_comercial_b2c_version  BigInt
+  id_producto_comercial_documento BigInt
+  id_version_documento            BigInt
+  orden_presentacion              Int
+  carta_version                   carta_comercial_b2c_version  @relation(fields: [id_carta_comercial_b2c_version], references: [id_carta_comercial_b2c_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_fotografia_version_carta")
+  asociacion_producto             producto_comercial_documento @relation(fields: [id_producto_comercial_documento], references: [id_producto_comercial_documento], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_fotografia_asociacion")
+  version_documento               version_documento            @relation(fields: [id_version_documento], references: [id_version_documento], onDelete: Restrict, onUpdate: NoAction, map: "fk_carta_b2c_fotografia_documento")
+
+  @@unique([id_carta_comercial_b2c_version, id_producto_comercial_documento, id_version_documento], map: "uq_carta_b2c_version_fotografia")
+  @@index([id_carta_comercial_b2c_version, orden_presentacion], map: "idx_carta_b2c_fotografia_orden")
+  @@schema("finanzas")
+}
+
+/// Contactos propios de una operación B2B. No modifica el contacto maestro del cliente.
+model contacto_cotizacion_b2b {
+  id_contacto_cotizacion_b2b BigInt     @id @default(autoincrement())
+  id_cotizacion              Int
+  nombre                     String     @db.VarChar(120)
+  apellido                   String?    @db.VarChar(120)
+  cargo                      String?    @db.VarChar(120)
+  empresa_relacionada        String?    @db.VarChar(200)
+  correo                     String?    @db.VarChar(254)
+  telefono                   String?    @db.VarChar(40)
+  tipo_contacto              String     @default("COMERCIAL") @db.VarChar(30)
+  es_principal               Boolean    @default(false)
+  observaciones              String?
+  estado                     String     @default("ACTIVO") @db.VarChar(20)
+  revision                   Int        @default(1)
+  creado_por                 BigInt
+  creado_en                  DateTime   @default(now()) @db.Timestamptz(6)
+  actualizado_en             DateTime   @default(now()) @db.Timestamptz(6)
+  cotizacion                 cotizacion @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict, onUpdate: NoAction, map: "fk_contacto_cotizacion_b2b_cotizacion")
+  actor                      usuario    @relation("contacto_cotizacion_b2b_actor", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_contacto_cotizacion_b2b_actor")
+
+  @@index([id_cotizacion, estado], map: "idx_contacto_cotizacion_b2b_estado")
+  @@schema("finanzas")
+}
+
+/// Servicio vendible. No representa costo interno ni una unidad física fabricable.
+model servicio_comercial {
+  id_servicio_comercial BigInt                      @id @default(autoincrement())
+  codigo                String                      @unique @db.VarChar(50)
+  nombre                String                      @db.VarChar(160)
+  descripcion           String?
+  unidad_cobro          String                      @db.VarChar(40)
+  habilitado_b2b        Boolean                     @default(true)
+  habilitado_b2c        Boolean                     @default(false)
+  estado                String                      @default("ACTIVO") @db.VarChar(20)
+  revision              Int                         @default(1)
+  creado_por            BigInt
+  creado_en             DateTime                    @default(now()) @db.Timestamptz(6)
+  actualizado_en        DateTime                    @default(now()) @db.Timestamptz(6)
+  actor                 usuario                     @relation("servicio_comercial_actor", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_servicio_comercial_actor")
+  precios               precio_servicio_comercial[]
+  detalles              detalle_servicio_cotizacion[]
+
+  @@index([estado, habilitado_b2b], map: "idx_servicio_comercial_b2b")
+  @@schema("finanzas")
+}
+
+/// Precio comercial versionado de un servicio; nunca se deriva de costos M7.
+model precio_servicio_comercial {
+  id_precio_servicio_comercial BigInt               @id @default(autoincrement())
+  id_servicio_comercial        BigInt
+  segmento_comercial           String               @db.VarChar(3)
+  id_moneda                    Int
+  monto                        Decimal              @db.Decimal(14, 2)
+  vigencia_desde               DateTime             @db.Date
+  vigencia_hasta               DateTime?            @db.Date
+  estado                       String               @default("ACTIVO") @db.VarChar(20)
+  motivo                       String?
+  revision                     Int                  @default(1)
+  creado_por                   BigInt
+  creado_en                    DateTime             @default(now()) @db.Timestamptz(6)
+  actualizado_en               DateTime             @default(now()) @db.Timestamptz(6)
+  servicio                     servicio_comercial   @relation(fields: [id_servicio_comercial], references: [id_servicio_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_servicio_comercial_servicio")
+  moneda                       moneda               @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_servicio_comercial_moneda")
+  actor                        usuario              @relation("precio_servicio_comercial_actor", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_precio_servicio_comercial_actor")
+  detalles                     detalle_servicio_cotizacion[]
+
+  @@unique([id_servicio_comercial, segmento_comercial, id_moneda, vigencia_desde], map: "uq_precio_servicio_inicio")
+  @@index([id_servicio_comercial, segmento_comercial, estado, vigencia_desde, vigencia_hasta], map: "idx_precio_servicio_vigencia")
+  @@schema("finanzas")
+}
+
+/// Partida vendida de servicio. Está separada del detalle físico para que nunca origine una OT.
+model detalle_servicio_cotizacion {
+  id_detalle_servicio_cotizacion BigInt                    @id @default(autoincrement())
+  id_cotizacion                  Int
+  id_servicio_comercial          BigInt
+  id_precio_servicio_comercial   BigInt
+  tipo_linea_comercial           String                    @db.VarChar(30)
+  descripcion_cotizada           String
+  cantidad                       Decimal                   @db.Decimal(12, 2)
+  unidad_cobro_cotizada          String                    @db.VarChar(40)
+  precio_unitario_autorizado     Decimal                   @db.Decimal(14, 2)
+  descuento_elegible             Boolean                   @default(true)
+  subtotal                       Decimal                   @db.Decimal(14, 2)
+  snapshot_comercial             Json
+  revision                       Int                       @default(1)
+  cotizacion                     cotizacion                @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_servicio_cotizacion")
+  servicio                       servicio_comercial        @relation(fields: [id_servicio_comercial], references: [id_servicio_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_servicio_catalogo")
+  precio                         precio_servicio_comercial @relation(fields: [id_precio_servicio_comercial], references: [id_precio_servicio_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_servicio_precio")
+
+  @@index([id_cotizacion], map: "idx_detalle_servicio_cotizacion")
+  @@index([id_servicio_comercial, id_precio_servicio_comercial], map: "idx_detalle_servicio_catalogo_precio")
+  @@schema("finanzas")
+}
+
+/// Comparaciones B2C. Ninguna fila de este grupo se considera contratada por sí sola.
+model grupo_alternativas_b2c {
+  id_grupo_alternativas_b2c BigInt            @id @default(autoincrement())
+  id_cotizacion             Int
+  numero_grupo              Int
+  titulo                    String?           @db.VarChar(200)
+  estado                    String            @default("ABIERTO") @db.VarChar(20)
+  revision                  Int               @default(1)
+  creado_en                 DateTime          @default(now()) @db.Timestamptz(6)
+  actualizado_en            DateTime          @default(now()) @db.Timestamptz(6)
+  id_alternativa_seleccionada BigInt?           @unique(map: "uq_grupo_alternativa_seleccionada")
+  seleccionada_en           DateTime?         @db.Timestamptz(6)
+  seleccionada_por          BigInt?
+  cotizacion                cotizacion        @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict, onUpdate: NoAction, map: "fk_grupo_alternativas_b2c_cotizacion")
+  alternativas              alternativa_b2c[]
+  alternativa_seleccionada  alternativa_b2c?  @relation("grupo_alternativa_seleccionada", fields: [id_alternativa_seleccionada], references: [id_alternativa_b2c], onDelete: Restrict, onUpdate: NoAction, map: "fk_grupo_alternativa_seleccionada")
+  selector                  usuario?          @relation("grupo_alternativa_selector", fields: [seleccionada_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_grupo_alternativa_selector")
+  historial_seleccion       historial_seleccion_alternativa_b2c[]
+
+  @@unique([id_cotizacion, numero_grupo], map: "uq_grupo_alternativas_b2c_numero")
+  @@index([id_cotizacion, estado], map: "idx_grupo_alternativas_b2c_estado")
+  @@schema("finanzas")
+}
+
+model historial_seleccion_alternativa_b2c {
+  id_historial_seleccion       BigInt                 @id @default(autoincrement())
+  id_grupo_alternativas_b2c    BigInt
+  id_alternativa_anterior      BigInt?
+  id_alternativa_nueva         BigInt?
+  motivo                       String
+  actor_id                     BigInt
+  revision_grupo               Int
+  fecha                        DateTime               @default(now()) @db.Timestamptz(6)
+  grupo                        grupo_alternativas_b2c @relation(fields: [id_grupo_alternativas_b2c], references: [id_grupo_alternativas_b2c], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_seleccion_grupo")
+  actor                        usuario                @relation("historial_seleccion_alternativa_actor", fields: [actor_id], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_seleccion_actor")
+
+  @@index([id_grupo_alternativas_b2c, fecha], map: "idx_historial_seleccion_fecha")
+  @@schema("finanzas")
+}
+
+model alternativa_b2c {
+  id_alternativa_b2c              BigInt                               @id @default(autoincrement())
+  id_grupo_alternativas_b2c       BigInt
+  numero_alternativa              Int
+  id_extension_producto_comercial Int
+  id_producto_comercial_version   Int
+  id_precio_producto_comercial    BigInt
+  id_moneda                       Int
+  id_condicion_comercial_version  BigInt?
+  id_tarifa_instalacion_comercial BigInt?
+  cantidad                        Int                                  @default(1)
+  configuracion_snapshot          Json
+  precio_unitario                 Decimal                              @db.Decimal(14, 2)
+  precio_instalacion              Decimal?                             @db.Decimal(14, 2)
+  monto_neto                      Decimal                              @db.Decimal(14, 2)
+  monto_impuesto                  Decimal                              @db.Decimal(14, 2)
+  monto_total                     Decimal                              @db.Decimal(14, 2)
+  estado                          String                               @default("PROPUESTA") @db.VarChar(20)
+  decidida_en                     DateTime?                            @db.Timestamptz(6)
+  decidida_por                    BigInt?
+  motivo_decision                 String?
+  revision                        Int                                  @default(1)
+  creado_en                       DateTime                             @default(now()) @db.Timestamptz(6)
+  grupo                           grupo_alternativas_b2c               @relation(fields: [id_grupo_alternativas_b2c], references: [id_grupo_alternativas_b2c], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_grupo")
+  seleccionada_en_grupo           grupo_alternativas_b2c?              @relation("grupo_alternativa_seleccionada")
+  producto                        extension_producto_comercial         @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_producto")
+  producto_version                producto_comercial_version           @relation(fields: [id_producto_comercial_version], references: [id_producto_comercial_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_producto_version")
+  precio                          precio_producto_comercial            @relation(fields: [id_precio_producto_comercial], references: [id_precio_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_precio")
+  moneda                          moneda                               @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_moneda")
+  condicion                       condicion_comercial_version?         @relation(fields: [id_condicion_comercial_version], references: [id_condicion_comercial_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_condicion")
+  tarifa_instalacion              tarifa_instalacion_comercial?        @relation(fields: [id_tarifa_instalacion_comercial], references: [id_tarifa_instalacion_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_tarifa_instalacion")
+  decisor                         usuario?                             @relation("alternativa_b2c_decisor", fields: [decidida_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_decisor")
+  opcionales                      alternativa_b2c_opcional[]
+  historial                       historial_decision_alternativa_b2c[]
+  detalle_contratado              detalle_cotizacion?
+
+  @@unique([id_grupo_alternativas_b2c, numero_alternativa], map: "uq_alternativa_b2c_numero")
+  @@index([id_grupo_alternativas_b2c, estado], map: "idx_alternativa_b2c_estado")
+  @@index([id_extension_producto_comercial, id_producto_comercial_version], map: "idx_alternativa_b2c_producto_version")
+  @@schema("finanzas")
+}
+
+model alternativa_b2c_opcional {
+  id_alternativa_b2c_opcional  BigInt                           @id @default(autoincrement())
+  id_alternativa_b2c           BigInt
+  id_compatibilidad_opcional   BigInt
+  id_precio_opcional_comercial BigInt
+  cantidad                     Int                              @default(1)
+  precio_unitario              Decimal                          @db.Decimal(14, 2)
+  snapshot_opcional            Json
+  alternativa                  alternativa_b2c                  @relation(fields: [id_alternativa_b2c], references: [id_alternativa_b2c], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_opcional_alternativa")
+  compatibilidad               compatibilidad_opcional_producto @relation(fields: [id_compatibilidad_opcional], references: [id_compatibilidad_opcional], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_opcional_compatibilidad")
+  precio                       precio_opcional_comercial        @relation(fields: [id_precio_opcional_comercial], references: [id_precio_opcional_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_alternativa_b2c_opcional_precio")
+
+  @@unique([id_alternativa_b2c, id_compatibilidad_opcional], map: "uq_alternativa_b2c_opcional")
+  @@schema("finanzas")
+}
+
+model historial_decision_alternativa_b2c {
+  id_historial_decision BigInt          @id @default(autoincrement())
+  id_alternativa_b2c    BigInt
+  estado_anterior       String?         @db.VarChar(20)
+  estado_nuevo          String          @db.VarChar(20)
+  motivo                String
+  actor_id              BigInt
+  fecha                 DateTime        @default(now()) @db.Timestamptz(6)
+  alternativa           alternativa_b2c @relation(fields: [id_alternativa_b2c], references: [id_alternativa_b2c], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_alternativa_b2c_alternativa")
+  actor                 usuario         @relation("historial_alternativa_actor", fields: [actor_id], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_historial_alternativa_b2c_actor")
+
+  @@index([id_alternativa_b2c, fecha], map: "idx_historial_alternativa_b2c_fecha")
   @@schema("finanzas")
 }
 

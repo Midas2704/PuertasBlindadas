@@ -17,7 +17,7 @@ export function numeroNoNegativo(valor: unknown, nombre: string): number {
   if (!Number.isFinite(numero) || numero < 0) throw new ErrorAplicacion(400, `${nombre} debe ser un número válido no negativo`);
   return numero;
 }
-export type FiltrosClientes = { busqueda: string; estado: 'activos' | 'inactivos' | 'todos'; deuda: boolean; morosos: boolean; ordenar: 'nombre'|'rut'|'saldo'; direccion: 'asc'|'desc' };
+export type FiltrosClientes = { busqueda: string; estado: 'activos' | 'inactivos' | 'todos'; segmento?: 'B2B'|'B2C'; deuda: boolean; morosos: boolean; ordenar: 'nombre'|'rut'|'saldo'; direccion: 'asc'|'desc' };
 export function validarFiltros(consulta: Record<string, unknown>): FiltrosClientes {
   const estado = texto(consulta.estado || 'activos');
   if (!['activos', 'inactivos', 'todos'].includes(estado)) throw new ErrorAplicacion(400, 'Estado permitido: activos, inactivos o todos');
@@ -26,5 +26,7 @@ export function validarFiltros(consulta: Record<string, unknown>): FiltrosClient
   }
   const ordenar = texto(consulta.ordenar || 'nombre'); const direccion = texto(consulta.direccion || 'asc');
   if (!['nombre','rut','saldo'].includes(ordenar) || !['asc','desc'].includes(direccion)) throw new ErrorAplicacion(400, 'Ordenamiento inválido');
-  return { busqueda: texto(consulta.busqueda ?? consulta.search), estado: estado as FiltrosClientes['estado'], deuda: consulta.deuda === 'true', morosos: consulta.morosos === 'true', ordenar: ordenar as FiltrosClientes['ordenar'], direccion: direccion as FiltrosClientes['direccion'] };
+  const segmento = texto(consulta.segmento).toUpperCase();
+  if (segmento && !['B2B','B2C'].includes(segmento)) throw new ErrorAplicacion(400, 'Segmento permitido: B2B o B2C');
+  return { busqueda: texto(consulta.busqueda ?? consulta.search), estado: estado as FiltrosClientes['estado'], segmento: segmento ? segmento as 'B2B'|'B2C' : undefined, deuda: consulta.deuda === 'true', morosos: consulta.morosos === 'true', ordenar: ordenar as FiltrosClientes['ordenar'], direccion: direccion as FiltrosClientes['direccion'] };
 }

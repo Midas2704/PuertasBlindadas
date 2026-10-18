@@ -14,6 +14,14 @@ import { navegacionOwner, scopeM9DesdeActor } from '../m9/autorizacion';
 import type { FiltrosM9 } from '../m9/tipos';
 import { Autorizacion, ContextoAutorizacion } from '../validaciones/autorizacion';
 import { identificador, texto, validarFiltros } from '../validaciones/solicitudes';
+import { ServicioCatalogoComercial } from '../comercial/ServicioCatalogoComercial';
+import { ServicioEscrituraComercial } from '../comercial/ServicioEscrituraComercial';
+import { ServicioDocumentosComerciales } from '../comercial/documentos/ServicioDocumentosComerciales';
+import { ServicioObraProyectoComercial } from '../comercial/ServicioObraProyectoComercial';
+import { RepositorioDocumentalPrisma } from '../documental/repositorios/RepositorioDocumentalPrisma';
+import { ServicioDocumentosProducto } from '../documental/productos/ServicioDocumentosProducto';
+import { AutorizadorDocumental } from '../documental/seguridad/AutorizacionDocumental';
+import { ErrorDocumental } from '../documental/tipos';
 
 const normalizarFiltrosHttpM9 = (consulta?: Record<string, unknown>): FiltrosM9 => {
   const filtros = { ...(consulta || {}) };
@@ -28,7 +36,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'bandeja' | 'historial' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
   | 'descartarBorrador' | 'aprobarCotizacion' | 'aprobarVenta' | 'editarCotizacion' | 'tipoCambio'
   | 'consultarPago' | 'consultarSaldo' | 'catalogosPago'
-  | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'obtenerPlanificacionAprobacionCotizacion' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
+  | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'obtenerPlanificacionAprobacionCotizacion' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'seleccionarAlternativaB2C' | 'aceptarAlternativaB2C' | 'rechazarAlternativaB2C' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
   | 'iniciarSesion' | 'solicitarRecuperacion' | 'recuperarClave' | 'validarRecuperacion' | 'miSesion' | 'cambiarClave' | 'cerrarSesion'
   | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
   | 'asignarPermisos' | 'retirarPermisos' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
@@ -79,13 +87,14 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'obtenerDetallePagoRemuneracion' | 'anularPagoRemuneracion' | 'registrarReversionPagoRemuneracion'
   | 'listarDocumentosRemuneracion' | 'descargarDocumentoRemuneracion' | 'reenviarDocumentoRemuneracion'
   | 'registrarEntregaDocumento' | 'consultarEntregaDocumento' | 'exportarCalculoPreliminar' | 'exportarRemuneracionesOficiales'
-  | 'crearVisitaTerreno' | 'listarObrasTerreno' | 'listarVisitasTerreno' | 'obtenerVisitaTerreno' | 'listarUsuariosTerreno' | 'asignarResponsableVisita' | 'listarMisTareasTerreno'
+  | 'crearVisitaTerreno' | 'listarObrasTerreno' | 'listarVisitasTerreno' | 'obtenerVisitaTerreno' | 'listarInstalacionesTerreno' | 'listarUsuariosTerreno' | 'asignarResponsableVisita' | 'listarMisTareasTerreno'
   | 'obtenerLevantamientoTerreno' | 'guardarLevantamientoTerreno' | 'corregirLevantamientoTerreno' | 'generarOrdenTrabajoLevantamiento'
   | 'ajustarOrdenTrabajoTerreno' | 'liberarOrdenTrabajoTerreno' | 'generarTareasProduccion'
   | 'listarOrdenesTrabajoRectificacion' | 'obtenerOrdenTrabajoRectificacion' | 'asignarRectificadorOrdenTrabajo' | 'guardarRectificacionOrdenTrabajo' | 'enviarRectificacionAprobacion' | 'aprobarRectificacionOrdenTrabajo' | 'devolverRectificacionOrdenTrabajo' | 'liberarOrdenTrabajoRectificada'
   | 'listarTareasProduccion' | 'asignarTareaProduccion' | 'modificarTareaProduccion' | 'agregarEtapaProduccion' | 'agregarTareaProduccion' | 'iniciarTareaProduccion' | 'registrarEjecucionTarea'
   | 'listarEjecucionesPendientes' | 'validarEjecucionProductiva' | 'cerrarTareaProduccion' | 'solicitarCorreccionTecnicaProduccion' | 'finalizarOrdenTrabajoProduccion' | 'obtenerPreparacionSalida' | 'actualizarChecklistSalida'
   | 'registrarResultadoVisita' | 'registrarIncidenciaRetrabajo' | 'listarIncidenciasOperativas' | 'catalogosIncidenciaOperativa' | 'obtenerEvidenciaIncidencia' | 'adjuntarEvidenciaIncidencia' | 'actualizarIncidenciaOperativa' | 'aprobarIncidenciaOperativa' | 'rechazarIncidenciaOperativa'
+  | 'consultarDashboardTerreno' | 'exportarReporteTerreno'
   | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
   | 'consultarPanelGeneralM7' | 'consultarHistoricoPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
   | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'consultarCostoRemuneracionesM7' | 'descargarPdfDashboardM7' | 'descargarExcelDashboardM7'
@@ -100,8 +109,21 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consultarAuditoriaM9' | 'obtenerDetalleAuditoriaM9' | 'exportarAuditoriaM9' | 'consultarResumenAuditoriaM9'
   | 'listarFamiliasProductoComercial' | 'crearFamiliaProductoComercial' | 'actualizarFamiliaProductoComercial' | 'desactivarFamiliaProductoComercial' | 'reactivarFamiliaProductoComercial' | 'historialFamiliaProductoComercial'
   | 'listarProductosComerciales' | 'crearProductoComercial' | 'obtenerProductoComercial' | 'actualizarProductoComercial' | 'desactivarProductoComercial' | 'reactivarProductoComercial' | 'vincularProductoComercial' | 'publicarVersionProductoComercial' | 'historialProductoComercial' | 'catalogosVinculacionProductoComercial'
+  | 'listarPreciosComerciales' | 'listarServiciosComerciales' | 'listarOpcionalesComerciales' | 'listarTarifasInstalacionComercial' | 'listarCondicionesComerciales' | 'resolverCoberturaInstalacionComercial' | 'obtenerResumenComercialProducto'
+  | 'crearPrecioComercial' | 'versionarPrecioComercial' | 'desactivarPrecioComercial'
+  | 'crearServicioComercial' | 'versionarPrecioServicioComercial' | 'desactivarServicioComercial'
+  | 'crearOpcionalComercial' | 'actualizarOpcionalComercial' | 'configurarCompatibilidadOpcional' | 'versionarPrecioOpcional' | 'desactivarOpcionalComercial'
+  | 'crearTarifaInstalacionComercial' | 'versionarTarifaInstalacionComercial' | 'registrarExclusionComunal' | 'desactivarTarifaInstalacionComercial'
+  | 'crearCondicionComercial' | 'versionarCondicionComercial' | 'publicarCondicionComercial' | 'desactivarCondicionComercial'
+  | 'listarProductosCatalogoCotizacion' | 'obtenerFichaProductoCatalogoCotizacion' | 'consultarDocumentosProducto' | 'consultarVersionesDocumentoProducto' | 'consultarCapacidadesDocumentosProducto'
+  | 'crearIntencionDocumentoComercial' | 'confirmarCargaDocumentoComercial' | 'reemplazarDocumentoComercial' | 'solicitarVistaPreviaDocumentoComercial' | 'descargarDocumentoComercial'
   | 'listarTareasFabricacion' | 'crearTareaFabricacion' | 'actualizarTareaFabricacion' | 'desactivarTareaFabricacion' | 'reactivarTareaFabricacion'
-  | 'obtenerPlantillaFabricacionFamilia' | 'historialPlantillaFabricacionFamilia' | 'guardarBorradorPlantillaFabricacion' | 'publicarPlantillaFabricacionFamilia';
+  | 'obtenerPlantillaFabricacionFamilia' | 'historialPlantillaFabricacionFamilia' | 'guardarBorradorPlantillaFabricacion' | 'publicarPlantillaFabricacionFamilia'
+  | 'estadoDocumentalComercial' | 'listarPlantillasDocumentalesComerciales' | 'listarCartasComercialesB2C' | 'previsualizarCotizacionPdf' | 'previsualizarCartaComercialB2C'
+  | 'crearPlantillaDocumentalComercial' | 'editarPlantillaDocumentalComercial' | 'publicarPlantillaDocumentalComercial'
+  | 'crearCartaComercialB2C' | 'editarCartaComercialB2C' | 'publicarCartaComercialB2C'
+  | 'historialDocumentalCotizacion' | 'descargarPdfHistoricoCotizacion' | 'descargarCartaComercialB2C'
+  | 'buscarObrasCotizacion' | 'registrarObraDesdeCotizacion' | 'vincularObraCotizacion';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -116,6 +138,14 @@ export interface SolicitudFinanzas {
 // Midas dejó esta puerta única por algo: acá se decide el camino y nada más.
 export class C_Finanzas {
   private readonly productorM9: ProductorAuditoriaM9;
+  private readonly catalogoComercial = new ServicioCatalogoComercial();
+  private readonly escrituraComercial = new ServicioEscrituraComercial();
+  private readonly documentosComerciales = new ServicioDocumentosComerciales();
+  private readonly obrasComerciales = new ServicioObraProyectoComercial();
+  private readonly documentosProducto = new ServicioDocumentosProducto(
+    new RepositorioDocumentalPrisma(),
+    new AutorizadorDocumental(async (_actor, contexto) => Number.isInteger(contexto.idProducto) && Number(contexto.idProducto) > 0),
+  );
   constructor(
     private readonly autorizacion?: Autorizacion,
     private readonly m1 = new M1Controller(),
@@ -324,6 +354,7 @@ export class C_Finanzas {
       case 'listarObrasTerreno': return this.m6.listarObrasTerreno();
       case 'listarVisitasTerreno': return this.m6.listarVisitasTerreno();
       case 'obtenerVisitaTerreno': return this.m6.obtenerVisitaTerreno(identificador(parametros.id));
+      case 'listarInstalacionesTerreno': return this.m6.listarInstalacionesTerreno();
       case 'listarUsuariosTerreno': return this.m6.listarUsuariosTerreno();
       case 'asignarResponsableVisita': return this.m6.asignarResponsableVisita(identificador(parametros.id), cuerpo);
       case 'listarMisTareasTerreno': return this.m6.listarMisTareasTerreno(actor.id);
@@ -358,13 +389,15 @@ export class C_Finanzas {
       case 'actualizarChecklistSalida': return this.m6.actualizarChecklistSalida(identificador(parametros.id), cuerpo);
       case 'registrarResultadoVisita': return this.m6.registrarResultadoVisita(identificador(parametros.id), cuerpo);
       case 'registrarIncidenciaRetrabajo': return this.m6.registrarIncidenciaRetrabajo(identificador(parametros.id), cuerpo, actor);
-      case 'listarIncidenciasOperativas': return this.m6.listarIncidenciasOperativas();
+      case 'listarIncidenciasOperativas': return this.m6.listarIncidenciasOperativas(solicitud.consulta || {});
       case 'catalogosIncidenciaOperativa': return this.m6.catalogosIncidenciaOperativa(solicitud.consulta || {});
       case 'obtenerEvidenciaIncidencia': return this.m6.obtenerEvidenciaIncidencia(identificador(parametros.id), identificador(parametros.evidenciaId));
       case 'adjuntarEvidenciaIncidencia': return this.m6.adjuntarEvidenciaIncidencia(identificador(parametros.id), cuerpo, actor);
       case 'actualizarIncidenciaOperativa': return this.m6.actualizarIncidenciaOperativa(identificador(parametros.id), cuerpo);
       case 'aprobarIncidenciaOperativa': return this.m6.resolverIncidenciaOperativa(identificador(parametros.id), 'aprobada', cuerpo, actor);
       case 'rechazarIncidenciaOperativa': return this.m6.resolverIncidenciaOperativa(identificador(parametros.id), 'rechazada', cuerpo, actor);
+      case 'consultarDashboardTerreno': return this.m6.consultarDashboardTerreno(solicitud.consulta || {}, actor);
+      case 'exportarReporteTerreno': return this.m6.exportarReporteTerreno(solicitud.consulta || {}, actor);
       case 'catalogoDeduccionesEmpleado': return this.m6.catalogoDeduccionesEmpleado();
       case 'listarDeduccionesEmpleado': return this.m6.listarDeduccionesEmpleado(identificador(parametros.id));
       case 'asignarDeduccionEmpleado': return this.m6.asignarDeduccionEmpleado(identificador(parametros.id), cuerpo);
@@ -493,6 +526,65 @@ export class C_Finanzas {
       case 'publicarVersionProductoComercial': return this.m2.publicarVersionProductoComercial(identificador(parametros.id), cuerpo, actor.id);
       case 'historialProductoComercial': return this.m2.obtenerProductoComercial(identificador(parametros.id), true);
       case 'catalogosVinculacionProductoComercial': return this.m2.catalogosVinculacionProductoComercial();
+      case 'listarPreciosComerciales': return this.catalogoComercial.listarPrecios(solicitud.consulta || {});
+      case 'estadoDocumentalComercial': return this.documentosComerciales.estadoInfraestructura();
+      case 'listarPlantillasDocumentalesComerciales': return this.documentosComerciales.listarPlantillas();
+      case 'crearPlantillaDocumentalComercial': return this.documentosComerciales.crearPlantilla(cuerpo, actor);
+      case 'editarPlantillaDocumentalComercial': return this.documentosComerciales.editarPlantilla(BigInt(identificador(parametros.id)), cuerpo, actor);
+      case 'publicarPlantillaDocumentalComercial': return this.documentosComerciales.publicarPlantilla(BigInt(identificador(parametros.id)), cuerpo, actor);
+      case 'listarCartasComercialesB2C': return this.documentosComerciales.listarCartasB2C();
+      case 'crearCartaComercialB2C': return this.documentosComerciales.crearCartaB2C(cuerpo, actor);
+      case 'editarCartaComercialB2C': return this.documentosComerciales.editarCartaB2C(BigInt(identificador(parametros.id)), cuerpo, actor);
+      case 'publicarCartaComercialB2C': return this.documentosComerciales.publicarCartaB2C(BigInt(identificador(parametros.id)), cuerpo, actor);
+      case 'previsualizarCartaComercialB2C': return this.documentosComerciales.previsualizarCartaB2C(BigInt(identificador(parametros.id)));
+      case 'descargarCartaComercialB2C': return this.documentosComerciales.recuperarDocumentoCarta(BigInt(identificador(parametros.id)), BigInt(identificador(parametros.versionId)));
+      case 'listarServiciosComerciales': return this.catalogoComercial.listarServicios(solicitud.consulta || {});
+      case 'crearServicioComercial': return this.escrituraComercial.ejecutar('CREAR_SERVICIO',cuerpo,actor);
+      case 'versionarPrecioServicioComercial': return this.escrituraComercial.ejecutar('VERSIONAR_PRECIO_SERVICIO',{...cuerpo,idServicio:parametros.id},actor);
+      case 'desactivarServicioComercial': return this.escrituraComercial.ejecutar('DESACTIVAR_SERVICIO',{...cuerpo,id:parametros.id},actor);
+      case 'crearPrecioComercial': return this.escrituraComercial.ejecutar('CREAR_PRECIO',cuerpo,actor);
+      case 'versionarPrecioComercial': return this.escrituraComercial.ejecutar('VERSIONAR_PRECIO',{...cuerpo,idAnterior:parametros.id},actor);
+      case 'desactivarPrecioComercial': return this.escrituraComercial.ejecutar('DESACTIVAR_PRECIO',{...cuerpo,id:parametros.id},actor);
+      case 'listarOpcionalesComerciales': return this.catalogoComercial.listarOpcionales(solicitud.consulta || {});
+      case 'crearOpcionalComercial': return this.escrituraComercial.ejecutar('CREAR_OPCIONAL',cuerpo,actor);
+      case 'actualizarOpcionalComercial': return this.escrituraComercial.ejecutar('EDITAR_OPCIONAL',{...cuerpo,id:parametros.id},actor);
+      case 'configurarCompatibilidadOpcional': return this.escrituraComercial.ejecutar('MODIFICAR_COMPATIBILIDAD',{...cuerpo,idOpcional:parametros.id},actor);
+      case 'versionarPrecioOpcional': return this.escrituraComercial.ejecutar('VERSIONAR_PRECIO_OPCIONAL',{...cuerpo,idOpcional:parametros.id},actor);
+      case 'desactivarOpcionalComercial': return this.escrituraComercial.ejecutar('DESACTIVAR_OPCIONAL',{...cuerpo,id:parametros.id},actor);
+      case 'listarTarifasInstalacionComercial': return this.catalogoComercial.listarTarifas(solicitud.consulta || {});
+      case 'crearTarifaInstalacionComercial': return this.escrituraComercial.ejecutar('CREAR_TARIFA',cuerpo,actor);
+      case 'versionarTarifaInstalacionComercial': return this.escrituraComercial.ejecutar('VERSIONAR_TARIFA',{...cuerpo,idAnterior:parametros.id},actor);
+      case 'registrarExclusionComunal': return this.escrituraComercial.ejecutar('REGISTRAR_EXCLUSION_COMUNAL',cuerpo,actor);
+      case 'desactivarTarifaInstalacionComercial': return this.escrituraComercial.ejecutar('DESACTIVAR_TARIFA',{...cuerpo,id:parametros.id},actor);
+      case 'listarCondicionesComerciales': return this.catalogoComercial.listarCondiciones(solicitud.consulta || {});
+      case 'crearCondicionComercial': return this.escrituraComercial.ejecutar('CREAR_CONDICION',cuerpo,actor);
+      case 'versionarCondicionComercial': return this.escrituraComercial.ejecutar('VERSIONAR_CONDICION',{...cuerpo,idCondicion:parametros.id},actor);
+      case 'publicarCondicionComercial': return this.escrituraComercial.ejecutar('PUBLICAR_CONDICION',{...cuerpo,idVersion:parametros.versionId},actor);
+      case 'desactivarCondicionComercial': return this.escrituraComercial.ejecutar('DESACTIVAR_CONDICION',{...cuerpo,id:parametros.id},actor);
+      case 'resolverCoberturaInstalacionComercial': return this.catalogoComercial.resolverCobertura(solicitud.consulta || {});
+      case 'obtenerResumenComercialProducto': return this.catalogoComercial.resumenProducto(identificador(parametros.id), solicitud.consulta || {});
+      case 'listarProductosCatalogoCotizacion': return this.catalogoComercial.listarProductosCotizacion(solicitud.consulta || {});
+      case 'obtenerFichaProductoCatalogoCotizacion': {
+        const segmento = String(solicitud.consulta?.segmento || '').toUpperCase();
+        if (!['B2B','B2C'].includes(segmento)) throw new ErrorAplicacion(400, 'El segmento B2B o B2C es obligatorio');
+        const idProducto = identificador(parametros.id);
+        const producto = await this.catalogoComercial.obtenerProductoCotizacion(idProducto, solicitud.consulta || {});
+        try {
+          const documental = await this.documentosProducto.listarParaSegmento(idProducto, segmento as 'B2B'|'B2C', actor);
+          return { ...producto, documental };
+        } catch (error) {
+          if (error instanceof ErrorDocumental) throw new ErrorAplicacion(error.estadoHttp, error.message, error.codigo);
+          throw error;
+        }
+      }
+      case 'consultarDocumentosProducto': try { return await this.documentosProducto.listar(identificador(parametros.id), actor); } catch (error) { if (error instanceof ErrorDocumental) throw new ErrorAplicacion(error.estadoHttp, error.message, error.codigo); throw error; }
+      case 'consultarVersionesDocumentoProducto': try { return await this.documentosProducto.consultarVersiones(identificador(parametros.id), BigInt(identificador(parametros.documentoId)), actor); } catch (error) { if (error instanceof ErrorDocumental) throw new ErrorAplicacion(error.estadoHttp, error.message, error.codigo); throw error; }
+      case 'consultarCapacidadesDocumentosProducto': return this.documentosProducto.consultarCapacidades(identificador(parametros.id), actor);
+      case 'crearIntencionDocumentoComercial': try { return await this.documentosProducto.exigirOperacionBinaria(identificador(parametros.id),'CREAR_INTENCION',actor); } catch(error){if(error instanceof ErrorDocumental)throw new ErrorAplicacion(error.estadoHttp,error.message,error.codigo);throw error;}
+      case 'confirmarCargaDocumentoComercial': try { return await this.documentosProducto.exigirOperacionBinaria(identificador(parametros.id),'CONFIRMAR_CARGA',actor); } catch(error){if(error instanceof ErrorDocumental)throw new ErrorAplicacion(error.estadoHttp,error.message,error.codigo);throw error;}
+      case 'reemplazarDocumentoComercial': try { return await this.documentosProducto.exigirOperacionBinaria(identificador(parametros.id),'REEMPLAZAR',actor); } catch(error){if(error instanceof ErrorDocumental)throw new ErrorAplicacion(error.estadoHttp,error.message,error.codigo);throw error;}
+      case 'solicitarVistaPreviaDocumentoComercial': try { return await this.documentosProducto.exigirOperacionBinaria(identificador(parametros.id),'SOLICITAR_VISTA_PREVIA',actor); } catch(error){if(error instanceof ErrorDocumental)throw new ErrorAplicacion(error.estadoHttp,error.message,error.codigo);throw error;}
+      case 'descargarDocumentoComercial': try { return await this.documentosProducto.exigirOperacionBinaria(identificador(parametros.id),'DESCARGAR',actor); } catch(error){if(error instanceof ErrorDocumental)throw new ErrorAplicacion(error.estadoHttp,error.message,error.codigo);throw error;}
       case 'listarTareasFabricacion': return this.m2.listarTareasFabricacion(solicitud.consulta || {});
       case 'crearTareaFabricacion': return this.m2.crearTareaFabricacion(cuerpo, actor.id);
       case 'actualizarTareaFabricacion': return this.m2.actualizarTareaFabricacion(identificador(parametros.id), cuerpo, actor.id);
@@ -510,7 +602,16 @@ export class C_Finanzas {
       case 'aprobarCotizacionB2B': return this.m2.aprobarCotizacionB2B(identificador(parametros.id), cuerpo, actor.id);
       case 'aprobarCotizacion': return cuerpo.folioOrdenCompra ? this.m2.aprobarCotizacionB2B(identificador(parametros.id), cuerpo, actor.id) : this.m2.operacionPendiente(operacion);
       case 'registrarClienteDesdeCotizacion': return this.m2.registrarClienteDesdeCotizacion(cuerpo);
-      case 'emitirCotizacion': return this.m2.emitirCotizacion(identificador(parametros.id));
+      case 'buscarObrasCotizacion': return this.obrasComerciales.buscar(solicitud.consulta || {});
+      case 'registrarObraDesdeCotizacion': return this.obrasComerciales.registrar(cuerpo, actor.id);
+      case 'vincularObraCotizacion': return this.obrasComerciales.vincularCotizacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'previsualizarCotizacionPdf': return this.documentosComerciales.previsualizarCotizacion(identificador(parametros.id));
+      case 'emitirCotizacion': return this.documentosComerciales.emitirCotizacion(identificador(parametros.id), cuerpo, actor);
+      case 'historialDocumentalCotizacion': return this.documentosComerciales.historialCotizacion(identificador(parametros.id));
+      case 'descargarPdfHistoricoCotizacion': return this.documentosComerciales.recuperarDocumentoCotizacion(identificador(parametros.id), identificador(parametros.versionId));
+      case 'seleccionarAlternativaB2C': return this.m2.seleccionarAlternativaB2C(identificador(parametros.id),cuerpo,actor.id);
+      case 'aceptarAlternativaB2C': return this.m2.aceptarAlternativaB2C(identificador(parametros.id),cuerpo,actor.id);
+      case 'rechazarAlternativaB2C': return this.m2.rechazarAlternativaB2C(identificador(parametros.id),cuerpo,actor.id);
       case 'reactivarCotizacion': return this.m2.reactivarCotizacion(identificador(parametros.id), cuerpo);
       case 'formalizarClienteB2C': return this.m2.formalizarClienteB2C(cuerpo);
       case 'configurarEtapasCobro': return this.m2.configurarEtapasCobro(identificador(parametros.id), cuerpo);
@@ -531,8 +632,8 @@ export class C_Finanzas {
         const reversion=await this.m2.registrarReversion(tx,identificador(parametros.id),cuerpo,actor.id.toString());
         return this.m3.procesarExcedente(tx,reversion.id_nota_venta,reversion.id_reversion_nota_venta,cuerpo);
       });
-      case 'guardarCotizacion': return this.m2.guardarCotizacion(cuerpo);
-      case 'editarCotizacion': return this.m2.editarCotizacion(identificador(parametros.id), cuerpo);
+      case 'guardarCotizacion': return this.m2.guardarCotizacion(cuerpo,actor.id);
+      case 'editarCotizacion': return this.m2.editarCotizacion(identificador(parametros.id), cuerpo,actor.id);
       case 'crearVentaDirecta': return this.m2.crearVentaDirecta(cuerpo);
       case 'aprobarVenta': return this.m2.confirmarNotaVenta(identificador(parametros.id));
       case 'anularVenta': return this.m2.anularVenta(identificador(parametros.id), cuerpo);

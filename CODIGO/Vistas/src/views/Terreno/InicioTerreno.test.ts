@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resumirOrdenesTerreno } from './InicioTerreno';
+import { resumirOrdenesTerreno } from './resumenPanelTerreno';
 
 describe('resumen real de órdenes de Terreno',()=>{
   it('clasifica los estados existentes sin duplicarlos ni inventar totales',()=>{

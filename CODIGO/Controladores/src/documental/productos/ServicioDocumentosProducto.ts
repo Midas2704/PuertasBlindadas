@@ -1,5 +1,6 @@
 import { RepositorioDocumentalPrisma } from '../repositorios/RepositorioDocumentalPrisma';
 import { AutorizadorDocumental, type ActorBackendDocumental } from '../seguridad/AutorizacionDocumental';
+import type { AccionDocumental } from '../seguridad/AutorizacionDocumental';
 import { ErrorDocumental, type EstadoVersion, type TipoDocumentoProducto } from '../tipos';
 import type {
   CapacidadesDocumentalesProductoDto, DocumentoComercialProductoDto,
@@ -17,10 +18,13 @@ const TIPO_DTO: Record<TipoDocumentoProducto, TipoDocumentoComercialDto> = {
   OTRO_AUTORIZADO: 'OTRO_DOCUMENTO_AUTORIZADO',
 };
 
-const capacidadesCerradas = (): CapacidadesDocumentalesProductoDto => ({
+export interface EstadoDependenciasDocumentalesProducto { politicaComercial:boolean; storage:boolean; antivirus:boolean }
+
+const capacidadesCerradas = (dependencias: EstadoDependenciasDocumentalesProducto): CapacidadesDocumentalesProductoDto => ({
   consultarMetadatos:false, consultarVersiones:false, solicitarVistaPrevia:false,
   descargar:false, cargar:false, reemplazar:false, definirPrincipal:false,
   ordenar:false, definirUsoComercial:false,
+  diagnosticoActivacion:{permisoGestion:'APROBADO_C2_6',politicaComercial:dependencias.politicaComercial?'CONFIGURADA':'NO_CONFIGURADA',storage:dependencias.storage?'CONFIGURADO':'NO_CONFIGURADO',antivirus:dependencias.antivirus?'CONFIGURADO':'NO_CONFIGURADO'},
 });
 
 /** Servicio interno: no registra rutas, no firma URLs y no accede al storage. */
@@ -28,17 +32,36 @@ export class ServicioDocumentosProducto {
   constructor(
     private readonly repositorio: Pick<RepositorioDocumentalPrisma, 'consultarDocumentosProducto'>,
     private readonly autorizador: AutorizadorDocumental,
+    private readonly dependencias: EstadoDependenciasDocumentalesProducto = {politicaComercial:false,storage:false,antivirus:false},
   ) {}
 
   async consultarCapacidades(idProducto: number, actor: ActorBackendDocumental): Promise<CapacidadesDocumentalesProductoDto> {
-    const capacidades = capacidadesCerradas();
+    const capacidades = capacidadesCerradas(this.dependencias);
     if (!Number.isInteger(idProducto) || idProducto <= 0) return capacidades;
     const contexto = { idProducto };
-    [capacidades.consultarMetadatos, capacidades.consultarVersiones] = await Promise.all([
+    const [consultar,versiones,preview,descargar,cargar,principal,ordenar,uso] = await Promise.all([
       this.autorizador.puede(actor, 'CONSULTAR_METADATA', contexto),
       this.autorizador.puede(actor, 'CONSULTAR_VERSIONES', contexto),
+      this.autorizador.puede(actor, 'SOLICITAR_VISTA_PREVIA', contexto),
+      this.autorizador.puede(actor, 'DESCARGAR', contexto),
+      this.autorizador.puede(actor, 'CREAR_INTENCION', contexto),
+      this.autorizador.puede(actor, 'DEFINIR_IMAGEN_PRINCIPAL', contexto),
+      this.autorizador.puede(actor, 'ORDENAR_GALERIA', contexto),
+      this.autorizador.puede(actor, 'DEFINIR_USO_B2B_B2C', contexto),
     ]);
+    capacidades.consultarMetadatos=consultar; capacidades.consultarVersiones=versiones;
+    capacidades.solicitarVistaPrevia=preview&&this.dependencias.politicaComercial&&this.dependencias.storage;
+    capacidades.descargar=descargar&&this.dependencias.politicaComercial&&this.dependencias.storage&&this.dependencias.antivirus;
+    capacidades.cargar=cargar&&this.dependencias.politicaComercial&&this.dependencias.storage&&this.dependencias.antivirus;
+    capacidades.reemplazar=capacidades.cargar;
+    capacidades.definirPrincipal=principal; capacidades.ordenar=ordenar; capacidades.definirUsoComercial=uso;
     return capacidades;
+  }
+
+  async exigirOperacionBinaria(idProducto:number, accion:Extract<AccionDocumental,'CREAR_INTENCION'|'CONFIRMAR_CARGA'|'REEMPLAZAR'|'SOLICITAR_VISTA_PREVIA'|'DESCARGAR'>, actor:ActorBackendDocumental):Promise<never>{
+    await this.autorizador.exigir(actor,accion,{idProducto});
+    const faltantes=[!this.dependencias.politicaComercial&&'POLITICA_COMERCIAL',!this.dependencias.storage&&'STORAGE',(['CREAR_INTENCION','CONFIRMAR_CARGA','REEMPLAZAR','DESCARGAR'].includes(accion)&&!this.dependencias.antivirus)&&'ANTIVIRUS'].filter(Boolean);
+    throw new ErrorDocumental('INFRAESTRUCTURA_DOCUMENTAL_NO_DISPONIBLE',`Gestión documental no disponible${faltantes.length?`: falta ${faltantes.join(', ')}`:''}`,503);
   }
 
   async listar(idProducto: number, actor: ActorBackendDocumental): Promise<MetadatosDocumentalesProductoDto> {
@@ -57,6 +80,15 @@ export class ServicioDocumentosProducto {
       estadoIntegracion:documentos.length ? 'LISTO' : 'VACIO',
       documentos, fotografias, documentosTecnicos, fotografiaPrincipal, capacidades,
     };
+  }
+
+  async listarParaSegmento(idProducto: number, segmento: 'B2B' | 'B2C', actor: ActorBackendDocumental): Promise<MetadatosDocumentalesProductoDto> {
+    const salida = await this.listar(idProducto, actor);
+    const documentos = salida.documentos.filter(documento => segmento === 'B2B' ? documento.habilitadoB2b : documento.habilitadoB2c);
+    const fotografias = documentos.filter(documento => documento.tipo === 'FOTOGRAFIA_COMERCIAL');
+    const documentosTecnicos = documentos.filter(documento => documento.tipo !== 'FOTOGRAFIA_COMERCIAL');
+    const fotografiaPrincipal = fotografias.find(documento => documento.esImagenPrincipal && documento.estado === 'DISPONIBLE') ?? null;
+    return { ...salida, estadoIntegracion: documentos.length ? 'LISTO' : 'VACIO', documentos, fotografias, documentosTecnicos, fotografiaPrincipal };
   }
 
   async consultarVersiones(idProducto: number, idDocumento: bigint, actor: ActorBackendDocumental) {

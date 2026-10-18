@@ -1,24 +1,26 @@
-import { ClipboardList, Factory, Home, House, ListTodo, MapPinned, Menu, ShieldAlert, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { BarChart3, CalendarDays, ClipboardList, Factory, Home, House, ListTodo, MapPinned, Menu, ShieldAlert, Truck, X } from 'lucide-react';
+import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { operar, usarSesion } from '../../seguridad/Sesion';
 
 const opciones = [
   { ruta:'/terreno', etiqueta:'Inicio de Terreno', icono:Home },
+  { ruta:'/terreno/agenda', etiqueta:'Agenda', icono:CalendarDays, permisos:['CU199','CU200','CU210'] },
+  { ruta:'/terreno/instalaciones', etiqueta:'Instalaciones', icono:Truck, permisos:['CU199','CU200','CU210','CU211'] },
   { ruta:'/terreno/ordenes-trabajo', etiqueta:'OT', icono:ClipboardList, permisos:['CU202','CU205','CU207','CU209'] },
   { ruta:'/terreno/visitas', etiqueta:'Visitas', icono:MapPinned, permisos:['CU199','CU200','CU210','CU211'] },
   { ruta:'/terreno/mis-tareas', etiqueta:'Mis Tareas', icono:ListTodo, permisos:['CU201','CU208'] },
   { ruta:'/terreno/produccion', etiqueta:'Producción', icono:Factory, permisos:['CU207','CU209'] },
   { ruta:'/terreno/incidencias', etiqueta:'Incidencias', icono:ShieldAlert, permisos:['CU212','CU213'] },
+  { ruta:'/terreno/reportes', etiqueta:'Reportes', icono:BarChart3, permisos:['CU199','CU200','CU202','CU205','CU207','CU209','CU210','CU211','CU212','CU213'] },
 ];
 
 const activa=(actual:string,ruta:string)=>ruta==='/terreno'?actual===ruta:actual===ruta||actual.startsWith(`${ruta}/`);
 
 export default function TerrenoWrapper(){
   const {sesion,actualizar}=usarSesion();const ubicacion=useLocation();const [abierto,setAbierto]=useState(false);
-  useEffect(()=>setAbierto(false),[ubicacion.pathname]);
   const visibles=opciones.filter(opcion=>!opcion.permisos||opcion.permisos.some(p=>sesion?.permisos.includes(p)));
-  const navegacion=<>{visibles.map(opcion=>{const Icono=opcion.icono;const seleccionada=activa(ubicacion.pathname,opcion.ruta);return <Link key={opcion.ruta} to={opcion.ruta} aria-current={seleccionada?'page':undefined} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold ${seleccionada?'bg-[#FE8F01] text-black':'text-gray-200 hover:bg-gray-800 hover:text-white'}`}><Icono className="h-5 w-5"/>{opcion.etiqueta}</Link>})}<Link to="/" className="mt-4 flex items-center gap-3 border-t border-gray-800 px-3 pt-5 text-sm font-bold text-gray-200 hover:text-white"><House className="h-5 w-5 text-[#FE8F01]"/>Volver al inicio</Link></>;
+  const navegacion=<>{visibles.map(opcion=>{const Icono=opcion.icono;const seleccionada=activa(ubicacion.pathname,opcion.ruta);return <Link key={opcion.ruta} to={opcion.ruta} onClick={()=>setAbierto(false)} aria-current={seleccionada?'page':undefined} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-bold ${seleccionada?'bg-[#FE8F01] text-black':'text-gray-200 hover:bg-gray-800 hover:text-white'}`}><Icono className="h-5 w-5"/>{opcion.etiqueta}</Link>})}<Link to="/" onClick={()=>setAbierto(false)} className="mt-4 flex items-center gap-3 border-t border-gray-800 px-3 pt-5 text-sm font-bold text-gray-200 hover:text-white"><House className="h-5 w-5 text-[#FE8F01]"/>Volver al inicio</Link></>;
   return <div className="flex min-h-screen bg-slate-50 lg:h-screen lg:overflow-hidden">
     <header className="fixed inset-x-0 top-0 z-30 flex h-16 items-center justify-between border-b bg-white px-4 lg:hidden"><strong>Terreno · Puertas Blindadas</strong><button type="button" aria-label="Abrir menú de Terreno" onClick={()=>setAbierto(true)} className="rounded-lg border p-2"><Menu className="h-5 w-5"/></button></header>
     {abierto&&<button type="button" aria-label="Cerrar menú de Terreno" className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={()=>setAbierto(false)}/>}
