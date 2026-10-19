@@ -26,7 +26,7 @@ test('C4 genera PDF B2B binario, íntegro y paginado sin información interna',(
   assert.equal(resultado.sha256,createHash('sha256').update(resultado.pdf).digest('hex'));
   const texto=resultado.pdf.toString('latin1');
   assert.match(texto,/BORRADOR - NO EMITIDO/);
-  assert.match(texto,/Servicios cotizados|Productos cotizados/);
+  assert.match(texto,/PARTIDAS DE PRODUCTOS/);
   assert.doesNotMatch(texto,/costo interno|margen confidencial|remuneraciones/i);
 });
 
@@ -35,15 +35,15 @@ test('C4 presenta alternativas B2C separadas y la emisión no constituye aceptac
   const resultado=crearPdfComercial({...base,tipo:'B2C',titulo:'Cotización personalizada',alternativas});
   const texto=resultado.pdf.toString('latin1');
   assert.match(texto,/ALTERNATIVA A/);assert.match(texto,/ALTERNATIVA B/);assert.match(texto,/ALTERNATIVA C/);
-  assert.match(texto,/no se suman entre sí/);
-  assert.match(texto,/emisión no constituye/);assert.match(texto,/aceptación/);
-  assert.match(texto,/Fotografía no disponible/);
+  assert.match(texto,/no se suman entre sí/i);
+  assert.match(texto,/emisión no constituye/i);assert.match(texto,/aceptación/i);
+  assert.match(texto,/Imagen comercial pendiente/i);
 });
 
 test('C4 genera carta general sin cliente y aclara que instalación depende de cobertura',()=>{
   const resultado=crearPdfComercial({...base,tipo:'CARTA_B2C',titulo:'Carta comercial general B2C',cliente:null,neto:null,impuesto:null,total:null});
   const texto=resultado.pdf.toString('latin1');
-  assert.match(texto,/CARTA B2C/);
+  assert.match(texto,/CARTA COMERCIAL/);
   assert.match(texto,/precios base no incluyen instalación/i);
   assert.doesNotMatch(texto,/Cliente:/);
 });

@@ -17,19 +17,29 @@ const producto:ProductoCatalogoComercial={
   documentos:{fotografias:0,fotografiaPrincipalDisponible:false,documentosComerciales:0},costosInternosExpuestos:false,
 };
 const ficha:FichaProductoCatalogoComercial={...producto,documental:{estadoIntegracion:'VACIO',documentos:[],fotografias:[],documentosTecnicos:[],fotografiaPrincipal:null,capacidades:{consultarMetadatos:true,consultarVersiones:false,solicitarVistaPrevia:false,descargar:false,cargar:false,reemplazar:false,definirPrincipal:false,ordenar:false,definirUsoComercial:false}}};
+const cliente={id_cliente_financiero:31,id_ficha_cliente:41,rut:'11.111.111-1',razonSocial:'Cliente B2C Prueba',nivelFormalizacion:'FORMAL',tipoCliente:'B2C',telefono:'+56911111111',correo:'cliente@prueba.cl'};
+const material={id_historial_precio_material:61,sku:'MAT-61',nombre:'Acero de prueba',precio_unitario:100000,moneda:'CLP'};
 const json=(datos:unknown,status=200)=>Promise.resolve(new Response(JSON.stringify(datos),{status,headers:{'Content-Type':'application/json'}}));
 
 describe('Armar Cotización conectado al catálogo comercial C2',()=>{
   beforeEach(()=>{
+    Object.defineProperty(URL,'createObjectURL',{configurable:true,value:vi.fn(()=> 'blob:preview-cotizacion')});
+    Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});
     vi.mocked(solicitarFinanzas).mockReset();
-    vi.mocked(solicitarFinanzas).mockImplementation((ruta)=>{
+    let revision=0;
+    vi.mocked(solicitarFinanzas).mockImplementation((ruta,opciones)=>{
       if(ruta==='/monedas')return json([{id_moneda:1,codigo_moneda:'CLP'}]);
-      if(String(ruta).startsWith('/clients?')||ruta==='/billing/inventory')return json([]);
+      if(String(ruta).startsWith('/clients?'))return json([cliente]);
+      if(ruta==='/billing/inventory')return json([material]);
       if(String(ruta).startsWith('/mantenedores/comercial/condiciones?'))return json([]);
       if(String(ruta).startsWith('/mantenedores/comercial/servicios?'))return json([{id:'501',codigo:'FLT',nombre:'Flete autorizado',descripcion:'Traslado comercial',unidad:'GLOBAL',precio:{resultado:'VIGENTE',id:'precio-servicio-501',monto:50000,moneda:'CLP',version:1}}]);
       if(String(ruta).startsWith('/billing/quotes/obras/buscar?'))return json({obras:[{id:'801',nombre:'Melín 7019',referencia:'Edificio principal',direccion:'Melín 7019',region:'Metropolitana',ciudad:'Santiago',comuna:'Quinta Normal',edificio:null,unidad:null,estado:'activa',revision:1,coincidencia:'EXACTA'}],requiereSeleccionExplicita:false});
       if(String(ruta).startsWith('/catalogo-comercial/productos/71/ficha'))return json(ficha);
       if(String(ruta).startsWith('/catalogo-comercial/productos?'))return json([producto]);
+      if(ruta==='/billing/quotes'&&opciones?.method==='POST'){revision=1;return json({id_cotizacion:901,revision,contactos_b2b:[],grupos_alternativas_b2c:[]});}
+      if(ruta==='/billing/quotes/901'&&opciones?.method==='PUT'){revision+=1;return json({id_cotizacion:901,revision,contactos_b2b:[],grupos_alternativas_b2c:[]});}
+      if(ruta==='/billing/quotes/901/preview-pdf'&&opciones?.method==='POST')return json({contenido:'data:application/pdf;base64,JVBERi0xLjQKJSVFT0YK',nombre:'cotizacion-borrador.pdf',paginas:3,sha256:'abc123',estado:'BORRADOR'});
+      if(ruta==='/billing/pending-approvals')return json({cotizaciones:[{id_cotizacion:901,estado_cotizacion:'borrador',segmento_comercial:'B2C',revision,id_ficha_cliente:41,id_moneda:1,fecha_vigencia:'2026-10-31',margen_esperado:30,exento_iva:false,descuento_valor:0,ficha_cliente:{cliente_financiero:{...cliente,nombre_razon_social_referencia:cliente.razonSocial,rut_cliente:cliente.rut,telefono_financiero:cliente.telefono,correo_financiero:cliente.correo}},detalle_cotizacion:[],grupos_alternativas_b2c:[],contactos_b2b:[],detalles_servicio:[]}]});
       return json({error:'Ruta no contemplada por el fixture C2'},404);
     });
   });
@@ -71,15 +81,33 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
     expect(screen.getByDisplayValue('Traslado comercial')).toBeInTheDocument();
   });
 
-  it('mantiene la vista previa visible y no emite ni crea NV u OT cuando falta guardar el borrador',async()=>{
+  it('crea un único borrador nuevo y abre su vista previa PDF sin emitir, NV ni OT',async()=>{
     const user=userEvent.setup();
     render(<MemoryRouter><ArmarCotizacion/></MemoryRouter>);
-    await user.click(screen.getByRole('button',{name:/B2C · PARTICULARES/i}));
-    const vistaPrevia=await screen.findByRole('button',{name:/Vista previa PDF/i});
-    await user.click(vistaPrevia);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/Guarda primero el borrador/i);
-    expect(vi.mocked(solicitarFinanzas).mock.calls.some(([ruta])=>String(ruta).includes('/preview-pdf'))).toBe(false);
+    await completarCotizacionB2C(user);
+    await user.click(await screen.findByRole('button',{name:/Vista previa PDF/i}));
+    expect(await screen.findByRole('dialog')).toHaveTextContent(/BORRADOR — NO EMITIDO/i);
+    expect(screen.getByTitle('Vista previa PDF')).toHaveAttribute('src','blob:preview-cotizacion');
+    const llamadas=vi.mocked(solicitarFinanzas).mock.calls;
+    expect(llamadas.filter(([ruta,opciones])=>ruta==='/billing/quotes'&&opciones?.method==='POST')).toHaveLength(1);
+    expect(llamadas.some(([ruta])=>ruta==='/billing/quotes/901/preview-pdf')).toBe(true);
     expect(vi.mocked(solicitarFinanzas).mock.calls.some(([ruta])=>String(ruta).includes('/emitir'))).toBe(false);
+    expect(vi.mocked(solicitarFinanzas).mock.calls.some(([ruta])=>String(ruta).includes('nota-venta')||String(ruta).includes('ordenes-trabajo'))).toBe(false);
+  });
+
+  it('actualiza el mismo borrador antes de cada vista previa y no crea duplicados',async()=>{
+    const user=userEvent.setup();
+    render(<MemoryRouter><ArmarCotizacion/></MemoryRouter>);
+    await completarCotizacionB2C(user);
+    await user.click(await screen.findByRole('button',{name:/Vista previa PDF/i}));
+    await screen.findByRole('dialog');
+    await user.click(screen.getByRole('button',{name:'Cerrar'}));
+    await user.click(screen.getByRole('button',{name:/Vista previa PDF/i}));
+    await screen.findByRole('dialog');
+    const llamadas=vi.mocked(solicitarFinanzas).mock.calls;
+    expect(llamadas.filter(([ruta,opciones])=>ruta==='/billing/quotes'&&opciones?.method==='POST')).toHaveLength(1);
+    expect(llamadas.filter(([ruta,opciones])=>ruta==='/billing/quotes/901'&&opciones?.method==='PUT').length).toBeGreaterThanOrEqual(1);
+    expect(llamadas.filter(([ruta])=>ruta==='/billing/quotes/901/preview-pdf')).toHaveLength(2);
   });
 
   it('distingue la dirección libre de la Obra estable y exige selección explícita',async()=>{
@@ -100,3 +128,14 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
 });
 
 function withinOptions(element:HTMLElement){return Array.from(element.querySelectorAll('option')).map(option=>option.textContent||'').join(' ');}
+async function completarCotizacionB2C(user:ReturnType<typeof userEvent.setup>){
+  await user.click(screen.getByRole('button',{name:/B2C · PARTICULARES/i}));
+  const buscador=await screen.findByPlaceholderText('Buscar cliente por nombre o RUT');
+  await user.click(buscador);
+  await user.click(await screen.findByRole('button',{name:/Cliente B2C Prueba/i}));
+  const opcion=await screen.findByRole('option',{name:/Puerta catálogo C2/i});
+  await user.selectOptions(opcion.closest('select')!,'71');
+  await user.click(screen.getByText('Costeo interno · no visible para el cliente'));
+  const materialOption=await screen.findByRole('option',{name:/Acero de prueba/i});
+  await user.selectOptions(materialOption.closest('select')!,'61');
+}
