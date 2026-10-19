@@ -30,20 +30,23 @@ export async function sincronizarPermisosMidas(
   });
   const idsActuales = new Set(actuales.map(item => item.id_permiso.toString()));
   const faltantes = catalogo.filter(item => !idsActuales.has(item.permiso_id_permiso.toString()));
+  const activarConfiguracionParticular = !cuenta.configuracion_particular;
   if (faltantes.length) {
     await tx.usuario_permiso_particular.createMany({
       data: faltantes.map(item => ({ id_usuario: cuenta.usuario_id_usuario, id_permiso: item.permiso_id_permiso })),
       skipDuplicates: true,
     });
   }
-  await tx.usuario.update({
-    where: { usuario_id_usuario: cuenta.usuario_id_usuario },
-    data: { configuracion_particular: true, version_seguridad: { increment: faltantes.length ? 1 : 0 } },
-  });
-  if (faltantes.length) {
+  if (faltantes.length || activarConfiguracionParticular) {
+    await tx.usuario.update({
+      where: { usuario_id_usuario: cuenta.usuario_id_usuario },
+      data: { configuracion_particular: true, version_seguridad: { increment: 1 } },
+    });
+  }
+  if (faltantes.length || activarConfiguracionParticular) {
     const ahora = new Date();
     const identidad = `M4:MIDAS:PERMISOS:${cuenta.usuario_id_usuario}:${ahora.toISOString()}`;
-    const nuevo = { actorId: actorId.toString(), permisosAsignados: faltantes.map(p => p.codigo_m4), totalCatalogo: catalogo.length };
+    const nuevo = { actorId: actorId.toString(), permisosAsignados: faltantes.map(p => p.codigo_m4), totalCatalogo: catalogo.length, configuracionParticularActivada: activarConfiguracionParticular };
     const canonico = JSON.stringify(nuevo);
     const { createHash } = await import('node:crypto');
     const hash = createHash('sha256').update(canonico).digest('hex');
