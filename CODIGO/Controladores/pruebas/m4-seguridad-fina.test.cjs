@@ -58,6 +58,7 @@ test('M4: separación de Gerencia y Administrador',async t=>{
 
    const ingresoOriginal=await ingresar(original,{direccion:'203.0.113.20',agente:'Prueba CU74'});
    const sesionOriginal=await modulo.autorizar('miSesion',{secretoSesion:ingresoOriginal.token});
+   assert.equal(sesionOriginal.administradorOriginal,true);
    await assert.rejects(modulo.cerrarSesionAdministrativa(actorAdmin,{id:sesionOriginal.sesion,confirmado:true}),/administrador original.*protegida/i);
    assert.equal((await prisma.sesion_usuario.findUniqueOrThrow({where:{id:sesionOriginal.sesion}})).invalidada,null);
   });

@@ -92,4 +92,15 @@ test('ficha operativa consolida relaciones directas sin alterar estados', async 
     assert.doesNotThrow(() => controlador.verificarAccesoRectificacion(unidad, { id: 1n, administrador: false, permisos: [], alcanceEmpleadoId: 7 }));
     assert.throws(() => controlador.verificarAccesoRectificacion(unidad, { id: 2n, administrador: false, permisos: [], alcanceEmpleadoId: 8 }), error => error.estado === 403);
   });
+  await t.test('Midas administrador original gestiona todas las OT sin alcance de empleado', () => {
+    const actorMidas = { id: 8n, administrador: false, administradorOriginal: true, permisos: ['CU202'] };
+    assert.equal(controlador.puedeGestionarTodasLasRectificaciones(actorMidas), true);
+    assert.doesNotThrow(() => controlador.verificarAccesoRectificacion({ rectificacion: null }, actorMidas));
+  });
+  await t.test('CU205, CU207 y CU209 habilitan gestión general sin depender del empleado', () => {
+    for (const permiso of ['CU205','CU207','CU209']) assert.equal(controlador.puedeGestionarTodasLasRectificaciones({ id: 3n, administrador: false, permisos: [permiso] }), true);
+  });
+  await t.test('usuario sin alcance recibe 403 explícito en vez de una bandeja vacía', async () => {
+    await assert.rejects(controlador.listarOrdenesTrabajoRectificacion({}, { id: 4n, administrador: false, permisos: ['CU202'], alcanceEmpleadoId: null }), error => error.estado === 403 && /No tienes alcance/.test(error.message));
+  });
 });

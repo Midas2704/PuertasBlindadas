@@ -13,7 +13,7 @@ import { archivoCsvAdministrativo } from '../utilidades/csv';
 import { resumirIncidenciasTerreno, resumirOperacionTerreno, type OtDashboard, type TareaDashboard } from '../m6/dashboardTerreno';
 
 interface ActorDocumentoM6 { id: bigint; alcanceEmpleadoId?: number | null }
-interface ActorTerrenoM6 { id: bigint; administrador: boolean; permisos?: string[]; alcanceEmpleadoId?: number | null }
+interface ActorTerrenoM6 { id: bigint; administrador: boolean; administradorOriginal?: boolean; permisos?: string[]; alcanceEmpleadoId?: number | null }
 interface ActorIncidenciaM6 { id: bigint; permisos: string[] }
 
 type Direccion = 'asc' | 'desc';
@@ -2814,7 +2814,7 @@ export class M6Controller {
   }
 
   private puedeGestionarTodasLasRectificaciones(actor:ActorTerrenoM6) {
-    return actor.administrador || Boolean(actor.permisos?.some(permiso=>permiso==='CU205'||permiso==='CU207'||permiso==='CU209'));
+    return actor.administrador || actor.administradorOriginal === true || Boolean(actor.permisos?.some(permiso=>permiso==='CU205'||permiso==='CU207'||permiso==='CU209'));
   }
 
   private verificarAccesoRectificacion(unidad:{rectificacion:{id_empleado_rectificador:number|null}|null},actor:ActorTerrenoM6) {
@@ -2910,7 +2910,7 @@ export class M6Controller {
     const cliente=texto(consulta.cliente,150);if(cliente)where.cotizacion={ficha_cliente:{cliente_financiero:{nombre_razon_social_referencia:{contains:cliente,mode:'insensitive'}}}};
     const producto=texto(consulta.producto,150);if(producto)where.producto={OR:[{nombre_comercial:{contains:producto,mode:'insensitive'}},{codigo_comercial:{contains:producto,mode:'insensitive'}}]};
     const idEmpleadoFiltro=consulta.empleado!==undefined&&consulta.empleado!==''?identificador(consulta.empleado):null;
-    if(!this.puedeGestionarTodasLasRectificaciones(actor)){if(!actor.alcanceEmpleadoId)return[];where.rectificacion={is:{id_empleado_rectificador:actor.alcanceEmpleadoId}};}
+    if(!this.puedeGestionarTodasLasRectificaciones(actor)){if(!actor.alcanceEmpleadoId)throw new ErrorAplicacion(403,'No tienes alcance para consultar Órdenes de Trabajo; solicita una asignación de empleado o un permiso de gestión');where.rectificacion={is:{id_empleado_rectificador:actor.alcanceEmpleadoId}};}
     else if(idEmpleadoFiltro)where.rectificacion={is:{id_empleado_rectificador:idEmpleadoFiltro}};
     const desde=consulta.desde?fechaEntrada(consulta.desde,'Fecha desde'):null;const hasta=consulta.hasta?fechaEntrada(consulta.hasta,'Fecha hasta'):null;
     if(desde||hasta)where.creado_en={...(desde?{gte:desde}:{}),...(hasta?{lt:new Date(hasta.getTime()+86400000)}:{})};
