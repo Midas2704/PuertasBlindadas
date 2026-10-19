@@ -3,6 +3,12 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {sincronizarPermisosMidas}=require('../dist/administracion/sincronizarPermisosMidas.js');
 const {permisosEfectivos}=require('../dist/controladores/M4Controller.js');
+const {M9Controller}=require('../dist/controladores/M9Controller.js');
+const {ProductorAuditoriaM9}=require('../dist/m9/contratoProductor.js');
+const {RepositorioAuditoriaM9Memoria}=require('../dist/m9/RepositorioAuditoriaM9.js');
+const {RelojFijoM9}=require('../dist/m9/puertos.js');
+
+const auditoriaOficial=()=>{const repositorio=new RepositorioAuditoriaM9Memoria();const receptor=new M9Controller({repositorio,reloj:new RelojFijoM9(new Date('2032-06-01T12:00:00Z'))});return{repositorio,receptor,productor:new ProductorAuditoriaM9(receptor)}};
 
 test('070 registra CU378-CU381 y no registra CU377 ni asigna usuarios',()=>{
   const sql=fs.readFileSync('prisma/migrations/070_permisos_documentales_c4_2/migration.sql','utf8');
@@ -13,7 +19,8 @@ test('070 registra CU378-CU381 y no registra CU377 ni asigna usuarios',()=>{
 
 test('sincronización Midas asigna sólo faltantes y la segunda ejecución es idempotente',async()=>{
   const permisos=[378,379,380,381].map(n=>({permiso_id_permiso:BigInt(n),codigo_m4:`CU${n}`,activo_m4:true}));
-  const asignados=new Set(['378']); const auditoria=[]; const cuenta={usuario_id_usuario:1n,administrador_original:true,configuracion_particular:false};
+  const asignados=new Set(['378']); const cuenta={usuario_id_usuario:1n,administrador_original:true,configuracion_particular:false};
+  const auditoria=auditoriaOficial();
   const tx={
     usuario:{findUnique:async({where})=>where.acceso_m4==='20776101-k'?cuenta:null,update:async({data})=>{cuenta.configuracion_particular=data.configuracion_particular}},
     permiso:{findMany:async()=>permisos},
@@ -21,11 +28,11 @@ test('sincronización Midas asigna sólo faltantes y la segunda ejecución es id
       findMany:async()=>permisos.filter(p=>asignados.has(p.permiso_id_permiso.toString())).map(permiso=>({id_permiso:permiso.permiso_id_permiso,permiso})),
       createMany:async({data})=>{data.forEach(x=>asignados.add(x.id_permiso.toString()));return{count:data.length}},
     },
-    evento_auditoria_m9:{create:async({data})=>{auditoria.push(data);return data}},
   };
-  const primera=await sincronizarPermisosMidas(tx,99n); assert.deepEqual(primera.asignados,['CU379','CU380','CU381']); assert.equal(auditoria.length,1);
-  const segunda=await sincronizarPermisosMidas(tx,99n); assert.deepEqual(segunda.asignados,[]); assert.equal(auditoria.length,1);
+  const primera=await sincronizarPermisosMidas(tx,99n,auditoria.productor); assert.deepEqual(primera.asignados,['CU379','CU380','CU381']); assert.equal(await auditoria.repositorio.cantidad(),1);
+  const segunda=await sincronizarPermisosMidas(tx,99n,auditoria.productor); assert.deepEqual(segunda.asignados,[]); assert.equal(await auditoria.repositorio.cantidad(),1);
   assert.ok(!asignados.has('377'));
+  const evento=(await auditoria.repositorio.listarTodo({}))[0];assert.equal(evento.operacion,'SINCRONIZAR_PERMISOS_MIDAS');assert.notEqual(evento.hashContenido,evento.hashIntegridad);assert.doesNotThrow(()=>auditoria.receptor.verificarIntegridad(evento));
 });
 
 test('regresión: Midas Gerencia conserva todos los CU aprobados con configuración particular',async()=>{
@@ -39,7 +46,7 @@ test('regresión: Midas Gerencia conserva todos los CU aprobados con configuraci
   }));
   const asignados=new Set(catalogo.slice(0,76).map(p=>p.permiso_id_permiso.toString()));
   const originales=new Set(asignados);
-  const auditoria=[];
+  const auditoria=auditoriaOficial();
   let actualizaciones=0;
   const cuenta={usuario_id_usuario:1n,administrador_original:true,usuario_es_administrador:true,configuracion_particular:false};
   const tx={
@@ -53,11 +60,10 @@ test('regresión: Midas Gerencia conserva todos los CU aprobados con configuraci
       createMany:async({data})=>{data.forEach(x=>asignados.add(x.id_permiso.toString()));return{count:data.length}},
       deleteMany:async()=>{throw new Error('La sincronización no debe borrar los 76 permisos existentes')},
     },
-    evento_auditoria_m9:{create:async({data})=>{auditoria.push(data);return data}},
   };
 
-  const primera=await sincronizarPermisosMidas(tx,99n);
-  const segunda=await sincronizarPermisosMidas(tx,99n);
+  const primera=await sincronizarPermisosMidas(tx,99n,auditoria.productor);
+  const segunda=await sincronizarPermisosMidas(tx,99n,auditoria.productor);
   const particulares=[...catalogo.map(permiso=>({permiso})),{permiso:{codigo_m4:'CU377',activo_m4:true,requiere_administrador:true}}];
   const efectivos=permisosEfectivos({...cuenta,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares});
 
@@ -66,7 +72,7 @@ test('regresión: Midas Gerencia conserva todos los CU aprobados con configuraci
   assert.deepEqual(primera.asignados,['CU378','CU379','CU380','CU381']);
   assert.deepEqual(segunda.asignados,[]);
   assert.equal(actualizaciones,1);
-  assert.equal(auditoria.length,1);
+  assert.equal(await auditoria.repositorio.cantidad(),1);
   assert.equal(cuenta.configuracion_particular,true);
   assert.deepEqual(new Set(efectivos),new Set(codigos));
   for(const codigo of ['CU65','CU66','CU74','CU378','CU379','CU380','CU381']) assert.ok(efectivos.includes(codigo),codigo);

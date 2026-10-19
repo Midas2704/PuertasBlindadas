@@ -73,7 +73,23 @@ test('M9 CUT275-CUT302 ingesta, validación e integridad', async t => {
     const repo = new RepositorioAuditoriaM9Memoria(), modulo = new M9Controller({ repositorio: repo, reloj });
     const creado = (await modulo.recibir(entrada())).evento;
     (await repo.porId(creado.id)).operacion = 'ALTERADA';
-    await assert.rejects(modulo.detalle(creado.id, { solicitante: 'tester', modulos: ['SINTETICO'] }), error => error.codigo === 'M9_INTEGRIDAD_INVALIDA');
+    const alterado=await repo.porId(creado.id);
+    assert.throws(()=>modulo.verificarIntegridad(alterado), error => error.codigo === 'M9_INTEGRIDAD_INVALIDA');
+    const detalle=await modulo.detalle(creado.id, { solicitante: 'tester', modulos: ['SINTETICO'] });
+    assert.equal(detalle.evento.integridad,'COMPROMETIDA');
+    assert.match(detalle.evento.advertenciaIntegridad,/no supera la verificación/i);
+  });
+  await t.test('regresión forense: un evento comprometido no oculta evidencia válida ni se exporta como verificada', async () => {
+    const repo = new RepositorioAuditoriaM9Memoria(), modulo = new M9Controller({ repositorio: repo, reloj, politicas:{proyectar:async evento=>evento} });
+    const valido=(await modulo.recibir(entrada({operacion:'VALIDO'}))).evento;
+    const {id:_id,...historico}=valido;
+    const comprometido=await repo.crear({...historico,identidadLogica:`M4:MIDAS:PERMISOS:HISTORICO-${randomUUID()}`,productor:'M4',modulo:'M4',operacion:'SINCRONIZAR_PERMISOS_MIDAS',hashContenido:'0'.repeat(64),hashIntegridad:'0'.repeat(64)});
+    assert.throws(()=>modulo.verificarIntegridad(comprometido),error=>error.codigo==='M9_INTEGRIDAD_INVALIDA');
+    const consulta=await modulo.consultar({orden:'asc'},{solicitante:'tester',permitirCambios:true,permitirMotivos:true});
+    const visibleValido=consulta.eventos.find(evento=>evento.id===valido.id),visibleComprometido=consulta.eventos.find(evento=>evento.id===comprometido.id);
+    assert.equal(visibleValido.integridad,'VERIFICADA');assert.equal(visibleComprometido.integridad,'COMPROMETIDA');assert.equal(visibleComprometido.cambios,null);
+    const exportado=await modulo.exportar('CSV',{}, {solicitante:'tester'});
+    assert.match(Buffer.from(exportado.contenido.split(',').at(-1),'base64').toString('utf8'),/;Comprometida;/i);
   });
   await t.test('CUT290-CUT292 persiste durable, separa fechas y trigger impide mutación', async () => {
     const modulo = new M9Controller({ repositorio: new RepositorioAuditoriaM9Prisma(), reloj });

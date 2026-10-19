@@ -7,6 +7,7 @@ export const archivoAuditoriaM9Csv = (eventos: EventoPresentadoM9[]) => archivoC
   { encabezado: 'Módulo', valor: evento => humanizarM9(evento.modulo) },
   { encabezado: 'Operación', valor: evento => humanizarM9(evento.operacion) },
   { encabezado: 'Resultado', valor: evento => humanizarM9(evento.resultado) },
+  { encabezado: 'Integridad', valor: evento => humanizarM9(evento.integridad) },
   { encabezado: 'Referencia', valor: evento => referenciaInformeM9(evento) },
   { encabezado: 'Ejecutor', valor: evento => ejecutorInformeM9(evento) },
 ], ';');

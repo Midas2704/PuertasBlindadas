@@ -14,6 +14,8 @@ export interface RepositorioAuditoriaM9 {
   cantidad(): Promise<number>;
 }
 
+type ClienteAuditoriaM9 = Pick<Prisma.TransactionClient, 'evento_auditoria_m9'>;
+
 type FilaM9 = Awaited<ReturnType<typeof prisma.evento_auditoria_m9.findFirst>>;
 const json = (valor: Prisma.JsonValue | null) => valor as Record<string, unknown> | null;
 const entradaJson = (valor: Record<string, unknown> | null) => valor === null ? Prisma.JsonNull : valor as Prisma.InputJsonValue;
@@ -75,11 +77,12 @@ const datos = (evento: EventoNormalizadoM9): Prisma.evento_auditoria_m9CreateInp
 });
 
 export class RepositorioAuditoriaM9Prisma implements RepositorioAuditoriaM9 {
-  async crear(evento: EventoNormalizadoM9) { return mapear(await prisma.evento_auditoria_m9.create({ data: datos(evento) })); }
-  async porIdentidad(identidad: string) { const fila = await prisma.evento_auditoria_m9.findUnique({ where: { identidad_logica: identidad } }); return fila ? mapear(fila) : null; }
-  async porId(id: number) { const fila = await prisma.evento_auditoria_m9.findUnique({ where: { id_evento_m9: id } }); return fila ? mapear(fila) : null; }
+  constructor(private readonly cliente: ClienteAuditoriaM9 = prisma) {}
+  async crear(evento: EventoNormalizadoM9) { return mapear(await this.cliente.evento_auditoria_m9.create({ data: datos(evento) })); }
+  async porIdentidad(identidad: string) { const fila = await this.cliente.evento_auditoria_m9.findUnique({ where: { identidad_logica: identidad } }); return fila ? mapear(fila) : null; }
+  async porId(id: number) { const fila = await this.cliente.evento_auditoria_m9.findUnique({ where: { id_evento_m9: id } }); return fila ? mapear(fila) : null; }
   async ultimaSecuencia(productor: string, entidadTipo: string | null, entidadReferencia: string | null) {
-    const fila = await prisma.evento_auditoria_m9.findFirst({ where: { productor, entidad_tipo: entidadTipo, entidad_referencia: entidadReferencia, secuencia: { not: null } }, orderBy: { secuencia: 'desc' } });
+    const fila = await this.cliente.evento_auditoria_m9.findFirst({ where: { productor, entidad_tipo: entidadTipo, entidad_referencia: entidadReferencia, secuencia: { not: null } }, orderBy: { secuencia: 'desc' } });
     return fila?.secuencia ?? null;
   }
   async listar(filtros: FiltrosM9, modulos?: string[], productores?: string[]) {
@@ -99,32 +102,32 @@ export class RepositorioAuditoriaM9Prisma implements RepositorioAuditoriaM9 {
       ...(filtros.buscar ? { OR: [{ identidad_logica: { contains: filtros.buscar, mode: 'insensitive' } }, { entidad_referencia: { contains: filtros.buscar, mode: 'insensitive' } }] } : {}),
     };
     const [total, filas] = await Promise.all([
-      prisma.evento_auditoria_m9.count({ where }),
-      prisma.evento_auditoria_m9.findMany({ where, orderBy: [{ fecha_ocurrencia: filtros.orden ?? 'desc' }, { id_evento_m9: filtros.orden ?? 'desc' }], skip: (pagina - 1) * tamano, take: tamano }),
+      this.cliente.evento_auditoria_m9.count({ where }),
+      this.cliente.evento_auditoria_m9.findMany({ where, orderBy: [{ fecha_ocurrencia: filtros.orden ?? 'desc' }, { id_evento_m9: filtros.orden ?? 'desc' }], skip: (pagina - 1) * tamano, take: tamano }),
     ]);
     return { total, eventos: filas.map(mapear) };
   }
   async listarTodo(filtros: FiltrosM9, modulos?: string[], productores?: string[]) {
-    const pagina = await this.listar({ ...filtros, pagina:1, tamano:Math.max(1, await prisma.evento_auditoria_m9.count()) }, modulos, productores);
+    const pagina = await this.listar({ ...filtros, pagina:1, tamano:Math.max(1, await this.cliente.evento_auditoria_m9.count()) }, modulos, productores);
     if (pagina.eventos.length === pagina.total) return pagina.eventos;
     const lotes: EventoPersistidoM9[]=[...pagina.eventos];
     for(let numero=2;lotes.length<pagina.total;numero++) lotes.push(...(await this.listar({...filtros,pagina:numero,tamano:200},modulos,productores)).eventos);
     return lotes;
   }
   async relacionados(id: number, tipo: 'origen' | 'correctivo') {
-    const filas = await prisma.evento_auditoria_m9.findMany({ where: tipo === 'origen' ? { id_evento_origen: id } : { id_evento_correctivo: id }, orderBy: [{ fecha_ocurrencia: 'asc' }, { id_evento_m9: 'asc' }] });
+    const filas = await this.cliente.evento_auditoria_m9.findMany({ where: tipo === 'origen' ? { id_evento_origen: id } : { id_evento_correctivo: id }, orderBy: [{ fecha_ocurrencia: 'asc' }, { id_evento_m9: 'asc' }] });
     return filas.map(mapear);
   }
   async resumen(modulos?: string[], productores?: string[]) {
     const where: Prisma.evento_auditoria_m9WhereInput = { ...(modulos ? { modulo_origen:{in:modulos} } : {}), ...(productores ? { productor:{in:productores} } : {}) };
     const [total, resultados, modulosAgrupados] = await Promise.all([
-      prisma.evento_auditoria_m9.count({where}),
-      prisma.evento_auditoria_m9.groupBy({by:['resultado'],where,_count:{_all:true}}),
-      prisma.evento_auditoria_m9.groupBy({by:['modulo_origen'],where,_count:{_all:true}}),
+      this.cliente.evento_auditoria_m9.count({where}),
+      this.cliente.evento_auditoria_m9.groupBy({by:['resultado'],where,_count:{_all:true}}),
+      this.cliente.evento_auditoria_m9.groupBy({by:['modulo_origen'],where,_count:{_all:true}}),
     ]);
     return { total, porResultado:Object.fromEntries(resultados.map(item=>[item.resultado,item._count._all])), porModulo:Object.fromEntries(modulosAgrupados.map(item=>[item.modulo_origen,item._count._all])) };
   }
-  cantidad() { return prisma.evento_auditoria_m9.count(); }
+  cantidad() { return this.cliente.evento_auditoria_m9.count(); }
 }
 
 export class RepositorioAuditoriaM9Memoria implements RepositorioAuditoriaM9 {

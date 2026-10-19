@@ -25,6 +25,7 @@ type DependenciasM9 = {
 const materialContenido = (evento: Omit<EventoNormalizadoM9, 'fechaPersistencia' | 'hashContenido' | 'hashIntegridad'>) => evento;
 const materialIntegridad = (evento: Omit<EventoNormalizadoM9, 'hashIntegridad'>) => evento;
 const textoOpcional = (valor: unknown, maximo: number) => valor === undefined || valor === null || valor === '' ? null : textoSeguro(valor, 'Texto', maximo);
+type EstadoIntegridadM9 = 'VERIFICADA' | 'COMPROMETIDA';
 
 export class M9Controller {
   readonly repositorio: RepositorioAuditoriaM9;
@@ -136,9 +137,13 @@ export class M9Controller {
   }
 
   private verificarIntegridad(evento: EventoPersistidoM9) {
-    const { id: _id, hashIntegridad, ...sinId } = evento;
-    if (hashM9(materialIntegridad(sinId)) !== hashIntegridad) throw new ErrorAplicacion(500, 'Integridad de evidencia comprometida', 'M9_INTEGRIDAD_INVALIDA');
+    if (this.estadoIntegridad(evento) === 'COMPROMETIDA') throw new ErrorAplicacion(500, 'Integridad de evidencia comprometida', 'M9_INTEGRIDAD_INVALIDA');
     return evento;
+  }
+
+  private estadoIntegridad(evento: EventoPersistidoM9): EstadoIntegridadM9 {
+    const { id: _id, hashIntegridad, ...sinId } = evento;
+    return hashM9(materialIntegridad(sinId)) === hashIntegridad ? 'VERIFICADA' : 'COMPROMETIDA';
   }
 
   private verificarScope(scope: ScopeM9, filtros?: FiltrosM9) {
@@ -147,24 +152,30 @@ export class M9Controller {
     if (filtros?.productor && scope.productores && !scope.productores.includes(filtros.productor)) throw new ErrorAplicacion(403, 'Productor fuera del scope', 'M9_SCOPE_DENEGADO');
   }
 
-  private presentar(evento: EventoPersistidoM9, scope: ScopeM9) {
+  private presentar(evento: EventoPersistidoM9, scope: ScopeM9, integridad: EstadoIntegridadM9 = 'VERIFICADA') {
     const ocultarPrivacidad = evento.eventoPrivacidad && !scope.permitirPrivacidad;
-    const cambios = scope.permitirCambios && !ocultarPrivacidad ? { anterior: evento.anterior, nuevo: evento.nuevo } : null;
+    const evidenciaConfiable = integridad === 'VERIFICADA';
+    const cambios = evidenciaConfiable && scope.permitirCambios && !ocultarPrivacidad ? { anterior: evento.anterior, nuevo: evento.nuevo } : null;
     const base = {
       id: evento.id, identidadLogica: evento.identidadLogica, versionContrato: evento.versionContrato,
       ocurrencia: evento.fechaOcurrencia.toISOString(), persistencia: evento.fechaPersistencia.toISOString(), zonaHoraria: evento.zonaHoraria,
       ejecutor: ocultarPrivacidad ? { tipo: evento.ejecutorTipo, referencia: '***' } : { tipo: evento.ejecutorTipo, referencia: evento.ejecutorReferencia },
       productor: evento.productor, modulo: evento.modulo, operacion: evento.operacion, resultado: evento.resultado,
       referencia: { tipo: evento.entidadTipo, id: ocultarPrivacidad ? '***' : evento.entidadReferencia },
-      cambios, motivo: scope.permitirMotivos && !ocultarPrivacidad ? evento.motivo : null,
-      causa: scope.permitirMotivos && !ocultarPrivacidad ? evento.causa : null,
+      cambios, motivo: evidenciaConfiable && scope.permitirMotivos && !ocultarPrivacidad ? evento.motivo : null,
+      causa: evidenciaConfiable && scope.permitirMotivos && !ocultarPrivacidad ? evento.causa : null,
       eventoOrigenId: evento.eventoOrigenId, eventoCorrectivoId: evento.eventoCorrectivoId,
-      eventoPrivacidad: evento.eventoPrivacidad, integridad: 'VERIFICADA',
+      eventoPrivacidad: evento.eventoPrivacidad, integridad,
+      advertenciaIntegridad: evidenciaConfiable ? null : 'La evidencia histórica no supera la verificación criptográfica. Su contenido funcional no se presenta como confiable.',
     };
     return enmascarar(base, scope.camposOcultos ?? []) as typeof base;
   }
 
-  private proyectarVerificado(evento:EventoPersistidoM9){this.verificarIntegridad(evento);return this.politicas.proyectar(evento);}
+  private async proyectarForense(evento:EventoPersistidoM9) {
+    const integridad=this.estadoIntegridad(evento);
+    const proyectado=await this.politicas.proyectar(evento);
+    return proyectado?{evento:proyectado,integridad}:null;
+  }
 
   private normalizarFiltros(filtros: FiltrosM9) {
     const pagina = filtros.pagina ?? 1, tamano = filtros.tamano ?? 50;
@@ -177,9 +188,9 @@ export class M9Controller {
     this.verificarScope(scope, filtros);
     const normalizados = this.normalizarFiltros(filtros);
     const todos = await this.repositorio.listarTodo(normalizados, scope.modulos, scope.productores);
-    const visibles=(await Promise.all(todos.map(evento=>this.proyectarVerificado(evento)))).filter((evento):evento is EventoPersistidoM9=>evento!==null);
+    const visibles=(await Promise.all(todos.map(evento=>this.proyectarForense(evento)))).filter((evento):evento is {evento:EventoPersistidoM9;integridad:EstadoIntegridadM9}=>evento!==null);
     const inicio=(normalizados.pagina!-1)*normalizados.tamano!,pagina=visibles.slice(inicio,inicio+normalizados.tamano!);
-    return { total: visibles.length, pagina: normalizados.pagina!, tamano: normalizados.tamano!, eventos: pagina.map(evento => this.presentar(evento, scope)) };
+    return { total: visibles.length, pagina: normalizados.pagina!, tamano: normalizados.tamano!, eventos: pagina.map(item => this.presentar(item.evento, scope, item.integridad)) };
   }
 
   private async terminal(operacion: string, scope: ScopeM9, resultado: 'EXITOSO' | 'RECHAZADO' | 'FALLIDO', metadatos: JsonM9) {
@@ -198,7 +209,8 @@ export class M9Controller {
   async detalle(id: number, scope: ScopeM9) {
     this.verificarScope(scope);
     const original = await this.repositorio.porId(id);
-    const evento=original?await this.proyectarVerificado(original):null;
+    const evaluado=original?await this.proyectarForense(original):null;
+    const evento=evaluado?.evento ?? null;
     if (!evento || scope.modulos && !scope.modulos.includes(evento.modulo) || scope.productores && !scope.productores.includes(evento.productor)) throw new ErrorAplicacion(404, 'Evidencia no encontrada', 'M9_NO_ENCONTRADO');
     const origenes: EventoPersistidoM9[] = [];
     let cursor: EventoPersistidoM9 | null = evento;
@@ -207,9 +219,9 @@ export class M9Controller {
     const correctivos = await this.repositorio.relacionados(evento.id, 'correctivo');
     const dentroScope=(item:EventoPersistidoM9)=>(!scope.modulos||scope.modulos.includes(item.modulo))&&(!scope.productores||scope.productores.includes(item.productor));
     await this.terminal('APERTURA_DETALLE', scope, 'EXITOSO', { correlationId: hashM9({ id }) });
-    const cadenaProyectada=(await Promise.all([...origenes,original!,...derivados].filter(dentroScope).map(item=>this.proyectarVerificado(item)))).filter((item):item is EventoPersistidoM9=>item!==null);
-    const correctivosProyectados=(await Promise.all(correctivos.filter(dentroScope).map(item=>this.proyectarVerificado(item)))).filter((item):item is EventoPersistidoM9=>item!==null);
-    return { evento: this.presentar(evento, scope), cadena: cadenaProyectada.map(item => this.presentar(item, scope)), correctivos: correctivosProyectados.map(item => this.presentar(item, scope)) };
+    const cadenaProyectada=(await Promise.all([...origenes,original!,...derivados].filter(dentroScope).map(item=>this.proyectarForense(item)))).filter((item):item is {evento:EventoPersistidoM9;integridad:EstadoIntegridadM9}=>item!==null);
+    const correctivosProyectados=(await Promise.all(correctivos.filter(dentroScope).map(item=>this.proyectarForense(item)))).filter((item):item is {evento:EventoPersistidoM9;integridad:EstadoIntegridadM9}=>item!==null);
+    return { evento: this.presentar(evento, scope, evaluado!.integridad), cadena: cadenaProyectada.map(item => this.presentar(item.evento, scope, item.integridad)), correctivos: correctivosProyectados.map(item => this.presentar(item.evento, scope, item.integridad)) };
   }
 
   async exportar(formato: 'CSV' | 'PDF', filtros: FiltrosM9, scope: ScopeM9) {
@@ -218,8 +230,8 @@ export class M9Controller {
     try {
       const normalizados=this.normalizarFiltros(filtros);
       const originales=await this.repositorio.listarTodo(normalizados,scope.modulos,scope.productores);
-      const eventos=(await Promise.all(originales.map(evento=>this.proyectarVerificado(evento)))).filter((evento):evento is EventoPersistidoM9=>evento!==null);
-      const congelado={total:eventos.length,eventos:eventos.map(evento=>this.presentar(evento,scope))};
+      const eventos=(await Promise.all(originales.map(evento=>this.proyectarForense(evento)))).filter((evento):evento is {evento:EventoPersistidoM9;integridad:EstadoIntegridadM9}=>evento!==null);
+      const congelado={total:eventos.length,eventos:eventos.map(item=>this.presentar(item.evento,scope,item.integridad))};
       const metadatos = { correlationId: hashM9({ filtros, total: congelado.total, formato }) };
       let archivo: { nombre: string; mime: string; contenido: string };
       if (formato === 'CSV') {

@@ -9,6 +9,7 @@ export type EventoPresentadoM9 = {
   resultado?: unknown;
   referencia?: { tipo?: unknown; id?: unknown } | null;
   ejecutor?: { tipo?: unknown; referencia?: unknown } | null;
+  integridad?: unknown;
 };
 
 const etiquetas: Record<string, string> = {
@@ -89,24 +90,27 @@ export function crearInformeAuditoriaM9(eventosEntrada: EventoPresentadoM9[], fi
   const modulos = [...eventos.reduce((mapa, evento) => mapa.set(evento.moduloNormalizado, (mapa.get(evento.moduloNormalizado) || 0) + 1), new Map<string, number>())]
     .map(([etiqueta, cantidad]) => ({ etiqueta, cantidad })).sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, 'es', { numeric: true }));
   const filtrosPresentados = filtrosInforme(filtros);
+  const comprometidos = eventos.filter(evento => String(evento.integridad || '').toUpperCase() === 'COMPROMETIDA').length;
+  if (comprometidos) filtrosPresentados.push({ etiqueta:'Advertencia forense', valor:`${comprometidos} evidencia(s) con integridad comprometida; se incluyen marcadas y sin contenido funcional confiable.` });
   const periodo = filtros.desde || filtros.hasta ? `${filtros.desde ? fechaInformeM9(filtros.desde, false) : 'Inicio'} a ${filtros.hasta ? fechaInformeM9(filtros.hasta, false) : 'Actualidad'}` : 'Todos los eventos visibles';
   const tarjetas = [
     { etiqueta: 'Total de eventos', valor: String(eventos.length), tono: 'neutro' as const },
     ...resultados.map(resultado => ({ etiqueta: resultado.etiqueta, valor: String(resultado.cantidad), detalle: `${resultado.porcentaje.toFixed(1).replace('.', ',')}%`, tono: resultado.tono })),
     { etiqueta: 'Módulos involucrados', valor: String(modulos.length), tono: 'neutro' as const },
+    ...(comprometidos ? [{ etiqueta:'Integridad comprometida', valor:String(comprometidos), tono:'fallido' as const }] : []),
   ];
   const informe: InformePdf = {
     titulo: 'Informe de Auditoría', subtitulo: 'Puertas Blindadas - Módulo de Auditoría M9', generado: fechaInformeM9(generadoEn), periodo,
     solicitante: solicitanteInforme(scope), total: eventos.length, filtros: filtrosPresentados, tarjetas, modulos, resultados,
     tabla: {
       columnas: [
-        { clave: 'fecha', etiqueta: 'Fecha y hora', ancho: 90 }, { clave: 'modulo', etiqueta: 'Módulo', ancho: 40 },
-        { clave: 'operacion', etiqueta: 'Operación', ancho: 135 }, { clave: 'resultado', etiqueta: 'Resultado', ancho: 60 },
-        { clave: 'referencia', etiqueta: 'Referencia', ancho: 95 }, { clave: 'ejecutor', etiqueta: 'Ejecutor', ancho: 91 },
+        { clave: 'fecha', etiqueta: 'Fecha y hora', ancho: 75 }, { clave: 'modulo', etiqueta: 'Módulo', ancho: 35 },
+        { clave: 'operacion', etiqueta: 'Operación', ancho: 100 }, { clave: 'resultado', etiqueta: 'Resultado', ancho: 50 },
+        { clave: 'integridad', etiqueta: 'Integridad', ancho: 75 }, { clave: 'referencia', etiqueta: 'Referencia', ancho: 70 }, { clave: 'ejecutor', etiqueta: 'Ejecutor', ancho: 106 },
       ],
-      filas: eventos.map(evento => ({ fecha: fechaInformeM9(evento.ocurrencia), modulo: humanizarM9(evento.modulo), operacion: humanizarM9(evento.operacion), resultado: humanizarM9(evento.resultado), referencia: referenciaInformeM9(evento), ejecutor: ejecutorInformeM9(evento), tonoResultado: tonoResultado(evento.resultadoNormalizado) })),
+      filas: eventos.map(evento => ({ fecha: fechaInformeM9(evento.ocurrencia), modulo: humanizarM9(evento.modulo), operacion: humanizarM9(evento.operacion), resultado: humanizarM9(evento.resultado), integridad:humanizarM9(evento.integridad), referencia: referenciaInformeM9(evento), ejecutor: ejecutorInformeM9(evento), tonoResultado: String(evento.integridad).toUpperCase()==='COMPROMETIDA'?'fallido':tonoResultado(evento.resultadoNormalizado) })),
     },
-    pie: 'Documento generado por el Sistema Financiero Puertas Blindadas',
+    pie: comprometidos ? 'ADVERTENCIA: el informe contiene evidencia marcada con integridad comprometida.' : 'Documento generado por el Sistema Financiero Puertas Blindadas',
   };
   return archivoPdfInforme('auditoria-m9.pdf', informe);
 }

@@ -93,6 +93,7 @@ export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> 
   asignarPermisos: { modulo:'M4', operacion:'PERMISOS_ASIGNADOS', entidad:'USUARIO', critico:false },
   retirarPermisos: { modulo:'M4', operacion:'PERMISOS_RETIRADOS', entidad:'USUARIO', critico:false },
   guardarPermisosUsuario: { modulo:'M4', operacion:'CONFIGURACION_PERMISOS_ACTUALIZADA', entidad:'USUARIO', critico:false },
+  sincronizarPermisosMidas: { modulo:'M4', operacion:'SINCRONIZAR_PERMISOS_MIDAS', entidad:'USUARIO', critico:true },
   cerrarSesionAdministrativa: { modulo:'M4', operacion:'SESION_CERRADA', entidad:'SESION', critico:false },
   crearProveedor: { modulo:'M5', operacion:'PROVEEDOR_CREADO', entidad:'PROVEEDOR', critico:false },
   confirmarOperacionPago: { modulo:'M5', operacion:'PAGO_PROVEEDOR_CONFIRMADO', entidad:'PAGO_PROVEEDOR', critico:false },
