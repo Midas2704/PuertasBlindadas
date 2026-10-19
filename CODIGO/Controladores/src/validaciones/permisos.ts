@@ -30,7 +30,7 @@ export const operacionesPermiso: Record<string, string> = {
  anularVenta:'CU37', registrarDocumento:'CU36', descartarBorrador:'CU22', aprobarCotizacion:'CU24', aprobarVenta:'CU27', tipoCambio:'CU47',
  consultarPago:'CU55', consultarSaldo:'CU49', catalogosPago:'CU45', contextoPago:'CU42', consolidarB2C:'CU25', revertirVenta:'CU38', registrarPago:'CU43', anularPago:'CU51', revertirPago:'CU52', aplicarSaldoFavor:'CU54', consultarMorosidad:'CU56', generarComprobante:'CU57', conciliarPago:'CU58',
  usuarios:'CU67', catalogosUsuarios:'CU59', registrarUsuario:'CU59', desactivarUsuario:'CU60', reactivarUsuario:'CU61',
- cambiarConfiguracion:'CU62', asignarPermisos:'CU63', retirarPermisos:'CU64', asignarAdministrador:'CU65', retirarAdministrador:'CU66',
+ cambiarConfiguracion:'CU62', asignarPermisos:'CU63', guardarPermisosUsuario:'CU63', retirarPermisos:'CU64', asignarAdministrador:'CU65', retirarAdministrador:'CU66',
  restablecerClave:'CU71', desbloquearUsuario:'CU72', consultarSesiones:'CU73', cerrarSesionAdministrativa:'CU74',
  crearProveedor:'CU75', actualizarProveedor:'CU76', corregirIdentidadProveedor:'CU77', desactivarProveedor:'CU78', reactivarProveedor:'CU79',
  listarProveedores:'CU80', abrirFichaProveedor:'CU84', catalogosProveedores:'CU80',
@@ -124,6 +124,7 @@ export const operacionesPermiso: Record<string, string> = {
 };
 
 const permisosAlternativosOperacion: Record<string, string[]> = {
+ guardarPermisosUsuario:['CU64','CU62'],
  consultarDashboardTerreno: ['CU199','CU200','CU205','CU207','CU209','CU210','CU211','CU212','CU213'],
  exportarReporteTerreno: ['CU199','CU200','CU205','CU207','CU209','CU210','CU211','CU212','CU213'],
  listarIncidenciasOperativas: ['CU212'],

@@ -39,7 +39,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'obtenerPlanificacionAprobacionCotizacion' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'seleccionarAlternativaB2C' | 'aceptarAlternativaB2C' | 'rechazarAlternativaB2C' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
   | 'iniciarSesion' | 'solicitarRecuperacion' | 'recuperarClave' | 'validarRecuperacion' | 'miSesion' | 'cambiarClave' | 'cerrarSesion'
   | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
-  | 'asignarPermisos' | 'retirarPermisos' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
+  | 'asignarPermisos' | 'retirarPermisos' | 'guardarPermisosUsuario' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
   | 'crearProveedor' | 'actualizarProveedor' | 'corregirIdentidadProveedor' | 'desactivarProveedor' | 'reactivarProveedor' | 'listarProveedores' | 'abrirFichaProveedor' | 'catalogosProveedores'
   | 'actualizarCondicionPagoProveedor' | 'listarOrdenesCompraServicios' | 'obtenerOrdenCompraServicio' | 'crearOrdenCompraServicio' | 'modificarOrdenCompraServicio'
   | 'prepararAjusteOrdenCompraServicio' | 'confirmarAjusteOrdenCompraServicio' | 'anularOrdenCompraServicio' | 'cerrarOrdenCompraServicio' | 'reabrirOrdenCompraServicio'
@@ -499,7 +499,7 @@ export class C_Finanzas {
       case 'registrarUsuario': return this.m4.registrarUsuario(actor,cuerpo);
       case 'consultarSesiones': return this.m4.consultarSesiones(actor);
       case 'cerrarSesionAdministrativa': return this.m4.cerrarSesionAdministrativa(actor,cuerpo);
-      case 'desactivarUsuario': case 'reactivarUsuario': case 'cambiarConfiguracion': case 'asignarPermisos': case 'retirarPermisos':
+      case 'desactivarUsuario': case 'reactivarUsuario': case 'cambiarConfiguracion': case 'asignarPermisos': case 'retirarPermisos': case 'guardarPermisosUsuario':
       case 'asignarAdministrador': case 'retirarAdministrador': case 'restablecerClave': case 'desbloquearUsuario':
         return this.m4.modificarUsuario(operacion,actor,cuerpo);
       case 'listarClientes': return this.m1.listarClientes(validarFiltros(solicitud.consulta || {}));

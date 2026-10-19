@@ -503,7 +503,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/usuarios',derivar('usuarios'));
   rutas.get('/usuarios/catalogos',derivar('catalogosUsuarios'));
   rutas.post('/usuarios',derivar('registrarUsuario'));
-  const acciones = {desactivar:'desactivarUsuario',reactivar:'reactivarUsuario',configuracion:'cambiarConfiguracion',asignar:'asignarPermisos',retirar:'retirarPermisos',administrador:'asignarAdministrador','retirar-administrador':'retirarAdministrador',restablecer:'restablecerClave',desbloquear:'desbloquearUsuario'} as const;
+  const acciones = {desactivar:'desactivarUsuario',reactivar:'reactivarUsuario',configuracion:'cambiarConfiguracion',asignar:'asignarPermisos',retirar:'retirarPermisos',permisos:'guardarPermisosUsuario',administrador:'asignarAdministrador','retirar-administrador':'retirarAdministrador',restablecer:'restablecerClave',desbloquear:'desbloquearUsuario'} as const;
   for(const [ruta,operacion] of Object.entries(acciones)) rutas.post(`/usuarios/${ruta}`,derivar(operacion));
   rutas.get('/sesiones',derivar('consultarSesiones'));
   rutas.post('/sesiones/cerrar',derivar('cerrarSesionAdministrativa'));

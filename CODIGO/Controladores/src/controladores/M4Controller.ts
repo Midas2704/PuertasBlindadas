@@ -6,6 +6,7 @@ import { CorreoRecuperacion, CorreoDesarrollo } from '../utilidades/correo';
 import { codigosAdministrador, operacionesPermiso, operacionesQueRequierenAdministrador, permiteOperacion } from '../validaciones/permisos';
 import { texto } from '../validaciones/solicitudes';
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
+import { clasificarPermisoM4 } from '../seguridad/catalogoPermisosFuncional';
 
 type Transaccion = Prisma.TransactionClient;
 type Entrada = Record<string, unknown>;
@@ -62,7 +63,8 @@ export class M4Controller {
   return {id:cuenta.usuario_id_usuario.toString(),acceso:cuenta.acceso_m4 || 'Pendiente de habilitación M4',nombre:cuenta.empleado_seguridad?`${cuenta.empleado_seguridad.nombres} ${cuenta.empleado_seguridad.apellido_paterno}`:(cuenta.usuario_nombre_completo_primer_nombre_usuario || cuenta.usuario_username || `Cuenta heredada ${cuenta.usuario_id_usuario}`),
    correo:cuenta.usuario_correo,estado:cuenta.usuario_estado_cuenta,configuracion:cuenta.perfil?.codigo_m4,configuracionParticular:cuenta.configuracion_particular,
    administrador:!!cuenta.usuario_es_administrador,original:cuenta.administrador_original,bloqueada:!!cuenta.seguridad?.bloqueo_persistente,bloqueoHasta:cuenta.seguridad?.bloqueo_hasta,
-   permisos:permisosEfectivos(cuenta),permisosParticulares:cuenta.particulares.map(p=>p.permiso.codigo_m4),rutEmpleado:cuenta.empleado_m4};
+   permisos:permisosEfectivos(cuenta),permisosParticulares:cuenta.particulares.map(p=>p.permiso.codigo_m4).filter((codigo):codigo is string=>!!codigo),
+   permisosPerfil:cuenta.perfil?.perfil_permiso.filter(v=>v.perfil_permiso_activo&&v.permiso.activo_m4&&v.permiso.codigo_m4).map(v=>v.permiso.codigo_m4!) || [],rutEmpleado:cuenta.empleado_m4};
  }
  async autorizar(operacion:string, contexto:ContextoSesion, adicionales:string[]=[]):Promise<ActorAutenticado> {
   if(!contexto.secretoSesion) return error(401,'Inicia sesión para continuar');
@@ -133,9 +135,9 @@ export class M4Controller {
   const [empleados,configuraciones,permisos,dependencias]=await Promise.all([
    prisma.empleado.findMany({where:{estado_laboral:'activo',cuenta_m4:null,usuario:{none:{}}},select:{rut_empleado:true,nombres:true,apellido_paterno:true}}),
    prisma.perfil.findMany({where:{activo_m4:true},select:{codigo_m4:true,perfil_nombre_perfil:true,admite_particulares:true}}),
-   prisma.permiso.findMany({where:{activo_m4:true},select:{codigo_m4:true,permiso_descripcion:true,requiere_administrador:true}}),
+   prisma.permiso.findMany({where:{activo_m4:true,codigo_m4:{not:null,notIn:['CU377']}},select:{codigo_m4:true,permiso_descripcion:true,requiere_administrador:true,activo_m4:true},orderBy:{codigo_m4:'asc'}}),
    prisma.permiso_dependencia.findMany({include:{permiso:{select:{codigo_m4:true}},requerido:{select:{codigo_m4:true}}}})]);
-  return {empleados,configuraciones,permisos,dependencias:dependencias.map(d=>({permiso:d.permiso.codigo_m4,requiere:d.requerido.codigo_m4}))};
+  return {empleados,configuraciones,permisos:permisos.map(p=>clasificarPermisoM4({codigo:p.codigo_m4!,descripcion:p.permiso_descripcion,activo:p.activo_m4,requiereAdministrador:p.requiere_administrador})),dependencias:dependencias.filter(d=>d.permiso.codigo_m4!=='CU377'&&d.requerido.codigo_m4!=='CU377').map(d=>({permiso:d.permiso.codigo_m4!,requiere:d.requerido.codigo_m4!}))};
  }
  private async validarPermisos(tx:Transaccion,codigos:string[],administrador=false) {
   const seleccion=await tx.permiso.findMany({where:{codigo_m4:{in:codigos},activo_m4:true},include:{dependencias:{include:{requerido:true}}}});
@@ -188,6 +190,29 @@ export class M4Controller {
     if(cuenta.usuario_es_administrador && perfil.codigo_m4!=='gerencia') error(409,'Retira primero el rol Administrador, respetando continuidad');
     await tx.usuario_permiso_particular.deleteMany({where:{id_usuario:id}});
     await tx.usuario.update({where:{usuario_id_usuario:id},data:{perfil_id_perfil:perfil.perfil_id_perfil,configuracion_particular:false}});
+   } else if(operacion==='guardarPermisosUsuario') {
+    const modo=texto(entrada.modo,20);
+    if(modo==='perfil') {
+     if(!actor.permisos.includes('CU62')) error(403,'Cambiar a permisos del perfil requiere autorización para cambiar configuración');
+     if(!cuenta.configuracion_particular) return {mensaje:'La cuenta ya utiliza los permisos de su perfil'};
+     await tx.usuario_permiso_particular.deleteMany({where:{id_usuario:id}});
+     await tx.usuario.update({where:{usuario_id_usuario:id},data:{configuracion_particular:false}});
+    } else if(modo==='particular') {
+     if(!cuenta.perfil?.admite_particulares || cuenta.perfil.codigo_m4==='gerencia') error(409,'Esta configuración base no admite permisos particulares');
+     if(!Array.isArray(entrada.permisos)) error(400,'La selección de permisos no es válida');
+     const finales=[...new Set((entrada.permisos as unknown[]).map(p=>texto(p)))];
+     if(!finales.length && cuenta.usuario_estado_cuenta==='activo') error(409,'Una cuenta Activa particular debe conservar permisos efectivos');
+     const actuales=permisosEfectivos(cuenta);
+     const agregados=finales.filter(p=>!actuales.includes(p));
+     const retirados=actuales.filter(p=>!finales.includes(p));
+     if((agregados.length||!cuenta.configuracion_particular)&&!actor.permisos.includes('CU63')) error(403,'Asignar permisos requiere autorización administrativa');
+     if(retirados.length&&!actor.permisos.includes('CU64')) error(403,'Retirar permisos requiere autorización administrativa');
+     if(cuenta.configuracion_particular&&!agregados.length&&!retirados.length) return {mensaje:'Los permisos particulares ya estaban actualizados'};
+     const permisos=await this.validarPermisos(tx,finales,cuenta.usuario_es_administrador||cuenta.administrador_original);
+     await tx.usuario_permiso_particular.deleteMany({where:{id_usuario:id}});
+     if(permisos.length) await tx.usuario_permiso_particular.createMany({data:permisos.map(p=>({id_usuario:id,id_permiso:p.permiso_id_permiso}))});
+     await tx.usuario.update({where:{usuario_id_usuario:id},data:{configuracion_particular:true}});
+    } else error(400,'Modo de permisos no válido');
    } else if(['asignarPermisos','retirarPermisos'].includes(operacion)) {
     if(!cuenta.perfil?.admite_particulares || cuenta.perfil.codigo_m4==='gerencia') error(409,'Esta configuración base no admite permisos particulares');
     if(!Array.isArray(entrada.permisos) || !entrada.permisos.length) error(400,'Selecciona permisos');
@@ -195,7 +220,7 @@ export class M4Controller {
     const actuales=permisosEfectivos(cuenta);
     const finales=operacion==='asignarPermisos'?[...new Set([...actuales,...elegidos])]:actuales.filter(p=>!elegidos.includes(p));
     if(!finales.length && cuenta.usuario_estado_cuenta==='activo') error(409,'Una cuenta Activa particular debe conservar permisos efectivos');
-    const permisos=await this.validarPermisos(tx,finales);
+    const permisos=await this.validarPermisos(tx,finales,cuenta.usuario_es_administrador||cuenta.administrador_original);
     await tx.usuario_permiso_particular.deleteMany({where:{id_usuario:id}});
     await tx.usuario_permiso_particular.createMany({data:permisos.map(p=>({id_usuario:id,id_permiso:p.permiso_id_permiso}))});
     await tx.usuario.update({where:{usuario_id_usuario:id},data:{configuracion_particular:true}});
