@@ -2,12 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
-const { prepararTrazabilidadOrdenCompraM11 } = require('../dist/comercial/ServicioTrazabilidadComercialM11');
+const { exigirCotejoAcreditadoM11, prepararCorrespondenciasTecnicasM11, prepararTrazabilidadOrdenCompraM11, validarCondicionesEconomicasOfertaM11 } = require('../dist/comercial/ServicioTrazabilidadComercialM11');
 
 const raiz = join(__dirname, '..');
 const leer = ruta => readFileSync(join(raiz, ruta), 'utf8');
 const detalles = [{ id_detalle_cotizacion: 11, id_cotizacion: 7 }, { id_detalle_cotizacion: 12, id_cotizacion: 7 }];
-const oferta = { productos: [
+const oferta = { moneda: 'CLP', neto: 4500, impuesto: 855, total: 5355, productos: [
   { idDetalleCotizacion: 11, idProductoComercial: 101, idVersionProducto: 1001, codigo: 'P-A', nombre: 'Puerta A', cantidad: 2, precioUnitario: 1000 },
   { idDetalleCotizacion: 12, idProductoComercial: 102, idVersionProducto: 1002, codigo: 'P-B', nombre: 'Puerta B', cantidad: 1, precioUnitario: 2500 },
 ] };
@@ -39,7 +39,7 @@ test('M11 Comercial Fase 1 · CUT452-CUT455', async t => {
   });
 
   await t.test('04 una OC multilínea conserva dos líneas y no crea una NV por línea', () => {
-    const resultado = prepararTrazabilidadOrdenCompraM11([linea(), linea({ numeroLinea: 2, idDetalleCotizacion: 12, cantidad: 1, precioUnitario: 2500 })], 7, detalles, oferta, 1);
+    const resultado = prepararTrazabilidadOrdenCompraM11([linea(), linea({ numeroLinea: 2, idDetalleCotizacion: 12, referenciaComercial: 'OC-L2', cantidad: 1, precioUnitario: 2500 })], 7, detalles, oferta, 1);
     assert.equal(resultado.estado, 'COINCIDE');
     assert.equal(resultado.lineas.length, 2);
     const controlador = leer('src/controladores/M2Controller.ts');
@@ -57,18 +57,23 @@ test('M11 Comercial Fase 1 · CUT452-CUT455', async t => {
   });
 
   await t.test('06 identidad insuficiente no inventa asociación', () => {
-    const resultado = prepararTrazabilidadOrdenCompraM11([linea({ idDetalleCotizacion: null })], 7, detalles, oferta, 1);
+    const resultado = prepararTrazabilidadOrdenCompraM11([linea({ idDetalleCotizacion: null, referenciaComercial: null })], 7, detalles, oferta, 1);
     assert.equal(resultado.estado, 'INFORMACION_INSUFICIENTE');
     assert.equal(resultado.lineas[0].idDetalleCotizacion, null);
     assert.equal(resultado.lineas[0].resultadoCotejo.identidad, null);
   });
 
-  await t.test('07 una línea acreditada puede relacionarse con múltiples unidades técnicas', () => {
-    const schema = leer('prisma/schema.prisma');
-    const controlador = leer('src/controladores/M2Controller.ts');
-    assert.match(schema, /model correspondencia_linea_oc_item_tecnico/);
-    assert.match(controlador, /ordenesTrabajo\.filter\(unidad=>unidad\.detalle===linea\.id_detalle_cotizacion\)/);
-    assert.match(controlador, /ASOCIACION_EXPLICITA_OC_COTIZACION/);
+  await t.test('07 sólo acredita unidades cuando identidad y cantidad coinciden exactamente', () => {
+    const cotejo = prepararTrazabilidadOrdenCompraM11([linea(), linea({ numeroLinea: 2, idDetalleCotizacion: 12, referenciaComercial: 'OC-L2', cantidad: 1, precioUnitario: 2500 })], 7, detalles, oferta, 1);
+    const exactas = prepararCorrespondenciasTecnicasM11(cotejo.lineas, [
+      { detalle: 11, idUnidad: 1, idOrdenTrabajo: 101 }, { detalle: 11, idUnidad: 2, idOrdenTrabajo: 102 }, { detalle: 12, idUnidad: 3, idOrdenTrabajo: 103 },
+    ]);
+    assert.equal(exactas.length, 3);
+    const ambiguas = prepararCorrespondenciasTecnicasM11(cotejo.lineas, [
+      { detalle: 11, idUnidad: 1, idOrdenTrabajo: 101 }, { detalle: 11, idUnidad: 2, idOrdenTrabajo: 102 }, { detalle: 11, idUnidad: 4, idOrdenTrabajo: 104 },
+      { detalle: 12, idUnidad: 3, idOrdenTrabajo: 103 },
+    ]);
+    assert.deepEqual(ambiguas.map(x => x.idDetalleCotizacion), [12]);
   });
 
   await t.test('08 relación ambigua o ajena se rechaza o queda no comprobada', () => {
@@ -91,5 +96,56 @@ test('M11 Comercial Fase 1 · CUT452-CUT455', async t => {
     assert.match(migration, /UNIQUE \("id_orden_compra_b2b", "numero_linea"\)/);
     assert.match(controlador, /createMany\(\{data:correspondencias,skipDuplicates:true\}\)/);
     assert.match(leer('prisma/schema.prisma'), /id_cotizacion\s+Int\s+@unique/);
+  });
+
+  await t.test('11 aceptación sin versión acreditada se rechaza antes de crear OC, NV, Proyecto u OT', () => {
+    const controlador = leer('src/controladores/M2Controller.ts');
+    const bloque = controlador.slice(controlador.indexOf('async aprobarCotizacionB2B'), controlador.indexOf('async consultarTrazabilidadComercialM11'));
+    assert.match(bloque, /Debes identificar la versión documental de la oferta aceptada/);
+    const validacion = bloque.indexOf('exigirCotejoAcreditadoM11');
+    assert.ok(validacion > 0);
+    for (const mutacion of ['orden_compra_b2b.create', 'formalizarProyectoCotizacion', 'nota_venta.create', 'crearOrdenesTrabajoCotizacion']) assert.ok(validacion < bloque.indexOf(mutacion), `${mutacion} debe ocurrir después del bloqueo`);
+  });
+
+  await t.test('12 oferta de tres líneas y OC de una sola línea no coincide', () => {
+    const tres = { productos: [...oferta.productos, { idDetalleCotizacion: 13, codigo: 'P-C', nombre: 'Puerta C', cantidad: 1, precioUnitario: 3000 }] };
+    const resultado = prepararTrazabilidadOrdenCompraM11([linea()], 7, [...detalles, { id_detalle_cotizacion: 13, id_cotizacion: 7 }], tres, 1);
+    assert.equal(resultado.estado, 'DISCREPANCIA');
+    assert.deepEqual(resultado.resumen.faltantesOferta.sort(), ['DETALLE:12', 'DETALLE:13']);
+  });
+
+  await t.test('13 línea adicional no respaldada impide formalizar', () => {
+    const resultado = prepararTrazabilidadOrdenCompraM11([linea(), linea({ numeroLinea: 2, idDetalleCotizacion: 12, referenciaComercial: 'OC-L2', cantidad: 1, precioUnitario: 2500 }), linea({ numeroLinea: 3, idDetalleCotizacion: null, referenciaComercial: 'EXTRA', cantidad: 1 })], 7, detalles, oferta, 1);
+    assert.equal(resultado.estado, 'DISCREPANCIA');
+    assert.deepEqual(resultado.resumen.lineasAdicionales, [3]);
+    assert.throws(() => exigirCotejoAcreditadoM11(resultado, validarCondicionesEconomicasOfertaM11(oferta, { moneda: 'CLP', neto: 4500, impuesto: 855, total: 5355 })), /no se formalizó/);
+  });
+
+  await t.test('14 referencias comerciales duplicadas quedan en discrepancia', () => {
+    const resultado = prepararTrazabilidadOrdenCompraM11([linea(), linea({ numeroLinea: 2, idDetalleCotizacion: 12, cantidad: 1, precioUnitario: 2500 })], 7, detalles, oferta, 1);
+    assert.equal(resultado.estado, 'DISCREPANCIA');
+    assert.ok(resultado.lineas[1].resultadoCotejo.discrepancias.some(x => x.campo === 'referencia_comercial_duplicada'));
+  });
+
+  await t.test('15 OC de dos unidades frente a cinco físicas no acredita correspondencias', () => {
+    const ofertaCinco = { productos: [{ idDetalleCotizacion: 11, codigo: 'P-A', nombre: 'Puerta A', cantidad: 5, precioUnitario: 1000 }] };
+    const resultado = prepararTrazabilidadOrdenCompraM11([linea({ cantidad: 2 })], 7, detalles, ofertaCinco, 1);
+    assert.equal(resultado.estado, 'DISCREPANCIA');
+    assert.deepEqual(prepararCorrespondenciasTecnicasM11(resultado.lineas, Array.from({ length: 5 }, (_, i) => ({ detalle: 11, idUnidad: i + 1, idOrdenTrabajo: i + 101 }))), []);
+  });
+
+  await t.test('16 una oferta anterior con importes distintos no se sustituye por valores actuales', () => {
+    const economia = validarCondicionesEconomicasOfertaM11(oferta, { moneda: 'CLP', neto: 9999, impuesto: 1900, total: 11899 });
+    assert.equal(economia.estado, 'DISCREPANCIA');
+    assert.deepEqual(economia.discrepancias.map(x => x.campo), ['neto', 'impuesto', 'total']);
+  });
+
+  await t.test('17 caso válido anterior conserva cobertura completa y no muta la versión', () => {
+    const original = structuredClone(oferta);
+    const resultado = prepararTrazabilidadOrdenCompraM11([linea(), linea({ numeroLinea: 2, idDetalleCotizacion: 12, referenciaComercial: 'OC-L2', cantidad: 1, precioUnitario: 2500 })], 7, detalles, oferta, 1);
+    const economia = validarCondicionesEconomicasOfertaM11(oferta, { moneda: 'CLP', neto: 4500, impuesto: 855, total: 5355 });
+    assert.doesNotThrow(() => exigirCotejoAcreditadoM11(resultado, economia));
+    assert.equal(resultado.estado, 'COINCIDE');
+    assert.deepEqual(oferta, original);
   });
 });
