@@ -303,6 +303,15 @@ export function compararPartidaRealM10(presupuesto: number, real: number | null,
   const desviacion = estado === 'VALIDO' ? calcularDesviacionResultadosM7(real, presupuesto) : { diferencia:null, variacionPorcentual:null };
   return { presupuesto:redondear(presupuesto), real:estado === 'VALIDO' ? real : null, ...desviacion, estado };
 }
+export function esMesFuturoPresupuestoM10(anio: number, mes: number, periodoActual = fechaNegocio().slice(0, 7)) {
+  return `${anio}-${String(mes).padStart(2, '0')}` > periodoActual;
+}
+export function estadoRealPresupuestoM10(tienePermiso: boolean, esFuturo: boolean, real: unknown, fuenteDisponible = true): 'VALIDO'|'SIN_PERMISO'|'DATOS_INSUFICIENTES'|'NO_APLICA' {
+  if (!tienePermiso) return 'SIN_PERMISO';
+  if (esFuturo) return 'NO_APLICA';
+  if (!fuenteDisponible) return 'DATOS_INSUFICIENTES';
+  return typeof real === 'number' ? 'VALIDO' : 'DATOS_INSUFICIENTES';
+}
 export function calcularFlujoRealM7(movimientos: Array<{ monto: number; naturaleza: string; ajuste?: boolean }>) {
   const total = { ingresosReales: 0, egresosReales: 0, ajustesEntrada: 0, ajustesSalida: 0 };
   for (const movimiento of movimientos) {
@@ -991,10 +1000,11 @@ export class M7Controller {
       const real: any = reales.get(mes.mes) || {};
       const resultados = mes.resultados || {}; const flujo = mes.flujoCaja || {};
       const presupuestoFlujo = [...CATEGORIAS_FLUJO_M10_ENTRADA].reduce((total,categoria)=>total+Number(flujo[categoria]||0),0)-CATEGORIAS_FLUJO_M10_SALIDA.reduce((total,categoria)=>total+Number(flujo[categoria]||0),0);
-      const estadoVentas = !puedeVentas?'SIN_PERMISO':typeof real.ventasNetas==='number'?'VALIDO':'DATOS_INSUFICIENTES';
-      const estadoCostos = !puedeCostos?'SIN_PERMISO':typeof real.costosDirectos==='number'?'VALIDO':'DATOS_INSUFICIENTES';
-      const estadoGastos = !puedeCostos?'SIN_PERMISO':'DATOS_INSUFICIENTES';
-      const estadoFlujo = !puedeFlujo?'SIN_PERMISO':typeof real.flujoNeto==='number'?'VALIDO':'DATOS_INSUFICIENTES';
+      const esFuturo = esMesFuturoPresupuestoM10(presupuesto.anio, mes.mes);
+      const estadoVentas = estadoRealPresupuestoM10(puedeVentas,esFuturo,real.ventasNetas);
+      const estadoCostos = estadoRealPresupuestoM10(puedeCostos,esFuturo,real.costosDirectos);
+      const estadoGastos = estadoRealPresupuestoM10(puedeCostos,esFuturo,null,false);
+      const estadoFlujo = estadoRealPresupuestoM10(puedeFlujo,esFuturo,real.flujoNeto);
       return { mes:mes.mes, resultados:{ ventasNetas:compararPartidaRealM10(Number(resultados.VENTAS_NETAS||0),typeof real.ventasNetas==='number'?real.ventasNetas:null,estadoVentas), costosDirectos:compararPartidaRealM10(Number(resultados.COSTOS_DIRECTOS||0),typeof real.costosDirectos==='number'?real.costosDirectos:null,estadoCostos), gastosOperacionales:compararPartidaRealM10(Number(resultados.GASTOS_OPERACIONALES||0),null,estadoGastos) }, flujoCaja:compararPartidaRealM10(redondear(presupuestoFlujo),typeof real.flujoNeto==='number'?real.flujoNeto:null,estadoFlujo) };
     });
     return { estado:puedeConsultarAlgunaFuente?'PARCIALMENTE_DISPONIBLE':'SIN_PERMISO', presupuesto:{id:presupuesto.id,anio:presupuesto.anio,moneda:presupuesto.moneda,version:numeroVersion}, meses, real:{origen:'Fuentes owner consultadas exclusivamente con permisos efectivos del actor',congelado:false} };

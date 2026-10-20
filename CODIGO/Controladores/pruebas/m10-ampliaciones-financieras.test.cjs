@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const ExcelJS = require('exceljs');
-const { resumirVentasHistoricasM7, resolverEbitdaSeguroM10, compararPartidaRealM10 } = require('../dist/controladores/M7Controller');
+const { resumirVentasHistoricasM7, resolverEbitdaSeguroM10, compararPartidaRealM10, esMesFuturoPresupuestoM10, estadoRealPresupuestoM10 } = require('../dist/controladores/M7Controller');
 const { crearInformeVentasExcelM7, neutralizarFormulaExcelM10 } = require('../dist/m7/informeVentasExcel');
 const { validarPresupuestoManualM10, compararVersionesPresupuestoM10 } = require('../dist/m10/presupuestoManualM10');
 const { operacionesPermiso, permisosDeOperacion } = require('../dist/validaciones/permisos');
@@ -68,12 +68,25 @@ test('CU451 exige un plan anual completo y conserva moneda, resultados y flujo s
   assert.throws(() => validarPresupuestoManualM10({ anio:2027, meses:negativos }), /no negativo/);
 });
 
-test('CU451 compara original y revisión sin alterar ninguna versión', () => {
-  const original={detalles:[{mes:1,tipo:'RESULTADOS',categoria:'VENTAS_NETAS',monto:100}]};
-  const revision={detalles:[{mes:1,tipo:'RESULTADOS',categoria:'VENTAS_NETAS',monto:125}]};
+test('CU451 compara original y revisión con diferencias firmadas sin alterar ninguna versión', () => {
+  const original={detalles:[{mes:1,tipo:'RESULTADOS',categoria:'VENTAS_NETAS',monto:100},{mes:1,tipo:'RESULTADOS',categoria:'COSTOS_DIRECTOS',monto:200},{mes:2,tipo:'FLUJO_CAJA',categoria:'INGRESOS_OPERACIONALES',monto:0}]};
+  const revision={detalles:[{mes:1,tipo:'RESULTADOS',categoria:'VENTAS_NETAS',monto:125},{mes:1,tipo:'RESULTADOS',categoria:'COSTOS_DIRECTOS',monto:150},{mes:2,tipo:'FLUJO_CAJA',categoria:'INGRESOS_OPERACIONALES',monto:50}]};
   const antes=JSON.stringify(original); const diferencias=compararVersionesPresupuestoM10(original,revision);
-  assert.deepEqual(diferencias[0],{mes:1,tipo:'RESULTADOS',categoria:'VENTAS_NETAS',versionA:100,versionB:125,diferencia:25,variacionPorcentual:25});
+  assert.deepEqual(diferencias.find(item=>item.categoria==='VENTAS_NETAS'),{mes:1,tipo:'RESULTADOS',categoria:'VENTAS_NETAS',versionA:100,versionB:125,diferencia:25,variacionPorcentual:25});
+  assert.deepEqual(diferencias.find(item=>item.categoria==='COSTOS_DIRECTOS'),{mes:1,tipo:'RESULTADOS',categoria:'COSTOS_DIRECTOS',versionA:200,versionB:150,diferencia:-50,variacionPorcentual:-25});
+  assert.deepEqual(diferencias.find(item=>item.categoria==='INGRESOS_OPERACIONALES'),{mes:2,tipo:'FLUJO_CAJA',categoria:'INGRESOS_OPERACIONALES',versionA:0,versionB:50,diferencia:50,variacionPorcentual:null});
   assert.equal(JSON.stringify(original),antes);
+  assert.equal(JSON.stringify(revision),JSON.stringify({detalles:[{mes:1,tipo:'RESULTADOS',categoria:'VENTAS_NETAS',monto:125},{mes:1,tipo:'RESULTADOS',categoria:'COSTOS_DIRECTOS',monto:150},{mes:2,tipo:'FLUJO_CAJA',categoria:'INGRESOS_OPERACIONALES',monto:50}]}));
+});
+
+test('CU451 no convierte meses futuros ni presupuestos de años futuros en reales cero', () => {
+  assert.equal(esMesFuturoPresupuestoM10(2026,10,'2026-10'),false);
+  assert.equal(esMesFuturoPresupuestoM10(2026,11,'2026-10'),true);
+  assert.equal(esMesFuturoPresupuestoM10(2027,1,'2026-10'),true);
+  assert.equal(estadoRealPresupuestoM10(true,true,0),'NO_APLICA');
+  assert.deepEqual(compararPartidaRealM10(500,0,estadoRealPresupuestoM10(true,true,0)),{presupuesto:500,real:null,diferencia:null,variacionPorcentual:null,estado:'NO_APLICA'});
+  assert.equal(estadoRealPresupuestoM10(false,true,999),'SIN_PERMISO');
+  assert.deepEqual(compararPartidaRealM10(500,999,estadoRealPresupuestoM10(false,true,999)),{presupuesto:500,real:null,diferencia:null,variacionPorcentual:null,estado:'SIN_PERMISO'});
 });
 
 test('M4 registra capacidades humanas M10 y no convierte CUT448/CUT450 en permisos', () => {
