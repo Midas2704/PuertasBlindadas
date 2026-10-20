@@ -118,7 +118,7 @@ const App: React.FC = () => {
           <Route path="dashboard-m7/centro-atencion" element={<Protegido permiso="CU216"><CentroAtencionM7 /></Protegido>} />
           <Route path="dashboard-m7/cotizaciones-pendientes" element={<Protegido permiso="CU217"><CotizacionesPendientesM7 /></Protegido>} />
           <Route path="dashboard-m7/clientes/:id" element={<Protegido permiso="CU221"><ContextoClienteM7 /></Protegido>} />
-          <Route path="dashboard-m7/ventas" element={<Protegido permiso="CU446"><AnalisisVentasM7 /></Protegido>} />
+          <Route path="dashboard-m7/ventas" element={<Protegido permiso={['CU218','CU219','CU220']}><AnalisisVentasM7 /></Protegido>} />
           <Route path="dashboard-m7/cuentas-cobrar" element={<Protegido permiso={['CU222','CU223','CU224','CU225']}><CuentasCobrarM7 /></Protegido>} />
           <Route path="dashboard-m7/cuentas-pagar" element={<Protegido permiso={['CU226','CU227']}><CuentasPagarM7 /></Protegido>} />
           <Route path="dashboard-m7/liquidez" element={<Protegido permiso={['CU228','CU229','CU230','CU231']}><LiquidezM7 /></Protegido>} />
@@ -126,7 +126,7 @@ const App: React.FC = () => {
           <Route path="dashboard-m7/margen-proyectos" element={<Protegido permiso={['CU233','CU234','CU235']}><MargenProyectosM7 /></Protegido>} />
           <Route path="dashboard-m7/proyectos/exposicion" element={<Protegido permiso="CU236"><ExposicionProyectosM7 /></Protegido>} />
           <Route path="dashboard-m7/proyectos/:id" element={<Protegido permiso="CU237"><ContextoProyectoM7 /></Protegido>} />
-          <Route path="dashboard-m7/resumenes" element={<Protegido permiso={['CU449','CU239']}><ResumenesM7 /></Protegido>} />
+          <Route path="dashboard-m7/resumenes" element={<Protegido permiso={['CU238','CU449','CU239']}><ResumenesM7 /></Protegido>} />
           <Route path="dashboard-m7/presupuestos" element={<Protegido permiso="CU451"><PresupuestoManualM10 /></Protegido>} />
           <Route path="dashboard-m7/operacion" element={<Protegido permiso={['CU242','CU247','CU248','CU250','CU252','CU253']}><OperacionCostosM7 /></Protegido>} />
           <Route path="dashboard-m7/control" element={<Protegido permiso={['CU228','CU232','CU240','CU241','CU243','CU244','CU249','CU251','CU254','CU255','CU256','CU257','CU258']}><DeltaControladoM7 /></Protegido>} />

@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const ExcelJS = require('exceljs');
-const { resumirVentasHistoricasM7, resolverEbitdaSeguroM10 } = require('../dist/controladores/M7Controller');
+const { resumirVentasHistoricasM7, resolverEbitdaSeguroM10, compararPartidaRealM10 } = require('../dist/controladores/M7Controller');
 const { crearInformeVentasExcelM7, neutralizarFormulaExcelM10 } = require('../dist/m7/informeVentasExcel');
 const { validarPresupuestoManualM10, compararVersionesPresupuestoM10 } = require('../dist/m10/presupuestoManualM10');
-const { operacionesPermiso } = require('../dist/validaciones/permisos');
+const { operacionesPermiso, permisosDeOperacion } = require('../dist/validaciones/permisos');
 
 const raiz = archivo => readFileSync(resolve(archivo), 'utf8');
 const mesesPresupuesto = () => Array.from({ length: 12 }, (_, indice) => ({
@@ -51,17 +51,19 @@ test('CU447 y CUT448 mantienen poblaciones separadas y neutralizan fórmulas sin
   assert.match(salida.nombre, /^Cotizaciones_2026_10\.xlsx$/i);
 });
 
-test('CUT450 sólo calcula EBITDA con cobertura completa y base cero no produce porcentaje', () => {
+test('CUT450 mantiene el gate económico cerrado por defecto y sólo calcula con validación explícita', () => {
   const base = { ventasNetas:1000, costosDirectos:400, gastosOperacionales:200, ventasExcluidasSinFx:0, costosExcluidosSinFx:0, coberturaCostosCompleta:true, clasificacionGastosCompleta:true, clasificacionExclusionesCompleta:true, controlDuplicadosCompleto:true, segmento:'TODOS' };
-  const valido = resolverEbitdaSeguroM10(base); assert.equal(valido.estado, 'VALIDO'); assert.equal(valido.monto, 400); assert.equal(valido.porcentaje, 40);
-  const parcial = resolverEbitdaSeguroM10({ ...base, controlDuplicadosCompleto:false }); assert.equal(parcial.calculable, false); assert.equal(parcial.monto, null);
-  const cero = resolverEbitdaSeguroM10({ ...base, ventasNetas:0 }); assert.equal(cero.calculable, true); assert.equal(cero.porcentaje, null);
+  const cerrado = resolverEbitdaSeguroM10(base); assert.equal(cerrado.estado, 'CONFIGURACION_PENDIENTE'); assert.equal(cerrado.calculable, false); assert.equal(cerrado.monto, null);
+  const valido = resolverEbitdaSeguroM10({ ...base, contratoEconomicoValidado:true }); assert.equal(valido.estado, 'VALIDO'); assert.equal(valido.monto, 400); assert.equal(valido.porcentaje, 40);
+  const parcial = resolverEbitdaSeguroM10({ ...base, controlDuplicadosCompleto:false, contratoEconomicoValidado:true }); assert.equal(parcial.calculable, false); assert.equal(parcial.monto, null);
+  const cero = resolverEbitdaSeguroM10({ ...base, ventasNetas:0, contratoEconomicoValidado:true }); assert.equal(cero.calculable, true); assert.equal(cero.porcentaje, null);
 });
 
 test('CU451 exige un plan anual completo y conserva moneda, resultados y flujo separados', () => {
   const validado = validarPresupuestoManualM10({ anio:2027, ambito:'GENERAL', moneda:'CLP', meses:mesesPresupuesto() });
   assert.equal(validado.partidas.length, 108); assert.equal(validado.partidas.filter(item=>item.tipo==='RESULTADOS').length, 36); assert.equal(validado.partidas.filter(item=>item.tipo==='FLUJO_CAJA').length, 72);
   assert.throws(() => validarPresupuestoManualM10({ anio:2027, meses:mesesPresupuesto().slice(0, 11) }), /12 meses/);
+  assert.throws(() => validarPresupuestoManualM10({ anio:2027, moneda:'USD', meses:mesesPresupuesto() }), /contrato FX/);
   const negativos = mesesPresupuesto(); negativos[0].resultados.VENTAS_NETAS = -1;
   assert.throws(() => validarPresupuestoManualM10({ anio:2027, meses:negativos }), /no negativo/);
 });
@@ -76,10 +78,20 @@ test('CU451 compara original y revisión sin alterar ninguna versión', () => {
 
 test('M4 registra capacidades humanas M10 y no convierte CUT448/CUT450 en permisos', () => {
   assert.equal(operacionesPermiso.consultarVentasAmpliadasM10,'CU446'); assert.equal(operacionesPermiso.descargarExcelDashboardM7,'CU447');
-  assert.equal(operacionesPermiso.consultarResumenResultadosM7,'CU449'); assert.equal(operacionesPermiso.crearPresupuestoM10,'CU451');
+  assert.equal(operacionesPermiso.consultarAnalisisVentasM7,'CU219'); assert.deepEqual(permisosDeOperacion('consultarAnalisisVentasM7'),['CU219','CU218','CU220']);
+  assert.equal(operacionesPermiso.consultarResumenResultadosM7,'CU238'); assert.deepEqual(permisosDeOperacion('consultarResumenResultadosM7'),['CU238','CU449']); assert.equal(operacionesPermiso.crearPresupuestoM10,'CU451');
   const migracion=raiz('prisma/migrations/072_m10_ampliaciones_financieras/migration.sql');
   for(const codigo of ['CU446','CU447','CU449','CU451']) assert.match(migracion,new RegExp(codigo));
   assert.doesNotMatch(migracion,/\('CUT448'|\('CUT450'/); assert.match(migracion,/CU377 permanece excluido/);
+});
+
+test('CU451 usa permisos owner reales y representa cada fuente sin filtrar datos', () => {
+  const fachada=raiz('src/controladores/C_Finanzas.ts'); const controlador=raiz('src/controladores/M7Controller.ts');
+  assert.match(fachada,/compararPresupuestoRealM10\([^\n]+actor\.permisos/);
+  assert.doesNotMatch(controlador,/\['CU219','CU230'\]/);
+  assert.match(controlador,/SIN_PERMISO/); assert.match(controlador,/DATOS_INSUFICIENTES/);
+  assert.deepEqual(compararPartidaRealM10(100,null,'SIN_PERMISO'),{presupuesto:100,real:null,diferencia:null,variacionPorcentual:null,estado:'SIN_PERMISO'});
+  assert.deepEqual(compararPartidaRealM10(100,125,'VALIDO'),{presupuesto:100,real:125,diferencia:25,variacionPorcentual:25,estado:'VALIDO'});
 });
 
 test('M9 audita sólo exportación y mutaciones presupuestarias relevantes', () => {
@@ -98,6 +110,6 @@ test('migración 072 es aditiva, inmutable y protege concurrencia e históricos'
 
 test('frontend integra CU446, CU447, CU449 y CU451 sin segundo Dashboard', () => {
   const app=raiz('../Vistas/src/App.tsx'); const ventas=raiz('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'); const presupuesto=raiz('../Vistas/src/views/DashboardM7/PresupuestoManualM10.tsx');
-  assert.match(app,/permiso="CU446"/); assert.match(app,/permiso=\{\['CU449','CU239'\]\}/); assert.match(app,/permiso="CU451"/);
-  assert.match(ventas,/CU447/); assert.match(ventas,/Ventas.*Cotizaciones/s); assert.match(presupuesto,/Presupuesto manual versionado/); assert.match(presupuesto,/Original vs revisión vigente/);
+  assert.match(app,/permiso=\{\['CU218','CU219','CU220'\]\}/); assert.match(app,/permiso=\{\['CU238','CU449','CU239'\]\}/); assert.match(app,/permiso="CU451"/);
+  assert.match(ventas,/CU447/); assert.match(ventas,/Ventas.*Cotizaciones/s); assert.match(presupuesto,/Presupuesto manual versionado/); assert.match(presupuesto,/Comparar versiones elegidas/); assert.match(presupuesto,/sólo lectura/);
 });

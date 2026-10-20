@@ -23,4 +23,15 @@ describe('PresupuestoManualM10', () => {
     const cuerpo = JSON.parse(String(guardado?.opciones?.body));
     expect(cuerpo.meses).toHaveLength(12); expect(cuerpo.moneda).toBe('CLP'); expect(cuerpo.ambito).toBe('GENERAL');
   });
+
+  it('recupera una versión histórica en sólo lectura y permite elegir ambas versiones para comparar', async () => {
+    const meses=(monto:number)=>Array.from({length:12},(_,indice)=>({mes:indice+1,resultados:{VENTAS_NETAS:monto,COSTOS_DIRECTOS:0,GASTOS_OPERACIONALES:0},flujoCaja:{INGRESOS_OPERACIONALES:0,OTROS_INGRESOS:0,PROVEEDORES:0,REMUNERACIONES:0,IMPUESTOS:0,OTROS_EGRESOS:0}}));
+    vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({estado:'VALIDO',presupuestos:[{id:'1',anio:2026,ambito:'GENERAL',moneda:'CLP',revision:2,versiones:[{numero:1,tipo:'ORIGINAL',creadoEn:'2026-01-01',meses:meses(100)},{numero:2,tipo:'REVISION',creadoEn:'2026-02-01',meses:meses(200)}]}]}),{status:200,headers:{'Content-Type':'application/json'}})));
+    render(<MemoryRouter><PresupuestoManualM10/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button',{name:/ORIGINAL 1/}));
+    expect(screen.getByText(/sólo lectura/)).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Volver a revisión vigente'})).toBeInTheDocument();
+    expect(screen.getByLabelText('Enero VENTAS_NETAS')).toBeDisabled();
+    expect(screen.getAllByRole('combobox')).toHaveLength(2);
+  });
 });

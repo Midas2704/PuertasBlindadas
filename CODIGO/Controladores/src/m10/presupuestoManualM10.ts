@@ -15,6 +15,7 @@ export function validarPresupuestoManualM10(entrada:Record<string,unknown>) {
   const anio=entero(entrada.anio,'Ano'); if(anio<2000||anio>2200) throw new ErrorAplicacion(400,'Ano fuera de rango');
   const ambito=String(entrada.ambito||'GENERAL').trim().toUpperCase(); if(!/^[A-Z0-9_]{1,40}$/.test(ambito)) throw new ErrorAplicacion(400,'Ambito invalido');
   const moneda=String(entrada.moneda||'CLP').trim().toUpperCase(); if(!/^[A-Z]{3,10}$/.test(moneda)) throw new ErrorAplicacion(400,'Moneda invalida');
+  if(moneda!=='CLP') throw new ErrorAplicacion(400,'El presupuesto M10 se mantiene en CLP hasta contar con un contrato FX presupuestario validado');
   const revisionEsperada=entrada.revisionEsperada===undefined?null:entero(entrada.revisionEsperada,'Revision esperada');
   const motivo=String(entrada.motivo||'').trim(); if(motivo.length>1000) throw new ErrorAplicacion(400,'El motivo supera 1000 caracteres');
   if(!Array.isArray(entrada.meses)||entrada.meses.length!==12) throw new ErrorAplicacion(400,'El presupuesto debe contener exactamente los 12 meses');

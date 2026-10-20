@@ -283,8 +283,9 @@ export function evaluarCoberturaEstadoResultadosM7(entrada: {
   const calculable = segmento === 'TODOS' && Object.values(partidas).every(partida => partida.estado === 'VALIDO');
   return { estado: calculable ? 'VALIDO' as const : 'DATOS_INSUFICIENTES' as const, calculable, partidas, motivo: calculable ? 'Cobertura completa y conciliada para el período' : segmento !== 'TODOS' ? 'Los costos y gastos no son segmentables con la cobertura actual' : 'Falta cobertura completa de gastos operacionales, exclusiones EBITDA y control transversal de duplicados' };
 }
-export function resolverEbitdaSeguroM10(entrada: Parameters<typeof evaluarCoberturaEstadoResultadosM7>[0]) {
+export function resolverEbitdaSeguroM10(entrada: Parameters<typeof evaluarCoberturaEstadoResultadosM7>[0] & { contratoEconomicoValidado?: boolean }) {
   const cobertura=evaluarCoberturaEstadoResultadosM7(entrada);
+  if(entrada.contratoEconomicoValidado!==true) return {estado:'CONFIGURACION_PENDIENTE' as const,calculable:false,monto:null,porcentaje:null,motivo:'Contrato económico EBITDA pendiente de validación empresarial',cobertura:cobertura.partidas};
   if(!cobertura.calculable) return {estado:cobertura.estado,calculable:false,monto:null,porcentaje:null,motivo:cobertura.motivo,cobertura:cobertura.partidas};
   const calculado=calcularEstadoResultadosM7({ventasNetas:entrada.ventasNetas,costoVenta:entrada.costosDirectos,gastosOperacionales:entrada.gastosOperacionales});
   return {estado:'VALIDO' as const,calculable:true,monto:calculado.ebitdaMonto,porcentaje:calculado.ebitdaPorcentaje,motivo:cobertura.motivo,cobertura:cobertura.partidas};
@@ -297,6 +298,10 @@ export function calcularPresupuestoResultadosM7(partidas: { ventasNetas: number 
 }
 export function calcularDesviacionResultadosM7(real: number | null, presupuesto: number | null) {
   return { diferencia: real === null || presupuesto === null ? null : redondear(real - presupuesto), variacionPorcentual: real === null || presupuesto === null || presupuesto === 0 ? null : redondear((real - presupuesto) / Math.abs(presupuesto) * 100) };
+}
+export function compararPartidaRealM10(presupuesto: number, real: number | null, estado: 'VALIDO'|'SIN_PERMISO'|'DATOS_INSUFICIENTES'|'NO_APLICA') {
+  const desviacion = estado === 'VALIDO' ? calcularDesviacionResultadosM7(real, presupuesto) : { diferencia:null, variacionPorcentual:null };
+  return { presupuesto:redondear(presupuesto), real:estado === 'VALIDO' ? real : null, ...desviacion, estado };
 }
 export function calcularFlujoRealM7(movimientos: Array<{ monto: number; naturaleza: string; ajuste?: boolean }>) {
   const total = { ingresosReales: 0, egresosReales: 0, ajustesEntrada: 0, ajustesSalida: 0 };
@@ -972,20 +977,27 @@ export class M7Controller {
     return this.presupuestoManualM10.guardar(entrada, actorId, id);
   }
 
-  async compararPresupuestoRealM10(id: bigint, consulta: Consulta) {
+  async compararPresupuestoRealM10(id: bigint, consulta: Consulta, permisos: string[]) {
     const datos = await this.presupuestoManualM10.consultar({ id: id.toString() }) as any;
     const presupuesto = datos.presupuestos?.[0]; if (!presupuesto) throw new ErrorAplicacion(404, 'Presupuesto no encontrado');
     const numeroVersion = consulta.version === undefined ? presupuesto.revision : Number(consulta.version);
     const version = presupuesto.versiones.find((item: any) => item.numero === numeroVersion); if (!version) throw new ErrorAplicacion(404, 'Version de presupuesto no encontrada');
-    const historico = await this.consultarHistoricoPanelGeneral({ anio: presupuesto.anio, mes: 12, meses: 12, segmento: 'TODOS' }, ['CU219','CU230']);
+    if(presupuesto.moneda!=='CLP') return { estado:'NO_APLICA', presupuesto:{id:presupuesto.id,anio:presupuesto.anio,moneda:presupuesto.moneda,version:numeroVersion}, meses:[], motivo:'La comparación real disponible está consolidada en CLP y no existe contrato FX presupuestario validado', real:{origen:'Fuentes owner',congelado:false} };
+    const puedeVentas=permisos.includes('CU219'); const puedeCostos=permisos.includes('CU238'); const puedeFlujo=permisos.includes('CU230');
+    const puedeConsultarAlgunaFuente=puedeVentas||puedeCostos||puedeFlujo;
+    const historico = puedeConsultarAlgunaFuente ? await this.consultarHistoricoPanelGeneral({ anio: presupuesto.anio, mes: 12, meses: 12, segmento: 'TODOS' }, permisos) : {meses:[]};
     const reales = new Map((historico.meses || []).map((mes: any) => [Number(String(mes.periodo).slice(5,7)), mes]));
     const meses = version.meses.map((mes: any) => {
       const real: any = reales.get(mes.mes) || {};
       const resultados = mes.resultados || {}; const flujo = mes.flujoCaja || {};
       const presupuestoFlujo = [...CATEGORIAS_FLUJO_M10_ENTRADA].reduce((total,categoria)=>total+Number(flujo[categoria]||0),0)-CATEGORIAS_FLUJO_M10_SALIDA.reduce((total,categoria)=>total+Number(flujo[categoria]||0),0);
-      return { mes:mes.mes, resultados:{ presupuestoVentasNetas:Number(resultados.VENTAS_NETAS||0), realVentasNetas:typeof real.ventasNetas==='number'?real.ventasNetas:null, ...calcularDesviacionResultadosM7(typeof real.ventasNetas==='number'?real.ventasNetas:null,Number(resultados.VENTAS_NETAS||0)) }, flujoCaja:{ presupuesto:redondear(presupuestoFlujo), real:typeof real.flujoNeto==='number'?real.flujoNeto:null, ...calcularDesviacionResultadosM7(typeof real.flujoNeto==='number'?real.flujoNeto:null,redondear(presupuestoFlujo)) } };
+      const estadoVentas = !puedeVentas?'SIN_PERMISO':typeof real.ventasNetas==='number'?'VALIDO':'DATOS_INSUFICIENTES';
+      const estadoCostos = !puedeCostos?'SIN_PERMISO':typeof real.costosDirectos==='number'?'VALIDO':'DATOS_INSUFICIENTES';
+      const estadoGastos = !puedeCostos?'SIN_PERMISO':'DATOS_INSUFICIENTES';
+      const estadoFlujo = !puedeFlujo?'SIN_PERMISO':typeof real.flujoNeto==='number'?'VALIDO':'DATOS_INSUFICIENTES';
+      return { mes:mes.mes, resultados:{ ventasNetas:compararPartidaRealM10(Number(resultados.VENTAS_NETAS||0),typeof real.ventasNetas==='number'?real.ventasNetas:null,estadoVentas), costosDirectos:compararPartidaRealM10(Number(resultados.COSTOS_DIRECTOS||0),typeof real.costosDirectos==='number'?real.costosDirectos:null,estadoCostos), gastosOperacionales:compararPartidaRealM10(Number(resultados.GASTOS_OPERACIONALES||0),null,estadoGastos) }, flujoCaja:compararPartidaRealM10(redondear(presupuestoFlujo),typeof real.flujoNeto==='number'?real.flujoNeto:null,estadoFlujo) };
     });
-    return { estado:'VALIDO', presupuesto:{id:presupuesto.id,anio:presupuesto.anio,moneda:presupuesto.moneda,version:numeroVersion}, meses, real:{origen:'Fuentes owner consultadas al momento de la comparacion',congelado:false} };
+    return { estado:puedeConsultarAlgunaFuente?'PARCIALMENTE_DISPONIBLE':'SIN_PERMISO', presupuesto:{id:presupuesto.id,anio:presupuesto.anio,moneda:presupuesto.moneda,version:numeroVersion}, meses, real:{origen:'Fuentes owner consultadas exclusivamente con permisos efectivos del actor',congelado:false} };
   }
 
   async compararVersionesPresupuestoM10(id: bigint, consulta: Consulta) {
@@ -1297,8 +1309,8 @@ export class M7Controller {
     const salida: Record<string, unknown> = { periodo: datos.periodo, segmento: datos.segmento, estado: datos.estado };
     if (permisos.includes('CU218')) for (const clave of ['conversion', 'conversionSegmentos']) salida[clave] = datos[clave];
     if (permisos.includes('CU219')) for (const clave of ['montoNeto', 'cantidad', 'ticketMedio', 'evolucion', 'comparacion', 'granularidad', 'serieTemporal']) salida[clave] = datos[clave];
-    if (permisos.includes('CU219') && !consulta.desde && !consulta.hasta) {
-      const historico = await this.consultarHistoricoPanelGeneral({ ...consulta, meses: 24 }, ['CU218', 'CU219', 'CU220']);
+    if (permisos.includes('CU446') && permisos.includes('CU219') && !consulta.desde && !consulta.hasta) {
+      const historico = await this.consultarHistoricoPanelGeneral({ ...consulta, meses: 24 }, permisos);
       salida.resumenTemporal = historico.resumenVentas;
     }
     if (permisos.includes('CU220')) for (const clave of ['clientes', 'tiposCliente', 'concentracionClientes', 'productos', 'productosVendidos', 'ventasPorFamilia', 'participacionSegmentos', 'brechaTaxonomiaB2B']) salida[clave] = datos[clave];
@@ -1950,7 +1962,7 @@ export class M7Controller {
     } catch { return { estado: 'FUENTE_NO_DISPONIBLE' as const, ordenesPendientes: [] }; }
   }
 
-  async consultarResumenResultados(consulta: Consulta) {
+  async consultarResumenResultados(consulta: Consulta, permisos: string[] = []) {
     const periodo = resolverPeriodoM7(consulta);
     const segmento = resolverSegmentoComercialM7(consulta.segmento);
     const consultaGeneral = { ...consulta, segmento };
@@ -1965,7 +1977,7 @@ export class M7Controller {
       this.consultarProyeccionesM7({ ...consulta, tipo: 'ESTADO_RESULTADOS' }),
       this.consultarProyeccionesM7({ desde: `${anioPresupuesto}-01-01`, hasta: `${anioPresupuesto}-12-31`, tipo: 'ESTADO_RESULTADOS' }),
       this.consultarHistoricoPanelGeneral({ anio: anioPresupuesto, mes: 12, meses: 12, segmento }, ['CU219', 'CU238']),
-      this.presupuestoManualM10.consultar({ anio: anioPresupuesto }),
+      permisos.includes('CU449') ? this.presupuestoManualM10.consultar({ anio: anioPresupuesto }) : Promise.resolve({estado:'SIN_PERMISO',presupuestos:[]}),
     ]);
     const ingresos = (ventas as any).montoNeto?.valor?.porMoneda as Array<{ moneda: string; monto: number }> | undefined;
     const costos = sumarPorMoneda(((margen as any).proyectos || []).flatMap((proyecto: any) => (proyecto.desgloseCostos || []).map((costo: any) => ({ moneda: costo.moneda, monto: costo.monto }))));
@@ -2045,10 +2057,10 @@ export class M7Controller {
       costosDirectos: costos.length ? indicador('VALIDO', costos, 'Costos directamente atribuidos a proyectos, sin prorrateos') : indicador('DATOS_INSUFICIENTES', null, 'No hay costos directos reconstruibles; no se reemplazan por cero'),
       gastosRegistrados: indicador('DATOS_INSUFICIENTES', null, 'No existe una fuente estructurada completa que permita separar gastos operacionales netos del período sin duplicar costos directos o pagos de caja'),
       coberturaEstadoResultados: indicador(coberturaEstadoResultados.estado, { ...coberturaEstadoResultados, matrizFuentes: matrizCoberturaFuentesEerrM7 }, 'Cobertura técnica agregada; no expone documentos, proveedores, empleados ni información tributaria individual'),
-      ebitda: indicador(ebitdaSeguro.estado, ebitdaSeguro, ebitdaSeguro.motivo),
+      ...(permisos.includes('CU449') ? { ebitda: indicador(ebitdaSeguro.estado, ebitdaSeguro, ebitdaSeguro.motivo) } : {}),
       resultadoGerencial: resultado.length ? indicador('VALIDO', resultado, 'Diferencia gerencial entre ingresos y costos directos comparables por moneda') : indicador('DATOS_INSUFICIENTES', null, 'Faltan partidas comparables para derivar un resultado'),
       presupuestoResultados: indicador(presupuestoAnualDato.estado, presupuestoResultados, 'Presupuesto económico mensual en CLP; no se mezcla con flujo de caja, no prorratea rangos parciales y no completa meses ausentes con cero'),
-      presupuestoManual: indicador((presupuestoManual as any).estado, presupuestoManual, 'Presupuesto manual anual versionado; el real se consulta dinámicamente y no se congela en sus revisiones'),
+      ...(permisos.includes('CU449') ? { presupuestoManual: indicador((presupuestoManual as any).estado, presupuestoManual, 'Presupuesto manual anual versionado; el real se consulta dinámicamente y no se congela en sus revisiones') } : {}),
       iva,
       devengado: indicador('FUENTE_NO_DISPONIBLE', null, 'DEVENGADO: FUENTE/DEFINICIÓN PENDIENTE; no se deriva de ventas, OT ni proyectos'),
       cobertura: indicador('DATOS_INSUFICIENTES', { completa: false, incluye: ['ventas definitivas netas', 'costos de proyecto atribuibles', 'mano de obra atribuible validada'], noDisponibles: ['gastos operacionales clasificados sin duplicación', 'devengado'], noIncluyeEbitda: ['intereses', 'impuestos', 'depreciaciones', 'amortizaciones'], ventasExcluidasSinConversion: ventasExcluidasSinFx, costosExcluidosSinConversion: estadoResultados.costosExcluidosSinConversion }, 'Síntesis gerencial parcial; no es un Estado de Resultados contable oficial. Los egresos de caja no se usan como gastos.'),

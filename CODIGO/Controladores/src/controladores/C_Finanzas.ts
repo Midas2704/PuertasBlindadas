@@ -663,7 +663,7 @@ export class C_Finanzas {
       case 'consultarPresupuestosM10': return this.m7.consultarPresupuestosM10(solicitud.consulta || {});
       case 'crearPresupuestoM10': return this.m7.guardarPresupuestoM10(cuerpo, actor.id);
       case 'revisarPresupuestoM10': return this.m7.guardarPresupuestoM10(cuerpo, actor.id, BigInt(identificador(parametros.id)));
-      case 'compararPresupuestoRealM10': return this.m7.compararPresupuestoRealM10(BigInt(identificador(parametros.id)), solicitud.consulta || {});
+      case 'compararPresupuestoRealM10': return this.m7.compararPresupuestoRealM10(BigInt(identificador(parametros.id)), solicitud.consulta || {}, actor.permisos);
       case 'compararVersionesPresupuestoM10': return this.m7.compararVersionesPresupuestoM10(BigInt(identificador(parametros.id)), solicitud.consulta || {});
       case 'consultarRiesgoDeficitM7': return this.m7.consultarRiesgoDeficit(solicitud.consulta || {}, actor.permisos);
       case 'registrarAjusteLiquidezM7': return this.m7.registrarAjusteLiquidez(cuerpo, { id: actor.id, administrador: actor.administrador });
@@ -673,7 +673,7 @@ export class C_Finanzas {
       case 'consultarExposicionProyectosM7': return this.m7.consultarExposicionProyectos(solicitud.consulta || {}, actor.permisos);
       case 'consultarContextoProyectoM7': return this.m7.consultarContextoProyecto(identificador(parametros.id), solicitud.consulta || {}, actor.permisos);
       case 'consultarMargenProyectosM7': return this.m7.consultarMargenProyectos(solicitud.consulta || {}, actor.permisos);
-      case 'consultarResumenResultadosM7': return this.m7.consultarResumenResultados(solicitud.consulta || {});
+      case 'consultarResumenResultadosM7': return this.m7.consultarResumenResultados(solicitud.consulta || {}, actor.permisos);
       case 'consultarSituacionFinancieraM7': return this.m7.consultarSituacionFinanciera(solicitud.consulta || {});
       case 'consultarCostoRemuneracionesM7': return this.m7.consultarCostoRemuneraciones(solicitud.consulta || {});
       case 'consultarOrdenesTrabajoM7': return this.m7.consultarOrdenesTrabajo(solicitud.consulta || {});

@@ -71,7 +71,8 @@ const menuGroups: MenuGroupDefinition[] = [
     icon: ChartNoAxesCombined,
     items: [
       { path: '/dashboard-m7/centro-atencion', label: 'Centro de Atención', icon: BellRing, permission: 'CU216' },
-      { path: '/dashboard-m7/resumenes', label: 'Resúmenes Gerenciales', icon: Scale, permissions: ['CU449', 'CU239'] },
+      { path: '/dashboard-m7/resumenes', label: 'Resúmenes Gerenciales', icon: Scale, permissions: ['CU238', 'CU449', 'CU239'] },
+      { path: '/dashboard-m7/ventas', label: 'Análisis de Ventas', icon: ShoppingCart, permissions: ['CU218', 'CU219', 'CU220'] },
       { path: '/dashboard-m7/presupuestos', label: 'Presupuestos Manuales', icon: PiggyBank, permission: 'CU451' },
       { path: '/dashboard-m7/operacion', label: 'Operación y Costos', icon: ClipboardList, permissions: ['CU242', 'CU247', 'CU248', 'CU250', 'CU252', 'CU253'] },
       { path: '/dashboard-m7/control', label: 'Control Financiero', icon: SearchCheck, permissions: ['CU228', 'CU232', 'CU240', 'CU241', 'CU243', 'CU244', 'CU249', 'CU251', 'CU254', 'CU255', 'CU256', 'CU257', 'CU258'] },
