@@ -759,6 +759,7 @@ model moneda {
   pago_cliente               pago_cliente[]
   pago_proveedor             pago_proveedor[]
   proyeccion_financiera_m7   proyeccion_financiera_m7[]
+  presupuestos_manuales_m10  presupuesto_manual_m10[]
   proveedor                  proveedor[]
   proyecto_financiero        proyecto_financiero[]
   precios_producto_comercial precio_producto_comercial[]
@@ -878,6 +879,60 @@ model proyeccion_financiera_m7 {
 
   @@index([tipo, anio, mes, estado], map: "idx_proyeccion_m7_periodo")
   @@index([id_moneda, categoria], map: "idx_proyeccion_m7_moneda_categoria")
+  @@schema("finanzas")
+}
+
+/// Presupuesto anual manual M10. No sustituye la proyeccion automatica ni copia datos reales.
+model presupuesto_manual_m10 {
+  id_presupuesto_manual_m10 BigInt                       @id @default(autoincrement())
+  anio                      Int
+  ambito                    String                       @default("GENERAL") @db.VarChar(40)
+  id_moneda                 Int
+  estado                    String                       @default("activo") @db.VarChar(20)
+  revision                  Int                          @default(1)
+  creado_por                BigInt
+  fecha_creacion            DateTime                     @default(now()) @db.Timestamptz(6)
+  fecha_actualizacion       DateTime                     @default(now()) @db.Timestamptz(6)
+  moneda                    moneda                       @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_presupuesto_m10_moneda")
+  creador                   usuario                      @relation("presupuesto_m10_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  versiones                 version_presupuesto_m10[]
+
+  @@unique([anio, ambito, id_moneda], map: "uq_presupuesto_m10_identidad")
+  @@index([anio, estado], map: "idx_presupuesto_m10_anio_estado")
+  @@schema("finanzas")
+}
+
+/// Version inmutable de un presupuesto manual; la primera es ORIGINAL y las siguientes REVISION.
+model version_presupuesto_m10 {
+  id_version_presupuesto_m10 BigInt                    @id @default(autoincrement())
+  id_presupuesto_manual_m10  BigInt
+  numero_version             Int
+  tipo_version               String                    @db.VarChar(20)
+  revision_base              Int
+  motivo                     String?                   @db.VarChar(1000)
+  creado_por                 BigInt
+  fecha_creacion             DateTime                  @default(now()) @db.Timestamptz(6)
+  presupuesto                presupuesto_manual_m10    @relation(fields: [id_presupuesto_manual_m10], references: [id_presupuesto_manual_m10], onDelete: Restrict, onUpdate: NoAction, map: "fk_version_presupuesto_m10_presupuesto")
+  creador                    usuario                   @relation("version_presupuesto_m10_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction)
+  detalles                   detalle_presupuesto_m10[]
+
+  @@unique([id_presupuesto_manual_m10, numero_version], map: "uq_version_presupuesto_m10_numero")
+  @@index([id_presupuesto_manual_m10, fecha_creacion], map: "idx_version_presupuesto_m10_historial")
+  @@schema("finanzas")
+}
+
+/// Partida mensual inmutable de resultados o flujo de caja perteneciente a una version.
+model detalle_presupuesto_m10 {
+  id_detalle_presupuesto_m10 BigInt                  @id @default(autoincrement())
+  id_version_presupuesto_m10 BigInt
+  mes                        Int
+  tipo                       String                  @db.VarChar(30)
+  categoria                  String                  @db.VarChar(50)
+  monto                      Decimal                 @db.Decimal(14, 2)
+  version                    version_presupuesto_m10 @relation(fields: [id_version_presupuesto_m10], references: [id_version_presupuesto_m10], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_presupuesto_m10_version")
+
+  @@unique([id_version_presupuesto_m10, mes, tipo, categoria], map: "uq_detalle_presupuesto_m10_partida")
+  @@index([id_version_presupuesto_m10, mes], map: "idx_detalle_presupuesto_m10_mes")
   @@schema("finanzas")
 }
 
@@ -3484,6 +3539,8 @@ model usuario {
   empleado_seguridad                               empleado?                               @relation("empleado_m4", fields: [empleado_m4], references: [rut_empleado])
   particulares                                     usuario_permiso_particular[]
   proyecciones_m7_creadas                          proyeccion_financiera_m7[]              @relation("proyeccion_m7_creador")
+  presupuestos_m10_creados                         presupuesto_manual_m10[]                @relation("presupuesto_m10_creador")
+  versiones_presupuesto_m10_creadas                version_presupuesto_m10[]               @relation("version_presupuesto_m10_creador")
   cuentas_bancarias_m7_creadas                     cuenta_bancaria_m7[]                    @relation("cuenta_bancaria_m7_creador")
   cuentas_bancarias_m7_actualizadas                cuenta_bancaria_m7[]                    @relation("cuenta_bancaria_m7_actualizador")
   saldos_bancarios_m7_creados                      saldo_inicial_bancario_m7[]             @relation("saldo_inicial_bancario_m7_creador")

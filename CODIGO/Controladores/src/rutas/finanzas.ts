@@ -126,6 +126,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/dashboard-m7/cotizaciones-pendientes', derivar('consultarCotizacionesPendientesM7'));
   rutas.get('/dashboard-m7/clientes/:id', derivar('consultarContextoClienteM7'));
   rutas.get('/dashboard-m7/ventas', derivar('consultarAnalisisVentasM7'));
+  rutas.get('/dashboard-m7/ventas-ampliadas', derivar('consultarVentasAmpliadasM10'));
   rutas.get('/dashboard-m7/cuentas-cobrar', derivar('consultarCuentasCobrarM7'));
   rutas.get('/dashboard-m7/cuentas-pagar', derivar('consultarCuentasPagarM7'));
   rutas.get('/dashboard-m7/liquidez', derivar('consultarLiquidezM7'));
@@ -136,6 +137,11 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/dashboard-m7/proyecciones', derivar('crearProyeccionM7'));
   rutas.put('/dashboard-m7/proyecciones/:id', derivar('actualizarProyeccionM7'));
   rutas.delete('/dashboard-m7/proyecciones/:id', derivar('desactivarProyeccionM7'));
+  rutas.get('/dashboard-m7/presupuestos-manuales', derivar('consultarPresupuestosM10'));
+  rutas.post('/dashboard-m7/presupuestos-manuales', derivar('crearPresupuestoM10'));
+  rutas.post('/dashboard-m7/presupuestos-manuales/:id/revisiones', derivar('revisarPresupuestoM10'));
+  rutas.get('/dashboard-m7/presupuestos-manuales/:id/comparacion-real', derivar('compararPresupuestoRealM10'));
+  rutas.get('/dashboard-m7/presupuestos-manuales/:id/comparacion-versiones', derivar('compararVersionesPresupuestoM10'));
   rutas.get('/dashboard-m7/riesgo-deficit', derivar('consultarRiesgoDeficitM7'));
   rutas.post('/dashboard-m7/liquidez/ajustes', derivar('registrarAjusteLiquidezM7'));
   rutas.get('/dashboard-m7/liquidez/ajustes/catalogos', derivar('consultarCatalogosAjusteLiquidezM7'));

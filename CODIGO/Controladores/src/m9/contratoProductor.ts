@@ -125,6 +125,8 @@ export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> 
   rechazarIncidenciaOperativa: { modulo:'M6', operacion:'INCIDENCIA_RECHAZADA', entidad:'INCIDENCIA_TERRENO', critico:false },
   descargarPdfDashboardM7: { modulo:'M7', operacion:'EXPORTACION_DASHBOARD_CONFIRMADA', entidad:'DASHBOARD', critico:false, consultaSensible:true },
   descargarExcelDashboardM7: { modulo:'M7', operacion:'EXPORTACION_DASHBOARD_EXCEL', entidad:'DASHBOARD', critico:false, consultaSensible:true },
+  crearPresupuestoM10: { modulo:'M7', operacion:'PRESUPUESTO_MANUAL_CREADO', entidad:'PRESUPUESTO_MANUAL', critico:false },
+  revisarPresupuestoM10: { modulo:'M7', operacion:'PRESUPUESTO_MANUAL_REVISION_CREADA', entidad:'PRESUPUESTO_MANUAL', critico:false, motivoRequerido:true },
   crearProyeccionM7: { modulo:'M7', operacion:'PROYECCION_FINANCIERA_CREADA', entidad:'PROYECCION_FINANCIERA', critico:false },
   actualizarProyeccionM7: { modulo:'M7', operacion:'PROYECCION_FINANCIERA_ACTUALIZADA', entidad:'PROYECCION_FINANCIERA', critico:false },
   desactivarProyeccionM7: { modulo:'M7', operacion:'PROYECCION_FINANCIERA_DESACTIVADA', entidad:'PROYECCION_FINANCIERA', critico:false },

@@ -51,6 +51,7 @@ export interface EntradaInformeVentasExcelM7 {
   generadoEn: Date;
   filas: FilaVentaExcelM7[] | FilaCotizacionExcelM7[];
   nombreArchivo: string;
+  incluirRut?: boolean;
   hojas?: Array<{ nombre: string; periodo: string; filas: FilaVentaExcelM7[] | FilaCotizacionExcelM7[] }>;
 }
 
@@ -59,6 +60,20 @@ interface ColumnaInforme {
   clave: string;
   ancho: number;
   formato?: string;
+}
+
+export const neutralizarFormulaExcelM10 = (valor: unknown) => {
+  if (typeof valor !== 'string') return valor;
+  return /^[=+\-@]/.test(valor) ? `'${valor}` : valor;
+};
+
+const nombreArchivoSeguro = (valor: string) => {
+  const limpio = valor.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^\.+/, '').slice(0, 140);
+  return (limpio || 'exportacion.xlsx').toLowerCase().endsWith('.xlsx') ? limpio : `${limpio}.xlsx`;
+};
+
+export function serializarFilaExcelM10(fila: Record<string, unknown>, columnas: ColumnaInforme[]) {
+  return Object.fromEntries(columnas.map(columna => [columna.clave, neutralizarFormulaExcelM10(fila[columna.clave])]));
 }
 
 const COLUMNAS_VENTAS: ColumnaInforme[] = [
@@ -104,7 +119,8 @@ const COLUMNAS_COTIZACIONES: ColumnaInforme[] = [
 ];
 
 export async function crearInformeVentasExcelM7(entrada: EntradaInformeVentasExcelM7) {
-  const columnas = entrada.tipo === 'VENTAS' ? COLUMNAS_VENTAS : COLUMNAS_COTIZACIONES;
+  const base = entrada.tipo === 'VENTAS' ? COLUMNAS_VENTAS : COLUMNAS_COTIZACIONES;
+  const columnas = entrada.incluirRut ? base : base.filter(columna => columna.clave !== 'rutCliente');
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Puertas Blindadas';
   workbook.company = 'Puertas Blindadas';
@@ -125,14 +141,14 @@ export async function crearInformeVentasExcelM7(entrada: EntradaInformeVentasExc
     for (let fila = 2; fila <= 4; fila += 1) hoja.getCell(fila, 1).font = { bold: true, color: { argb: 'FF676767' } };
     const filaEncabezados = hoja.getRow(6); filaEncabezados.values = columnas.map((columna) => columna.encabezado); filaEncabezados.height = 24;
     filaEncabezados.eachCell((celda) => { celda.font = { bold: true, color: { argb: 'FF000000' } }; celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFE8F01' } }; celda.alignment = { vertical: 'middle', wrapText: true }; celda.border = { bottom: { style: 'thin', color: { argb: 'FF676767' } } }; });
-    for (const fila of definicion.filas) hoja.addRow(fila as unknown as Record<string, unknown>);
+    for (const fila of definicion.filas) hoja.addRow(serializarFilaExcelM10(fila as unknown as Record<string, unknown>, columnas));
     hoja.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: ultimaColumna } };
     hoja.eachRow({ includeEmpty: false }, (fila, numeroFila) => { if (numeroFila > 6) fila.alignment = { vertical: 'top', wrapText: false }; });
   }
 
   const contenido = await workbook.xlsx.writeBuffer();
   return {
-    nombre: entrada.nombreArchivo,
+    nombre: nombreArchivoSeguro(entrada.nombreArchivo),
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     contenido: `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${Buffer.from(contenido).toString('base64')}`,
   };

@@ -107,8 +107,9 @@ export const operacionesPermiso: Record<string, string> = {
  listarIncidenciasOperativas:'CU213', catalogosIncidenciaOperativa:'CU212', obtenerEvidenciaIncidencia:'CU213', adjuntarEvidenciaIncidencia:'CU212', actualizarIncidenciaOperativa:'CU213', aprobarIncidenciaOperativa:'CU213', rechazarIncidenciaOperativa:'CU213',
  consultarDashboardTerreno:'CU202', exportarReporteTerreno:'CU202',
  catalogoDeduccionesEmpleado:'CU214', listarDeduccionesEmpleado:'CU214', asignarDeduccionEmpleado:'CU214', finalizarDeduccionEmpleado:'CU214',
- consultarPanelGeneralM7:'CU215', consultarHistoricoPanelGeneralM7:'CU215', consultarCentroAtencionM7:'CU216', consultarCotizacionesPendientesM7:'CU217', consultarContextoClienteM7:'CU221', consultarAnalisisVentasM7:'CU219', consultarCuentasCobrarM7:'CU222', consultarCuentasPagarM7:'CU226', consultarLiquidezM7:'CU230', consultarRiesgoDeficitM7:'CU232', consultarExposicionProyectosM7:'CU236', consultarContextoProyectoM7:'CU237',
- consultarMargenProyectosM7:'CU233', consultarResumenResultadosM7:'CU238', consultarSituacionFinancieraM7:'CU239', consultarCostoRemuneracionesM7:'CU242', descargarPdfDashboardM7:'CU245', descargarExcelDashboardM7:'CU245', consultarUmbralMargenM7:'CU246', configurarUmbralMargenM7:'CU246', crearProyeccionM7:'CU246', actualizarProyeccionM7:'CU246', desactivarProyeccionM7:'CU246',
+ consultarPanelGeneralM7:'CU215', consultarHistoricoPanelGeneralM7:'CU215', consultarCentroAtencionM7:'CU216', consultarCotizacionesPendientesM7:'CU217', consultarContextoClienteM7:'CU221', consultarAnalisisVentasM7:'CU446', consultarCuentasCobrarM7:'CU222', consultarCuentasPagarM7:'CU226', consultarLiquidezM7:'CU230', consultarRiesgoDeficitM7:'CU232', consultarExposicionProyectosM7:'CU236', consultarContextoProyectoM7:'CU237',
+ consultarMargenProyectosM7:'CU233', consultarResumenResultadosM7:'CU449', consultarSituacionFinancieraM7:'CU239', consultarCostoRemuneracionesM7:'CU242', descargarPdfDashboardM7:'CU245', descargarExcelDashboardM7:'CU447', consultarUmbralMargenM7:'CU246', configurarUmbralMargenM7:'CU246', crearProyeccionM7:'CU246', actualizarProyeccionM7:'CU246', desactivarProyeccionM7:'CU246',
+ consultarVentasAmpliadasM10:'CU446', consultarPresupuestosM10:'CU451', crearPresupuestoM10:'CU451', revisarPresupuestoM10:'CU451', compararPresupuestoRealM10:'CU451', compararVersionesPresupuestoM10:'CU451',
  consultarOrdenesTrabajoM7:'CU247', consultarProduccionModelosM7:'CU247', consultarCargaOperacionalM7:'CU248', consultarInstalacionesM7:'CU250', consultarAtrasosInstalacionesM7:'CU252', consultarIncidenciasRetrabajosM7:'CU253',
  consultarExposicionCreditoM7:'CU240', consultarAlertasCreditoM7:'CU241', consultarResumenIvaM7:'CU243', consultarCostosFabricacionM7:'CU244', consultarBloqueosEconomicosM7:'CU249', consultarMargenInstalacionesM7:'CU251',
  consultarInventarioValorizadoM7:'CU254', consultarMaterialesProyectoOtM7:'CU255', consultarRiesgoStockM7:'CU256', consultarRotacionInventarioM7:'CU257', consultarComprasRecepcionesM7:'CU258',
@@ -178,10 +179,11 @@ export const codigosImplementados = [...new Set([...Object.values(operacionesPer
 /** El perfil Administrador representa acceso integral a la matriz de CU implementados. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
 export const codigosTodosLosCU = Array.from({ length: 274 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
-export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({length:22},(_,i)=>`CU${360+i}`).filter(c=>c!=='CU377')];
+export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({length:22},(_,i)=>`CU${360+i}`).filter(c=>c!=='CU377'), 'CU446','CU447','CU449','CU451'];
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
  if (numero >= 360 && numero <= 381) return 'M2';
+ if ([446,447,449,451].includes(numero)) return 'M7';
  return numero >= 275 ? 'M9' : numero >= 259 ? 'M8' : numero >= 215 ? 'M7' : numero >= 155 ? 'M6' : numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
 };
 export const dependenciasPermiso: Record<string, string[]> = {
@@ -255,7 +257,7 @@ export const dependenciasPermiso: Record<string, string[]> = {
  CU212:[],
  CU213:[],
  CU214:[],
- CU215:[],CU216:[],CU217:[],CU218:[],CU219:[],CU220:[],CU221:[],CU222:[],CU223:[],CU224:[],CU225:[],CU226:[],CU227:[],CU228:[],CU229:[],CU230:[],CU231:[],CU232:[],CU233:[],CU234:[],CU235:[],CU236:[],CU237:[],CU238:[],CU239:[],CU240:[],CU241:[],CU242:[],CU243:[],CU244:[],CU245:[],CU246:[],CU247:[],CU248:[],CU249:[],CU250:[],CU251:[],CU252:[],CU253:[],CU254:[],CU255:[],CU256:[],CU257:[],CU258:[],CU259:[],CU260:[],CU261:[],CU262:[],CU263:[],CU264:[],CU265:[],CU266:[],CU267:[],CU268:[],CU269:[],CU270:[],CU271:[],CU272:[],CU273:[],CU274:[],CU355:[],CU359:['CU355'],CU360:[],CU361:['CU360'],CU362:['CU360'],CU363:['CU360'],CU364:['CU360'],CU365:['CU360'],CU366:['CU360'],CU367:['CU360'],CU368:['CU360'],CU369:['CU360'],CU370:['CU360'],CU371:['CU360'],CU372:['CU360','CU371'],CU373:['CU360'],CU374:['CU360'],CU375:['CU360'],CU376:['CU360'],CU377:[],CU378:['CU360'],CU379:['CU378'],CU380:['CU360'],CU381:['CU380'],
+ CU215:[],CU216:[],CU217:[],CU218:[],CU219:[],CU220:[],CU221:[],CU222:[],CU223:[],CU224:[],CU225:[],CU226:[],CU227:[],CU228:[],CU229:[],CU230:[],CU231:[],CU232:[],CU233:[],CU234:[],CU235:[],CU236:[],CU237:[],CU238:[],CU239:[],CU240:[],CU241:[],CU242:[],CU243:[],CU244:[],CU245:[],CU246:[],CU247:[],CU248:[],CU249:[],CU250:[],CU251:[],CU252:[],CU253:[],CU254:[],CU255:[],CU256:[],CU257:[],CU258:[],CU259:[],CU260:[],CU261:[],CU262:[],CU263:[],CU264:[],CU265:[],CU266:[],CU267:[],CU268:[],CU269:[],CU270:[],CU271:[],CU272:[],CU273:[],CU274:[],CU355:[],CU359:['CU355'],CU360:[],CU361:['CU360'],CU362:['CU360'],CU363:['CU360'],CU364:['CU360'],CU365:['CU360'],CU366:['CU360'],CU367:['CU360'],CU368:['CU360'],CU369:['CU360'],CU370:['CU360'],CU371:['CU360'],CU372:['CU360','CU371'],CU373:['CU360'],CU374:['CU360'],CU375:['CU360'],CU376:['CU360'],CU377:[],CU378:['CU360'],CU379:['CU378'],CU380:['CU360'],CU381:['CU380'],CU446:['CU215','CU219','CU220'],CU447:['CU446'],CU449:['CU238'],CU451:['CU449'],
 };
 type PerfilFuncional = 'gerencia' | 'secretaria' | 'contador';
 const G: readonly PerfilFuncional[] = ['gerencia'];
@@ -295,7 +297,7 @@ export const matrizPermisosPorCU: Record<string, readonly PerfilFuncional[]> = {
  CU178:[],CU179:[],CU180:[],CU181:[],CU182:[],CU183:[],CU184:[],CU185:[],CU186:[],CU187:[],CU188:[],CU189:[],CU190:[],
  CU191:[],CU192:[],CU193:[],CU194:[],CU195:[],CU196:[],CU197:[],CU198:[],CU199:[],CU200:[],CU201:[],CU202:[],CU203:[],CU204:[],CU205:[],CU206:[],CU207:[],CU208:[],CU209:[],CU210:[],CU211:[],CU212:[],CU213:[],CU214:[],CU215:[],CU216:[],CU217:[],CU218:[],CU219:[],CU220:[],CU221:[],CU222:[],CU223:[],CU224:[],CU225:[],CU226:[],CU227:[],CU228:[],CU229:[],CU230:[],CU231:[],CU232:[],CU233:[],CU234:[],CU235:[],CU236:[],CU237:[],CU238:[],CU239:[],CU240:[],CU241:[],CU242:[],CU243:[],CU244:[],CU245:[],CU246:[],CU247:[],CU248:[],CU249:[],CU250:[],CU251:[],CU252:[],CU253:[],CU254:[],CU255:[],CU256:[],CU257:[],CU258:[],CU259:GS,
  CU260:S,CU261:S,CU262:GS,CU263:G,CU264:G,CU265:G,CU266:G,CU267:G,CU268:G,CU269:G,CU270:GSC,CU271:G,CU272:GSC,CU273:G,CU274:G,
- CU355:GSC,CU359:GC,CU360:[],CU361:[],CU362:[],CU363:[],CU364:[],CU365:[],CU366:[],CU367:[],CU368:[],CU369:[],CU370:[],CU371:[],CU372:[],CU373:[],CU374:[],CU375:[],CU376:[],CU377:[],CU378:[],CU379:[],CU380:[],CU381:[],
+ CU355:GSC,CU359:GC,CU360:[],CU361:[],CU362:[],CU363:[],CU364:[],CU365:[],CU366:[],CU367:[],CU368:[],CU369:[],CU370:[],CU371:[],CU372:[],CU373:[],CU374:[],CU375:[],CU376:[],CU377:[],CU378:[],CU379:[],CU380:[],CU381:[],CU446:[],CU447:[],CU449:[],CU451:[],
 };
 
 const operacionesPersonales = new Set(['CU68','CU69','CU70']);

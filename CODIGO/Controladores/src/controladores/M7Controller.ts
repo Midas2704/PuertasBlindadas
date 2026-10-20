@@ -4,6 +4,7 @@ import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, efectoPago, fechaNegocio, incluirNota } from '../utilidades/finanzas';
 import { crearInformeDashboardM7 } from '../m7/informeDashboardPdf';
 import { crearInformeVentasExcelM7, FilaCotizacionExcelM7, FilaVentaExcelM7, TipoInformeVentasExcelM7 } from '../m7/informeVentasExcel';
+import { PresupuestoManualM10 } from '../m10/presupuestoManualM10';
 
 type Consulta = Record<string, unknown>;
 export type EstadoIndicadorM7 = 'VALIDO' | 'SIN_RESULTADOS' | 'DATOS_INSUFICIENTES' | 'FUENTE_NO_DISPONIBLE' | 'DESACTUALIZADO' | 'PARCIALMENTE_DISPONIBLE' | 'SIN_PERMISO' | 'ERROR_CALCULO' | 'NO_APLICA' | 'CONFIGURACION_PENDIENTE';
@@ -19,6 +20,8 @@ const tipoUmbralMargen = 'DASHBOARD';
 const unidadUmbralMargen = 'PORCENTAJE';
 const categoriasFlujoProyectadoM7 = ['INGRESOS_OPERACIONALES', 'OTROS_INGRESOS', 'PROVEEDORES', 'REMUNERACIONES', 'IMPUESTOS', 'OTROS_EGRESOS'] as const;
 const categoriasEntradaProyeccionM7 = new Set<string>(['INGRESOS_OPERACIONALES', 'OTROS_INGRESOS']);
+const CATEGORIAS_FLUJO_M10_ENTRADA = ['INGRESOS_OPERACIONALES','OTROS_INGRESOS'] as const;
+const CATEGORIAS_FLUJO_M10_SALIDA = ['PROVEEDORES','REMUNERACIONES','IMPUESTOS','OTROS_EGRESOS'] as const;
 export const categoriasEstadoResultadosM7 = ['VENTAS_NETAS', 'COSTOS_DIRECTOS', 'GASTOS_OPERACIONALES'] as const;
 type CategoriaEstadoResultadosM7 = typeof categoriasEstadoResultadosM7[number];
 export type AptitudFuenteEerrM7 = 'APTA' | 'PARCIALMENTE_APTA' | 'NO_APTA' | 'POR_CONFIRMAR';
@@ -280,6 +283,12 @@ export function evaluarCoberturaEstadoResultadosM7(entrada: {
   const calculable = segmento === 'TODOS' && Object.values(partidas).every(partida => partida.estado === 'VALIDO');
   return { estado: calculable ? 'VALIDO' as const : 'DATOS_INSUFICIENTES' as const, calculable, partidas, motivo: calculable ? 'Cobertura completa y conciliada para el período' : segmento !== 'TODOS' ? 'Los costos y gastos no son segmentables con la cobertura actual' : 'Falta cobertura completa de gastos operacionales, exclusiones EBITDA y control transversal de duplicados' };
 }
+export function resolverEbitdaSeguroM10(entrada: Parameters<typeof evaluarCoberturaEstadoResultadosM7>[0]) {
+  const cobertura=evaluarCoberturaEstadoResultadosM7(entrada);
+  if(!cobertura.calculable) return {estado:cobertura.estado,calculable:false,monto:null,porcentaje:null,motivo:cobertura.motivo,cobertura:cobertura.partidas};
+  const calculado=calcularEstadoResultadosM7({ventasNetas:entrada.ventasNetas,costoVenta:entrada.costosDirectos,gastosOperacionales:entrada.gastosOperacionales});
+  return {estado:'VALIDO' as const,calculable:true,monto:calculado.ebitdaMonto,porcentaje:calculado.ebitdaPorcentaje,motivo:cobertura.motivo,cobertura:cobertura.partidas};
+}
 export function calcularPresupuestoResultadosM7(partidas: { ventasNetas: number | null; costosDirectos: number | null; gastosOperacionales: number | null }) {
   const margenBruto = partidas.ventasNetas === null || partidas.costosDirectos === null ? null : redondear(partidas.ventasNetas - partidas.costosDirectos);
   const resultadoOperativo = margenBruto === null || partidas.gastosOperacionales === null ? null : redondear(margenBruto - partidas.gastosOperacionales);
@@ -376,9 +385,15 @@ export function resumirVentasHistoricasM7(meses: MesVentaHistoricaM7[], anio: nu
     actual, anterior, anual,
     mom: calcularVariacionVentasM7(actual, anterior),
     yoy: calcularVariacionVentasM7(actual, anual),
+    diferenciaMom: actual === null || anterior === null ? null : redondear(actual - anterior),
+    diferenciaYoY: actual === null || anual === null ? null : redondear(actual - anual),
     acumuladoActual: acumuladoActual.total,
     acumuladoAnterior: acumuladoAnterior.total,
+    diferenciaYtd: acumuladoActual.total === null || acumuladoAnterior.total === null ? null : redondear(acumuladoActual.total - acumuladoAnterior.total),
     variacionYtd: calcularVariacionVentasM7(acumuladoActual.total, acumuladoAnterior.total),
+    corteYtd: { desde: `${anio}-01-01`, hastaMes: mes, comparableAnterior: `${anio - 1}-01-01 a ${anio - 1}-${String(mes).padStart(2,'0')}` },
+    periodoParcial: (() => { const hoy=new Date(`${fechaNegocio()}T00:00:00Z`); return hoy.getUTCFullYear()===anio&&hoy.getUTCMonth()+1===mes&&hoy.getUTCDate()<new Date(Date.UTC(anio,mes,0)).getUTCDate(); })(),
+    extrapolado: false,
     coberturaMes: { incluidas: coberturaActual?.ventasIncluidasClp || 0, excluidasSinTipoCambio: coberturaActual?.ventasExcluidasSinTipoCambio || 0 },
     coberturaYtd: { incluidas: acumuladoActual.incluidas, excluidasSinTipoCambio: acumuladoActual.excluidasSinTipoCambio },
     coberturaYtdAnterior: { incluidas: acumuladoAnterior.incluidas, excluidasSinTipoCambio: acumuladoAnterior.excluidasSinTipoCambio },
@@ -407,6 +422,7 @@ export interface ProveedorBloqueosOperacionales {
   consultarBloqueos(consulta: Consulta): Promise<unknown>;
 }
 export class M7Controller {
+  private readonly presupuestoManualM10 = new PresupuestoManualM10();
   constructor(private creditoM8?: ProveedorCreditoM8, private readonly bloqueosOwner?: ProveedorBloqueosOperacionales) {}
   conectarCreditoM8(proveedor: ProveedorCreditoM8) { this.creditoM8 = proveedor; }
   async consultarPanelGeneral(consulta: Consulta, permisos: string[]): Promise<any> {
@@ -946,6 +962,34 @@ export class M7Controller {
     const anterior = await prisma.proyeccion_financiera_m7.findUnique({ where: { id_proyeccion_financiera_m7: id }, include: { moneda: true } }); if (!anterior) throw new ErrorAplicacion(404, 'Proyección no encontrada');
     const fila = await prisma.proyeccion_financiera_m7.update({ where: { id_proyeccion_financiera_m7: id }, data: { estado: 'inactivo', actualizado_por: actorId, fecha_actualizacion: new Date() }, include: { moneda: true } });
     const salida = this.presentarProyeccionM7(fila); Object.defineProperty(salida, '__auditoriaM9', { value: { anterior: this.presentarProyeccionM7(anterior), nuevo: salida }, enumerable: false }); return salida;
+  }
+
+  async consultarPresupuestosM10(consulta: Consulta) {
+    return this.presupuestoManualM10.consultar(consulta);
+  }
+
+  async guardarPresupuestoM10(entrada: Record<string, unknown>, actorId: bigint, id?: bigint) {
+    return this.presupuestoManualM10.guardar(entrada, actorId, id);
+  }
+
+  async compararPresupuestoRealM10(id: bigint, consulta: Consulta) {
+    const datos = await this.presupuestoManualM10.consultar({ id: id.toString() }) as any;
+    const presupuesto = datos.presupuestos?.[0]; if (!presupuesto) throw new ErrorAplicacion(404, 'Presupuesto no encontrado');
+    const numeroVersion = consulta.version === undefined ? presupuesto.revision : Number(consulta.version);
+    const version = presupuesto.versiones.find((item: any) => item.numero === numeroVersion); if (!version) throw new ErrorAplicacion(404, 'Version de presupuesto no encontrada');
+    const historico = await this.consultarHistoricoPanelGeneral({ anio: presupuesto.anio, mes: 12, meses: 12, segmento: 'TODOS' }, ['CU219','CU230']);
+    const reales = new Map((historico.meses || []).map((mes: any) => [Number(String(mes.periodo).slice(5,7)), mes]));
+    const meses = version.meses.map((mes: any) => {
+      const real: any = reales.get(mes.mes) || {};
+      const resultados = mes.resultados || {}; const flujo = mes.flujoCaja || {};
+      const presupuestoFlujo = [...CATEGORIAS_FLUJO_M10_ENTRADA].reduce((total,categoria)=>total+Number(flujo[categoria]||0),0)-CATEGORIAS_FLUJO_M10_SALIDA.reduce((total,categoria)=>total+Number(flujo[categoria]||0),0);
+      return { mes:mes.mes, resultados:{ presupuestoVentasNetas:Number(resultados.VENTAS_NETAS||0), realVentasNetas:typeof real.ventasNetas==='number'?real.ventasNetas:null, ...calcularDesviacionResultadosM7(typeof real.ventasNetas==='number'?real.ventasNetas:null,Number(resultados.VENTAS_NETAS||0)) }, flujoCaja:{ presupuesto:redondear(presupuestoFlujo), real:typeof real.flujoNeto==='number'?real.flujoNeto:null, ...calcularDesviacionResultadosM7(typeof real.flujoNeto==='number'?real.flujoNeto:null,redondear(presupuestoFlujo)) } };
+    });
+    return { estado:'VALIDO', presupuesto:{id:presupuesto.id,anio:presupuesto.anio,moneda:presupuesto.moneda,version:numeroVersion}, meses, real:{origen:'Fuentes owner consultadas al momento de la comparacion',congelado:false} };
+  }
+
+  async compararVersionesPresupuestoM10(id: bigint, consulta: Consulta) {
+    return this.presupuestoManualM10.compararVersiones(id, consulta);
   }
 
   private presentarCuentaBancariaM7(fila: { id_cuenta_bancaria_m7: number; banco: string; alias_cuenta: string; identificador_bancario: string; estado: string; creado_por: bigint; fecha_creacion: Date; actualizado_por: bigint | null; fecha_actualizacion: Date | null; moneda: { codigo_moneda: string } }) {
@@ -1913,7 +1957,7 @@ export class M7Controller {
     const hastaYtd = new Date(periodo.hastaExclusiva); hastaYtd.setUTCDate(hastaYtd.getUTCDate() - 1);
     const anioPresupuesto = hastaYtd.getUTCFullYear();
     const consultaYtd = { desde: `${hastaYtd.getUTCFullYear()}-01-01`, hasta: fechaIso(hastaYtd), segmento };
-    const [ventas, margen, ventasYtd, margenYtd, iva, historico, presupuestoPeriodo, presupuestoAnual, historicoAnual] = await Promise.all([
+    const [ventas, margen, ventasYtd, margenYtd, iva, historico, presupuestoPeriodo, presupuestoAnual, historicoAnual, presupuestoManual] = await Promise.all([
       this.consultarAnalisisVentas(consultaGeneral), this.consultarMargenProyectos(consulta),
       this.consultarAnalisisVentas(consultaYtd), this.consultarMargenProyectos(consultaYtd),
       this.consultarResumenIva(consulta),
@@ -1921,6 +1965,7 @@ export class M7Controller {
       this.consultarProyeccionesM7({ ...consulta, tipo: 'ESTADO_RESULTADOS' }),
       this.consultarProyeccionesM7({ desde: `${anioPresupuesto}-01-01`, hasta: `${anioPresupuesto}-12-31`, tipo: 'ESTADO_RESULTADOS' }),
       this.consultarHistoricoPanelGeneral({ anio: anioPresupuesto, mes: 12, meses: 12, segmento }, ['CU219', 'CU238']),
+      this.presupuestoManualM10.consultar({ anio: anioPresupuesto }),
     ]);
     const ingresos = (ventas as any).montoNeto?.valor?.porMoneda as Array<{ moneda: string; monto: number }> | undefined;
     const costos = sumarPorMoneda(((margen as any).proyectos || []).flatMap((proyecto: any) => (proyecto.desgloseCostos || []).map((costo: any) => ({ moneda: costo.moneda, monto: costo.monto }))));
@@ -1949,6 +1994,11 @@ export class M7Controller {
       clasificacionExclusionesCompleta: false,
       controlDuplicadosCompleto: false,
       segmento,
+    });
+    const ebitdaSeguro = resolverEbitdaSeguroM10({
+      ventasNetas: estadoResultados.ventasNetas, costosDirectos: estadoResultados.costoVenta, gastosOperacionales: estadoResultados.gastosOperacionales,
+      ventasExcluidasSinFx, costosExcluidosSinFx: estadoResultados.costosExcluidosSinConversion, coberturaCostosCompleta: false,
+      clasificacionGastosCompleta: false, clasificacionExclusionesCompleta: false, controlDuplicadosCompleto: false, segmento,
     });
     const serieMensual = ((historico as any).meses || []).map((mes: any) => ({ periodo: mes.periodo, ...calcularEstadoResultadosM7({ ventasNetas: mes.ventasNetas, costoVenta: mes.costosDirectos, gastosOperacionales: null }) }));
     const presupuestoPeriodoDato = presupuestoPeriodo as any; const presupuestoAnualDato = presupuestoAnual as any;
@@ -1995,8 +2045,10 @@ export class M7Controller {
       costosDirectos: costos.length ? indicador('VALIDO', costos, 'Costos directamente atribuidos a proyectos, sin prorrateos') : indicador('DATOS_INSUFICIENTES', null, 'No hay costos directos reconstruibles; no se reemplazan por cero'),
       gastosRegistrados: indicador('DATOS_INSUFICIENTES', null, 'No existe una fuente estructurada completa que permita separar gastos operacionales netos del período sin duplicar costos directos o pagos de caja'),
       coberturaEstadoResultados: indicador(coberturaEstadoResultados.estado, { ...coberturaEstadoResultados, matrizFuentes: matrizCoberturaFuentesEerrM7 }, 'Cobertura técnica agregada; no expone documentos, proveedores, empleados ni información tributaria individual'),
+      ebitda: indicador(ebitdaSeguro.estado, ebitdaSeguro, ebitdaSeguro.motivo),
       resultadoGerencial: resultado.length ? indicador('VALIDO', resultado, 'Diferencia gerencial entre ingresos y costos directos comparables por moneda') : indicador('DATOS_INSUFICIENTES', null, 'Faltan partidas comparables para derivar un resultado'),
       presupuestoResultados: indicador(presupuestoAnualDato.estado, presupuestoResultados, 'Presupuesto económico mensual en CLP; no se mezcla con flujo de caja, no prorratea rangos parciales y no completa meses ausentes con cero'),
+      presupuestoManual: indicador((presupuestoManual as any).estado, presupuestoManual, 'Presupuesto manual anual versionado; el real se consulta dinámicamente y no se congela en sus revisiones'),
       iva,
       devengado: indicador('FUENTE_NO_DISPONIBLE', null, 'DEVENGADO: FUENTE/DEFINICIÓN PENDIENTE; no se deriva de ventas, OT ni proyectos'),
       cobertura: indicador('DATOS_INSUFICIENTES', { completa: false, incluye: ['ventas definitivas netas', 'costos de proyecto atribuibles', 'mano de obra atribuible validada'], noDisponibles: ['gastos operacionales clasificados sin duplicación', 'devengado'], noIncluyeEbitda: ['intereses', 'impuestos', 'depreciaciones', 'amortizaciones'], ventasExcluidasSinConversion: ventasExcluidasSinFx, costosExcluidosSinConversion: estadoResultados.costosExcluidosSinConversion }, 'Síntesis gerencial parcial; no es un Estado de Resultados contable oficial. Los egresos de caja no se usan como gastos.'),
@@ -2019,7 +2071,7 @@ export class M7Controller {
   }
 
   async descargarExcelVentas(entrada: Record<string, unknown>, permisos: string[]): Promise<Record<string, unknown>> {
-    if (!permisos.includes('CU245')) throw new ErrorAplicacion(403, 'No tienes permiso para exportar información del Dashboard');
+    if (!permisos.includes('CU447')) throw new ErrorAplicacion(403, 'No tienes permiso para exportar información Excel');
     const tipo = String(entrada.tipo || '').trim().toUpperCase() as TipoInformeVentasExcelM7;
     if (tipo !== 'VENTAS' && tipo !== 'COTIZACIONES') throw new ErrorAplicacion(400, 'Tipo de exportación inválido');
     const permisosLectura = tipo === 'VENTAS' ? ['CU219', 'CU220'] : ['CU218', 'CU220'];
@@ -2036,10 +2088,11 @@ export class M7Controller {
       ]) as Array<Record<string, unknown>>;
       const filasA = archivoA.__filasExcel as FilaVentaExcelM7[] | FilaCotizacionExcelM7[];
       const filasB = archivoB.__filasExcel as FilaVentaExcelM7[] | FilaCotizacionExcelM7[];
-      const nombreArchivo = `PuertasBlindadas_${tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones'}_Comparacion_${periodoA.etiquetaDesde}_${periodoB.etiquetaHasta}_${segmento}.xlsx`.replace(/[^A-Za-z0-9_.-]+/g, '_');
+      const selloGeneracion = new Date().toISOString().slice(0, 10);
+      const nombreArchivo = `PuertasBlindadas_${tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones'}_Comparacion_${periodoA.etiquetaDesde}_${periodoB.etiquetaHasta}_${segmento}_${selloGeneracion}.xlsx`.replace(/[^A-Za-z0-9_.-]+/g, '_');
       const resultado = await crearInformeVentasExcelM7({
         tipo, periodo: `${periodoA.etiquetaDesde} al ${periodoA.etiquetaHasta} vs ${periodoB.etiquetaDesde} al ${periodoB.etiquetaHasta}`,
-        segmento, generadoEn: new Date(), filas: [], nombreArchivo,
+        segmento, generadoEn: new Date(), filas: [], nombreArchivo, incluirRut: permisos.includes('CU09'),
         hojas: [
           { nombre: 'Período A', periodo: `${periodoA.etiquetaDesde} al ${periodoA.etiquetaHasta}`, filas: filasA },
           { nombre: 'Período B', periodo: `${periodoB.etiquetaDesde} al ${periodoB.etiquetaHasta}`, filas: filasB },
@@ -2052,7 +2105,8 @@ export class M7Controller {
     const segmento = resolverSegmentoComercialM7(consulta.segmento);
     const generadoEn = new Date();
     const periodoArchivo = `${periodo.etiquetaDesde}_${periodo.etiquetaHasta}`;
-    const nombreArchivo = `PuertasBlindadas_${tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones'}_${periodoArchivo}_${segmento}.xlsx`.replace(/[^A-Za-z0-9_.-]+/g, '_');
+    const selloGeneracion = generadoEn.toISOString().slice(0, 10);
+    const nombreArchivo = `PuertasBlindadas_${tipo === 'VENTAS' ? 'Ventas' : 'Cotizaciones'}_${periodoArchivo}_${segmento}_${selloGeneracion}.xlsx`.replace(/[^A-Za-z0-9_.-]+/g, '_');
     const includeCliente = { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } } as const;
 
     let filas: FilaVentaExcelM7[] | FilaCotizacionExcelM7[];
@@ -2162,8 +2216,9 @@ export class M7Controller {
       generadoEn,
       filas,
       nombreArchivo,
+      incluirRut: permisos.includes('CU09'),
     });
-    Object.defineProperty(resultado, '__auditoriaM9', { enumerable: false, value: { nuevo: { tipo, periodo: periodoSalida(periodo), segmento, filas: filas.length } } });
+    Object.defineProperty(resultado, '__auditoriaM9', { enumerable: false, value: { nuevo: { tipo, periodo: periodoSalida(periodo), segmento, cantidadFilas: filas.length, incluyeIdentificadorTributario: permisos.includes('CU09') } } });
     Object.defineProperty(resultado, '__filasExcel', { enumerable: false, value: filas });
     return resultado;
   }

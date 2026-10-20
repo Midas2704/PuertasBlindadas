@@ -98,6 +98,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'catalogoDeduccionesEmpleado' | 'listarDeduccionesEmpleado' | 'asignarDeduccionEmpleado' | 'finalizarDeduccionEmpleado'
   | 'consultarPanelGeneralM7' | 'consultarHistoricoPanelGeneralM7' | 'consultarCentroAtencionM7' | 'consultarCotizacionesPendientesM7' | 'consultarContextoClienteM7' | 'consultarAnalisisVentasM7' | 'consultarCuentasCobrarM7' | 'consultarCuentasPagarM7' | 'consultarLiquidezM7' | 'consultarRiesgoDeficitM7' | 'consultarExposicionProyectosM7' | 'consultarContextoProyectoM7'
   | 'consultarMargenProyectosM7' | 'consultarResumenResultadosM7' | 'consultarSituacionFinancieraM7' | 'consultarCostoRemuneracionesM7' | 'descargarPdfDashboardM7' | 'descargarExcelDashboardM7'
+  | 'consultarVentasAmpliadasM10' | 'consultarPresupuestosM10' | 'crearPresupuestoM10' | 'revisarPresupuestoM10' | 'compararPresupuestoRealM10' | 'compararVersionesPresupuestoM10'
   | 'consultarOrdenesTrabajoM7' | 'consultarProduccionModelosM7' | 'consultarCargaOperacionalM7' | 'consultarInstalacionesM7' | 'consultarAtrasosInstalacionesM7' | 'consultarIncidenciasRetrabajosM7'
   | 'consultarUmbralMargenM7' | 'configurarUmbralMargenM7' | 'crearProyeccionM7' | 'actualizarProyeccionM7' | 'desactivarProyeccionM7'
   | 'registrarAjusteLiquidezM7' | 'consultarCatalogosAjusteLiquidezM7' | 'crearCuentaBancariaM7' | 'actualizarCuentaBancariaM7' | 'crearSaldoInicialBancarioM7' | 'actualizarSaldoInicialBancarioM7' | 'consultarParametrosLiquidezM7' | 'configurarParametroLiquidezM7' | 'consultarCostosInstalacionM7' | 'configurarCostoInstalacionM7' | 'consultarParametroStockInmovilM7' | 'configurarParametroStockInmovilM7'
@@ -648,6 +649,7 @@ export class C_Finanzas {
       case 'consultarCotizacionesPendientesM7': return this.m7.consultarCotizacionesPendientes(solicitud.consulta || {}, actor.permisos);
       case 'consultarContextoClienteM7': return this.m7.consultarContextoCliente(identificador(parametros.id), solicitud.consulta || {}, actor.permisos);
       case 'consultarAnalisisVentasM7': return this.m7.consultarAnalisisVentas(solicitud.consulta || {}, actor.permisos);
+      case 'consultarVentasAmpliadasM10': return this.m7.consultarAnalisisVentas(solicitud.consulta || {}, actor.permisos);
       case 'consultarCuentasCobrarM7': return this.m7.consultarCuentasCobrar(solicitud.consulta || {}, actor.permisos);
       case 'consultarCuentasPagarM7': return this.m7.consultarCuentasPagar(solicitud.consulta || {}, actor.permisos);
       case 'consultarLiquidezM7': return this.m7.consultarLiquidez(solicitud.consulta || {}, actor.permisos);
@@ -658,6 +660,11 @@ export class C_Finanzas {
       case 'crearProyeccionM7': return this.m7.guardarProyeccionM7(cuerpo, actor.id);
       case 'actualizarProyeccionM7': return this.m7.guardarProyeccionM7(cuerpo, actor.id, identificador(parametros.id));
       case 'desactivarProyeccionM7': return this.m7.desactivarProyeccionM7(identificador(parametros.id), actor.id);
+      case 'consultarPresupuestosM10': return this.m7.consultarPresupuestosM10(solicitud.consulta || {});
+      case 'crearPresupuestoM10': return this.m7.guardarPresupuestoM10(cuerpo, actor.id);
+      case 'revisarPresupuestoM10': return this.m7.guardarPresupuestoM10(cuerpo, actor.id, BigInt(identificador(parametros.id)));
+      case 'compararPresupuestoRealM10': return this.m7.compararPresupuestoRealM10(BigInt(identificador(parametros.id)), solicitud.consulta || {});
+      case 'compararVersionesPresupuestoM10': return this.m7.compararVersionesPresupuestoM10(BigInt(identificador(parametros.id)), solicitud.consulta || {});
       case 'consultarRiesgoDeficitM7': return this.m7.consultarRiesgoDeficit(solicitud.consulta || {}, actor.permisos);
       case 'registrarAjusteLiquidezM7': return this.m7.registrarAjusteLiquidez(cuerpo, { id: actor.id, administrador: actor.administrador });
       case 'consultarCatalogosAjusteLiquidezM7': return this.m7.consultarCatalogosAjusteLiquidez();
