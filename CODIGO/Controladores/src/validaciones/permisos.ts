@@ -2,7 +2,7 @@
 // Midas dijo que este catálogo no se toca a la ligera
 export const operacionesPermiso: Record<string, string> = {
  buscarClientes:'CU06',filtrarEstado:'CU07',filtrarFinanzas:'CU08',listarClientes:'CU05', abrirFicha:'CU09', dashboard:'CU05', crearCliente:'CU01', actualizarCliente:'CU02', desactivarCliente:'CU03', reactivarCliente:'CU04', inventario:'CU15', productos:'CU14', monedas:'CU28',
- listarFamiliasProductoComercial:'CU360', listarProductosComerciales:'CU360', obtenerProductoComercial:'CU360', catalogosVinculacionProductoComercial:'CU360', obtenerPlanificacionAprobacionCotizacion:'CU24',
+ listarFamiliasProductoComercial:'CU360', listarProductosComerciales:'CU360', obtenerProductoComercial:'CU360', catalogosVinculacionProductoComercial:'CU360', obtenerPlanificacionAprobacionCotizacion:'CU24', consultarTrazabilidadComercialM11:'CU20',
  listarPreciosComerciales:'CU360', listarServiciosComerciales:'CU360', listarOpcionalesComerciales:'CU360', listarTarifasInstalacionComercial:'CU360', listarCondicionesComerciales:'CU360', resolverCoberturaInstalacionComercial:'CU360', obtenerResumenComercialProducto:'CU360',
  crearServicioComercial:'CU368', versionarPrecioServicioComercial:'CU368', desactivarServicioComercial:'CU368',
  listarProductosCatalogoCotizacion:'CU360', obtenerFichaProductoCatalogoCotizacion:'CU360', consultarDocumentosProducto:'CU360', consultarVersionesDocumentoProducto:'CU367', consultarCapacidadesDocumentosProducto:'CU360',

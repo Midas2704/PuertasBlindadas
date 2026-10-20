@@ -10,6 +10,7 @@ import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 import { registrarCompromisoCredito, validarCreditoParaFormalizacion } from '../utilidades/creditoM8';
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 import { normalizarUbicacion, resolverCoberturaDesdeTarifas, type SegmentoComercial, type TarifaResoluble } from '../comercial/contratosCatalogoComercial';
+import { prepararTrazabilidadOrdenCompraM11 } from '../comercial/ServicioTrazabilidadComercialM11';
 
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 const ESTADOS_FAMILIA_COMERCIAL = ['ACTIVA', 'INACTIVA'] as const;
@@ -555,7 +556,12 @@ export class M2Controller {
     ]);
     const empleadosPorArea:Record<string,Array<{id:number;nombre:string;rut:string}>>={};
     for(const asignacion of asignaciones){const clave=asignacion.id_area_trabajo.toString();(empleadosPorArea[clave]??=[]).push({id:asignacion.empleado.id_empleado,nombre:[asignacion.empleado.nombres,asignacion.empleado.apellido_paterno,asignacion.empleado.apellido_materno].filter(Boolean).join(' '),rut:asignacion.empleado.rut_empleado});}
-    return { cotizacion:{ id:resultado.cotizacion.id_cotizacion, cliente:resultado.cotizacion.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, fechaVigencia:resultado.cotizacion.fecha_vigencia }, totalOt:resultado.unidades.length, planificaciones:resultado.unidades, empleadosPorArea, areas:areas.map(area=>({id:area.area_trabajo_id_area.toString(),nombre:area.area_trabajo_nombre_area||`Área ${area.area_trabajo_id_area}`})) };
+    const ofertas = await prisma.cotizacion_version.findMany({
+      where:{id_cotizacion:idCotizacion,numero_version_comercial:{not:null},tipo_version:'EMISION',estado_documental:'DISPONIBLE',id_documento_logico:{not:null}},
+      orderBy:{numero_version_comercial:'desc'},
+      select:{id_cotizacion_version:true,numero_version_comercial:true,fecha:true,motivo:true,estado_documental:true},
+    });
+    return { cotizacion:{ id:resultado.cotizacion.id_cotizacion, cliente:resultado.cotizacion.ficha_cliente.cliente_financiero.nombre_razon_social_referencia, fechaVigencia:resultado.cotizacion.fecha_vigencia,idMoneda:resultado.cotizacion.id_moneda,moneda:resultado.cotizacion.moneda.codigo_moneda }, ofertas:ofertas.map(oferta=>({id:oferta.id_cotizacion_version,numero:oferta.numero_version_comercial,fecha:oferta.fecha,motivo:oferta.motivo,estadoDocumental:oferta.estado_documental})), totalOt:resultado.unidades.length, planificaciones:resultado.unidades, empleadosPorArea, areas:areas.map(area=>({id:area.area_trabajo_id_area.toString(),nombre:area.area_trabajo_nombre_area||`Área ${area.area_trabajo_id_area}`})) };
   }
 
   private async crearOrdenesTrabajoCotizacion(tx:Prisma.TransactionClient,idCotizacion:number,entrada:unknown,usuario:bigint,idProyecto?:bigint){
@@ -606,13 +612,17 @@ export class M2Controller {
 
   async aprobarCotizacionB2B(idCotizacion: number, entrada: Entrada, usuario: bigint) {
     return this.enTransaccion(async tx => {
-      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true, moneda: true } });
+      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true, moneda: true, detalle_cotizacion:{select:{id_detalle_cotizacion:true,id_cotizacion:true}} } });
       if (!cot || cot.estado_cotizacion !== 'emitida' || cot.nota_venta) throw new ErrorAplicacion(409, 'La Cotización no está disponible para aceptación');
       if (cot.segmento_comercial && cot.segmento_comercial !== 'B2B') throw new ErrorAplicacion(409, 'La Cotización no pertenece al segmento B2B');
       if (!cot.fecha_vigencia || cot.fecha_vigencia.toISOString().slice(0, 10) < fechaNegocio()) throw new ErrorAplicacion(409, 'La Cotización está vencida; no se puede aceptar');
       const folio = texto(entrada.folioOrdenCompra, 100); const respaldo = texto(entrada.respaldoOrdenCompra, 4500000);
       if (!folio || !respaldo) throw new ErrorAplicacion(400, 'El folio y respaldo de la Orden de Compra son obligatorios');
-      const oc = await tx.orden_compra_b2b.create({ data: { id_cotizacion: idCotizacion, folio, respaldo, fecha: new Date(`${fechaNegocio()}T00:00:00Z`) } });
+      const idVersionOferta = entrada.idVersionOfertaAceptada === undefined || entrada.idVersionOfertaAceptada === null || entrada.idVersionOfertaAceptada === '' ? null : identificador(entrada.idVersionOfertaAceptada);
+      const ofertaAceptada = idVersionOferta === null ? null : await tx.cotizacion_version.findFirst({where:{id_cotizacion_version:idVersionOferta,id_cotizacion:idCotizacion,numero_version_comercial:{not:null},tipo_version:'EMISION',estado_documental:'DISPONIBLE',id_documento_logico:{not:null}}});
+      if(idVersionOferta !== null && !ofertaAceptada)throw new ErrorAplicacion(400,'La oferta aceptada no pertenece a esta negociación o no posee documento confirmado');
+      const cotejo=prepararTrazabilidadOrdenCompraM11(entrada.lineasOrdenCompra,idCotizacion,cot.detalle_cotizacion,ofertaAceptada?.snapshot_comercial,cot.id_moneda);
+      const oc = await tx.orden_compra_b2b.create({ data: { id_cotizacion: idCotizacion, id_version_oferta_aceptada:idVersionOferta, folio, respaldo, fecha: new Date(`${fechaNegocio()}T00:00:00Z`),estado_cotejo:cotejo.estado,resultado_cotejo:cotejo.resumen as Prisma.InputJsonValue,lineas:{create:cotejo.lineas.map(linea=>({numero_linea:linea.numeroLinea,id_detalle_cotizacion:linea.idDetalleCotizacion,referencia_comercial:linea.referenciaComercial,concepto:linea.concepto,especificaciones:linea.especificaciones??undefined,cantidad:linea.cantidad,id_moneda:linea.idMoneda,precio_unitario:linea.precioUnitario,subtotal:linea.subtotal,estado_cotejo:linea.estadoCotejo,resultado_cotejo:linea.resultadoCotejo}))} },include:{lineas:true,version_oferta_aceptada:{select:{id_cotizacion_version:true,numero_version_comercial:true,fecha:true,estado_documental:true}}} });
       let tipoCambio:Prisma.Decimal|null;
       try{tipoCambio=await obtenerTipoCambioCotizacion(tx,idCotizacion,cot.moneda.codigo_moneda,entrada.tipoCambio);}catch(error){
         if(!(error instanceof ErrorAplicacion)||cot.moneda.codigo_moneda!=='USD')throw error;
@@ -631,9 +641,40 @@ export class M2Controller {
       await tx.proyecto_financiero.create({data:{id_ficha_cliente:cot.id_ficha_cliente,id_nota_venta:nota.id_nota_venta,id_proyecto_terreno:proyecto.proyecto_proyecto_id,id_moneda:cot.id_moneda,codigo_proyecto_financiero:`COT-${idCotizacion}`,fecha_inicio_financiera:new Date(`${fechaNegocio()}T00:00:00Z`),estado_financiero_proyecto:'activo',monto_venta_estimado:cot.monto_neto,monto_costo_estimado:cot.subtotal_costos_estimados}});
       if (montoFinanciado) await registrarCompromisoCredito(tx, { idFicha: cot.id_ficha_cliente, idNota: nota.id_nota_venta, montoFinanciado, idSolicitudExcepcion: autorizacionCredito?.idSolicitudExcepcion });
       const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,usuario,proyecto.proyecto_proyecto_id);
+      const correspondencias=oc.lineas.flatMap(linea=>linea.id_detalle_cotizacion===null?[]:ordenesTrabajo.filter(unidad=>unidad.detalle===linea.id_detalle_cotizacion).map(unidad=>({id_linea_orden_compra_b2b:linea.id_linea_orden_compra_b2b,id_unidad_fisica_ot:BigInt(unidad.idUnidad),estado:'ACREDITADA',evidencia:{fuente:'ASOCIACION_EXPLICITA_OC_COTIZACION',idCotizacion,idDetalleCotizacion:linea.id_detalle_cotizacion,numeroLinea:linea.numero_linea,idOrdenTrabajo:unidad.idOrdenTrabajo} as Prisma.InputJsonValue})));
+      if(correspondencias.length)await tx.correspondencia_linea_oc_item_tecnico.createMany({data:correspondencias,skipDuplicates:true});
       await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'aprobada' } });
-      return auditableM9({ mensaje: 'Orden de Compra, Nota de Venta y OT generadas', idNota: nota.id_nota_venta, idProyecto:proyecto.proyecto_proyecto_id.toString(), idObra:cot.id_obra_contexto?.toString()??null, ordenCompra: oc, ordenesTrabajo },undefined,{idCotizacion,idNota:nota.id_nota_venta,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cot.id_obra_contexto?.toString()??null,ordenesTrabajo});
+      return auditableM9({ mensaje: 'Orden de Compra, Nota de Venta y OT generadas', idNota: nota.id_nota_venta, idProyecto:proyecto.proyecto_proyecto_id.toString(), idObra:cot.id_obra_contexto?.toString()??null, ordenCompra: oc, cotejo:{estado:cotejo.estado,...cotejo.resumen},correspondenciasTecnicas:correspondencias.length, ordenesTrabajo },undefined,{idCotizacion,idNota:nota.id_nota_venta,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cot.id_obra_contexto?.toString()??null,idVersionOfertaAceptada:idVersionOferta,cotejo:cotejo.estado,lineasOrdenCompra:cotejo.lineas.length,correspondenciasTecnicas:correspondencias.length,ordenesTrabajo});
     });
+  }
+
+  async consultarTrazabilidadComercialM11(idCotizacion:number){
+    const cotizacion=await prisma.cotizacion.findUnique({
+      where:{id_cotizacion:idCotizacion},
+      select:{
+        id_cotizacion:true,
+        segmento_comercial:true,
+        cotizacion_version:{
+          where:{numero_version_comercial:{not:null}},
+          orderBy:{numero_version_comercial:'asc'},
+          select:{id_cotizacion_version:true,numero_version_comercial:true,fecha:true,motivo:true,estado_documental:true,id_documento_logico:true},
+        },
+        orden_compra_b2b:{
+          include:{
+            version_oferta_aceptada:{select:{id_cotizacion_version:true,numero_version_comercial:true,fecha:true,estado_documental:true,id_documento_logico:true}},
+            lineas:{
+              orderBy:{numero_linea:'asc'},
+              include:{
+                moneda:{select:{codigo_moneda:true}},
+                correspondencias_tecnicas:{include:{unidad:{select:{id_unidad_fisica_ot:true,id_detalle_cotizacion:true,numero_unidad:true,id_orden_trabajo:true,estado:true}}}},
+              },
+            },
+          },
+        },
+      },
+    });
+    if(!cotizacion)throw new ErrorAplicacion(404,'Cotización no encontrada');
+    return cotizacion;
   }
 
   async registrarClienteDesdeCotizacion(entrada: Entrada) {

@@ -326,6 +326,7 @@ model detalle_cotizacion {
   item_comercial                    item_comercial                      @relation(fields: [id_item_comercial], references: [id_item_comercial], onUpdate: NoAction, map: "fk_det_cot_item_ext")
   cotizacion                        cotizacion                          @relation(fields: [id_cotizacion], references: [id_cotizacion], onUpdate: NoAction, map: "fk_detalle_cotizacion_cotizacion")
   unidades_fisicas_ot               unidad_fisica_orden_trabajo[]
+  lineas_orden_compra_b2b           linea_orden_compra_b2b[]
   producto_comercial                extension_producto_comercial?       @relation(fields: [id_extension_producto_comercial], references: [id_extension_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_cotizacion_producto_comercial")
   producto_version                  producto_comercial_version?         @relation(fields: [id_producto_comercial_version], references: [id_producto_comercial_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_cotizacion_producto_version")
   precio_comercial                  precio_producto_comercial?          @relation(fields: [id_precio_producto_comercial], references: [id_precio_producto_comercial], onDelete: Restrict, onUpdate: NoAction, map: "fk_detalle_cotizacion_precio_comercial")
@@ -767,6 +768,7 @@ model moneda {
   tarifas_instalacion        tarifa_instalacion_comercial[]
   alternativas_b2c           alternativa_b2c[]
   precios_servicio_comercial precio_servicio_comercial[]
+  lineas_orden_compra_b2b    linea_orden_compra_b2b[]
 
   @@schema("finanzas")
 }
@@ -4054,6 +4056,7 @@ model unidad_fisica_orden_trabajo {
   solicitudes_correccion_tecnica  solicitud_correccion_tecnica_ot[]
   aplicaciones_revision_tecnica   aplicacion_revision_tecnica_ot[]
   cierre_produccion               cierre_orden_trabajo_produccion?
+  correspondencias_linea_oc      correspondencia_linea_oc_item_tecnico[]
 
   @@unique([id_detalle_cotizacion, numero_unidad])
   @@index([id_cotizacion, estado])
@@ -4576,6 +4579,7 @@ model cotizacion_version {
   cotizacion               cotizacion        @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict)
   documento                documento_logico? @relation(fields: [id_documento_logico], references: [id_documento_logico], onDelete: Restrict, onUpdate: NoAction, map: "fk_cotizacion_version_documento")
   actor                    usuario?          @relation("cotizacion_version_actor", fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_cotizacion_version_actor")
+  ordenes_compra_aceptadas orden_compra_b2b[] @relation("orden_compra_oferta_aceptada")
 
   @@unique([id_cotizacion, numero_version_comercial], map: "uq_cotizacion_version_comercial")
   @@index([id_cotizacion, fecha], map: "idx_cotizacion_version_fecha")
@@ -5079,13 +5083,62 @@ model historial_decision_alternativa_b2c {
 
 /// PROVISIONAL I2 — antecedente obligatorio de aceptación B2B.
 model orden_compra_b2b {
-  id_orden_compra_b2b Int        @id @default(autoincrement())
-  id_cotizacion       Int        @unique
-  folio               String
-  respaldo            String
-  fecha               DateTime   @db.Date
-  cotizacion          cotizacion @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict)
+  id_orden_compra_b2b          Int                  @id @default(autoincrement())
+  id_cotizacion                Int                  @unique
+  id_version_oferta_aceptada   Int?
+  folio                        String
+  respaldo                     String
+  fecha                        DateTime             @db.Date
+  estado_cotejo                String               @default("INFORMACION_INSUFICIENTE") @db.VarChar(30)
+  resultado_cotejo             Json?
+  revision                     Int                  @default(1)
+  cotizacion                   cotizacion           @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict)
+  version_oferta_aceptada      cotizacion_version?  @relation("orden_compra_oferta_aceptada", fields: [id_version_oferta_aceptada], references: [id_cotizacion_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_orden_compra_oferta_aceptada")
+  lineas                       linea_orden_compra_b2b[]
 
+  @@index([id_version_oferta_aceptada], map: "idx_orden_compra_oferta_aceptada")
+
+  @@schema("finanzas")
+}
+
+/// Línea individual preservada de una única OC. La relación comercial sólo existe cuando fue acreditada explícitamente.
+model linea_orden_compra_b2b {
+  id_linea_orden_compra_b2b BigInt                 @id @default(autoincrement())
+  id_orden_compra_b2b       Int
+  numero_linea              Int
+  id_detalle_cotizacion     Int?
+  referencia_comercial     String?                @db.VarChar(120)
+  concepto                  String?
+  especificaciones          Json?
+  cantidad                  Decimal?               @db.Decimal(12, 2)
+  id_moneda                 Int?
+  precio_unitario           Decimal?               @db.Decimal(14, 2)
+  subtotal                  Decimal?               @db.Decimal(14, 2)
+  estado_cotejo             String                 @default("INFORMACION_INSUFICIENTE") @db.VarChar(30)
+  resultado_cotejo          Json?
+  creado_en                 DateTime               @default(now()) @db.Timestamptz(6)
+  orden_compra              orden_compra_b2b       @relation(fields: [id_orden_compra_b2b], references: [id_orden_compra_b2b], onDelete: Restrict, onUpdate: NoAction, map: "fk_linea_oc_orden_compra")
+  detalle_cotizacion        detalle_cotizacion?    @relation(fields: [id_detalle_cotizacion], references: [id_detalle_cotizacion], onDelete: Restrict, onUpdate: NoAction, map: "fk_linea_oc_detalle_cotizacion")
+  moneda                    moneda?                @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_linea_oc_moneda")
+  correspondencias_tecnicas correspondencia_linea_oc_item_tecnico[]
+
+  @@unique([id_orden_compra_b2b, numero_linea], map: "uq_linea_oc_numero")
+  @@index([id_detalle_cotizacion], map: "idx_linea_oc_detalle")
+  @@schema("finanzas")
+}
+
+/// Correspondencia explícita y no inferida entre una línea de OC y una puerta física/OT.
+model correspondencia_linea_oc_item_tecnico {
+  id_linea_orden_compra_b2b BigInt
+  id_unidad_fisica_ot       BigInt
+  estado                    String                         @default("ACREDITADA") @db.VarChar(30)
+  evidencia                 Json
+  creado_en                 DateTime                       @default(now()) @db.Timestamptz(6)
+  linea                     linea_orden_compra_b2b         @relation(fields: [id_linea_orden_compra_b2b], references: [id_linea_orden_compra_b2b], onDelete: Restrict, onUpdate: NoAction, map: "fk_correspondencia_linea_oc")
+  unidad                    unidad_fisica_orden_trabajo    @relation(fields: [id_unidad_fisica_ot], references: [id_unidad_fisica_ot], onDelete: Restrict, onUpdate: NoAction, map: "fk_correspondencia_item_tecnico")
+
+  @@id([id_linea_orden_compra_b2b, id_unidad_fisica_ot])
+  @@index([id_unidad_fisica_ot], map: "idx_correspondencia_linea_oc_unidad")
   @@schema("finanzas")
 }
 

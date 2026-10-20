@@ -479,6 +479,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/billing/quotes/:id/approve', derivar('aprobarCotizacion'));
   rutas.post('/billing/quotes/:id/accept-b2b', derivar('aprobarCotizacionB2B'));
   rutas.get('/billing/quotes/:id/work-order-planning', derivar('obtenerPlanificacionAprobacionCotizacion'));
+  rutas.get('/billing/quotes/:id/commercial-traceability', derivar('consultarTrazabilidadComercialM11'));
   rutas.post('/billing/quotes/:id/reject', derivar('descartarBorrador'));
   rutas.post('/billing/nota-venta', derivar('crearVentaDirecta'));
   rutas.post('/billing/nota-venta/:id/approve', derivar('aprobarVenta'));

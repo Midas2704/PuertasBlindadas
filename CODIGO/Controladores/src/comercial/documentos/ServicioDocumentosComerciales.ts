@@ -402,8 +402,9 @@ export class ServicioDocumentosComerciales {
     const snapshot = await this.snapshotCotizacion(idCotizacion, false);
     if (snapshot.camposPendientes?.length) throw new ErrorAplicacion(409, `La cotización no puede emitirse: falta ${snapshot.camposPendientes.join(', ')}`);
     if (!snapshot.plantilla?.publicada) throw new ErrorAplicacion(409, 'La emisión requiere una plantilla documental publicada');
-    const cotizacion = await this.cliente.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion } });
-    if (!cotizacion || cotizacion.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se puede emitir un borrador disponible');
+    const cotizacion = await this.cliente.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include:{nota_venta:true,orden_compra_b2b:true} });
+    const ofertaSucesivaB2B=cotizacion?.segmento_comercial==='B2B'&&cotizacion.estado_cotizacion==='emitida'&&!cotizacion.nota_venta&&!cotizacion.orden_compra_b2b;
+    if (!cotizacion || (cotizacion.estado_cotizacion !== 'borrador' && !ofertaSucesivaB2B)) throw new ErrorAplicacion(409, 'Sólo se puede emitir un borrador o una nueva oferta B2B aún no aceptada');
     if (cotizacion.revision !== revision) throw new ErrorAplicacion(409, 'La cotización fue modificada por otra sesión', 'REVISION_DESACTUALIZADA');
     const generado = crearPdfComercial({ ...snapshot, borrador: false });
     const clave = claveObjetoIdempotente(`cotizacion:${idCotizacion}:${idempotencia}`);
@@ -413,7 +414,8 @@ export class ServicioDocumentosComerciales {
         const repetida = await tx.cotizacion_version.findUnique({ where: { clave_idempotencia: idempotencia } });
         if (repetida) return repetida;
         const actual = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion } });
-        if (!actual || actual.estado_cotizacion !== 'borrador' || actual.revision !== revision) throw new ErrorAplicacion(409, 'La cotización cambió durante la emisión', 'REVISION_DESACTUALIZADA');
+        const estadoAdmitido=actual?.estado_cotizacion==='borrador'||(ofertaSucesivaB2B&&actual?.estado_cotizacion==='emitida');
+        if (!actual || !estadoAdmitido || actual.revision !== revision) throw new ErrorAplicacion(409, 'La cotización cambió durante la emisión', 'REVISION_DESACTUALIZADA');
         const ultimo = await tx.cotizacion_version.aggregate({ where: { id_cotizacion: idCotizacion }, _max: { numero_version_comercial: true } });
         const numeroVersion = (ultimo._max.numero_version_comercial ?? 0) + 1;
         const documento = await tx.documento_logico.create({ data: { titulo: `Cotización ${idCotizacion} v${numeroVersion}`, clasificacion: 'COMERCIAL', es_historico: true, numero_version_actual: 1, creado_por: actor.id } });
@@ -425,7 +427,7 @@ export class ServicioDocumentosComerciales {
         const version = await tx.cotizacion_version.create({ data: { id_cotizacion: idCotizacion, antecedentes: json(snapshot), motivo: requerido(entrada.motivo, 'Motivo', 2000),
           numero_version_comercial: numeroVersion, tipo_version: 'EMISION', snapshot_comercial: json(snapshot), id_documento_logico: documento.id_documento_logico,
           estado_documental: 'DISPONIBLE', usuario_id_usuario: actor.id, clave_idempotencia: idempotencia } });
-        const cambio = await tx.cotizacion.updateMany({ where: { id_cotizacion: idCotizacion, revision, estado_cotizacion: 'borrador' }, data: { estado_cotizacion: 'emitida', revision: { increment: 1 } } });
+        const cambio = await tx.cotizacion.updateMany({ where: { id_cotizacion: idCotizacion, revision, estado_cotizacion:cotizacion.estado_cotizacion }, data: { estado_cotizacion: 'emitida', revision: { increment: 1 } } });
         if (cambio.count !== 1) throw new ErrorAplicacion(409, 'La cotización cambió durante la emisión', 'REVISION_DESACTUALIZADA');
         await tx.evento_operacional_documental.create({ data: { tipo_evento: 'COTIZACION_PDF_CONFIRMADO', id_documento_logico: documento.id_documento_logico,
           id_version_documento: versionDocumento.id_version_documento, clave_idempotencia: `cotizacion:${version.id_cotizacion_version}:emitida`,
@@ -559,6 +561,9 @@ export class ServicioDocumentosComerciales {
       const nombre = cadena(snap.nombre) || detalle.producto_version?.nombre_comercial || detalle.item_comercial.nombre_item;
       const unitario = detalle.precio_unitario_autorizado ? numero(detalle.precio_unitario_autorizado) : null;
       return {
+        idDetalleCotizacion: detalle.id_detalle_cotizacion,
+        idProductoComercial: detalle.id_extension_producto_comercial,
+        idVersionProducto: detalle.id_producto_comercial_version,
         codigo: cadena(snap.codigo) || detalle.producto_version?.codigo_comercial || null,
         nombre, descripcion: detalle.descripcion_item_cotizado || detalle.producto_version?.descripcion_general || null,
         cantidad: numero(detalle.cantidad_item), unidad: 'unidad(es)',

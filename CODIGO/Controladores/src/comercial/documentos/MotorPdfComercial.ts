@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 export type SegmentoDocumentoComercial = 'B2B' | 'B2C' | 'CARTA_B2C';
 
 export interface LineaDocumentoComercial {
+  idDetalleCotizacion?: number | null; idProductoComercial?: number | null; idVersionProducto?: number | null;
   codigo?: string | null; nombre: string; descripcion?: string | null; cantidad: number; unidad?: string | null;
   dimensiones?: string | null; precioUnitario?: number | null; subtotal?: number | null; caracteristicas?: string[]; opcionales?: string[];
 }
