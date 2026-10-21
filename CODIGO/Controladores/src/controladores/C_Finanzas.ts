@@ -124,7 +124,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'crearPlantillaDocumentalComercial' | 'editarPlantillaDocumentalComercial' | 'publicarPlantillaDocumentalComercial'
   | 'crearCartaComercialB2C' | 'editarCartaComercialB2C' | 'publicarCartaComercialB2C'
   | 'historialDocumentalCotizacion' | 'descargarPdfHistoricoCotizacion' | 'descargarCartaComercialB2C'
-  | 'buscarObrasCotizacion' | 'registrarObraDesdeCotizacion' | 'vincularObraCotizacion';
+  | 'buscarObrasCotizacion' | 'registrarObraDesdeCotizacion' | 'vincularObraCotizacion' | 'resolverContextoObraProyectoM12' | 'consultarAntecedentesObraProyectoM12';
 
 export interface SolicitudFinanzas {
   consulta?: Record<string, unknown>;
@@ -612,6 +612,8 @@ export class C_Finanzas {
       case 'buscarObrasCotizacion': return this.obrasComerciales.buscar(solicitud.consulta || {});
       case 'registrarObraDesdeCotizacion': return this.obrasComerciales.registrar(cuerpo, actor.id);
       case 'vincularObraCotizacion': return this.obrasComerciales.vincularCotizacion(identificador(parametros.id), cuerpo, actor.id);
+      case 'resolverContextoObraProyectoM12': return this.obrasComerciales.resolverIdentidades(solicitud.consulta || {});
+      case 'consultarAntecedentesObraProyectoM12': return this.obrasComerciales.consultarAntecedentes(solicitud.consulta || {}, actor.permisos);
       case 'previsualizarCotizacionPdf': return this.documentosComerciales.previsualizarCotizacion(identificador(parametros.id));
       case 'emitirCotizacion': return this.documentosComerciales.emitirCotizacion(identificador(parametros.id), cuerpo, actor);
       case 'historialDocumentalCotizacion': return this.documentosComerciales.historialCotizacion(identificador(parametros.id));

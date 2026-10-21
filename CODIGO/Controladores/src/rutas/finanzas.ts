@@ -467,6 +467,8 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/billing/quotes/cliente', derivar('registrarClienteDesdeCotizacion'));
   rutas.get('/billing/quotes/obras/buscar', derivar('buscarObrasCotizacion'));
   rutas.post('/billing/quotes/obras', derivar('registrarObraDesdeCotizacion'));
+  rutas.get('/billing/quotes/contexto/identidades', derivar('resolverContextoObraProyectoM12'));
+  rutas.get('/billing/quotes/contexto/antecedentes', derivar('consultarAntecedentesObraProyectoM12'));
   rutas.put('/billing/quotes/:id/obra', derivar('vincularObraCotizacion'));
   rutas.post('/billing/quotes/:id/emitir', derivar('emitirCotizacion'));
   rutas.post('/billing/quotes/:id/preview-pdf', derivar('previsualizarCotizacionPdf'));

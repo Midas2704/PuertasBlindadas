@@ -34,6 +34,7 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
       if(String(ruta).startsWith('/mantenedores/comercial/condiciones?'))return json([]);
       if(String(ruta).startsWith('/mantenedores/comercial/servicios?'))return json([{id:'501',codigo:'FLT',nombre:'Flete autorizado',descripcion:'Traslado comercial',unidad:'GLOBAL',precio:{resultado:'VIGENTE',id:'precio-servicio-501',monto:50000,moneda:'CLP',version:1}}]);
       if(String(ruta).startsWith('/billing/quotes/obras/buscar?'))return json({obras:[{id:'801',nombre:'Melín 7019',referencia:'Edificio principal',direccion:'Melín 7019',region:'Metropolitana',ciudad:'Santiago',comuna:'Quinta Normal',edificio:null,unidad:null,estado:'activa',revision:1,coincidencia:'EXACTA'}],requiereSeleccionExplicita:false});
+      if(String(ruta).startsWith('/billing/quotes/contexto/antecedentes?'))return json({identidad:{estado:'REFERENCIA_CONFIRMADA',cliente:{id:31,rut:cliente.rut,nombre:cliente.razonSocial,estado:'activo',procedencia:'finanzas.cliente_financiero'},obra:{id:'801',nombre:'Melín 7019'},proyectos:[{id:'9010',codigo:'COT-901',nombre:'Pedido 2026',estadoOperacional:'FORMALIZADO',estadoProduccion:'PENDIENTE',idCotizacionOrigen:901,procedencia:'terreno.proyecto'}]},fuentes:[{origen:'M2',disponibilidad:'DISPONIBLE',alcanceAutorizado:true,antecedentes:[{referencia:'COTIZACION:901'}]},{origen:'TERRENO',disponibilidad:'SIN_ANTECEDENTES',alcanceAutorizado:true,antecedentes:[]},{origen:'M3',disponibilidad:'ACCESO_RESTRINGIDO',alcanceAutorizado:false,antecedentes:[]}]});
       if(String(ruta).startsWith('/catalogo-comercial/productos/71/ficha'))return json(ficha);
       if(String(ruta).startsWith('/catalogo-comercial/productos?'))return json([producto]);
       if(ruta==='/billing/quotes'&&opciones?.method==='POST'){revision=1;return json({id_cotizacion:901,revision,contactos_b2b:[],grupos_alternativas_b2c:[]});}
@@ -121,9 +122,25 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
     await user.click(screen.getByRole('button',{name:/Buscar o registrar Obra/i}));
     const modal=await screen.findByRole('dialog');
     expect(modal).toHaveTextContent(/cada pedido formalizado tendrá su propio Proyecto/i);
-    await user.click(screen.getByRole('button',{name:/Melín 7019/i}));
+    await user.click(screen.getByRole('button',{name:'Seleccionar Obra'}));
     expect(screen.getByText(/Obra formal seleccionada/i)).toBeInTheDocument();
     expect(screen.getByText(/ID 801/i)).toBeInTheDocument();
+  });
+
+  it('consulta identidad, proyectos y disponibilidad por fuente sin crear entidades',async()=>{
+    const user=userEvent.setup();
+    render(<MemoryRouter><ArmarCotizacion/></MemoryRouter>);
+    await user.click(screen.getByRole('button',{name:/B2B · EMPRESAS/i}));
+    await user.type(screen.getByRole('textbox',{name:'Dirección de obra'}),'Melín 7019');
+    await user.type(screen.getByRole('textbox',{name:'Región'}),'Metropolitana');
+    await user.type(screen.getByRole('textbox',{name:'Comuna'}),'Quinta Normal');
+    await user.click(screen.getByRole('button',{name:/Buscar o registrar Obra/i}));
+    await screen.findByRole('dialog');
+    await user.click(screen.getByRole('button',{name:'Ver identidad y antecedentes'}));
+    expect(await screen.findByRole('region',{name:'Contexto de Obra'})).toHaveTextContent(/Pedido 2026/i);
+    expect(screen.getByRole('region',{name:'Contexto de Obra'})).toHaveTextContent(/M3: ACCESO_RESTRINGIDO/i);
+    expect(vi.mocked(solicitarFinanzas).mock.calls.some(([ruta,opciones])=>String(ruta).includes('/contexto/antecedentes')&&!opciones?.method)).toBe(true);
+    expect(vi.mocked(solicitarFinanzas).mock.calls.some(([,opciones])=>['POST','PUT','DELETE'].includes(String(opciones?.method)))).toBe(false);
   });
 });
 

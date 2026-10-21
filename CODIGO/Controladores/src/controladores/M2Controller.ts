@@ -103,13 +103,14 @@ const auditableM9 = <T extends object>(resultado: T, anterior?: Prisma.InputJson
   Object.defineProperty(resultado, '__auditoriaM9', { enumerable: false, value: { anterior, nuevo } });
   return resultado;
 };
-async function resolverObraContexto(tx: Prisma.TransactionClient, valor: unknown, anterior: bigint | null = null) {
+async function resolverObraContexto(tx: Prisma.TransactionClient, valor: unknown, anterior: bigint | null = null, motivoCambio?: unknown) {
   if (valor === undefined) return anterior;
   if (valor === null || valor === '') return null;
   const idObra = BigInt(identificador(valor));
   const obra = await tx.obra.findUnique({ where: { obra_obra_id: idObra } });
   if (!obra) throw new ErrorAplicacion(400, 'La Obra seleccionada no existe');
   if (['inactiva', 'cerrada', 'eliminada'].includes(String(obra.obra_estado).toLowerCase())) throw new ErrorAplicacion(409, 'La Obra seleccionada no admite nuevas vinculaciones');
+  if (anterior && anterior !== idObra && !texto(motivoCambio, 2000)) throw new ErrorAplicacion(400, 'Cambiar la Obra de un borrador requiere motivo y revisión humana');
   return idObra;
 }
 function importes(base: Prisma.Decimal, tipo: unknown, valor: unknown, exento: unknown) {
@@ -1285,7 +1286,7 @@ export class M2Controller {
         const productosEntrada=entrada.productos as Entrada[];
         const { costoTotal, precioSugerido: calculadoClp, detalles } = await construirCosteoCotizacion(transaccion, productosEntrada, monedaLocal, margen, true);
         const contrato = await validarContratoComercialCotizacion(transaccion,{...entrada,segmento_comercial:segmento},productosEntrada,detalles,idMoneda,new Date(`${fechaNegocio()}T00:00:00Z`));
-        const idObraContexto = await resolverObraContexto(transaccion, entrada.id_obra_contexto, cotizacion.id_obra_contexto);
+        const idObraContexto = await resolverObraContexto(transaccion, entrada.id_obra_contexto, cotizacion.id_obra_contexto, entrada.motivo_cambio_obra);
         const calculado=convertirDesdeClp(calculadoClp,tipoCambioEdicion??null);
         const nuevosDetalles=contrato?detalles:detalles.map(detalle=>({...detalle,subtotal_item_estimado:convertirDesdeClp(new Prisma.Decimal(detalle.subtotal_item_estimado as Prisma.Decimal),tipoCambioEdicion??null)}));
         const precioDefinido = contrato?.completo ? contrato.precioBase : (entrada.precio_sugerido === undefined ? calculado : new Prisma.Decimal(numeroNoNegativo(entrada.precio_sugerido, 'Precio definido')));

@@ -5,6 +5,36 @@ import { identificador, texto } from '../validaciones/solicitudes';
 
 type Entrada = Record<string, any>;
 
+export type EstadoReferenciaM12 = 'REFERENCIA_CONFIRMADA' | 'REFERENCIA_NO_ENCONTRADA' | 'FUENTE_NO_DISPONIBLE' | 'IDENTIDAD_AMBIGUA';
+export type ResultadoCoherenciaM12 = {
+  estado: EstadoReferenciaM12;
+  compatible: boolean;
+  motivo: string;
+  requiereRevisionHumana: boolean;
+};
+
+export const resolverEstadoReferenciaM12 = (cantidad: number, coincidenciasExactas = 0): EstadoReferenciaM12 => {
+  if (cantidad <= 0) return 'REFERENCIA_NO_ENCONTRADA';
+  if (cantidad === 1 && coincidenciasExactas === 1) return 'REFERENCIA_CONFIRMADA';
+  return 'IDENTIDAD_AMBIGUA';
+};
+
+/** CUT463: valida referencias ya acreditadas; nunca crea, fusiona ni reasigna entidades. */
+export const validarCoherenciaContextualM12 = (entrada: {
+  fuenteDisponible?: boolean;
+  requiereObra?: boolean;
+  idObra?: string | null;
+  idObraProyecto?: string | null;
+  idProyecto?: string | null;
+  idProyectoOrdenTrabajo?: string | null;
+}): ResultadoCoherenciaM12 => {
+  if (entrada.fuenteDisponible === false) return { estado: 'FUENTE_NO_DISPONIBLE', compatible: false, motivo: 'La fuente propietaria no está disponible', requiereRevisionHumana: false };
+  if (entrada.requiereObra && !entrada.idObra) return { estado: 'REFERENCIA_NO_ENCONTRADA', compatible: false, motivo: 'El proceso requiere una Obra acreditada', requiereRevisionHumana: true };
+  if (entrada.idProyecto && entrada.idProyectoOrdenTrabajo && entrada.idProyecto !== entrada.idProyectoOrdenTrabajo) return { estado: 'IDENTIDAD_AMBIGUA', compatible: false, motivo: 'La Orden de Trabajo pertenece a otro Proyecto', requiereRevisionHumana: true };
+  if (entrada.idObra && entrada.idObraProyecto && entrada.idObra !== entrada.idObraProyecto) return { estado: 'IDENTIDAD_AMBIGUA', compatible: false, motivo: 'El Proyecto ya está vinculado a otra Obra', requiereRevisionHumana: true };
+  return { estado: 'REFERENCIA_CONFIRMADA', compatible: true, motivo: entrada.idObra ? 'Las referencias contextuales son coherentes' : 'El proceso no exige una Obra', requiereRevisionHumana: false };
+};
+
 const sinDiacriticos = (valor: string) => valor.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 export const normalizarParteUbicacion = (valor: unknown) => sinDiacriticos(String(valor ?? '').trim().toUpperCase())
   .replace(/[^A-Z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -43,7 +73,130 @@ export class ServicioObraProyectoComercial {
     });
     let clave: string | undefined;
     try { clave = direccion && region && comuna ? claveUbicacionObra(consulta) : undefined; } catch { clave = undefined; }
-    return { obras: obras.map(obra => presentar(obra, clave)), requiereSeleccionExplicita: obras.length > 1 };
+    const presentadas = obras.map(obra => presentar(obra, clave));
+    const exactas = presentadas.filter(obra => obra.coincidencia === 'EXACTA').length;
+    return {
+      obras: presentadas,
+      requiereSeleccionExplicita: resolverEstadoReferenciaM12(obras.length, exactas) === 'IDENTIDAD_AMBIGUA',
+      estadoReferencia: resolverEstadoReferenciaM12(obras.length, exactas),
+      procedencia: 'terreno.obra',
+    };
+  }
+
+  /** CUT462: lectura diferenciada de Cliente, Proyecto y Obra, sin efectos secundarios. */
+  async resolverIdentidades(consulta: Entrada) {
+    const idObra = consulta.idObra ? BigInt(identificador(consulta.idObra)) : null;
+    const idProyecto = consulta.idProyecto ? BigInt(identificador(consulta.idProyecto)) : null;
+    const idCotizacion = consulta.idCotizacion ? identificador(consulta.idCotizacion) : null;
+    if ([idObra, idProyecto, idCotizacion].filter(Boolean).length !== 1) throw new ErrorAplicacion(400, 'Indica exactamente una Obra, Proyecto o Cotización');
+
+    try {
+      let obraObjetivo = idObra;
+      let proyectoObjetivo = idProyecto;
+      if (idCotizacion) {
+        const cotizacion = await prisma.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, select: { id_obra_contexto: true, proyecto_originado: { select: { proyecto_proyecto_id: true } } } });
+        if (!cotizacion) return { estado: 'REFERENCIA_NO_ENCONTRADA' as const, procedencia: 'finanzas.cotizacion', cliente: null, obra: null, proyectos: [] };
+        obraObjetivo = cotizacion.id_obra_contexto;
+        proyectoObjetivo = cotizacion.proyecto_originado?.proyecto_proyecto_id ?? null;
+        if (!obraObjetivo && !proyectoObjetivo) return { estado: 'REFERENCIA_NO_ENCONTRADA' as const, procedencia: 'finanzas.cotizacion', cliente: null, obra: null, proyectos: [] };
+      }
+
+      if (proyectoObjetivo && !obraObjetivo) {
+        const vinculos = await prisma.proyecto_obra.findMany({ where: { id_proyecto: proyectoObjetivo }, select: { id_obra: true, es_principal: true } });
+        if (vinculos.length > 1 && !vinculos.some(v => v.es_principal)) return { estado: 'IDENTIDAD_AMBIGUA' as const, procedencia: 'terreno.proyecto_obra', cliente: null, obra: null, proyectos: [] };
+        obraObjetivo = vinculos.find(v => v.es_principal)?.id_obra ?? vinculos[0]?.id_obra ?? null;
+      }
+
+      const obra = obraObjetivo ? await prisma.obra.findUnique({ where: { obra_obra_id: obraObjetivo } }) : null;
+      const proyectos = await prisma.proyecto.findMany({
+        where: proyectoObjetivo ? { proyecto_proyecto_id: proyectoObjetivo } : obraObjetivo ? { obras: { some: { id_obra: obraObjetivo } } } : { proyecto_proyecto_id: BigInt(-1) },
+        include: {
+          obras: { include: { obra: true } },
+          cotizacion_origen: { include: { ficha_cliente: { include: { cliente_financiero: true } }, contactos_b2b: true } },
+        },
+        orderBy: { proyecto_proyecto_id: 'asc' },
+      });
+      const cotizacionesObra = obraObjetivo ? await prisma.cotizacion.findMany({
+        where: { id_obra_contexto: obraObjetivo },
+        include: { ficha_cliente: { include: { cliente_financiero: true } } },
+        orderBy: { id_cotizacion: 'asc' },
+      }) : [];
+      const clientes = [...cotizacionesObra, ...proyectos.flatMap(p => p.cotizacion_origen ? [p.cotizacion_origen] : [])]
+        .map(c => c.ficha_cliente.cliente_financiero)
+        .filter((cliente, indice, todos) => todos.findIndex(c => c.id_cliente_financiero === cliente.id_cliente_financiero) === indice);
+      const estado: EstadoReferenciaM12 = obra || proyectos.length ? (clientes.length > 1 ? 'IDENTIDAD_AMBIGUA' : 'REFERENCIA_CONFIRMADA') : 'REFERENCIA_NO_ENCONTRADA';
+      return {
+        estado,
+        procedencia: 'terreno.obra + terreno.proyecto + finanzas.cotizacion',
+        cliente: clientes.length === 1 ? {
+          id: clientes[0].id_cliente_financiero,
+          rut: clientes[0].rut_cliente,
+          nombre: clientes[0].nombre_razon_social_referencia,
+          estado: clientes[0].estado_financiero,
+          procedencia: 'finanzas.cliente_financiero',
+        } : null,
+        obra: obra ? presentar(obra) : null,
+        proyectos: proyectos.map(proyecto => ({
+          id: proyecto.proyecto_proyecto_id.toString(),
+          codigo: proyecto.proyecto_codigo_proyecto,
+          nombre: proyecto.proyecto_nombre_referencia,
+          estadoOperacional: proyecto.proyecto_estado_operacional,
+          estadoProduccion: proyecto.proyecto_estado_produccion,
+          idCotizacionOrigen: proyecto.id_cotizacion_origen,
+          contactosContextuales: (proyecto.cotizacion_origen?.contactos_b2b ?? []).map(contacto => ({
+            id: contacto.id_contacto_cotizacion_b2b.toString(),
+            nombre: contacto.nombre,
+            apellido: contacto.apellido,
+            cargo: contacto.cargo,
+            correo: contacto.correo,
+            telefono: contacto.telefono,
+            tipo: contacto.tipo_contacto,
+            principal: contacto.es_principal,
+            estado: contacto.estado,
+            vigencia: contacto.actualizado_en,
+            procedencia: 'finanzas.contacto_cotizacion_b2b',
+          })),
+          obras: proyecto.obras.map(v => ({ id: v.id_obra.toString(), principal: v.es_principal, origen: v.origen })),
+          procedencia: 'terreno.proyecto',
+        })),
+      };
+    } catch (error) {
+      if (error instanceof ErrorAplicacion) throw error;
+      return { estado: 'FUENTE_NO_DISPONIBLE' as const, procedencia: 'terreno/finanzas', cliente: null, obra: null, proyectos: [] };
+    }
+  }
+
+  /** CUT464: compone referencias mínimas desde cada owner; no replica sus históricos. */
+  async consultarAntecedentes(consulta: Entrada, permisos: readonly string[]) {
+    const identidad = await this.resolverIdentidades(consulta);
+    if (identidad.estado === 'FUENTE_NO_DISPONIBLE' || identidad.estado === 'REFERENCIA_NO_ENCONTRADA') return { identidad, fuentes: [] };
+    const idObra = identidad.obra?.id ? BigInt(identidad.obra.id) : null;
+    const idsProyecto = identidad.proyectos.map(proyecto => BigInt(proyecto.id));
+    const puede = (...codigos: string[]) => codigos.some(codigo => permisos.includes(codigo));
+    const fuente = async (origen: string, autorizado: boolean, consultar: () => Promise<unknown[]>) => {
+      if (!autorizado) return { origen, disponibilidad: 'ACCESO_RESTRINGIDO', alcanceAutorizado: false, antecedentes: [] };
+      try {
+        const antecedentes = await consultar();
+        return { origen, disponibilidad: antecedentes.length ? 'DISPONIBLE' : 'SIN_ANTECEDENTES', alcanceAutorizado: true, antecedentes };
+      } catch {
+        return { origen, disponibilidad: 'FUENTE_NO_DISPONIBLE', alcanceAutorizado: true, antecedentes: [] };
+      }
+    };
+    const [m2, terreno, inventario, m3, m7] = await Promise.all([
+      fuente('M2', puede('CU20'), async () => {
+        const cotizaciones = await prisma.cotizacion.findMany({
+          where: { OR: [ ...(idObra ? [{ id_obra_contexto: idObra }] : []), ...(idsProyecto.length ? [{ proyecto_originado: { is: { proyecto_proyecto_id: { in: idsProyecto } } } }] : []) ] },
+          select: { id_cotizacion: true, fecha_emision: true, estado_cotizacion: true, proyecto_originado: { select: { proyecto_proyecto_id: true } }, nota_venta: { select: { id_nota_venta: true, fecha_emision: true, estado_nota_venta: true } } },
+        });
+        return cotizaciones.map(c => ({ referencia: `COTIZACION:${c.id_cotizacion}`, proyecto: c.proyecto_originado?.proyecto_proyecto_id.toString() ?? null, obra: idObra?.toString() ?? null, fecha: c.fecha_emision, estado: c.estado_cotizacion, notaVenta: c.nota_venta ? { referencia: `NV:${c.nota_venta.id_nota_venta}`, fecha: c.nota_venta.fecha_emision, estado: c.nota_venta.estado_nota_venta } : null }));
+      }),
+      fuente('TERRENO', puede('CU199'), async () => idObra ? (await prisma.servicio_terreno.findMany({ where: { id_obra: idObra }, select: { servicio_terreno_servicio_terreno_id: true, servicio_terreno_tipo_servicio: true, servicio_terreno_fecha_real: true, servicio_terreno_estado: true } })).map(s => ({ referencia: `SERVICIO_TERRENO:${s.servicio_terreno_servicio_terreno_id}`, proyecto: null, obra: idObra.toString(), fecha: s.servicio_terreno_fecha_real, estado: s.servicio_terreno_estado, tipo: s.servicio_terreno_tipo_servicio })) : []),
+      fuente('INVENTARIO', puede('CU202','CU205','CU207','CU209'), async () => idsProyecto.length ? (await prisma.orden_trabajo.findMany({ where: { proyecto_id_proyecto: { in: idsProyecto } }, select: { orden_trabajo_id_orden: true, orden_trabajo_fecha_hora: true, orden_trabajo_estado: true, proyecto_id_proyecto: true } })).map(ot => ({ referencia: `OT:${ot.orden_trabajo_id_orden}`, proyecto: ot.proyecto_id_proyecto?.toString() ?? null, obra: idObra?.toString() ?? null, fecha: ot.orden_trabajo_fecha_hora, estado: ot.orden_trabajo_estado })) : []),
+      fuente('M3', puede('CU49','CU55'), async () => idsProyecto.length ? (await prisma.asignacion_pago_cliente.findMany({ where: { nota_venta: { proyecto_contexto: { is: { proyecto_proyecto_id: { in: idsProyecto } } } } }, select: { id_asignacion_pago_cliente: true, fecha_asignacion: true, id_nota_venta: true, monto_asignado: true } })).map(p => ({ referencia: `ASIGNACION_PAGO:${p.id_asignacion_pago_cliente}`, proyecto: null, obra: idObra?.toString() ?? null, fecha: p.fecha_asignacion, notaVenta: p.id_nota_venta, monto: p.monto_asignado.toString() })) : []),
+      fuente('M7', puede('CU237'), async () => idsProyecto.length ? (await prisma.proyecto_financiero.findMany({ where: { id_proyecto_terreno: { in: idsProyecto } }, select: { id_proyecto_financiero: true, id_proyecto_terreno: true, estado_financiero_proyecto: true, fecha_inicio_financiera: true } })).map(p => ({ referencia: `PROYECTO_FINANCIERO:${p.id_proyecto_financiero}`, proyecto: p.id_proyecto_terreno?.toString() ?? null, obra: idObra?.toString() ?? null, fecha: p.fecha_inicio_financiera, estado: p.estado_financiero_proyecto })) : []),
+    ]);
+    const m5 = { origen: 'M5', disponibilidad: 'FUENTE_NO_DISPONIBLE', alcanceAutorizado: false, antecedentes: [], motivo: 'No existe un contrato owner aprobado para consultar costos M5 desde M12' };
+    return { identidad, fuentes: [m2, terreno, inventario, m3, m5, m7] };
   }
 
   async registrar(entrada: Entrada, actorId: bigint) {
@@ -76,12 +229,14 @@ export class ServicioObraProyectoComercial {
       if (!cotizacion) throw new ErrorAplicacion(404, 'Cotización no encontrada');
       if (cotizacion.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'Sólo un borrador puede cambiar su Obra vinculada');
       if (cotizacion.revision !== revision) throw new ErrorAplicacion(409, 'La Cotización fue modificada por otra sesión');
+      const motivo = texto(entrada.motivo, 2000);
+      if (cotizacion.id_obra_contexto && cotizacion.id_obra_contexto !== idObra && !motivo) throw new ErrorAplicacion(400, 'Cambiar la Obra requiere motivo y revisión humana');
       const obra = await tx.obra.findUnique({ where: { obra_obra_id: idObra } });
       if (!obra || ['inactiva', 'cerrada', 'eliminada'].includes(String(obra.obra_estado).toLowerCase())) throw new ErrorAplicacion(409, 'La Obra no está disponible para nuevas vinculaciones');
       const rutCotizacion = cotizacion.ficha_cliente.cliente_financiero.rut_cliente;
       if (obra.rut_cliente && rutCotizacion && obra.rut_cliente !== rutCotizacion) throw new ErrorAplicacion(409, 'La Obra pertenece a otro cliente; requiere revisión explícita');
       const actualizada = await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { id_obra_contexto: idObra, revision: { increment: 1 } } });
-      return Object.assign({ idCotizacion, idObra: idObra.toString(), revision: actualizada.revision, actor: actorId.toString() }, { __auditoriaM9: { anterior: { idObra: cotizacion.id_obra_contexto?.toString() ?? null }, nuevo: { idObra: idObra.toString(), revision: actualizada.revision } } });
+      return Object.assign({ idCotizacion, idObra: idObra.toString(), revision: actualizada.revision, actor: actorId.toString() }, { __auditoriaM9: { anterior: { idObra: cotizacion.id_obra_contexto?.toString() ?? null }, nuevo: { idObra: idObra.toString(), revision: actualizada.revision, motivo: motivo || null } } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 }
