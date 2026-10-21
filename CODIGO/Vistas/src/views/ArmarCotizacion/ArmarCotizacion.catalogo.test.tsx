@@ -35,6 +35,7 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
       if(String(ruta).startsWith('/mantenedores/comercial/servicios?'))return json([{id:'501',codigo:'FLT',nombre:'Flete autorizado',descripcion:'Traslado comercial',unidad:'GLOBAL',precio:{resultado:'VIGENTE',id:'precio-servicio-501',monto:50000,moneda:'CLP',version:1}}]);
       if(String(ruta).startsWith('/billing/quotes/obras/buscar?'))return json({obras:[{id:'801',nombre:'Melín 7019',referencia:'Edificio principal',direccion:'Melín 7019',region:'Metropolitana',ciudad:'Santiago',comuna:'Quinta Normal',edificio:null,unidad:null,estado:'activa',revision:1,coincidencia:'EXACTA'}],requiereSeleccionExplicita:false});
       if(String(ruta).startsWith('/billing/quotes/contexto/antecedentes?'))return json({identidad:{estado:'REFERENCIA_CONFIRMADA',cliente:{id:31,rut:cliente.rut,nombre:cliente.razonSocial,estado:'activo',procedencia:'finanzas.cliente_financiero'},obra:{id:'801',nombre:'Melín 7019'},proyectos:[{id:'9010',codigo:'COT-901',nombre:'Pedido 2026',estadoOperacional:'FORMALIZADO',estadoProduccion:'PENDIENTE',idCotizacionOrigen:901,procedencia:'terreno.proyecto'}]},fuentes:[{origen:'M2',disponibilidad:'DISPONIBLE',alcanceAutorizado:true,antecedentes:[{referencia:'COTIZACION:901'}]},{origen:'TERRENO',disponibilidad:'SIN_ANTECEDENTES',alcanceAutorizado:true,antecedentes:[]},{origen:'M3',disponibilidad:'ACCESO_RESTRINGIDO',alcanceAutorizado:false,antecedentes:[]}]});
+      if(ruta==='/billing/quotes/obras'&&opciones?.method==='POST')return json({id:'802',nombre:'Melín 7019 Torre B',referencia:'Nueva identidad',direccion:'Melín 7019',region:'Metropolitana',ciudad:'Santiago',comuna:'Quinta Normal',edificio:'Torre B',unidad:null,estado:'activa',revision:1,coincidencia:'EXACTA'});
       if(String(ruta).startsWith('/catalogo-comercial/productos/71/ficha'))return json(ficha);
       if(String(ruta).startsWith('/catalogo-comercial/productos?'))return json([producto]);
       if(ruta==='/billing/quotes'&&opciones?.method==='POST'){revision=1;return json({id_cotizacion:901,revision,contactos_b2b:[],grupos_alternativas_b2c:[]});}
@@ -141,6 +142,25 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
     expect(screen.getByRole('region',{name:'Contexto de Obra'})).toHaveTextContent(/M3: ACCESO_RESTRINGIDO/i);
     expect(vi.mocked(solicitarFinanzas).mock.calls.some(([ruta,opciones])=>String(ruta).includes('/contexto/antecedentes')&&!opciones?.method)).toBe(true);
     expect(vi.mocked(solicitarFinanzas).mock.calls.some(([,opciones])=>['POST','PUT','DELETE'].includes(String(opciones?.method)))).toBe(false);
+  });
+
+  it('requiere confirmación humana explícita antes de registrar una Obra distinta de las candidatas',async()=>{
+    const user=userEvent.setup();
+    render(<MemoryRouter><ArmarCotizacion/></MemoryRouter>);
+    await user.click(screen.getByRole('button',{name:/B2B · EMPRESAS/i}));
+    await user.type(screen.getByRole('textbox',{name:'Dirección de obra'}),'Melín 7019');
+    await user.type(screen.getByRole('textbox',{name:'Región'}),'Metropolitana');
+    await user.type(screen.getByRole('textbox',{name:'Comuna'}),'Quinta Normal');
+    await user.click(screen.getByRole('button',{name:/Buscar o registrar Obra/i}));
+    await screen.findByRole('dialog');
+    await user.click(screen.getByRole('button',{name:'Registrar y seleccionar'}));
+    expect(await screen.findByText(/Debes confirmar que revisaste/i)).toBeInTheDocument();
+    expect(vi.mocked(solicitarFinanzas).mock.calls.filter(([ruta])=>ruta==='/billing/quotes/obras')).toHaveLength(0);
+    await user.click(screen.getByRole('checkbox',{name:/Revisé las Obras candidatas/i}));
+    await user.click(screen.getByRole('button',{name:'Registrar y seleccionar'}));
+    await waitFor(()=>expect(vi.mocked(solicitarFinanzas).mock.calls.filter(([ruta])=>ruta==='/billing/quotes/obras')).toHaveLength(1));
+    const llamada=vi.mocked(solicitarFinanzas).mock.calls.find(([ruta])=>ruta==='/billing/quotes/obras');
+    expect(JSON.parse(String(llamada?.[1]?.body))).toMatchObject({declaracionRevisionCoincidencias:'IDENTIDAD_DISTINTA_REVISADA'});
   });
 });
 

@@ -1,7 +1,7 @@
 import { prepararPago } from '../utilidades/pago';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { formalizarProyectoCotizacion } from '../comercial/ServicioObraProyectoComercial';
+import { formalizarProyectoCotizacion, validarCoherenciaContextualM12 } from '../comercial/ServicioObraProyectoComercial';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, consolidarNotasClp, estadoVisibleNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
@@ -577,6 +577,8 @@ export class M2Controller {
     const creadas:Array<{idOrdenTrabajo:string;idUnidad:string;detalle:number;unidad:number;version:number}>=[];
     for(const unidad of resultado.unidades){
       const orden=await tx.orden_trabajo.create({data:{orden_trabajo_fecha_hora:new Date(),orden_trabajo_estado:'PENDIENTE_RECTIFICACION',especificaciones_puerta_id_especificacion_puerta:null,proyecto_id_proyecto:idProyecto??null,area_trabajo_id_area:null,usuario_id_usuario:null}});
+      const coherencia=validarCoherenciaContextualM12({idProyecto:idProyecto?.toString()??null,idProyectoOrdenTrabajo:orden.proyecto_id_proyecto?.toString()??null});
+      if(!coherencia.compatible)throw new ErrorAplicacion(409,coherencia.motivo);
       const planificacion={etapas:unidad.etapas};
       const registro=await tx.unidad_fisica_orden_trabajo.create({data:{id_cotizacion:idCotizacion,id_detalle_cotizacion:unidad.idDetalleCotizacion,id_extension_producto_comercial:unidad.idProductoComercial,id_familia_producto_comercial:unidad.idFamiliaProducto,numero_unidad:unidad.numeroUnidad,id_version_plantilla:unidad.idVersionPlantilla,id_orden_trabajo:orden.orden_trabajo_id_orden,planificacion_inicial:planificacion as Prisma.InputJsonValue,planificacion_actual:planificacion as Prisma.InputJsonValue,creado_por:usuario}});
       await tx.historial_unidad_fisica_ot.create({data:{id_unidad_fisica_ot:registro.id_unidad_fisica_ot,evento:'CREACION_DESDE_COTIZACION',valor_nuevo:{idCotizacion,idDetalle:unidad.idDetalleCotizacion,numeroUnidad:unidad.numeroUnidad,idOrdenTrabajo:orden.orden_trabajo_id_orden.toString(),idVersionPlantilla:unidad.idVersionPlantilla,estado:'PENDIENTE_RECTIFICACION'},usuario_id_usuario:usuario}});
