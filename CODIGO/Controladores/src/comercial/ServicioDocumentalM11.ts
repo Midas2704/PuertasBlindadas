@@ -199,11 +199,9 @@ export class ServicioDocumentalM11 {
       const repetida = await tx.resolucion_hallazgo_m11.findUnique({ where: { clave_idempotencia: clave } }); if (repetida) return repetida;
       const hallazgo = await tx.hallazgo_discrepancia_m11.findUnique({ where: { id_hallazgo_discrepancia_m11: idHallazgo } });
       if (!hallazgo) throw new ErrorAplicacion(404, 'Hallazgo no encontrado');
-      if (hallazgo.estado !== 'PENDIENTE' || hallazgo.revision !== revision) throw new ErrorAplicacion(409, 'El hallazgo ya fue resuelto o cambió durante la revisión');
-      const cambio = await tx.hallazgo_discrepancia_m11.updateMany({ where: { id_hallazgo_discrepancia_m11: idHallazgo, estado: 'PENDIENTE', revision }, data: { estado: 'RESUELTO', revision: { increment: 1 }, actualizado_en: new Date() } });
-      if (cambio.count !== 1) throw new ErrorAplicacion(409, 'El hallazgo cambió durante la resolución');
+      if (hallazgo.estado !== 'PENDIENTE' || hallazgo.revision !== revision) throw new ErrorAplicacion(409, 'El hallazgo cambió durante la revisión');
       const resolucion = await tx.resolucion_hallazgo_m11.create({ data: { id_hallazgo: idHallazgo, decision, motivo, respaldo, resultado, actor_id: actorId, clave_idempotencia: clave } });
-      return auditable(resolucion, json({ idHallazgo: idHallazgo.toString(), estado: 'PENDIENTE', revision }), json({ idHallazgo: idHallazgo.toString(), estado: 'RESUELTO', decision, resultado }));
+      return auditable({ ...resolucion, estadoHallazgo: 'PENDIENTE', cierreAplicado: false, detalle: 'La decisión queda registrada; no existe un contrato aprobado para cerrar o ejecutar automáticamente el hallazgo' }, json({ idHallazgo: idHallazgo.toString(), estado: 'PENDIENTE', revision }), json({ idHallazgo: idHallazgo.toString(), estado: 'PENDIENTE', decision, resultado, cierreAplicado: false }));
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 }

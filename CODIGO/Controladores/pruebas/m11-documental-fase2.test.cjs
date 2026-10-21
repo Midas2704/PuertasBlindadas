@@ -37,7 +37,7 @@ test('M11 Fase 2 documental', async t => {
   });
   await t.test('correcciones y resoluciones usan auditoría oficial; consultas aritméticas no', () => {
     assert.equal(CATALOGO_PRODUCTORES_M9.gestionarCorreccionDocumentalM11.operacion,'DOCUMENTO_COMERCIAL_CORREGIDO');
-    assert.equal(CATALOGO_PRODUCTORES_M9.resolverHallazgoDocumentalM11.operacion,'HALLAZGO_DOCUMENTAL_RESUELTO');
+    assert.equal(CATALOGO_PRODUCTORES_M9.resolverHallazgoDocumentalM11.operacion,'DECISION_HALLAZGO_DOCUMENTAL_REGISTRADA');
     assert.equal(CATALOGO_PRODUCTORES_M9.consultarConciliacionDocumentalM11,undefined);
   });
   await t.test('migración 074 es aditiva, preserva originales y registra sólo permisos humanos', () => {
@@ -54,6 +54,6 @@ test('M11 Fase 2 documental', async t => {
   await t.test('hallazgo sólo nace de evidencia acreditada y resolución conserva motivo y respaldo', () => {
     const fuente=readFileSync(resolve('src/comercial/ServicioDocumentalM11.ts'),'utf8');
     assert.match(fuente,/resultado\.estado === 'DATOS_INSUFICIENTES'/); assert.match(fuente,/upsert/); assert.match(fuente,/decision, motivo, respaldo, resultado/);
-    assert.match(fuente,/clave_idempotencia/); assert.match(fuente,/revision: \{ increment: 1 \}/);
+    assert.match(fuente,/clave_idempotencia/); assert.match(fuente,/cierreAplicado: false/); assert.doesNotMatch(fuente,/estado: 'RESUELTO'/);
   });
 });
