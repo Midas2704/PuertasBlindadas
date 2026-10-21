@@ -415,6 +415,8 @@ model documento_compra_proveedor {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model documento_tributario {
   documento_tributario_nota_venta documento_tributario_nota_venta[]
+  correcciones_m11_original       correccion_documental_m11[] @relation("correccion_m11_documento_original")
+  correcciones_m11_corrector      correccion_documental_m11[] @relation("correccion_m11_documento_corrector")
 
   id_documento_tributario    Int                       @id @default(autoincrement())
   id_ficha_cliente           Int
@@ -3602,6 +3604,9 @@ model usuario {
   precios_servicio_comercial_creados               precio_servicio_comercial[]            @relation("precio_servicio_comercial_actor")
   selecciones_alternativas_b2c                     grupo_alternativas_b2c[]                @relation("grupo_alternativa_selector")
   historial_selecciones_alternativas_b2c            historial_seleccion_alternativa_b2c[]  @relation("historial_seleccion_alternativa_actor")
+  correcciones_documentales_m11                     correccion_documental_m11[]             @relation("correccion_documental_m11_actor")
+  hallazgos_documentales_m11                         hallazgo_discrepancia_m11[]             @relation("hallazgo_discrepancia_m11_actor")
+  resoluciones_documentales_m11                      resolucion_hallazgo_m11[]               @relation("resolucion_hallazgo_m11_actor")
   asignaciones_area_empleado_creadas               asignacion_area_empleado[]              @relation("area_empleado_asignador")
   asignaciones_area_empleado_finalizadas           asignacion_area_empleado[]              @relation("area_empleado_finalizador")
   seguridad                                        estado_seguridad_usuario?
@@ -5095,6 +5100,8 @@ model orden_compra_b2b {
   cotizacion                   cotizacion           @relation(fields: [id_cotizacion], references: [id_cotizacion], onDelete: Restrict)
   version_oferta_aceptada      cotizacion_version?  @relation("orden_compra_oferta_aceptada", fields: [id_version_oferta_aceptada], references: [id_cotizacion_version], onDelete: Restrict, onUpdate: NoAction, map: "fk_orden_compra_oferta_aceptada")
   lineas                       linea_orden_compra_b2b[]
+  hallazgos_documentales_m11   hallazgo_discrepancia_m11[]
+  correcciones_documentales_m11 correccion_documental_m11[]
 
   @@index([id_version_oferta_aceptada], map: "idx_orden_compra_oferta_aceptada")
 
@@ -5121,6 +5128,7 @@ model linea_orden_compra_b2b {
   detalle_cotizacion        detalle_cotizacion?    @relation(fields: [id_detalle_cotizacion], references: [id_detalle_cotizacion], onDelete: Restrict, onUpdate: NoAction, map: "fk_linea_oc_detalle_cotizacion")
   moneda                    moneda?                @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_linea_oc_moneda")
   correspondencias_tecnicas correspondencia_linea_oc_item_tecnico[]
+  hallazgos_documentales_m11 hallazgo_discrepancia_m11[]
 
   @@unique([id_orden_compra_b2b, numero_linea], map: "uq_linea_oc_numero")
   @@index([id_detalle_cotizacion], map: "idx_linea_oc_detalle")
@@ -5151,7 +5159,82 @@ model guia_despacho {
   estado           String     @default("emitida")
   antecedentes     Json?
   nota_venta       nota_venta @relation(fields: [id_nota_venta], references: [id_nota_venta], onDelete: Restrict)
+  correcciones_m11_original  correccion_documental_m11[] @relation("correccion_m11_guia_original")
+  correcciones_m11_correctora correccion_documental_m11[] @relation("correccion_m11_guia_correctora")
 
+  @@schema("finanzas")
+}
+
+/// Actuación documental humana con original preservado. No emite DTE ni reemplaza archivos por inferencia.
+model correccion_documental_m11 {
+  id_correccion_documental_m11 BigInt                 @id @default(autoincrement())
+  tipo_documento               String                 @db.VarChar(20)
+  id_orden_compra_original     Int?
+  id_guia_original             Int?
+  id_guia_correctora           Int?
+  id_documento_original        Int?
+  id_documento_corrector       Int?
+  actuacion                    String                 @db.VarChar(80)
+  motivo                       String
+  respaldo                     String
+  snapshot_anterior            Json
+  snapshot_resultado           Json
+  actor_id                     BigInt
+  clave_idempotencia           String                 @unique @db.VarChar(120)
+  creado_en                    DateTime               @default(now()) @db.Timestamptz(6)
+  orden_compra_original        orden_compra_b2b?      @relation(fields: [id_orden_compra_original], references: [id_orden_compra_b2b], onDelete: Restrict, onUpdate: NoAction, map: "fk_correccion_m11_oc")
+  guia_original                guia_despacho?         @relation("correccion_m11_guia_original", fields: [id_guia_original], references: [id_guia_despacho], onDelete: Restrict, onUpdate: NoAction, map: "fk_correccion_m11_guia")
+  guia_correctora              guia_despacho?         @relation("correccion_m11_guia_correctora", fields: [id_guia_correctora], references: [id_guia_despacho], onDelete: Restrict, onUpdate: NoAction, map: "fk_correccion_m11_guia_correctora")
+  documento_original           documento_tributario? @relation("correccion_m11_documento_original", fields: [id_documento_original], references: [id_documento_tributario], onDelete: Restrict, onUpdate: NoAction, map: "fk_correccion_m11_documento_original")
+  documento_corrector          documento_tributario? @relation("correccion_m11_documento_corrector", fields: [id_documento_corrector], references: [id_documento_tributario], onDelete: Restrict, onUpdate: NoAction, map: "fk_correccion_m11_documento_corrector")
+  actor                        usuario                @relation("correccion_documental_m11_actor", fields: [actor_id], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_correccion_m11_actor")
+
+  @@index([tipo_documento, id_guia_original, creado_en], map: "idx_correccion_m11_guia")
+  @@index([tipo_documento, id_orden_compra_original, creado_en], map: "idx_correccion_m11_oc")
+  @@index([tipo_documento, id_documento_original, creado_en], map: "idx_correccion_m11_documento")
+  @@schema("finanzas")
+}
+
+/// Discrepancia comprobada por fuentes acreditadas. La información insuficiente no se persiste como hallazgo.
+model hallazgo_discrepancia_m11 {
+  id_hallazgo_discrepancia_m11 BigInt                      @id @default(autoincrement())
+  id_orden_compra_b2b          Int
+  id_linea_orden_compra_b2b    BigInt?
+  etapa                        String                      @db.VarChar(20)
+  tipo_discrepancia            String                      @db.VarChar(80)
+  referencias_origen           Json
+  evidencia                    Json
+  contexto                     Json
+  estado                       String                      @default("PENDIENTE") @db.VarChar(20)
+  clave_idempotencia           String                      @unique @db.VarChar(160)
+  detectado_por                BigInt?
+  revision                     Int                         @default(1)
+  creado_en                    DateTime                    @default(now()) @db.Timestamptz(6)
+  actualizado_en               DateTime                    @default(now()) @db.Timestamptz(6)
+  orden_compra                 orden_compra_b2b            @relation(fields: [id_orden_compra_b2b], references: [id_orden_compra_b2b], onDelete: Restrict, onUpdate: NoAction, map: "fk_hallazgo_m11_oc")
+  linea_orden_compra           linea_orden_compra_b2b?     @relation(fields: [id_linea_orden_compra_b2b], references: [id_linea_orden_compra_b2b], onDelete: Restrict, onUpdate: NoAction, map: "fk_hallazgo_m11_linea_oc")
+  actor                        usuario?                    @relation("hallazgo_discrepancia_m11_actor", fields: [detectado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_hallazgo_m11_actor")
+  resoluciones                 resolucion_hallazgo_m11[]
+
+  @@index([id_orden_compra_b2b, estado], map: "idx_hallazgo_m11_oc_estado")
+  @@schema("finanzas")
+}
+
+/// Decisión humana append-only. No ejecuta correcciones, pagos, DTE ni movimientos físicos.
+model resolucion_hallazgo_m11 {
+  id_resolucion_hallazgo_m11 BigInt                     @id @default(autoincrement())
+  id_hallazgo                BigInt
+  decision                   String                     @db.VarChar(120)
+  motivo                     String
+  respaldo                   String
+  resultado                  String
+  actor_id                   BigInt
+  clave_idempotencia         String                     @unique @db.VarChar(120)
+  creado_en                  DateTime                   @default(now()) @db.Timestamptz(6)
+  hallazgo                   hallazgo_discrepancia_m11 @relation(fields: [id_hallazgo], references: [id_hallazgo_discrepancia_m11], onDelete: Restrict, onUpdate: NoAction, map: "fk_resolucion_m11_hallazgo")
+  actor                      usuario                    @relation("resolucion_hallazgo_m11_actor", fields: [actor_id], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_resolucion_m11_actor")
+
+  @@index([id_hallazgo, creado_en], map: "idx_resolucion_m11_hallazgo")
   @@schema("finanzas")
 }
 

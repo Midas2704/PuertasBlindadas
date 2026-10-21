@@ -11,6 +11,7 @@ import { registrarCompromisoCredito, validarCreditoParaFormalizacion } from '../
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 import { normalizarUbicacion, resolverCoberturaDesdeTarifas, type SegmentoComercial, type TarifaResoluble } from '../comercial/contratosCatalogoComercial';
 import { exigirCotejoAcreditadoM11, prepararCorrespondenciasTecnicasM11, prepararTrazabilidadOrdenCompraM11, validarCondicionesEconomicasOfertaM11 } from '../comercial/ServicioTrazabilidadComercialM11';
+import { ServicioDocumentalM11 } from '../comercial/ServicioDocumentalM11';
 
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 const ESTADOS_FAMILIA_COMERCIAL = ['ACTIVA', 'INACTIVA'] as const;
@@ -446,6 +447,7 @@ async function obtenerTipoCambioCotizacion(transaccion: Prisma.TransactionClient
 
 /** M2 CU12–CU41. Compatibilidad del frontend existente; no sustituye la implementación completa de los CU. */
 export class M2Controller {
+  private readonly documentalM11 = new ServicioDocumentalM11();
   constructor(private readonly bancoCentral: BancoCentral = new C_BancoCentral()) {}
   private async resolverTipoCambioCotizacion(codigoMoneda: string, entrada: Entrada) {
     if (codigoMoneda === 'CLP') return null;
@@ -680,6 +682,11 @@ export class M2Controller {
     if(!cotizacion)throw new ErrorAplicacion(404,'Cotización no encontrada');
     return cotizacion;
   }
+  consultarCadenaDocumentalM11(idCotizacion: number) { return this.documentalM11.consultarCadena(idCotizacion); }
+  consultarConciliacionDocumentalM11(idCotizacion: number) { return this.documentalM11.consultarConciliacion(idCotizacion); }
+  gestionarCorreccionDocumentalM11(entrada: Entrada, actorId: bigint) { return this.documentalM11.gestionarCorreccion(entrada, actorId); }
+  consultarHistorialCorreccionM11(tipo: string, idDocumento: number) { return this.documentalM11.consultarHistorial(tipo, idDocumento); }
+  resolverHallazgoDocumentalM11(idHallazgo: number, entrada: Entrada, actorId: bigint) { return this.documentalM11.resolverHallazgo(BigInt(idHallazgo), entrada, actorId); }
 
   async registrarClienteDesdeCotizacion(entrada: Entrada) {
     const nombre = texto(entrada.nombre, 150); const tipo = texto(entrada.tipo || 'B2C', 30).toUpperCase();

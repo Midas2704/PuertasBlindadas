@@ -3,6 +3,7 @@
 export const operacionesPermiso: Record<string, string> = {
  buscarClientes:'CU06',filtrarEstado:'CU07',filtrarFinanzas:'CU08',listarClientes:'CU05', abrirFicha:'CU09', dashboard:'CU05', crearCliente:'CU01', actualizarCliente:'CU02', desactivarCliente:'CU03', reactivarCliente:'CU04', inventario:'CU15', productos:'CU14', monedas:'CU28',
  listarFamiliasProductoComercial:'CU360', listarProductosComerciales:'CU360', obtenerProductoComercial:'CU360', catalogosVinculacionProductoComercial:'CU360', obtenerPlanificacionAprobacionCotizacion:'CU24', consultarTrazabilidadComercialM11:'CU20',
+ consultarCadenaDocumentalM11:'CU459', consultarConciliacionDocumentalM11:'CU459', gestionarCorreccionDocumentalM11:'CU458', consultarHistorialCorreccionM11:'CU459', resolverHallazgoDocumentalM11:'CU461',
  listarPreciosComerciales:'CU360', listarServiciosComerciales:'CU360', listarOpcionalesComerciales:'CU360', listarTarifasInstalacionComercial:'CU360', listarCondicionesComerciales:'CU360', resolverCoberturaInstalacionComercial:'CU360', obtenerResumenComercialProducto:'CU360',
  crearServicioComercial:'CU368', versionarPrecioServicioComercial:'CU368', desactivarServicioComercial:'CU368',
  listarProductosCatalogoCotizacion:'CU360', obtenerFichaProductoCatalogoCotizacion:'CU360', consultarDocumentosProducto:'CU360', consultarVersionesDocumentoProducto:'CU367', consultarCapacidadesDocumentosProducto:'CU360',
@@ -180,10 +181,11 @@ export const codigosImplementados = [...new Set([...Object.values(operacionesPer
 /** El perfil Administrador representa acceso integral a la matriz de CU implementados. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
 export const codigosTodosLosCU = Array.from({ length: 274 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
-export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({length:22},(_,i)=>`CU${360+i}`).filter(c=>c!=='CU377'), 'CU446','CU447','CU449','CU451'];
+export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({length:22},(_,i)=>`CU${360+i}`).filter(c=>c!=='CU377'), 'CU446','CU447','CU449','CU451','CU458','CU459','CU461'];
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
  if (numero >= 360 && numero <= 381) return 'M2';
+ if ([458,459,461].includes(numero)) return 'M11';
  if ([446,447,449,451].includes(numero)) return 'M7';
  return numero >= 275 ? 'M9' : numero >= 259 ? 'M8' : numero >= 215 ? 'M7' : numero >= 155 ? 'M6' : numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
 };

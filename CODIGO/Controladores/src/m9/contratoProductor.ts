@@ -49,6 +49,8 @@ export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> 
   aprobarCotizacion: { modulo:'M2', operacion:'COTIZACION_APROBADA', entidad:'COTIZACION', critico:false },
   crearFamiliaProductoComercial: { modulo:'M2', operacion:'FAMILIA_COMERCIAL_CREADA', entidad:'FAMILIA_PRODUCTO_COMERCIAL', critico:false },
   aprobarCotizacionB2B: { modulo:'M2', operacion:'COTIZACION_B2B_APROBADA_OT_GENERADAS', entidad:'COTIZACION', critico:true },
+  gestionarCorreccionDocumentalM11: { modulo:'M2', operacion:'DOCUMENTO_COMERCIAL_CORREGIDO', entidad:'DOCUMENTO_COMERCIAL', critico:true, motivoRequerido:true },
+  resolverHallazgoDocumentalM11: { modulo:'M2', operacion:'HALLAZGO_DOCUMENTAL_RESUELTO', entidad:'HALLAZGO_DOCUMENTAL', critico:true, motivoRequerido:true },
   consolidarB2C: { modulo:'M2', operacion:'COTIZACION_B2C_APROBADA_OT_GENERADAS', entidad:'COTIZACION', critico:true },
   crearTareaFabricacion: { modulo:'M2', operacion:'TAREA_FABRICACION_CREADA', entidad:'TAREA_FABRICACION', critico:false },
   actualizarTareaFabricacion: { modulo:'M2', operacion:'TAREA_FABRICACION_ACTUALIZADA', entidad:'TAREA_FABRICACION', critico:false },

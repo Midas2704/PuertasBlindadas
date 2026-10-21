@@ -60,6 +60,7 @@ const nombresExplicitos: Record<string, string> = {
   CU380:'Crear y editar carta comercial B2C', CU381:'Publicar carta comercial B2C',
   CU446:'Consultar ventas y comparaciones ampliadas', CU447:'Exportar Excel de ventas y cotizaciones',
   CU449:'Consultar resultados gerenciales ampliados', CU451:'Administrar presupuestos manuales',
+  CU458:'Gestionar correcciones documentales', CU459:'Conciliar operación documental', CU461:'Resolver discrepancias documentales',
 };
 
 const primeraOperacionPorCodigo = new Map<string,string>();
@@ -96,6 +97,7 @@ export const areaPermisoM4 = (codigo: string): AreaFuncionalM4 => {
   if(numero===355||numero===359)return 'Auditoría';
   if(numero>=368&&numero<=372)return 'Precios y Condiciones Comerciales';
   if(numero>=373&&numero<=381)return 'Documentos Comerciales';
+  if([458,459,461].includes(numero))return 'Documentos Comerciales';
   if([446,447,449,451].includes(numero))return 'Dashboard y Gestión Financiera';
   return 'Configuración y Mantenedores';
 };

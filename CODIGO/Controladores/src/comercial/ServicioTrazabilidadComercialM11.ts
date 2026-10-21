@@ -98,7 +98,9 @@ export function prepararTrazabilidadOrdenCompraM11(entrada: unknown, idCotizacio
     const referenciaComercial = textoOpcional(item.referenciaComercial, 120); const concepto = textoOpcional(item.concepto, 2000);
     const cantidad = decimalOpcional(item.cantidad, 'Cantidad'); const idMoneda = enteroOpcional(item.idMoneda, 'Moneda');
     const precioUnitario = decimalOpcional(item.precioUnitario, 'Precio unitario', true);
-    const subtotal = decimalOpcional(item.subtotal, 'Subtotal', true) ?? (cantidad && precioUnitario ? cantidad.mul(precioUnitario).toDecimalPlaces(2) : null);
+    const subtotalExplicito = decimalOpcional(item.subtotal, 'Subtotal', true);
+    const subtotalCalculado = cantidad && precioUnitario ? cantidad.mul(precioUnitario).toDecimalPlaces(2) : null;
+    const subtotal = subtotalExplicito ?? subtotalCalculado;
     const especificaciones = item.especificaciones === undefined || item.especificaciones === null ? null : objeto(item.especificaciones) as Prisma.InputJsonValue;
     const faltantes: string[] = []; const discrepancias: Array<{ campo: string; oc: unknown; oferta: unknown }> = [];
     if (referenciaComercial && referencias.has(referenciaComercial)) discrepancias.push({ campo: 'referencia_comercial_duplicada', oc: referenciaComercial, oferta: null });
@@ -116,6 +118,7 @@ export function prepararTrazabilidadOrdenCompraM11(entrada: unknown, idCotizacio
     if (lineaOferta && (lineaOferta.precioUnitario === null || lineaOferta.precioUnitario === undefined)) faltantes.push('precio_unitario_oferta');
     if (lineaOferta && cantidad && lineaOferta.cantidad !== null && lineaOferta.cantidad !== undefined && !iguales(cantidad, lineaOferta.cantidad)) discrepancias.push({ campo: 'cantidad', oc: cantidad.toString(), oferta: lineaOferta.cantidad });
     if (lineaOferta && precioUnitario && lineaOferta.precioUnitario !== null && lineaOferta.precioUnitario !== undefined && !iguales(precioUnitario, lineaOferta.precioUnitario)) discrepancias.push({ campo: 'precio_unitario', oc: precioUnitario.toString(), oferta: lineaOferta.precioUnitario });
+    if (subtotalExplicito && subtotalCalculado && !subtotalExplicito.eq(subtotalCalculado)) discrepancias.push({ campo: 'subtotal', oc: subtotalExplicito.toString(), oferta: subtotalCalculado.toString() });
     if (idMoneda !== null && idMoneda !== monedaOfertaId) discrepancias.push({ campo: 'moneda', oc: idMoneda, oferta: monedaOfertaId });
     const estadoCotejo: EstadoCotejoM11 = discrepancias.length ? 'DISCREPANCIA' : faltantes.length ? 'INFORMACION_INSUFICIENTE' : 'COINCIDE';
     const cantidadAcreditada = estadoCotejo === 'COINCIDE' && cantidad?.isInteger() ? cantidad.toNumber() : null;
