@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const { Prisma } = require('@prisma/client');
-const { conciliarDosEtapasM11 } = require('../dist/comercial/ServicioDocumentalM11');
+const { conciliarDosEtapasM11, validarCorrectorDteAcreditadoM11 } = require('../dist/comercial/ServicioDocumentalM11');
 const { prepararTrazabilidadOrdenCompraM11 } = require('../dist/comercial/ServicioTrazabilidadComercialM11');
 const { operacionesPermiso, codigosAdministrador, moduloPermiso } = require('../dist/validaciones/permisos');
 const { CATALOGO_PRODUCTORES_M9 } = require('../dist/m9/contratoProductor');
@@ -46,10 +46,27 @@ test('M11 Fase 2 documental', async t => {
     assert.match(sql,/'CU458'/); assert.match(sql,/'CU459'/); assert.match(sql,/'CU461'/); assert.doesNotMatch(sql,/INSERT[\s\S]*'CU456'/);
     assert.doesNotMatch(sql,/DROP TABLE|TRUNCATE|DELETE FROM/i);
   });
-  await t.test('DTE admite cadena de correctores existentes sin crear DTE automático', () => {
+  await t.test('CU458 bloquea GDE correctora sin contrato y la ruta legacy no sobrescribe originales', () => {
     const fuente=readFileSync(resolve('src/comercial/ServicioDocumentalM11.ts'),'utf8');
-    assert.match(fuente,/id_documento_referencia: idOriginal/); assert.match(fuente,/VINCULAR_CORRECTOR_EXISTENTE/);
-    assert.doesNotMatch(fuente,/documento_tributario\.create/); assert.match(fuente,/produciría un ciclo documental/);
+    const m2=readFileSync(resolve('src/controladores/M2Controller.ts'),'utf8');
+    assert.match(fuente,/M11_CONTRATO_CORRECCION_GDE_PENDIENTE/); assert.doesNotMatch(fuente,/guia_despacho\.create/);
+    const bloque=m2.slice(m2.indexOf('async modificarGuia'),m2.indexOf('async definirCondicionesCobro'));
+    assert.match(bloque,/M11_GUIA_INMUTABLE/); assert.doesNotMatch(bloque,/guia_despacho\.update/);
+  });
+  await t.test('DTE exige relación y tipo acreditados, detecta ciclos y conserva caso documentado', () => {
+    const tipoVenta={aplica_venta:true,estado_tipo_documento:'activo'};
+    const original={id_documento_tributario:1,id_tipo_documento:10,id_documento_referencia:null,tipo_documento:tipoVenta};
+    const sinVinculo={id_documento_tributario:2,id_tipo_documento:11,id_documento_referencia:null,tipo_documento:tipoVenta};
+    assert.throws(()=>validarCorrectorDteAcreditadoM11(original,sinVinculo,[]),/vínculo corrector no está acreditado/);
+    assert.throws(()=>validarCorrectorDteAcreditadoM11(original,{...sinVinculo,id_tipo_documento:10,id_documento_referencia:1},[]),/tipo.*no está acreditado/i);
+    assert.throws(()=>validarCorrectorDteAcreditadoM11(original,{...sinVinculo,id_documento_referencia:1},[2]),/ciclo/);
+    assert.doesNotThrow(()=>validarCorrectorDteAcreditadoM11(original,{...sinVinculo,id_documento_referencia:1},[]));
+    const fuente=readFileSync(resolve('src/comercial/ServicioDocumentalM11.ts'),'utf8'); assert.doesNotMatch(fuente,/documento_tributario\.create|documento_tributario\.update/); assert.match(fuente,/VINCULAR_CORRECTOR_EXISTENTE/);
+  });
+  await t.test('CUT456 no acredita vínculo directo GDE-DTE por compartir Nota de Venta',()=>{
+    const fuente=readFileSync(resolve('src/comercial/ServicioDocumentalM11.ts'),'utf8');
+    assert.match(fuente,/relacionesDirectasGuiaDte: \[\]/); assert.match(fuente,/Compartir Nota de Venta no acredita una relación directa/);
+    assert.match(fuente,/RELACION_ACREDITADA_A_NOTA_VENTA/);
   });
   await t.test('hallazgo sólo nace de evidencia acreditada y resolución conserva motivo y respaldo', () => {
     const fuente=readFileSync(resolve('src/comercial/ServicioDocumentalM11.ts'),'utf8');

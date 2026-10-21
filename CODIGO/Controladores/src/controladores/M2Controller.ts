@@ -1450,13 +1450,10 @@ export class M2Controller {
     });
   }
   async modificarGuia(idGuia: number, entrada: Entrada) {
-    const folio = texto(entrada.folio, 80); if (!folio) throw new ErrorAplicacion(400, 'El folio es obligatorio');
     const guia = await prisma.guia_despacho.findUnique({ where: { id_guia_despacho: idGuia } });
     if (!guia) throw new ErrorAplicacion(404, 'Guía de Despacho no encontrada');
-    if (['cerrada', 'finalizada', 'anulada'].includes(String(guia.estado).toLowerCase())) throw new ErrorAplicacion(409, 'La Guía de Despacho ya no permite modificaciones');
-    const antecedentes = entrada.antecedentes === undefined ? undefined : entrada.antecedentes;
-    if (antecedentes !== undefined && (typeof antecedentes !== 'object' || antecedentes === null || Array.isArray(antecedentes))) throw new ErrorAplicacion(400, 'Antecedentes inválidos');
-    return prisma.guia_despacho.update({ where: { id_guia_despacho: idGuia }, data: { folio, antecedentes: antecedentes as any } });
+    void entrada;
+    throw new ErrorAplicacion(409, 'La Guía de Despacho es históricamente inmutable; la corrección requiere CU458 y una fuente documental acreditada', 'M11_GUIA_INMUTABLE');
   }
   async definirCondicionesCobro(idNota: number, entrada: Entrada) {
     const fecha = texto(entrada.fechaVencimiento, 20); if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new ErrorAplicacion(400, 'Fecha de vencimiento inválida');

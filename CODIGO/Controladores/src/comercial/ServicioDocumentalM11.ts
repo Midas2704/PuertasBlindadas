@@ -6,6 +6,7 @@ type Entrada = Record<string, unknown>;
 export type LineaCantidadM11 = { idLinea: string; cantidad: number; moneda?: string | null; monto?: number | null; compartido?: boolean };
 type LineaCantidad = LineaCantidadM11;
 export type FuenteSalidaAcreditadaM11 = { acreditada: true; owner: string; referencia: string; lineas: LineaCantidad[] } | null;
+type DteAcreditableM11 = { id_documento_tributario:number; id_tipo_documento:number; id_documento_referencia:number|null; tipo_documento:{aplica_venta:boolean;estado_tipo_documento:string} };
 
 const requerido = (valor: unknown, nombre: string, maximo = 4000) => {
   if (typeof valor !== 'string' || !valor.trim() || valor.trim().length > maximo) throw new ErrorAplicacion(400, `${nombre} es obligatorio`);
@@ -30,6 +31,12 @@ const auditable = <T extends object>(salida: T, anterior: Prisma.InputJsonValue 
   Object.defineProperty(salida, '__auditoriaM9', { enumerable: false, value: { anterior, nuevo } });
   return salida;
 };
+
+export function validarCorrectorDteAcreditadoM11(original:DteAcreditableM11,corrector:DteAcreditableM11,ancestrosOriginal:number[]){
+  if(corrector.id_documento_referencia!==original.id_documento_tributario)throw new ErrorAplicacion(409,'El vínculo corrector no está acreditado por una relación documental existente; se requiere el contrato de la fuente tributaria','M11_CONTRATO_CORRECCION_DTE_PENDIENTE');
+  if(original.id_tipo_documento===corrector.id_tipo_documento||!corrector.tipo_documento.aplica_venta||corrector.tipo_documento.estado_tipo_documento!=='activo')throw new ErrorAplicacion(409,'El tipo del documento corrector no está acreditado como compatible con el original','M11_TIPO_CORRECTOR_NO_ACREDITADO');
+  if(ancestrosOriginal.includes(corrector.id_documento_tributario))throw new ErrorAplicacion(409,'La relación documental contiene un ciclo y no puede acreditarse','M11_CICLO_DOCUMENTAL');
+}
 
 export function conciliarDosEtapasM11(ordenadas: LineaCantidad[], salida: FuenteSalidaAcreditadaM11, facturadas: LineaCantidad[] | null) {
   if (!salida) return {
@@ -82,8 +89,10 @@ export class ServicioDocumentalM11 {
       idCotizacion, ordenCompra: { id: oc.id_orden_compra_b2b, folio: oc.folio, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA', lineas: oc.lineas },
       notaVenta: nota ? { id: nota.id_nota_venta, numero: nota.numero_nota_venta, relacion: 'RELACION_ACREDITADA' } : null,
       guias: guias.map(guia => ({ id: guia.id_guia_despacho, folio: guia.folio, fecha: guia.fecha_emision, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA', salidaFisica: 'NO_ACREDITADA' })),
-      documentosTributarios: documentos.map(documento => ({ id: documento.id_documento_tributario, folio: documento.folio_documento, tipo: documento.tipo_documento.nombre_tipo_documento, moneda: documento.moneda.codigo_moneda, monto: documento.monto_total, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA' })),
-      eslabones: { guiaDespacho: guias.length ? 'CONFIRMADO' : 'DOCUMENTO_FALTANTE', facturacion: documentos.length ? 'CONFIRMADO' : 'DOCUMENTO_FALTANTE', salidaFisica: 'INFORMACION_INSUFICIENTE' },
+      documentosTributarios: documentos.map(documento => ({ id: documento.id_documento_tributario, folio: documento.folio_documento, tipo: documento.tipo_documento.nombre_tipo_documento, moneda: documento.moneda.codigo_moneda, monto: documento.monto_total, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA_A_NOTA_VENTA' })),
+      relacionesDirectasGuiaDte: [] as Array<{idGuia:number;idDocumentoTributario:number;evidencia:string}>,
+      eslabones: { guiaDespacho: guias.length ? 'CONFIRMADO' : 'DOCUMENTO_FALTANTE', facturacion: documentos.length ? 'CONFIRMADO' : 'DOCUMENTO_FALTANTE', guiaDteDirecto: 'INFORMACION_INSUFICIENTE', salidaFisica: 'INFORMACION_INSUFICIENTE' },
+      advertenciaRelacionDocumental: 'Compartir Nota de Venta no acredita una relación directa entre GDE y DTE',
       advertenciaFisica: 'Una GDE emitida o una OT terminada no acredita salida física real',
     };
   }
@@ -125,17 +134,16 @@ export class ServicioDocumentalM11 {
       if (tipo === 'DTE') {
         const idOriginal = idPositivo(entrada.idDocumentoOriginal, 'Documento original'); const idCorrector = idPositivo(entrada.idDocumentoCorrector, 'Documento corrector');
         if (idOriginal === idCorrector) throw new ErrorAplicacion(400, 'El original y el corrector deben ser documentos distintos');
-        const incluirCiclo = { documento_tributario_nota_venta: { select: { id_nota_venta: true } } } as const;
+        const incluirCiclo = { documento_tributario_nota_venta: { select: { id_nota_venta: true } }, tipo_documento:{select:{aplica_venta:true,estado_tipo_documento:true}} } as const;
         const [original, corrector] = await Promise.all([tx.documento_tributario.findUnique({ where: { id_documento_tributario: idOriginal }, include: incluirCiclo }), tx.documento_tributario.findUnique({ where: { id_documento_tributario: idCorrector }, include: incluirCiclo })]);
         if (!original || !corrector) throw new ErrorAplicacion(404, 'Documento original o corrector no encontrado');
         if (original.id_ficha_cliente !== corrector.id_ficha_cliente) throw new ErrorAplicacion(409, 'El corrector no corresponde al mismo cliente del original');
         const notasOriginal = new Set([original.id_nota_venta, ...original.documento_tributario_nota_venta.map(v => v.id_nota_venta)].filter((id): id is number => id !== null));
         const mismoCiclo = [corrector.id_nota_venta, ...corrector.documento_tributario_nota_venta.map(v => v.id_nota_venta)].some(id => id !== null && notasOriginal.has(id));
         if (!mismoCiclo) throw new ErrorAplicacion(409, 'El documento corrector no pertenece al mismo ciclo comercial acreditado');
-        if (corrector.id_documento_referencia && corrector.id_documento_referencia !== idOriginal) throw new ErrorAplicacion(409, 'El documento corrector ya referencia otro original');
-        let cursor = original.id_documento_referencia; const visitados = new Set([idCorrector]);
-        while (cursor) { if (visitados.has(cursor)) throw new ErrorAplicacion(409, 'La relación produciría un ciclo documental'); visitados.add(cursor); cursor = (await tx.documento_tributario.findUnique({ where: { id_documento_tributario: cursor }, select: { id_documento_referencia: true } }))?.id_documento_referencia ?? null; }
-        await tx.documento_tributario.update({ where: { id_documento_tributario: idCorrector }, data: { id_documento_referencia: idOriginal } });
+        let cursor = original.id_documento_referencia; const ancestros:number[]=[];
+        while(cursor){if(ancestros.includes(cursor))throw new ErrorAplicacion(409,'La cadena original ya contiene un ciclo documental','M11_CICLO_DOCUMENTAL');ancestros.push(cursor);cursor=(await tx.documento_tributario.findUnique({where:{id_documento_tributario:cursor},select:{id_documento_referencia:true}}))?.id_documento_referencia??null;}
+        validarCorrectorDteAcreditadoM11(original,corrector,ancestros);
         const correccion = await tx.correccion_documental_m11.create({ data: { tipo_documento: 'DTE', id_documento_original: idOriginal, id_documento_corrector: idCorrector, actuacion: 'VINCULAR_CORRECTOR_EXISTENTE', motivo, respaldo, actor_id: actorId, clave_idempotencia: clave, snapshot_anterior: json(original), snapshot_resultado: json({ idDocumentoCorrector: idCorrector, idDocumentoReferencia: idOriginal }) } });
         return auditable(correccion, json({ idOriginal, idCorrector, referenciaAnterior: corrector.id_documento_referencia }), json({ idOriginal, idCorrector, referencia: idOriginal }));
       }
@@ -143,14 +151,7 @@ export class ServicioDocumentalM11 {
         const idGuia = idPositivo(entrada.idGuiaOriginal, 'Guía original');
         const guia = await tx.guia_despacho.findUnique({ where: { id_guia_despacho: idGuia } });
         if (!guia) throw new ErrorAplicacion(404, 'Guía de Despacho original no encontrada');
-        if (['cerrada','finalizada','anulada'].includes(guia.estado.toLowerCase())) throw new ErrorAplicacion(409, 'El estado de la Guía no admite esta corrección');
-        const folio = requerido(entrada.folio, 'Folio corrector', 80);
-        if (folio === guia.folio) throw new ErrorAplicacion(409, 'La guía correctora debe tener una identidad documental distinta');
-        const antecedentes = entrada.antecedentes === undefined ? guia.antecedentes : entrada.antecedentes;
-        if (antecedentes !== null && (typeof antecedentes !== 'object' || Array.isArray(antecedentes))) throw new ErrorAplicacion(400, 'Antecedentes inválidos');
-        const correctora = await tx.guia_despacho.create({ data: { id_nota_venta: guia.id_nota_venta, folio, fecha_emision: new Date(), estado: 'emitida', antecedentes: antecedentes === null ? Prisma.JsonNull : antecedentes as Prisma.InputJsonValue } });
-        const correccion = await tx.correccion_documental_m11.create({ data: { tipo_documento: 'GDE', id_guia_original: idGuia, id_guia_correctora: correctora.id_guia_despacho, actuacion: 'REGISTRAR_GUIA_CORRECTORA', motivo, respaldo, actor_id: actorId, clave_idempotencia: clave, snapshot_anterior: json(guia), snapshot_resultado: json(correctora) } });
-        return auditable(correccion, json(guia), json(correctora));
+        throw new ErrorAplicacion(409,'No existe un contrato acreditado para registrar una GDE correctora externa; el original permanece inmutable','M11_CONTRATO_CORRECCION_GDE_PENDIENTE');
       }
       if (tipo === 'OC') {
         const idOrden = idPositivo(entrada.idOrdenCompraOriginal, 'Orden de Compra original');

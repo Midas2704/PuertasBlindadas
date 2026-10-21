@@ -13,21 +13,9 @@ interface ModalDetalleDocumentoProps {
 }
 
 const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeModal, onClose, children, onViewPago }) => {
-  const [guiaEdit, setGuiaEdit] = useState<any>(null);
-  const [guiaFolio, setGuiaFolio] = useState('');
-  const [guiaAntecedentes, setGuiaAntecedentes] = useState('');
-  const [guiaMotivo, setGuiaMotivo] = useState('');
-  const [guiaRespaldo, setGuiaRespaldo] = useState('');
   const [documentoExterno, setDocumentoExterno] = useState({ tipo: 'Factura Electrónica', folio: '', fechaEmision: new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago'}).format(new Date()), fechaVencimiento: '', montoNeto: '', montoImpuesto: '', montoTotal: '', respaldo: '', observacion: '', idsNotas: '' });
   if (!activeModal) return null;
   const guias = activeModal.data.guia_despacho || [];
-
-  const guardarGuia = async () => {
-    if (!guiaEdit || !guiaFolio.trim() || !guiaMotivo.trim() || !guiaRespaldo.trim()) { void notificarUsuario('Folio corrector, motivo y respaldo son obligatorios'); return; }
-    const respuesta = await solicitarFinanzas('/billing/documents/corrections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tipoDocumento:'GDE', idGuiaOriginal:guiaEdit.id_guia_despacho, folio: guiaFolio.trim(), antecedentes: guiaAntecedentes ? { texto: guiaAntecedentes } : null, motivo:guiaMotivo.trim(), respaldo:guiaRespaldo.trim(), claveIdempotencia:crypto.randomUUID() }) });
-    if (!respuesta.ok) { const error = await respuesta.json(); void notificarUsuario(error.error || 'No se pudo registrar la corrección documental'); return; }
-    window.location.reload();
-  };
 
   const registrarDocumentoExterno = async () => {
     const ids = (documentoExterno.idsNotas || String(activeModal.data.id_nota_venta)).split(',').map(valor=>Number(valor.trim())).filter(Number.isSafeInteger);
@@ -272,7 +260,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                       } catch (e) { void notificarUsuario('Error de conexión'); }
                     }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded transition-colors">Vincular</button>
                   </div>
-                  {guias.map((guia: any) => <div key={guia.id_guia_despacho} className="mt-3 p-2 bg-blue-50 rounded text-sm"><div className="flex justify-between"><span>Guía {guia.folio}</span><button className="text-blue-700 font-medium" onClick={() => { setGuiaEdit(guia); setGuiaFolio(''); setGuiaAntecedentes(guia.antecedentes?.texto || ''); setGuiaMotivo(''); setGuiaRespaldo(''); }}>Registrar corrección</button></div>{guiaEdit?.id_guia_despacho === guia.id_guia_despacho && <div className="mt-2 space-y-2"><p className="text-xs text-gray-600">El original queda inmutable; se registrará una guía correctora vinculada.</p><input className="w-full border rounded p-2" value={guiaFolio} onChange={e=>setGuiaFolio(e.target.value)} placeholder="Nuevo folio corrector"/><textarea className="w-full border rounded p-2" value={guiaAntecedentes} onChange={e=>setGuiaAntecedentes(e.target.value)} placeholder="Antecedentes corregidos"/><textarea className="w-full border rounded p-2" value={guiaMotivo} onChange={e=>setGuiaMotivo(e.target.value)} placeholder="Motivo obligatorio"/><textarea className="w-full border rounded p-2" value={guiaRespaldo} onChange={e=>setGuiaRespaldo(e.target.value)} placeholder="Respaldo obligatorio"/><button className="px-3 py-1.5 bg-primary-600 text-white rounded" onClick={guardarGuia}>Registrar corrección formal</button></div>}</div>)}
+                  {guias.map((guia: any) => <div key={guia.id_guia_despacho} className="mt-3 rounded bg-blue-50 p-2 text-sm"><div className="flex justify-between"><span>Guía {guia.folio}</span><span className="text-xs font-semibold text-gray-600">Original inmutable</span></div><p className="mt-1 text-xs text-amber-800">Una correctora sólo podrá registrarse cuando exista una fuente documental acreditada.</p></div>)}
                 </div>
                 
                 <div className="bg-white border border-gray-200 p-3 rounded-lg shadow-sm col-span-2">
