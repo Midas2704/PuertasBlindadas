@@ -612,8 +612,8 @@ export class C_Finanzas {
       case 'buscarObrasCotizacion': return this.obrasComerciales.buscar(solicitud.consulta || {});
       case 'registrarObraDesdeCotizacion': return this.obrasComerciales.registrar(cuerpo, actor.id);
       case 'vincularObraCotizacion': return this.obrasComerciales.vincularCotizacion(identificador(parametros.id), cuerpo, actor.id);
-      case 'resolverContextoObraProyectoM12': return this.obrasComerciales.resolverIdentidades(solicitud.consulta || {});
-      case 'consultarAntecedentesObraProyectoM12': return this.obrasComerciales.consultarAntecedentes(solicitud.consulta || {}, actor.permisos);
+      case 'resolverContextoObraProyectoM12': return this.obrasComerciales.resolverIdentidades(solicitud.consulta || {}, actor);
+      case 'consultarAntecedentesObraProyectoM12': return this.obrasComerciales.consultarAntecedentes(solicitud.consulta || {}, actor);
       case 'previsualizarCotizacionPdf': return this.documentosComerciales.previsualizarCotizacion(identificador(parametros.id));
       case 'emitirCotizacion': return this.documentosComerciales.emitirCotizacion(identificador(parametros.id), cuerpo, actor);
       case 'historialDocumentalCotizacion': return this.documentosComerciales.historialCotizacion(identificador(parametros.id));

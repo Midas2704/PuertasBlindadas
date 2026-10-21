@@ -4,6 +4,7 @@ import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { identificador, texto } from '../validaciones/solicitudes';
 
 type Entrada = Record<string, any>;
+type ActorContextualM12 = { permisos?: readonly string[] };
 
 export type EstadoReferenciaM12 = 'REFERENCIA_CONFIRMADA' | 'REFERENCIA_NO_ENCONTRADA' | 'FUENTE_NO_DISPONIBLE' | 'IDENTIDAD_AMBIGUA';
 export type ResultadoCoherenciaM12 = {
@@ -52,6 +53,47 @@ export const fuenteAutorizadaM12 = (origen: 'M2'|'TERRENO'|'INVENTARIO'|'M3'|'M7
   return existentes[origen].some(codigo => permisos.includes(codigo));
 };
 
+export const alcanceIdentidadM12 = (consulta: Entrada, actor: ActorContextualM12 = {}) => {
+  const permisos = actor.permisos ?? [];
+  const porCotizacion = Boolean(consulta.idCotizacion) && permisos.includes('CU20');
+  const puedeVerProyectos = porCotizacion || permisos.includes('CU199');
+  const puedeVerClientes = porCotizacion || (Boolean(consulta.idProyecto) && puedeVerProyectos && permisos.includes('CU09'));
+  return {
+    puedeVerProyectos,
+    puedeVerClientes,
+    puedeConsultarM2: porCotizacion || (Boolean(consulta.idProyecto) && puedeVerProyectos && permisos.includes('CU20')),
+  };
+};
+
+type ClienteContextualM12 = { id_cliente_financiero: number; rut_cliente: string | null; nombre_razon_social_referencia: string; estado_financiero: string };
+export const presentarClientesContextualesM12 = (clientes: ClienteContextualM12[], autorizado: boolean) => {
+  if (!autorizado) return { cliente: null, clientes: [], acceso: 'ACCESO_RESTRINGIDO' as const };
+  const presentados = clientes.map(cliente => ({
+    id: cliente.id_cliente_financiero,
+    rut: cliente.rut_cliente,
+    nombre: cliente.nombre_razon_social_referencia,
+    estado: cliente.estado_financiero,
+    procedencia: 'finanzas.cliente_financiero',
+  }));
+  return { cliente: presentados.length === 1 ? presentados[0] : null, clientes: presentados, acceso: 'AUTORIZADO' as const };
+};
+
+export const presentarServicioTerrenoContextualM12 = (servicio: {
+  servicio_terreno_servicio_terreno_id: bigint;
+  servicio_terreno_tipo_servicio: string | null;
+  servicio_terreno_fecha_real: Date | null;
+  servicio_terreno_estado: string | null;
+}, idObra: bigint) => ({
+  referencia: `SERVICIO_TERRENO:${servicio.servicio_terreno_servicio_terreno_id}`,
+  proyecto: null,
+  obra: idObra.toString(),
+  fecha: servicio.servicio_terreno_fecha_real,
+  estado: servicio.servicio_terreno_estado,
+  tipo: servicio.servicio_terreno_tipo_servicio,
+  atribucion: 'CONTEXTO_OBRA' as const,
+  noAtribuibleProyecto: true,
+});
+
 /** CUT463: valida referencias ya acreditadas; nunca crea, fusiona ni reasigna entidades. */
 export const validarCoherenciaContextualM12 = (entrada: {
   fuenteDisponible?: boolean;
@@ -60,9 +102,14 @@ export const validarCoherenciaContextualM12 = (entrada: {
   idObraProyecto?: string | null;
   idProyecto?: string | null;
   idProyectoOrdenTrabajo?: string | null;
+  idCotizacion?: string | null;
+  idCotizacionOrigenProyecto?: string | null;
+  proyectoEncontrado?: boolean;
 }): ResultadoCoherenciaM12 => {
   if (entrada.fuenteDisponible === false) return { estado: 'FUENTE_NO_DISPONIBLE', compatible: false, motivo: 'La fuente propietaria no está disponible', requiereRevisionHumana: false };
   if (entrada.requiereObra && !entrada.idObra) return { estado: 'REFERENCIA_NO_ENCONTRADA', compatible: false, motivo: 'El proceso requiere una Obra acreditada', requiereRevisionHumana: true };
+  if (entrada.idProyecto && entrada.proyectoEncontrado === false) return { estado: 'REFERENCIA_NO_ENCONTRADA', compatible: false, motivo: 'El Proyecto indicado no existe en la fuente propietaria', requiereRevisionHumana: false };
+  if (entrada.idProyecto && entrada.idCotizacion && entrada.idCotizacionOrigenProyecto !== entrada.idCotizacion) return { estado: 'IDENTIDAD_AMBIGUA', compatible: false, motivo: 'El Proyecto no pertenece a la Cotización que origina las Órdenes de Trabajo', requiereRevisionHumana: true };
   if (entrada.idProyecto && entrada.idProyectoOrdenTrabajo && entrada.idProyecto !== entrada.idProyectoOrdenTrabajo) return { estado: 'IDENTIDAD_AMBIGUA', compatible: false, motivo: 'La Orden de Trabajo pertenece a otro Proyecto', requiereRevisionHumana: true };
   if (entrada.idObra && entrada.idObraProyecto && entrada.idObra !== entrada.idObraProyecto) return { estado: 'IDENTIDAD_AMBIGUA', compatible: false, motivo: 'El Proyecto ya está vinculado a otra Obra', requiereRevisionHumana: true };
   return { estado: 'REFERENCIA_CONFIRMADA', compatible: true, motivo: entrada.idObra ? 'Las referencias contextuales son coherentes' : 'El proceso no exige una Obra', requiereRevisionHumana: false };
@@ -117,7 +164,7 @@ export class ServicioObraProyectoComercial {
   }
 
   /** CUT462: lectura diferenciada de Cliente, Proyecto y Obra, sin efectos secundarios. */
-  async resolverIdentidades(consulta: Entrada) {
+  async resolverIdentidades(consulta: Entrada, actor: ActorContextualM12 = {}) {
     const idObra = consulta.idObra ? BigInt(identificador(consulta.idObra)) : null;
     const idProyecto = consulta.idProyecto ? BigInt(identificador(consulta.idProyecto)) : null;
     const idCotizacion = consulta.idCotizacion ? identificador(consulta.idCotizacion) : null;
@@ -141,43 +188,36 @@ export class ServicioObraProyectoComercial {
       }
 
       const obra = obraObjetivo ? await prisma.obra.findUnique({ where: { obra_obra_id: obraObjetivo } }) : null;
+      const alcance = alcanceIdentidadM12(consulta, actor);
       const proyectos = await prisma.proyecto.findMany({
         where: proyectoObjetivo ? { proyecto_proyecto_id: proyectoObjetivo } : obraObjetivo ? { obras: { some: { id_obra: obraObjetivo } } } : { proyecto_proyecto_id: BigInt(-1) },
         include: {
           obras: { include: { obra: true } },
-          cotizacion_origen: { include: { ficha_cliente: { include: { cliente_financiero: true } } } },
         },
         orderBy: { proyecto_proyecto_id: 'asc' },
       });
-      const cotizacionesContexto = await prisma.cotizacion.findMany({
+      const cotizacionesContexto = alcance.puedeVerClientes ? await prisma.cotizacion.findMany({
         where: filtroCotizacionesContextualesM12({ idObra: obraObjetivo, idProyecto: proyectoObjetivo, idCotizacion }),
         include: { ficha_cliente: { include: { cliente_financiero: true } } },
         orderBy: { id_cotizacion: 'asc' },
-      });
-      const clientes = [...cotizacionesContexto, ...proyectos.flatMap(p => p.cotizacion_origen ? [p.cotizacion_origen] : [])]
+      }) : [];
+      const clientes = cotizacionesContexto
         .map(c => c.ficha_cliente.cliente_financiero)
         .filter((cliente, indice, todos) => todos.findIndex(c => c.id_cliente_financiero === cliente.id_cliente_financiero) === indice);
+      const clientesPresentados = presentarClientesContextualesM12(clientes, alcance.puedeVerClientes);
       const estado = estadoIdentidadContextualM12({ obraEncontrada: Boolean(obra), proyectosEncontrados: proyectos.length, clientesEncontrados: clientes.length });
       return {
         estado,
         alcanceConsulta: idProyecto ? 'PROYECTO' : idCotizacion ? 'COTIZACION' : 'OBRA',
+        acceso: {
+          clientes: clientesPresentados.acceso,
+          proyectos: alcance.puedeVerProyectos ? 'AUTORIZADO' : 'ACCESO_RESTRINGIDO',
+        },
         procedencia: 'terreno.obra + terreno.proyecto + finanzas.cotizacion',
-        cliente: clientes.length === 1 ? {
-          id: clientes[0].id_cliente_financiero,
-          rut: clientes[0].rut_cliente,
-          nombre: clientes[0].nombre_razon_social_referencia,
-          estado: clientes[0].estado_financiero,
-          procedencia: 'finanzas.cliente_financiero',
-        } : null,
-        clientes: clientes.map(cliente => ({
-          id: cliente.id_cliente_financiero,
-          rut: cliente.rut_cliente,
-          nombre: cliente.nombre_razon_social_referencia,
-          estado: cliente.estado_financiero,
-          procedencia: 'finanzas.cliente_financiero',
-        })),
+        cliente: clientesPresentados.cliente,
+        clientes: clientesPresentados.clientes,
         obra: obra ? presentar(obra) : null,
-        proyectos: proyectos.map(proyecto => ({
+        proyectos: alcance.puedeVerProyectos ? proyectos.map(proyecto => ({
           id: proyecto.proyecto_proyecto_id.toString(),
           codigo: proyecto.proyecto_codigo_proyecto,
           nombre: proyecto.proyecto_nombre_referencia,
@@ -186,7 +226,7 @@ export class ServicioObraProyectoComercial {
           idCotizacionOrigen: proyecto.id_cotizacion_origen,
           obras: proyecto.obras.map(v => ({ id: v.id_obra.toString(), principal: v.es_principal, origen: v.origen })),
           procedencia: 'terreno.proyecto',
-        })),
+        })) : [],
       };
     } catch (error) {
       if (error instanceof ErrorAplicacion) throw error;
@@ -195,8 +235,10 @@ export class ServicioObraProyectoComercial {
   }
 
   /** CUT464: compone referencias mínimas desde cada owner; no replica sus históricos. */
-  async consultarAntecedentes(consulta: Entrada, permisos: readonly string[]) {
-    const identidad = await this.resolverIdentidades(consulta);
+  async consultarAntecedentes(consulta: Entrada, actor: ActorContextualM12 = {}) {
+    const permisos = actor.permisos ?? [];
+    const alcance = alcanceIdentidadM12(consulta, actor);
+    const identidad = await this.resolverIdentidades(consulta, actor);
     if (identidad.estado === 'FUENTE_NO_DISPONIBLE' || identidad.estado === 'REFERENCIA_NO_ENCONTRADA') return { identidad, fuentes: [] };
     const idObra = identidad.obra?.id ? BigInt(identidad.obra.id) : null;
     const idsProyecto = identidad.proyectos.map(proyecto => BigInt(proyecto.id));
@@ -213,7 +255,7 @@ export class ServicioObraProyectoComercial {
       }
     };
     const [m2, terreno, inventario, m3, m7] = await Promise.all([
-      fuente('M2', fuenteAutorizadaM12('M2', permisos), async () => {
+      fuente('M2', alcance.puedeConsultarM2, async () => {
         const cotizaciones = await prisma.cotizacion.findMany({
           where: filtroCotizacionesContextualesM12({ idObra, idProyecto: idProyectoConsultado, idCotizacion: idCotizacionConsultada }),
           select: { id_cotizacion: true, fecha_emision: true, estado_cotizacion: true, proyecto_originado: { select: { proyecto_proyecto_id: true } }, nota_venta: { select: { id_nota_venta: true, fecha_emision: true, estado_nota_venta: true } }, contactos_b2b: { select: { id_contacto_cotizacion_b2b: true, nombre: true, apellido: true, cargo: true, correo: true, telefono: true, tipo_contacto: true, es_principal: true, estado: true } } },
@@ -225,10 +267,12 @@ export class ServicioObraProyectoComercial {
           fecha: c.fecha_emision,
           estado: c.estado_cotizacion,
           notaVenta: c.nota_venta ? { referencia: `NV:${c.nota_venta.id_nota_venta}`, fecha: c.nota_venta.fecha_emision, estado: c.nota_venta.estado_nota_venta } : null,
-          ...(alcanceProyecto ? { contactos: presentarContactosContextualesM12(c.contactos_b2b) } : {}),
+          ...(alcanceProyecto && alcance.puedeVerClientes
+            ? { contactos: presentarContactosContextualesM12(c.contactos_b2b) }
+            : alcanceProyecto ? { contactos: [], contactosAcceso: 'ACCESO_RESTRINGIDO' } : {}),
         }));
       }),
-      fuente('TERRENO', fuenteAutorizadaM12('TERRENO', permisos), async () => idObra ? (await prisma.servicio_terreno.findMany({ where: { id_obra: idObra }, select: { servicio_terreno_servicio_terreno_id: true, servicio_terreno_tipo_servicio: true, servicio_terreno_fecha_real: true, servicio_terreno_estado: true } })).map(s => ({ referencia: `SERVICIO_TERRENO:${s.servicio_terreno_servicio_terreno_id}`, proyecto: null, obra: idObra.toString(), fecha: s.servicio_terreno_fecha_real, estado: s.servicio_terreno_estado, tipo: s.servicio_terreno_tipo_servicio })) : []),
+      fuente('TERRENO', fuenteAutorizadaM12('TERRENO', permisos), async () => idObra ? (await prisma.servicio_terreno.findMany({ where: { id_obra: idObra }, select: { servicio_terreno_servicio_terreno_id: true, servicio_terreno_tipo_servicio: true, servicio_terreno_fecha_real: true, servicio_terreno_estado: true } })).map(s => presentarServicioTerrenoContextualM12(s, idObra)) : []),
       fuente('INVENTARIO', fuenteAutorizadaM12('INVENTARIO', permisos), async () => idsProyecto.length ? (await prisma.orden_trabajo.findMany({ where: { proyecto_id_proyecto: { in: idsProyecto } }, select: { orden_trabajo_id_orden: true, orden_trabajo_fecha_hora: true, orden_trabajo_estado: true, proyecto_id_proyecto: true } })).map(ot => ({ referencia: `OT:${ot.orden_trabajo_id_orden}`, proyecto: ot.proyecto_id_proyecto?.toString() ?? null, obra: idObra?.toString() ?? null, fecha: ot.orden_trabajo_fecha_hora, estado: ot.orden_trabajo_estado })) : []),
       fuente('M3', fuenteAutorizadaM12('M3', permisos), async () => idsProyecto.length ? (await prisma.asignacion_pago_cliente.findMany({ where: { nota_venta: { proyecto_contexto: { is: { proyecto_proyecto_id: { in: idsProyecto } } } } }, select: { id_asignacion_pago_cliente: true, fecha_asignacion: true, id_nota_venta: true, monto_asignado: true, nota_venta: { select: { id_proyecto_contexto: true } } } })).map(p => ({ referencia: `ASIGNACION_PAGO:${p.id_asignacion_pago_cliente}`, proyecto: p.nota_venta.id_proyecto_contexto?.toString() ?? null, obra: idObra?.toString() ?? null, fecha: p.fecha_asignacion, notaVenta: p.id_nota_venta, monto: p.monto_asignado.toString() })) : []),
       fuente('M7', fuenteAutorizadaM12('M7', permisos), async () => idsProyecto.length ? (await prisma.proyecto_financiero.findMany({ where: { id_proyecto_terreno: { in: idsProyecto } }, select: { id_proyecto_financiero: true, id_proyecto_terreno: true, estado_financiero_proyecto: true, fecha_inicio_financiera: true } })).map(p => ({ referencia: `PROYECTO_FINANCIERO:${p.id_proyecto_financiero}`, proyecto: p.id_proyecto_terreno?.toString() ?? null, obra: idObra?.toString() ?? null, fecha: p.fecha_inicio_financiera, estado: p.estado_financiero_proyecto })) : []),

@@ -574,11 +574,14 @@ export class M2Controller {
       return [];
     }
     const resultado=await this.normalizarPlanificacionesOt(tx,idCotizacion,entrada);
+    if(idProyecto){
+      const proyecto=await tx.proyecto.findUnique({where:{proyecto_proyecto_id:idProyecto},select:{id_cotizacion_origen:true}});
+      const coherencia=validarCoherenciaContextualM12({idProyecto:idProyecto.toString(),proyectoEncontrado:Boolean(proyecto),idCotizacion:String(idCotizacion),idCotizacionOrigenProyecto:proyecto?.id_cotizacion_origen?.toString()??null});
+      if(!coherencia.compatible)throw new ErrorAplicacion(409,coherencia.motivo);
+    }
     const creadas:Array<{idOrdenTrabajo:string;idUnidad:string;detalle:number;unidad:number;version:number}>=[];
     for(const unidad of resultado.unidades){
       const orden=await tx.orden_trabajo.create({data:{orden_trabajo_fecha_hora:new Date(),orden_trabajo_estado:'PENDIENTE_RECTIFICACION',especificaciones_puerta_id_especificacion_puerta:null,proyecto_id_proyecto:idProyecto??null,area_trabajo_id_area:null,usuario_id_usuario:null}});
-      const coherencia=validarCoherenciaContextualM12({idProyecto:idProyecto?.toString()??null,idProyectoOrdenTrabajo:orden.proyecto_id_proyecto?.toString()??null});
-      if(!coherencia.compatible)throw new ErrorAplicacion(409,coherencia.motivo);
       const planificacion={etapas:unidad.etapas};
       const registro=await tx.unidad_fisica_orden_trabajo.create({data:{id_cotizacion:idCotizacion,id_detalle_cotizacion:unidad.idDetalleCotizacion,id_extension_producto_comercial:unidad.idProductoComercial,id_familia_producto_comercial:unidad.idFamiliaProducto,numero_unidad:unidad.numeroUnidad,id_version_plantilla:unidad.idVersionPlantilla,id_orden_trabajo:orden.orden_trabajo_id_orden,planificacion_inicial:planificacion as Prisma.InputJsonValue,planificacion_actual:planificacion as Prisma.InputJsonValue,creado_por:usuario}});
       await tx.historial_unidad_fisica_ot.create({data:{id_unidad_fisica_ot:registro.id_unidad_fisica_ot,evento:'CREACION_DESDE_COTIZACION',valor_nuevo:{idCotizacion,idDetalle:unidad.idDetalleCotizacion,numeroUnidad:unidad.numeroUnidad,idOrdenTrabajo:orden.orden_trabajo_id_orden.toString(),idVersionPlantilla:unidad.idVersionPlantilla,estado:'PENDIENTE_RECTIFICACION'},usuario_id_usuario:usuario}});
