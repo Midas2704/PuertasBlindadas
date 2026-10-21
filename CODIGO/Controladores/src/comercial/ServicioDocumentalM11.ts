@@ -34,8 +34,10 @@ const auditable = <T extends object>(salida: T, anterior: Prisma.InputJsonValue 
 
 export function validarCorrectorDteAcreditadoM11(original:DteAcreditableM11,corrector:DteAcreditableM11,ancestrosOriginal:number[]){
   if(corrector.id_documento_referencia!==original.id_documento_tributario)throw new ErrorAplicacion(409,'El vínculo corrector no está acreditado por una relación documental existente; se requiere el contrato de la fuente tributaria','M11_CONTRATO_CORRECCION_DTE_PENDIENTE');
-  if(original.id_tipo_documento===corrector.id_tipo_documento||!corrector.tipo_documento.aplica_venta||corrector.tipo_documento.estado_tipo_documento!=='activo')throw new ErrorAplicacion(409,'El tipo del documento corrector no está acreditado como compatible con el original','M11_TIPO_CORRECTOR_NO_ACREDITADO');
   if(ancestrosOriginal.includes(corrector.id_documento_tributario))throw new ErrorAplicacion(409,'La relación documental contiene un ciclo y no puede acreditarse','M11_CICLO_DOCUMENTAL');
+  // El catálogo vigente sólo declara actividad y aplicación a ventas. No existe
+  // una matriz o contrato aprobado que acredite qué tipo DTE corrige a otro.
+  throw new ErrorAplicacion(409,'No existe una matriz o contrato aprobado que acredite la compatibilidad entre el tipo documental original y el corrector','M11_TIPO_CORRECTOR_NO_ACREDITADO');
 }
 
 export function conciliarDosEtapasM11(ordenadas: LineaCantidad[], salida: FuenteSalidaAcreditadaM11, facturadas: LineaCantidad[] | null) {

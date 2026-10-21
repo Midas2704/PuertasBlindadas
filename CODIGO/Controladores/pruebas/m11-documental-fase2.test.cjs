@@ -53,14 +53,20 @@ test('M11 Fase 2 documental', async t => {
     const bloque=m2.slice(m2.indexOf('async modificarGuia'),m2.indexOf('async definirCondicionesCobro'));
     assert.match(bloque,/M11_GUIA_INMUTABLE/); assert.doesNotMatch(bloque,/guia_despacho\.update/);
   });
-  await t.test('DTE exige relación y tipo acreditados, detecta ciclos y conserva caso documentado', () => {
+  await t.test('DTE exige relación acreditada, detecta ciclos y bloquea tipos sin contrato aprobado', () => {
     const tipoVenta={aplica_venta:true,estado_tipo_documento:'activo'};
     const original={id_documento_tributario:1,id_tipo_documento:10,id_documento_referencia:null,tipo_documento:tipoVenta};
     const sinVinculo={id_documento_tributario:2,id_tipo_documento:11,id_documento_referencia:null,tipo_documento:tipoVenta};
     assert.throws(()=>validarCorrectorDteAcreditadoM11(original,sinVinculo,[]),/vínculo corrector no está acreditado/);
-    assert.throws(()=>validarCorrectorDteAcreditadoM11(original,{...sinVinculo,id_tipo_documento:10,id_documento_referencia:1},[]),/tipo.*no está acreditado/i);
     assert.throws(()=>validarCorrectorDteAcreditadoM11(original,{...sinVinculo,id_documento_referencia:1},[2]),/ciclo/);
-    assert.doesNotThrow(()=>validarCorrectorDteAcreditadoM11(original,{...sinVinculo,id_documento_referencia:1},[]));
+    assert.throws(
+      ()=>validarCorrectorDteAcreditadoM11(original,{...sinVinculo,id_documento_referencia:1},[]),
+      error=>error?.codigo==='M11_TIPO_CORRECTOR_NO_ACREDITADO'&&/matriz o contrato aprobado/.test(error.message),
+    );
+    assert.throws(
+      ()=>validarCorrectorDteAcreditadoM11(original,{...sinVinculo,id_tipo_documento:10,id_documento_referencia:1},[]),
+      error=>error?.codigo==='M11_TIPO_CORRECTOR_NO_ACREDITADO',
+    );
     const fuente=readFileSync(resolve('src/comercial/ServicioDocumentalM11.ts'),'utf8'); assert.doesNotMatch(fuente,/documento_tributario\.create|documento_tributario\.update/); assert.match(fuente,/VINCULAR_CORRECTOR_EXISTENTE/);
   });
   await t.test('CUT456 no acredita vínculo directo GDE-DTE por compartir Nota de Venta',()=>{
