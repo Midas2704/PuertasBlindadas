@@ -40,6 +40,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://migraciones_ci:clave_sintetica_migraciones_ci@127.0.0.1:5432/puertas_blindadas_migraciones_ci?schema=public
+      PSQL_URL: postgresql://migraciones_ci:clave_sintetica_migraciones_ci@127.0.0.1:5432/puertas_blindadas_migraciones_ci
 
     steps:
       - name: Descargar código del commit
@@ -83,7 +84,7 @@ jobs:
       - name: Confirmar PostgreSQL temporal 18
         run: |
           set -Eeuo pipefail
-          version_servidor=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SHOW server_version;")
+          version_servidor=$(psql "$PSQL_URL" -v ON_ERROR_STOP=1 -Atc "SHOW server_version;")
           printf 'PostgreSQL temporal iniciado: %s\n' "$version_servidor"
           [[ "$version_servidor" == 18.* ]]
 
@@ -107,14 +108,14 @@ jobs:
 
       - name: Verificar estructura e integridad sintética de 072-074
         id: pruebas_integridad
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --file pruebas/migraciones-072-074.integridad.sql
+        run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 --file pruebas/migraciones-072-074.integridad.sql
 
       - name: Confirmar idempotencia de Prisma migrate deploy
         id: migrate_idempotencia
         run: |
           set -Eeuo pipefail
           npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-deploy-segunda-ejecucion.log"
-          pendientes=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM \"_prisma_migrations\" WHERE \"finished_at\" IS NULL AND \"rolled_back_at\" IS NULL;")
+          pendientes=$(psql "$PSQL_URL" -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM \"_prisma_migrations\" WHERE \"finished_at\" IS NULL AND \"rolled_back_at\" IS NULL;")
           [[ "$pendientes" == "0" ]]
 
       - name: Resumen verificable
@@ -124,7 +125,7 @@ jobs:
           set +e
           consultar_estado() {
             local patron="$1"
-            psql "$DATABASE_URL" -Atc "
+            psql "$PSQL_URL" -Atc "
               SELECT CASE
                 WHEN count(*) = 1 AND bool_and(\"finished_at\" IS NOT NULL AND \"rolled_back_at\" IS NULL) THEN 'APROBADA'
                 WHEN count(*) = 0 THEN 'NO APLICADA'
@@ -135,7 +136,7 @@ jobs:
             " 2>/dev/null
           }
 
-          estado_base=$(psql "$DATABASE_URL" -Atc "
+          estado_base=$(psql "$PSQL_URL" -Atc "
             SELECT CASE
               WHEN count(*) = 72 AND bool_and(\"finished_at\" IS NOT NULL AND \"rolled_back_at\" IS NULL) THEN 'APROBADAS'
               ELSE 'INCOMPLETAS (' || count(*) || '/72 registradas)'
@@ -148,7 +149,7 @@ jobs:
           estado_072=$(consultar_estado '072_%'); [[ -n "$estado_072" ]] || estado_072="NO VALIDADA"
           estado_073=$(consultar_estado '073_%'); [[ -n "$estado_073" ]] || estado_073="NO VALIDADA"
           estado_074=$(consultar_estado '074_%'); [[ -n "$estado_074" ]] || estado_074="NO VALIDADA"
-          version_postgres=$(psql "$DATABASE_URL" -Atc "SHOW server_version;" 2>/dev/null)
+          version_postgres=$(psql "$PSQL_URL" -Atc "SHOW server_version;" 2>/dev/null)
           [[ "$version_postgres" == 18.* ]] && estado_postgres="INICIADO (${version_postgres})" || estado_postgres="NO INICIADO O INCOMPATIBLE"
 
           {
