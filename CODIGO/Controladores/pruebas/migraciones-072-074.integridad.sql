@@ -135,6 +135,35 @@ SELECT pg_temp.afirmar(
   'faltan capacidades M10/M11 activas'
 );
 SELECT pg_temp.afirmar(
+  (SELECT count(*) = 2 FROM terreno.permiso
+   WHERE codigo_m4 IN ('CU20','CU36')
+     AND permiso_modulo = 'M2'
+     AND activo_m4 IS TRUE
+     AND requiere_administrador IS FALSE),
+  'CU20 y CU36 no tienen la definición M4 compatible acreditada'
+);
+SELECT pg_temp.afirmar(
+  NOT EXISTS (
+    SELECT 1 FROM terreno.permiso
+    WHERE codigo_m4 IN ('CU20','CU36')
+    GROUP BY codigo_m4 HAVING count(*) <> 1
+  ),
+  'CU20 o CU36 están duplicados'
+);
+SELECT pg_temp.afirmar(
+  NOT EXISTS (
+    SELECT 1 FROM terreno.perfil_permiso pp
+    JOIN terreno.permiso p ON p.permiso_id_permiso = pp.permiso_id_permiso
+    WHERE p.codigo_m4 IN ('CU20','CU36')
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM terreno.usuario_permiso_particular up
+    JOIN terreno.permiso p ON p.permiso_id_permiso = up.id_permiso
+    WHERE p.codigo_m4 IN ('CU20','CU36')
+  ),
+  '075 no debe asignar CU20/CU36 a perfiles ni usuarios'
+);
+SELECT pg_temp.afirmar(
   NOT EXISTS (SELECT 1 FROM terreno.permiso WHERE codigo_m4 = 'CU377'),
   'CU377 fue incorporado pese a estar expresamente excluido'
 );
@@ -211,4 +240,4 @@ SELECT pg_temp.esperar_error(
 
 ROLLBACK;
 
-\echo 'Pruebas estructurales y sintéticas de migraciones 072-074: APROBADAS'
+\echo 'Pruebas estructurales y sintéticas de migraciones 072-075: APROBADAS'

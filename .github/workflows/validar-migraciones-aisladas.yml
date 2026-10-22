@@ -1,4 +1,4 @@
-name: Validar migraciones aisladas
+name: Validar migraciones aisladas 000-075
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   validar-migraciones:
-    name: PostgreSQL 18 / Prisma 000-074
+    name: PostgreSQL 18 / Prisma 000-075
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -41,6 +41,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://migraciones_ci:clave_sintetica_migraciones_ci@127.0.0.1:5432/puertas_blindadas_migraciones_ci?schema=public
       PSQL_URL: postgresql://migraciones_ci:clave_sintetica_migraciones_ci@127.0.0.1:5432/puertas_blindadas_migraciones_ci
+      DATABASE_URL_COMPAT: postgresql://migraciones_ci:clave_sintetica_migraciones_ci@127.0.0.1:5432/puertas_blindadas_m4_preexistente_ci?schema=public
+      PSQL_URL_COMPAT: postgresql://migraciones_ci:clave_sintetica_migraciones_ci@127.0.0.1:5432/puertas_blindadas_m4_preexistente_ci
 
     steps:
       - name: Descargar código del commit
@@ -53,18 +55,18 @@ jobs:
           cache: npm
           cache-dependency-path: CODIGO/Controladores/package-lock.json
 
-      - name: Verificar cadena exacta 000-074
+      - name: Verificar cadena exacta 000-075
         run: |
           set -Eeuo pipefail
           mapfile -t migraciones < <(find prisma/migrations -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
 
-          if [[ "${#migraciones[@]}" -ne 75 ]]; then
-            printf 'Se esperaban 75 migraciones (000-074), pero se encontraron %s.\n' "${#migraciones[@]}" >&2
+          if [[ "${#migraciones[@]}" -ne 76 ]]; then
+            printf 'Se esperaban 76 migraciones (000-075), pero se encontraron %s.\n' "${#migraciones[@]}" >&2
             printf '%s\n' "${migraciones[@]}" >&2
             exit 1
           fi
 
-          for numero in $(seq 0 74); do
+          for numero in $(seq 0 75); do
             prefijo=$(printf '%03d_' "$numero")
             coincidencias=0
             for migracion in "${migraciones[@]}"; do
@@ -76,7 +78,7 @@ jobs:
             fi
           done
 
-          printf 'Cadena 000-074 completa y sin numeraciones duplicadas.\n'
+          printf 'Cadena 000-075 completa y sin numeraciones duplicadas.\n'
 
       - name: Instalar dependencias del backend
         run: npm ci
@@ -88,7 +90,7 @@ jobs:
           printf 'PostgreSQL temporal iniciado: %s\n' "$version_servidor"
           [[ "$version_servidor" == 18.* ]]
 
-      - name: Aplicar migraciones 000-074 en la base temporal
+      - name: Aplicar migraciones 000-075 en la base temporal
         id: migrate_deploy
         run: |
           set -Eeuo pipefail
@@ -106,7 +108,7 @@ jobs:
         id: prisma_generate
         run: npx prisma generate
 
-      - name: Verificar estructura e integridad sintética de 072-074
+      - name: Verificar estructura e integridad sintética de 072-075
         id: pruebas_integridad
         run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 --file pruebas/migraciones-072-074.integridad.sql
 
@@ -117,6 +119,21 @@ jobs:
           npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-deploy-segunda-ejecucion.log"
           pendientes=$(psql "$PSQL_URL" -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM \"_prisma_migrations\" WHERE \"finished_at\" IS NULL AND \"rolled_back_at\" IS NULL;")
           [[ "$pendientes" == "0" ]]
+
+      - name: Validar 075 con CU20 y CU36 preexistentes
+        id: compatibilidad_075
+        run: |
+          set -Eeuo pipefail
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE puertas_blindadas_m4_preexistente_ci'
+
+          migracion_075="$RUNNER_TEMP/075_reconciliacion_catalogo_m4"
+          mv prisma/migrations/075_reconciliacion_catalogo_m4 "$migracion_075"
+          DATABASE_URL="$DATABASE_URL_COMPAT" npx prisma migrate deploy
+          psql "$PSQL_URL_COMPAT" -v ON_ERROR_STOP=1 --file pruebas/migracion-075-preexistente.preparar.sql
+          mv "$migracion_075" prisma/migrations/075_reconciliacion_catalogo_m4
+          DATABASE_URL="$DATABASE_URL_COMPAT" npx prisma migrate deploy
+          DATABASE_URL="$DATABASE_URL_COMPAT" npx prisma migrate status
+          psql "$PSQL_URL_COMPAT" -v ON_ERROR_STOP=1 --file pruebas/migracion-075-preexistente.verificar.sql
 
       - name: Resumen verificable
         if: always()
@@ -149,6 +166,7 @@ jobs:
           estado_072=$(consultar_estado '072_%'); [[ -n "$estado_072" ]] || estado_072="NO VALIDADA"
           estado_073=$(consultar_estado '073_%'); [[ -n "$estado_073" ]] || estado_073="NO VALIDADA"
           estado_074=$(consultar_estado '074_%'); [[ -n "$estado_074" ]] || estado_074="NO VALIDADA"
+          estado_075=$(consultar_estado '075_%'); [[ -n "$estado_075" ]] || estado_075="NO VALIDADA"
           version_postgres=$(psql "$PSQL_URL" -Atc "SHOW server_version;" 2>/dev/null)
           [[ "$version_postgres" == 18.* ]] && estado_postgres="INICIADO (${version_postgres})" || estado_postgres="NO INICIADO O INCOMPATIBLE"
 
@@ -162,11 +180,13 @@ jobs:
             echo "| Migración 072 | ${estado_072} |"
             echo "| Migración 073 | ${estado_073} |"
             echo "| Migración 074 | ${estado_074} |"
+            echo "| Migración 075 | ${estado_075} |"
             echo "| Prisma migrate status | ${{ steps.migrate_status.outcome }} |"
             echo "| Prisma validate | ${{ steps.prisma_validate.outcome }} |"
             echo "| Prisma Client | ${{ steps.prisma_generate.outcome }} |"
             echo "| Pruebas sintéticas | ${{ steps.pruebas_integridad.outcome }} |"
             echo "| Segunda ejecución idempotente | ${{ steps.migrate_idempotencia.outcome }} |"
+            echo "| CU20/CU36 preexistentes | ${{ steps.compatibilidad_075.outcome }} |"
             echo
             echo 'La base y el servicio PostgreSQL pertenecen exclusivamente a este job y se eliminan al finalizar el runner.'
           } >> "$GITHUB_STEP_SUMMARY"
