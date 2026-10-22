@@ -1,0 +1,171 @@
+name: Validar migraciones aisladas
+
+on:
+  push:
+    branches:
+      - feature/terreno-agenda-visitas
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validar-migraciones-aisladas-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validar-migraciones:
+    name: PostgreSQL 18 / Prisma 000-074
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: migraciones_ci
+          POSTGRES_PASSWORD: clave_sintetica_migraciones_ci
+          POSTGRES_DB: puertas_blindadas_migraciones_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U migraciones_ci -d puertas_blindadas_migraciones_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: CODIGO/Controladores
+
+    env:
+      DATABASE_URL: postgresql://migraciones_ci:clave_sintetica_migraciones_ci@127.0.0.1:5432/puertas_blindadas_migraciones_ci?schema=public
+
+    steps:
+      - name: Descargar código del commit
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: CODIGO/Controladores/package-lock.json
+
+      - name: Verificar cadena exacta 000-074
+        run: |
+          set -Eeuo pipefail
+          mapfile -t migraciones < <(find prisma/migrations -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+
+          if [[ "${#migraciones[@]}" -ne 75 ]]; then
+            printf 'Se esperaban 75 migraciones (000-074), pero se encontraron %s.\n' "${#migraciones[@]}" >&2
+            printf '%s\n' "${migraciones[@]}" >&2
+            exit 1
+          fi
+
+          for numero in $(seq 0 74); do
+            prefijo=$(printf '%03d_' "$numero")
+            coincidencias=0
+            for migracion in "${migraciones[@]}"; do
+              [[ "$migracion" == "$prefijo"* ]] && coincidencias=$((coincidencias + 1))
+            done
+            if [[ "$coincidencias" -ne 1 ]]; then
+              printf 'La secuencia %03d debe tener exactamente una migración; encontradas: %s.\n' "$numero" "$coincidencias" >&2
+              exit 1
+            fi
+          done
+
+          printf 'Cadena 000-074 completa y sin numeraciones duplicadas.\n'
+
+      - name: Instalar dependencias del backend
+        run: npm ci
+
+      - name: Confirmar PostgreSQL temporal 18
+        run: |
+          set -Eeuo pipefail
+          version_servidor=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SHOW server_version;")
+          printf 'PostgreSQL temporal iniciado: %s\n' "$version_servidor"
+          [[ "$version_servidor" == 18.* ]]
+
+      - name: Aplicar migraciones 000-074 en la base temporal
+        id: migrate_deploy
+        run: |
+          set -Eeuo pipefail
+          npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-deploy.log"
+
+      - name: Consultar estado de migraciones
+        id: migrate_status
+        run: npx prisma migrate status
+
+      - name: Validar esquema Prisma
+        id: prisma_validate
+        run: npx prisma validate
+
+      - name: Generar Prisma Client
+        id: prisma_generate
+        run: npx prisma generate
+
+      - name: Verificar estructura e integridad sintética de 072-074
+        id: pruebas_integridad
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --file pruebas/migraciones-072-074.integridad.sql
+
+      - name: Confirmar idempotencia de Prisma migrate deploy
+        id: migrate_idempotencia
+        run: |
+          set -Eeuo pipefail
+          npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-deploy-segunda-ejecucion.log"
+          pendientes=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM \"_prisma_migrations\" WHERE \"finished_at\" IS NULL AND \"rolled_back_at\" IS NULL;")
+          [[ "$pendientes" == "0" ]]
+
+      - name: Resumen verificable
+        if: always()
+        working-directory: CODIGO/Controladores
+        run: |
+          set +e
+          consultar_estado() {
+            local patron="$1"
+            psql "$DATABASE_URL" -Atc "
+              SELECT CASE
+                WHEN count(*) = 1 AND bool_and(\"finished_at\" IS NOT NULL AND \"rolled_back_at\" IS NULL) THEN 'APROBADA'
+                WHEN count(*) = 0 THEN 'NO APLICADA'
+                ELSE 'FALLIDA O INCOMPLETA'
+              END
+              FROM \"_prisma_migrations\"
+              WHERE \"migration_name\" LIKE '${patron}';
+            " 2>/dev/null
+          }
+
+          estado_base=$(psql "$DATABASE_URL" -Atc "
+            SELECT CASE
+              WHEN count(*) = 72 AND bool_and(\"finished_at\" IS NOT NULL AND \"rolled_back_at\" IS NULL) THEN 'APROBADAS'
+              ELSE 'INCOMPLETAS (' || count(*) || '/72 registradas)'
+            END
+            FROM \"_prisma_migrations\"
+            WHERE split_part(\"migration_name\", '_', 1)::integer BETWEEN 0 AND 71;
+          " 2>/dev/null)
+          [[ -n "$estado_base" ]] || estado_base="NO VALIDADO"
+
+          estado_072=$(consultar_estado '072_%'); [[ -n "$estado_072" ]] || estado_072="NO VALIDADA"
+          estado_073=$(consultar_estado '073_%'); [[ -n "$estado_073" ]] || estado_073="NO VALIDADA"
+          estado_074=$(consultar_estado '074_%'); [[ -n "$estado_074" ]] || estado_074="NO VALIDADA"
+          version_postgres=$(psql "$DATABASE_URL" -Atc "SHOW server_version;" 2>/dev/null)
+          [[ "$version_postgres" == 18.* ]] && estado_postgres="INICIADO (${version_postgres})" || estado_postgres="NO INICIADO O INCOMPATIBLE"
+
+          {
+            echo '## Validación aislada de migraciones'
+            echo
+            echo '| Verificación | Resultado |'
+            echo '|---|---|'
+            echo "| PostgreSQL temporal | ${estado_postgres} |"
+            echo "| Migraciones 000-071 | ${estado_base} |"
+            echo "| Migración 072 | ${estado_072} |"
+            echo "| Migración 073 | ${estado_073} |"
+            echo "| Migración 074 | ${estado_074} |"
+            echo "| Prisma migrate status | ${{ steps.migrate_status.outcome }} |"
+            echo "| Prisma validate | ${{ steps.prisma_validate.outcome }} |"
+            echo "| Prisma Client | ${{ steps.prisma_generate.outcome }} |"
+            echo "| Pruebas sintéticas | ${{ steps.pruebas_integridad.outcome }} |"
+            echo "| Segunda ejecución idempotente | ${{ steps.migrate_idempotencia.outcome }} |"
+            echo
+            echo 'La base y el servicio PostgreSQL pertenecen exclusivamente a este job y se eliminan al finalizar el runner.'
+          } >> "$GITHUB_STEP_SUMMARY"
