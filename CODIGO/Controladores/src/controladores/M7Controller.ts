@@ -120,6 +120,45 @@ export function calcularComparacionPeriodosVentasM7(valorA: number | null, valor
   };
 }
 
+export type FilaResumenIvaM7 = {
+  moneda: string;
+  montoNeto: number | null;
+  montoImpuesto: number | null;
+  montoTotal: number | null;
+  afectaImpuesto: boolean;
+  idDocumentoReferencia?: number | null;
+};
+
+export function calcularResumenIvaM7(ventas: FilaResumenIvaM7[], compras: FilaResumenIvaM7[]) {
+  const exclusiones = { sinDesglose: 0, desgloseInconsistente: 0, correctorSinSignoAcreditado: 0 };
+  const procesar = (filas: FilaResumenIvaM7[]) => filas.flatMap(fila => {
+    const impuesto = fila.montoImpuesto;
+    if (impuesto === null || !Number.isFinite(impuesto)) { exclusiones.sinDesglose += 1; return []; }
+    if (!fila.afectaImpuesto && impuesto !== 0) { exclusiones.desgloseInconsistente += 1; return []; }
+    if (fila.montoNeto === null || fila.montoTotal === null || !Number.isFinite(fila.montoNeto) || !Number.isFinite(fila.montoTotal)
+      || Math.abs(redondear(fila.montoNeto + impuesto - fila.montoTotal)) > 0.01) {
+      exclusiones.desgloseInconsistente += 1; return [];
+    }
+    // Una referencia acredita que existe un corrector, no su efecto tributario. Sólo un signo
+    // negativo persistido permite restarlo sin inventar reglas según nombre o tipo de DTE.
+    if (fila.idDocumentoReferencia && impuesto > 0) { exclusiones.correctorSinSignoAcreditado += 1; return []; }
+    return [{ moneda: fila.moneda, monto: impuesto }];
+  });
+  const ivaVentas = sumarPorMoneda(procesar(ventas));
+  const ivaCompras = sumarPorMoneda(procesar(compras));
+  const monedas = [...new Set([...ivaVentas, ...ivaCompras].map(fila => fila.moneda))];
+  const ivaEstimado = monedas.map(moneda => {
+    const debito = ivaVentas.find(fila => fila.moneda === moneda)?.monto || 0;
+    const credito = ivaCompras.find(fila => fila.moneda === moneda)?.monto || 0;
+    return { moneda, ivaVentas: debito, ivaCompras: credito, ivaEstimado: redondear(debito - credito) };
+  });
+  const excluidos = exclusiones.sinDesglose + exclusiones.desgloseInconsistente + exclusiones.correctorSinSignoAcreditado;
+  const estado: EstadoIndicadorM7 = ivaEstimado.length === 0
+    ? (ventas.length || compras.length ? 'DATOS_INSUFICIENTES' : 'SIN_RESULTADOS')
+    : excluidos > 0 ? 'PARCIALMENTE_DISPONIBLE' : 'VALIDO';
+  return { estado, ivaVentas, ivaCompras, ivaEstimado, cobertura: { documentosVentas: ventas.length, documentosCompras: compras.length, excluidos, ...exclusiones } };
+}
+
 export type EjecucionHorariaM7 = { cantidad: number | null; unidad: string | null; estado: string; validacion: string };
 export const esUnidadHorariaM7 = (unidad: unknown) => ['H', 'HR', 'HRS', 'HORA', 'HORAS'].includes(String(unidad || '').trim().toUpperCase());
 export function calcularHorasRealesM7(ejecuciones: EjecucionHorariaM7[]) {
@@ -1836,13 +1875,20 @@ export class M7Controller {
     const periodo = resolverPeriodoM7(consulta);
     try {
       const [ventas, compras] = await Promise.all([
-        prisma.documento_tributario.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_documento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true } }),
-        prisma.documento_compra_proveedor.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_documento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true } }),
+        prisma.documento_tributario.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_documento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true, tipo_documento: true } }),
+        prisma.documento_compra_proveedor.findMany({ where: { fecha_emision: { gte: periodo.desde, lt: periodo.hastaExclusiva }, estado_documento: { notIn: ['anulado', 'rechazado'] } }, include: { moneda: true, tipo_documento: true } }),
       ]);
-      const agrupar = (filas: Array<{ moneda: { codigo_moneda: string }; monto_impuesto: Prisma.Decimal }>) => sumarPorMoneda(filas.map(fila => ({ moneda: fila.moneda.codigo_moneda, monto: Number(fila.monto_impuesto) })));
-      const ivaVentas = agrupar(ventas); const ivaCompras = agrupar(compras); const monedas = [...new Set([...ivaVentas, ...ivaCompras].map(fila => fila.moneda))];
-      const estimado = monedas.map(moneda => ({ moneda, ivaVentas: ivaVentas.find(fila => fila.moneda === moneda)?.monto || 0, ivaCompras: ivaCompras.find(fila => fila.moneda === moneda)?.monto || 0 })).map(fila => ({ ...fila, ivaEstimado: redondear(fila.ivaVentas - fila.ivaCompras) }));
-      return { periodo: periodoSalida(periodo), estado: estimado.length ? 'VALIDO' as const : 'SIN_RESULTADOS' as const, ivaVentas, ivaCompras, ivaEstimado: estimado, naturaleza: 'IVA estimado; no constituye declaración oficial SII' };
+      const resultado = calcularResumenIvaM7(
+        ventas.map(fila => ({ moneda: fila.moneda.codigo_moneda, montoNeto: Number(fila.monto_neto), montoImpuesto: Number(fila.monto_impuesto), montoTotal: Number(fila.monto_total), afectaImpuesto: fila.tipo_documento.afecta_impuesto, idDocumentoReferencia: fila.id_documento_referencia })),
+        compras.map(fila => ({ moneda: fila.moneda.codigo_moneda, montoNeto: Number(fila.monto_neto), montoImpuesto: Number(fila.monto_impuesto), montoTotal: Number(fila.monto_total), afectaImpuesto: fila.tipo_documento.afecta_impuesto })),
+      );
+      return {
+        periodo: periodoSalida(periodo), ...resultado,
+        naturaleza: 'IVA estimado desde desglose persistido; no constituye declaración oficial SII',
+        alcance: consulta.segmento && consulta.segmento !== 'TODOS' ? 'GLOBAL_EMPRESA_NO_SEGMENTABLE' : 'GLOBAL_EMPRESA',
+        criterioCredito: 'IVA crédito estimado; la elegibilidad tributaria definitiva no está acreditada en M7',
+        criterioCorrectores: 'Sólo se aplica el signo persistido; correctores positivos sin regla tributaria acreditada se excluyen',
+      };
     } catch { return { periodo: periodoSalida(periodo), estado: 'FUENTE_NO_DISPONIBLE' as const, ivaEstimado: indicador('FUENTE_NO_DISPONIBLE', null, 'Documentos tributarios no disponibles') }; }
   }
 

@@ -87,8 +87,8 @@ test('M7 delta controlado CU218-CU258', async t => {
 
   await t.test('11 IVA estimado resta compras de ventas por moneda', async () => {
     const originalVentas = prisma.documento_tributario.findMany; const originalCompras = prisma.documento_compra_proveedor.findMany;
-    prisma.documento_tributario.findMany = async () => [{ monto_impuesto: new Prisma.Decimal(190), moneda: { codigo_moneda: 'CLP' } }];
-    prisma.documento_compra_proveedor.findMany = async () => [{ monto_impuesto: new Prisma.Decimal(76), moneda: { codigo_moneda: 'CLP' } }];
+    prisma.documento_tributario.findMany = async () => [{ monto_neto: new Prisma.Decimal(1000), monto_impuesto: new Prisma.Decimal(190), monto_total: new Prisma.Decimal(1190), id_documento_referencia: null, moneda: { codigo_moneda: 'CLP' }, tipo_documento: { afecta_impuesto: true } }];
+    prisma.documento_compra_proveedor.findMany = async () => [{ monto_neto: new Prisma.Decimal(400), monto_impuesto: new Prisma.Decimal(76), monto_total: new Prisma.Decimal(476), moneda: { codigo_moneda: 'CLP' }, tipo_documento: { afecta_impuesto: true } }];
     try { const r = await new M7Controller().consultarResumenIva(consulta); assert.deepEqual(r.ivaEstimado, [{ moneda: 'CLP', ivaVentas: 190, ivaCompras: 76, ivaEstimado: 114 }]); assert.match(r.naturaleza, /estimado/i); }
     finally { prisma.documento_tributario.findMany = originalVentas; prisma.documento_compra_proveedor.findMany = originalCompras; }
   });
