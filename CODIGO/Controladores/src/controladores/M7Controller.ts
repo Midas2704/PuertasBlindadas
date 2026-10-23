@@ -503,7 +503,7 @@ export class M7Controller {
       ['riesgoDeficit', ['CU232'], () => this.consultarRiesgoDeficit(consulta, permisos)],
       ['margenProyectos', ['CU233', 'CU234', 'CU235'], () => this.consultarMargenProyectos(consulta, permisos)],
       ['exposicionProyectos', ['CU236'], () => this.consultarExposicionProyectos(consulta, permisos)],
-      ['resumenResultados', ['CU238'], () => this.consultarResumenResultados(consulta)],
+      ['resumenResultados', ['CU238'], () => this.consultarResumenResultados(consulta, permisos)],
       ['situacionFinanciera', ['CU239'], () => this.consultarSituacionFinanciera(consulta)],
       ['costoRemuneraciones', ['CU242'], () => this.consultarCostoRemuneraciones(consulta)],
       ['ordenesTrabajo', ['CU247'], () => this.consultarOrdenesTrabajo(consulta)],
@@ -2028,7 +2028,7 @@ export class M7Controller {
     const [ventas, margen, ventasYtd, margenYtd, iva, historico, presupuestoPeriodo, presupuestoAnual, historicoAnual, presupuestoManual] = await Promise.all([
       this.consultarAnalisisVentas(consultaGeneral), this.consultarMargenProyectos(consulta),
       this.consultarAnalisisVentas(consultaYtd), this.consultarMargenProyectos(consultaYtd),
-      this.consultarResumenIva(consulta),
+      permisos.includes('CU243') ? this.consultarResumenIva(consulta) : Promise.resolve(undefined),
       this.consultarHistoricoPanelGeneral({ anio: hastaYtd.getUTCFullYear(), mes: hastaYtd.getUTCMonth() + 1, meses: 12, segmento }, ['CU219', 'CU238']),
       this.consultarProyeccionesM7({ ...consulta, tipo: 'ESTADO_RESULTADOS' }),
       this.consultarProyeccionesM7({ desde: `${anioPresupuesto}-01-01`, hasta: `${anioPresupuesto}-12-31`, tipo: 'ESTADO_RESULTADOS' }),
@@ -2117,7 +2117,7 @@ export class M7Controller {
       resultadoGerencial: resultado.length ? indicador('VALIDO', resultado, 'Diferencia gerencial entre ingresos y costos directos comparables por moneda') : indicador('DATOS_INSUFICIENTES', null, 'Faltan partidas comparables para derivar un resultado'),
       presupuestoResultados: indicador(presupuestoAnualDato.estado, presupuestoResultados, 'Presupuesto económico mensual en CLP; no se mezcla con flujo de caja, no prorratea rangos parciales y no completa meses ausentes con cero'),
       ...(permisos.includes('CU449') ? { presupuestoManual: indicador((presupuestoManual as any).estado, presupuestoManual, 'Presupuesto manual anual versionado; el real se consulta dinámicamente y no se congela en sus revisiones') } : {}),
-      iva,
+      ...(iva ? { iva } : {}),
       devengado: indicador('FUENTE_NO_DISPONIBLE', null, 'DEVENGADO: FUENTE/DEFINICIÓN PENDIENTE; no se deriva de ventas, OT ni proyectos'),
       cobertura: indicador('DATOS_INSUFICIENTES', { completa: false, incluye: ['ventas definitivas netas', 'costos de proyecto atribuibles', 'mano de obra atribuible validada'], noDisponibles: ['gastos operacionales clasificados sin duplicación', 'devengado'], noIncluyeEbitda: ['intereses', 'impuestos', 'depreciaciones', 'amortizaciones'], ventasExcluidasSinConversion: ventasExcluidasSinFx, costosExcluidosSinConversion: estadoResultados.costosExcluidosSinConversion }, 'Síntesis gerencial parcial; no es un Estado de Resultados contable oficial. Los egresos de caja no se usan como gastos.'),
     };
@@ -2302,7 +2302,7 @@ export class M7Controller {
       'cuentas-pagar': { permisos: ['CU226', 'CU227'], titulo: 'Cuentas por Pagar', cargar: () => this.consultarCuentasPagar(consulta, permisos) },
       liquidez: { permisos: ['CU230', 'CU231'], titulo: 'Liquidez y Flujo', cargar: () => this.consultarLiquidez(consulta, permisos) },
       margen: { permisos: ['CU233', 'CU234', 'CU235'], titulo: 'Margen Directo y Costos por Proyecto', cargar: () => this.consultarMargenProyectos(consulta, permisos) },
-      resultados: { permisos: ['CU238'], titulo: 'Resumen gerencial de resultados', cargar: () => this.consultarResumenResultados(consulta) },
+      resultados: { permisos: ['CU238'], titulo: 'Resumen gerencial de resultados', cargar: () => this.consultarResumenResultados(consulta, permisos) },
       situacion: { permisos: ['CU239'], titulo: 'Situación financiera resumida', cargar: () => this.consultarSituacionFinanciera(consulta) },
     };
     const fuente = fuentes[origen];
