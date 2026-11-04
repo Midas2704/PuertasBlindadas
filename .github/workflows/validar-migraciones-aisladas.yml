@@ -90,15 +90,12 @@ jobs:
           printf 'PostgreSQL temporal iniciado: %s\n' "$version_servidor"
           [[ "$version_servidor" == 18.* ]]
 
-      - name: Aplicar migraciones 000-076 en la base temporal
+      - name: Aplicar migraciones 000-075 en la base temporal
         id: migrate_deploy
         run: |
           set -Eeuo pipefail
+          mv prisma/migrations/076_schema_comun "$RUNNER_TEMP/076_schema_comun_principal"
           npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-deploy.log"
-
-      - name: Consultar estado de migraciones
-        id: migrate_status
-        run: npx prisma migrate status
 
       - name: Validar esquema Prisma
         id: prisma_validate
@@ -111,6 +108,17 @@ jobs:
       - name: Verificar estructura e integridad sintética de 072-074
         id: pruebas_integridad
         run: psql "$PSQL_URL" -v ON_ERROR_STOP=1 --file pruebas/migraciones-072-074.integridad.sql
+
+      - name: Aplicar migración 076 en la base temporal
+        id: migrate_076
+        run: |
+          set -Eeuo pipefail
+          mv "$RUNNER_TEMP/076_schema_comun_principal" prisma/migrations/076_schema_comun
+          npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-076.log"
+
+      - name: Consultar estado de migraciones 000-076
+        id: migrate_status
+        run: npx prisma migrate status
 
       - name: Verificar estructura e integridad del schema común 076
         id: pruebas_integridad_076
@@ -195,6 +203,7 @@ jobs:
             echo "| Migración 074 | ${estado_074} |"
             echo "| Migración 075 | ${estado_075} |"
             echo "| Migración 076 | ${estado_076} |"
+            echo "| Aplicación controlada 076 | ${{ steps.migrate_076.outcome }} |"
             echo "| Prisma migrate status | ${{ steps.migrate_status.outcome }} |"
             echo "| Prisma validate | ${{ steps.prisma_validate.outcome }} |"
             echo "| Prisma Client | ${{ steps.prisma_generate.outcome }} |"
