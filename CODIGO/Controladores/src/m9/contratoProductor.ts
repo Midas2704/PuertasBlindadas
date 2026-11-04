@@ -47,6 +47,7 @@ export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> 
   aceptarAlternativaB2C: { modulo:'M2', operacion:'ALTERNATIVA_B2C_ACEPTADA', entidad:'ALTERNATIVA_B2C', critico:true, motivoRequerido:true },
   rechazarAlternativaB2C: { modulo:'M2', operacion:'ALTERNATIVA_B2C_RECHAZADA', entidad:'ALTERNATIVA_B2C', critico:false, motivoRequerido:true },
   aprobarCotizacion: { modulo:'M2', operacion:'COTIZACION_APROBADA', entidad:'COTIZACION', critico:false },
+  modificarGuia: { modulo:'M2', operacion:'GUIA_DESPACHO_MODIFICADA', entidad:'GUIA_DESPACHO', critico:false },
   crearFamiliaProductoComercial: { modulo:'M2', operacion:'FAMILIA_COMERCIAL_CREADA', entidad:'FAMILIA_PRODUCTO_COMERCIAL', critico:false },
   aprobarCotizacionB2B: { modulo:'M2', operacion:'COTIZACION_B2B_APROBADA_OT_GENERADAS', entidad:'COTIZACION', critico:true },
   gestionarCorreccionDocumentalM11: { modulo:'M2', operacion:'DOCUMENTO_COMERCIAL_CORREGIDO', entidad:'DOCUMENTO_COMERCIAL', critico:true, motivoRequerido:true },

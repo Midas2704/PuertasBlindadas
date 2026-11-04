@@ -24,19 +24,25 @@ export class M3Controller {
         datosEntrada = { ...datosEntrada, tipoCambioOrigen: 'manual-fallback' };
       }
     }
-    return prisma.$transaction(async tx=>{
-      const nota=await tx.nota_venta.findUnique({where:{id_nota_venta:idNota},include:{...incluirNota,ficha_cliente:{include:{cliente_financiero:true}}}});
-      if(!nota || nota.ficha_cliente.cliente_financiero.estado_financiero!=='activo')throw new ErrorAplicacion(409,'Selecciona una NV de un cliente activo');
-      const idDocumento=entrada.idDocumento?identificador(entrada.idDocumento):null;
-      const documento=idDocumento?await tx.documento_tributario.findUnique({where:{id_documento_tributario:idDocumento}}):null;
-      if(idDocumento&&(!documento || documento.id_ficha_cliente!==nota.id_ficha_cliente))throw new ErrorAplicacion(400,'El documento tributario debe existir y pertenecer al mismo cliente');
-      if(idDocumento&&!await tx.documento_tributario_nota_venta.findUnique({where:{id_documento_tributario_id_nota_venta:{id_documento_tributario:idDocumento,id_nota_venta:idNota}}}))throw new ErrorAplicacion(400,'El documento tributario no está relacionado con la Nota de Venta');
-      const catalogo={medios:await tx.medio_pago.findMany({where:{estado_medio_pago:'activo'}}),categorias:await tx.categoria_pago.findMany({where:{activo:true}}),cuotas:await tx.config_cuotas_tarjeta.findMany({where:{activo:true}})};
-      const pago=await tx.pago_cliente.create({data:prepararPago(nota,datosEntrada,catalogo,idDocumento,responsable)});
-      await reducirCompromisoPorPago(tx, pago.id_pago_cliente, idNota, pago.monto_pago);
-      const calculo=await this.recalcularSaldo(tx,idNota);
-      return {mensaje:'Pago registrado',idPago:pago.id_pago_cliente,...calculo};
-    },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+    try {
+      return await prisma.$transaction(async tx=>{
+        await tx.$queryRaw(Prisma.sql`SELECT id_nota_venta FROM finanzas.nota_venta WHERE id_nota_venta = ${idNota} FOR UPDATE`);
+        const nota=await tx.nota_venta.findUnique({where:{id_nota_venta:idNota},include:{...incluirNota,ficha_cliente:{include:{cliente_financiero:true}}}});
+        if(!nota || nota.ficha_cliente.cliente_financiero.estado_financiero!=='activo')throw new ErrorAplicacion(409,'Selecciona una NV de un cliente activo');
+        const idDocumento=entrada.idDocumento?identificador(entrada.idDocumento):null;
+        const documento=idDocumento?await tx.documento_tributario.findUnique({where:{id_documento_tributario:idDocumento}}):null;
+        if(idDocumento&&(!documento || documento.id_ficha_cliente!==nota.id_ficha_cliente))throw new ErrorAplicacion(400,'El documento tributario debe existir y pertenecer al mismo cliente');
+        if(idDocumento&&!await tx.documento_tributario_nota_venta.findUnique({where:{id_documento_tributario_id_nota_venta:{id_documento_tributario:idDocumento,id_nota_venta:idNota}}}))throw new ErrorAplicacion(400,'El documento tributario no está relacionado con la Nota de Venta');
+        const catalogo={medios:await tx.medio_pago.findMany({where:{estado_medio_pago:'activo'}}),categorias:await tx.categoria_pago.findMany({where:{activo:true}}),cuotas:await tx.config_cuotas_tarjeta.findMany({where:{activo:true}})};
+        const pago=await tx.pago_cliente.create({data:prepararPago(nota,datosEntrada,catalogo,idDocumento,responsable)});
+        await reducirCompromisoPorPago(tx, pago.id_pago_cliente, idNota, pago.monto_pago);
+        const calculo=await this.recalcularSaldo(tx,idNota);
+        return {mensaje:'Pago registrado',idPago:pago.id_pago_cliente,...calculo};
+      },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+    } catch (error) {
+      if(error instanceof Prisma.PrismaClientKnownRequestError&&error.code==='P2034')throw new ErrorAplicacion(409,'El saldo de la Nota de Venta cambió concurrentemente; vuelve a revisar el pago');
+      throw error;
+    }
   }
 
   async recalcularSaldo(tx:Prisma.TransactionClient,idNota:number) {

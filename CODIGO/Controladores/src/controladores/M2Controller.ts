@@ -12,6 +12,7 @@ import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 import { normalizarUbicacion, resolverCoberturaDesdeTarifas, type SegmentoComercial, type TarifaResoluble } from '../comercial/contratosCatalogoComercial';
 import { exigirCotejoAcreditadoM11, prepararCorrespondenciasTecnicasM11, prepararTrazabilidadOrdenCompraM11, validarCondicionesEconomicasOfertaM11 } from '../comercial/ServicioTrazabilidadComercialM11';
 import { ServicioDocumentalM11 } from '../comercial/ServicioDocumentalM11';
+import { prepararModificacionGuia } from '../m2/guiaDespacho';
 
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 const ESTADOS_FAMILIA_COMERCIAL = ['ACTIVA', 'INACTIVA'] as const;
@@ -1456,10 +1457,21 @@ export class M2Controller {
     });
   }
   async modificarGuia(idGuia: number, entrada: Entrada) {
-    const guia = await prisma.guia_despacho.findUnique({ where: { id_guia_despacho: idGuia } });
-    if (!guia) throw new ErrorAplicacion(404, 'Guía de Despacho no encontrada');
-    void entrada;
-    throw new ErrorAplicacion(409, 'La Guía de Despacho es históricamente inmutable; la corrección requiere CU458 y una fuente documental acreditada', 'M11_GUIA_INMUTABLE');
+    try {
+      return await prisma.$transaction(async tx => {
+        await tx.$queryRaw(Prisma.sql`SELECT id_guia_despacho FROM finanzas.guia_despacho WHERE id_guia_despacho = ${idGuia} FOR UPDATE`);
+        const guia = await tx.guia_despacho.findUnique({ where: { id_guia_despacho: idGuia } });
+        if (!guia) throw new ErrorAplicacion(404, 'Guía de Despacho no encontrada');
+        const cambios = prepararModificacionGuia(guia,entrada);
+        const actualizada = await tx.guia_despacho.update({ where: { id_guia_despacho: idGuia }, data: cambios });
+        return auditableM9(actualizada,
+          { folio:guia.folio, antecedentes:guia.antecedentes ?? null, estado:guia.estado },
+          { folio:actualizada.folio, antecedentes:actualizada.antecedentes ?? null, estado:actualizada.estado });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ErrorAplicacion(409, 'Ya existe una Guía de Despacho con ese folio');
+      throw error;
+    }
   }
   async definirCondicionesCobro(idNota: number, entrada: Entrada) {
     const fecha = texto(entrada.fechaVencimiento, 20); if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new ErrorAplicacion(400, 'Fecha de vencimiento inválida');

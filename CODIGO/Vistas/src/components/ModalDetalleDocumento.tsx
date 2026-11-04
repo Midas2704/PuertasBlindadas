@@ -1,7 +1,7 @@
 import { notificarUsuario } from './DialogosSistema';
 import OperacionesFinancieras from './OperacionesFinancieras';
 import { solicitarFinanzas } from '../api/finanzas';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, DollarSign } from 'lucide-react';
 import TrazabilidadDocumentalM11 from './TrazabilidadDocumentalM11';
 
@@ -11,11 +11,30 @@ interface ModalDetalleDocumentoProps {
   children?: React.ReactNode;
   onViewPago?: (id: number) => void;
 }
+type GuiaDetalle={id_guia_despacho:number;folio:string;estado?:string;antecedentes?:unknown};
 
 const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeModal, onClose, children, onViewPago }) => {
   const [documentoExterno, setDocumentoExterno] = useState({ tipo: 'Factura Electrónica', folio: '', fechaEmision: new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago'}).format(new Date()), fechaVencimiento: '', montoNeto: '', montoImpuesto: '', montoTotal: '', respaldo: '', observacion: '', idsNotas: '' });
+  const [guiasLocales,setGuiasLocales]=useState<GuiaDetalle[]>([]);
+  const [guiaEnEdicion,setGuiaEnEdicion]=useState<{id:number;folio:string;antecedentes:string}|null>(null);
+  // El modal permanece montado al cambiar de documento; ambos estados locales deben acompañar esa identidad.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(()=>{setGuiasLocales(activeModal?.data?.guia_despacho||[]);setGuiaEnEdicion(null);},[activeModal]);
   if (!activeModal) return null;
-  const guias = activeModal.data.guia_despacho || [];
+  const guias = guiasLocales;
+  const guiaEditable=(guia:GuiaDetalle)=>!['cerrada','finalizada','anulada'].includes(String(guia.estado||'emitida').toLowerCase());
+
+  const guardarGuia=async()=>{
+    if(!guiaEnEdicion)return;
+    let antecedentes:Record<string,unknown>;
+    try{const valor=JSON.parse(guiaEnEdicion.antecedentes||'{}');if(!valor||typeof valor!=='object'||Array.isArray(valor))throw new Error();antecedentes=valor;}
+    catch{void notificarUsuario('Los antecedentes deben tener formato JSON de objeto.');return;}
+    const respuesta=await solicitarFinanzas(`/billing/guides/${guiaEnEdicion.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({folio:guiaEnEdicion.folio,antecedentes})});
+    const resultado=await respuesta.json();
+    if(!respuesta.ok){void notificarUsuario(resultado.error||'No se pudo modificar la guía');return;}
+    setGuiasLocales(actuales=>actuales.map(guia=>guia.id_guia_despacho===resultado.id_guia_despacho?resultado:guia));
+    setGuiaEnEdicion(null);void notificarUsuario('Guía de Despacho modificada correctamente');
+  };
 
   const registrarDocumentoExterno = async () => {
     const ids = (documentoExterno.idsNotas || String(activeModal.data.id_nota_venta)).split(',').map(valor=>Number(valor.trim())).filter(Number.isSafeInteger);
@@ -260,7 +279,13 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                       } catch (e) { void notificarUsuario('Error de conexión'); }
                     }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded transition-colors">Vincular</button>
                   </div>
-                  {guias.map((guia: any) => <div key={guia.id_guia_despacho} className="mt-3 rounded bg-blue-50 p-2 text-sm"><div className="flex justify-between"><span>Guía {guia.folio}</span><span className="text-xs font-semibold text-gray-600">Original inmutable</span></div><p className="mt-1 text-xs text-amber-800">Una correctora sólo podrá registrarse cuando exista una fuente documental acreditada.</p></div>)}
+                  {guias.map((guia) => <div key={guia.id_guia_despacho} className="mt-3 rounded bg-blue-50 p-2 text-sm">
+                    {guiaEnEdicion?.id===guia.id_guia_despacho?<div className="space-y-2">
+                      <label className="block text-xs font-semibold text-gray-700">Folio<input aria-label="Folio de Guía de Despacho" className="mt-1 w-full rounded border border-gray-300 bg-white p-2 text-sm" value={guiaEnEdicion!.folio} onChange={e=>setGuiaEnEdicion(actual=>actual?{...actual,folio:e.target.value}:actual)}/></label>
+                      <label className="block text-xs font-semibold text-gray-700">Antecedentes autorizados (JSON)<textarea aria-label="Antecedentes de Guía de Despacho" className="mt-1 min-h-20 w-full rounded border border-gray-300 bg-white p-2 font-mono text-xs" value={guiaEnEdicion!.antecedentes} onChange={e=>setGuiaEnEdicion(actual=>actual?{...actual,antecedentes:e.target.value}:actual)}/></label>
+                      <div className="flex justify-end gap-2"><button type="button" onClick={()=>setGuiaEnEdicion(null)} className="rounded border px-3 py-1 text-xs">Cancelar</button><button type="button" onClick={guardarGuia} className="rounded bg-blue-700 px-3 py-1 text-xs font-semibold text-white">Guardar guía</button></div>
+                    </div>:<><div className="flex items-center justify-between gap-2"><span>Guía {guia.folio}</span>{guiaEditable(guia)?<button type="button" onClick={()=>setGuiaEnEdicion({id:guia.id_guia_despacho,folio:guia.folio,antecedentes:JSON.stringify(guia.antecedentes||{},null,2)})} className="rounded border border-blue-300 bg-white px-2 py-1 text-xs font-semibold text-blue-800">Editar guía</button>:<span className="text-xs font-semibold text-gray-600">Estado {guia.estado}</span>}</div><p className="mt-1 text-xs text-amber-800">La edición CU35 actualiza antecedentes autorizados. Una corrección documental formal continúa bajo CU458.</p></>}
+                  </div>)}
                 </div>
                 
                 <div className="bg-white border border-gray-200 p-3 rounded-lg shadow-sm col-span-2">

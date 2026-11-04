@@ -159,7 +159,7 @@ export class ServicioObraProyectoComercial {
       obras: presentadas,
       requiereSeleccionExplicita: resolverEstadoReferenciaM12(obras.length, exactas) === 'IDENTIDAD_AMBIGUA',
       estadoReferencia: resolverEstadoReferenciaM12(obras.length, exactas),
-      procedencia: 'terreno.obra',
+      procedencia: 'comun.obra',
     };
   }
 
@@ -183,7 +183,7 @@ export class ServicioObraProyectoComercial {
 
       if (proyectoObjetivo && !obraObjetivo) {
         const vinculos = await prisma.proyecto_obra.findMany({ where: { id_proyecto: proyectoObjetivo }, select: { id_obra: true, es_principal: true } });
-        if (vinculos.length > 1 && !vinculos.some(v => v.es_principal)) return { estado: 'IDENTIDAD_AMBIGUA' as const, procedencia: 'terreno.proyecto_obra', cliente: null, obra: null, proyectos: [] };
+        if (vinculos.length > 1 && !vinculos.some(v => v.es_principal)) return { estado: 'IDENTIDAD_AMBIGUA' as const, procedencia: 'comun.proyecto_obra', cliente: null, obra: null, proyectos: [] };
         obraObjetivo = vinculos.find(v => v.es_principal)?.id_obra ?? vinculos[0]?.id_obra ?? null;
       }
 
@@ -213,7 +213,7 @@ export class ServicioObraProyectoComercial {
           clientes: clientesPresentados.acceso,
           proyectos: alcance.puedeVerProyectos ? 'AUTORIZADO' : 'ACCESO_RESTRINGIDO',
         },
-        procedencia: 'terreno.obra + terreno.proyecto + finanzas.cotizacion',
+        procedencia: 'comun.obra + comun.proyecto + finanzas.cotizacion',
         cliente: clientesPresentados.cliente,
         clientes: clientesPresentados.clientes,
         obra: obra ? presentar(obra) : null,
@@ -225,7 +225,7 @@ export class ServicioObraProyectoComercial {
           estadoProduccion: proyecto.proyecto_estado_produccion,
           idCotizacionOrigen: proyecto.id_cotizacion_origen,
           obras: proyecto.obras.map(v => ({ id: v.id_obra.toString(), principal: v.es_principal, origen: v.origen })),
-          procedencia: 'terreno.proyecto',
+          procedencia: 'comun.proyecto',
         })) : [],
       };
     } catch (error) {

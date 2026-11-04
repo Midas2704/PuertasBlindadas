@@ -1,0 +1,11 @@
+flowchart LR
+U[Usuario] --> FE[React Vite]
+FE --> API[Express rutas]
+API --> F[C_Finanzas]
+F --> C[M1-M9 y servicios]
+C --> P[Prisma]
+P --> DB[(PostgreSQL)]
+C --> M9[Auditoria M9]
+C --> DOC[Servicio documental]
+DOC --> AV[ClamAV]
+DOC --> S3[Storage S3-compatible privado]

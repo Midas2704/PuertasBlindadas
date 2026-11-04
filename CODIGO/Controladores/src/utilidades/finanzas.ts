@@ -53,18 +53,27 @@ export function efectoPago(pago: PagoFinanciero) {
   return Prisma.Decimal.max(0, pago.monto_pago.minus(revertido));
 }
 
-
-export function calcularNota(nota: NotaFinanciera, hoy = fechaNegocio()) {
+export function montosNota(nota: NotaFinanciera) {
   const retiroComercial = ['anulada', 'revertida', 'revertida_total', 'provisional'].includes(nota.estado_nota_venta.toLowerCase());
-  // Midas: el monto original se queda quieto; las reversiones van aparte
   const reversiones = nota.reversion_nota_venta.reduce((suma, movimiento) => suma.plus(movimiento.monto), cero());
   const montoComercialVigente = retiroComercial ? cero() : Prisma.Decimal.max(0, nota.monto_total.minus(reversiones));
   const pagosEfectivos = nota.asignacion_pago_cliente.reduce((suma, asignacion) =>
     suma.plus(Prisma.Decimal.min(asignacion.monto_asignado, efectoPago(asignacion.pago_cliente))), cero());
   const saldoAplicado = nota.aplicacion_saldo_favor.reduce((suma, aplicacion) => suma.plus(aplicacion.monto), cero());
   const saldoResultante = montoComercialVigente.minus(pagosEfectivos).minus(saldoAplicado);
-  const saldoPendiente = Prisma.Decimal.max(0, saldoResultante);
-  const excedente = Prisma.Decimal.max(0, saldoResultante.negated());
+  return {
+    montoComercialVigente,
+    pagosEfectivos,
+    saldoAplicado,
+    saldoResultante,
+    saldoPendiente: Prisma.Decimal.max(0, saldoResultante),
+    excedente: Prisma.Decimal.max(0, saldoResultante.negated()),
+  };
+}
+
+export function calcularNota(nota: NotaFinanciera, hoy = fechaNegocio()) {
+  // Midas: el monto original se queda quieto; las reversiones van aparte
+  const { montoComercialVigente, pagosEfectivos, saldoAplicado, saldoResultante, saldoPendiente, excedente } = montosNota(nota);
   const esMorosa = saldoPendiente.gt(0) && !!nota.fecha_vencimiento && fechaRegistro(nota.fecha_vencimiento) < hoy;
   return {
     montoOriginal: nota.monto_total.toNumber(), montoComercialVigente: montoComercialVigente.toNumber(),

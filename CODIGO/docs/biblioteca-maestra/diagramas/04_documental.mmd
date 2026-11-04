@@ -1,0 +1,14 @@
+sequenceDiagram
+participant C as Controlador
+participant P as Motor PDF
+participant A as ClamAV
+participant S as StorageAdapter
+participant D as PostgreSQL
+C->>P: snapshot validado
+P-->>C: PDF y SHA-256
+C->>A: analizar bytes
+A-->>C: LIMPIO
+C->>S: guardar objeto privado
+S-->>C: confirmacion
+C->>D: documento/version/estado
+D-->>C: emision confirmada

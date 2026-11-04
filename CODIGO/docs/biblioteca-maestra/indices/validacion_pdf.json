@@ -1,0 +1,314 @@
+{
+  "status": "OK",
+  "pdfCount": 38,
+  "markdownCount": 38,
+  "totalPages": 1180,
+  "errors": [],
+  "warnings": [],
+  "documents": [
+    {
+      "pdf": "01_Indice_Maestro_y_Ruta_de_Aprendizaje.pdf",
+      "pages": 5,
+      "bytes": 108851,
+      "sha256": "8c344cb77d524a01f78504550ea2bf4ce84133884e5b13c42084a401be2924e7",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "02_Manual_Instalacion_y_Entorno_Desarrollo.pdf",
+      "pages": 4,
+      "bytes": 108629,
+      "sha256": "efe2b5a2e03018d3ac7cd02854a48d21aedb4e00033a8b3cb5ba27a49d5faf8d",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "03_Manual_Despliegue_Clouding.pdf",
+      "pages": 4,
+      "bytes": 107086,
+      "sha256": "6d2d8b446776519b186358b9ccf2735344cca2af11b95712ae43b669a94eb664",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "04_Manual_Usuario_A_Prueba_de_Dummies.pdf",
+      "pages": 26,
+      "bytes": 211492,
+      "sha256": "15b702a8d37a8709863c5c6758c179770cd54ba537d5eb56729f6a9789bb86f3",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "05_Manual_de_Usuarios_por_Rol.pdf",
+      "pages": 8,
+      "bytes": 132485,
+      "sha256": "5244b2dd3eaeaa5d18d5667bcc34073ef5b2439904f415058d128b29f08cf33c",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "06_Trazabilidad_Casos_de_Uso_CU.pdf",
+      "pages": 408,
+      "bytes": 1754976,
+      "sha256": "3fa7c87a96740fdc7b0e4f36455b640db5944331739c9556f974ae5cc148eea3",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "07_Trazabilidad_Funcionalidades_Sin_CU.pdf",
+      "pages": 4,
+      "bytes": 104900,
+      "sha256": "6e59a976c95735b782109bcc494d733f4e4f85cb404abe8b13e9fe419c129b5c",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "08_Arquitectura_Completa_del_Sistema.pdf",
+      "pages": 4,
+      "bytes": 105043,
+      "sha256": "5ddc2606ac4b50eba36178cf062e1a5e064603f795aa628e257f9af15a6b6e3c",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "09_Codigo_Frontend_Explicado.pdf",
+      "pages": 17,
+      "bytes": 171682,
+      "sha256": "6a0d56f3e0da71ab9e00e172e4d6ab181609c5c0bc00908ffb64e6b34c53ef9d",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "10_Codigo_Backend_Explicado.pdf",
+      "pages": 42,
+      "bytes": 233959,
+      "sha256": "ece631782fb7f9e55e76158153600cfdd348573cf0c909de4ef1ccb8bcd296c7",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "11_Base_de_Datos_Diccionario_y_Relaciones.pdf",
+      "pages": 161,
+      "bytes": 851909,
+      "sha256": "0615d95e1f39852c00d034ffc4f06ed48f3100d3cb5984c02c29bc55e4d05e1e",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "12_Migraciones_Explicadas.pdf",
+      "pages": 39,
+      "bytes": 283818,
+      "sha256": "297e6bc7a56232ce6bd6aea06198f3a4a70842a21e3d279a763ac98c67126030",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "13_Pruebas_Automatizadas_Explicadas.pdf",
+      "pages": 100,
+      "bytes": 463256,
+      "sha256": "41b99a67d34366db099c156b27ab92af7c1a9d686292dbeb682ebbd072757da3",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "14_QA_Manual_y_Casos_de_Prueba.pdf",
+      "pages": 26,
+      "bytes": 174568,
+      "sha256": "e37754072f6a37682010454efd47f68387b23324e0b06c2875268a9703c25d7f",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "15_Seguridad_M4_y_Permisos.pdf",
+      "pages": 4,
+      "bytes": 105632,
+      "sha256": "7c86c4b0206cc645f9b1e6248f8c28ade979f578102e5b1dbc142973a933b1fa",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "16_Auditoria_M9.pdf",
+      "pages": 5,
+      "bytes": 110949,
+      "sha256": "fd74e573fe960ef265bb8cdb21a9908b0821b6d9837a57177aa215573bbc303d",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "17_Ciclo_Comercial_B2B_B2C.pdf",
+      "pages": 7,
+      "bytes": 116098,
+      "sha256": "801d22bde89863b0379f208f603e1a1e740eb06aa630a3d4c0269292c28d8fc7",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "18_Terreno_Rectificacion_y_Produccion.pdf",
+      "pages": 7,
+      "bytes": 114455,
+      "sha256": "1cae65c89c8a1eb30fb1bc2ed73fd50faddc39dd9560e633ae239fbe53e36223",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "19_Sistema_Documental_PDF.pdf",
+      "pages": 10,
+      "bytes": 122690,
+      "sha256": "499172ae15ce24b13ddb68d6fa25a411c04b77775aa8993dc7e5221dd6950d49",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "20_Troubleshooting.pdf",
+      "pages": 3,
+      "bytes": 103915,
+      "sha256": "8e7e9d2598beeac42ec6cf1d4d3a4e60b60eb0bc21af74743f7a041561494af2",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "21_API_Referencia_Completa.pdf",
+      "pages": 100,
+      "bytes": 519562,
+      "sha256": "244be0ea254c379bb6dd40f956a033a2b2a855f6f8bfee88ca800127b1738961",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "22_Glosario_Puertas_Blindadas.pdf",
+      "pages": 3,
+      "bytes": 103511,
+      "sha256": "b9102e88fbb409cfa32d7082e4b8bec26fe371df26c5946ff4ffccd3ac216444",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "23_Como_Desarrollar_una_Nueva_Funcionalidad.pdf",
+      "pages": 4,
+      "bytes": 104312,
+      "sha256": "184926b1068e7d09c54a58d23cd915b0fc57457d2ed5d5b56158b43af05dbde5",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "24_Mantenimiento_y_Buenas_Practicas.pdf",
+      "pages": 4,
+      "bytes": 104446,
+      "sha256": "f5af4829477e94f45a6fd5152988f5e59fb208bd932c72b2c99e456793c061fe",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "25_Tecnologias_y_Dependencias.pdf",
+      "pages": 5,
+      "bytes": 107333,
+      "sha256": "1c1ebef1d4bb140245a7508b3488e918dddb3aae2ff28aad3a2c624611a23719",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "26_Flujos_de_Datos_End_to_End.pdf",
+      "pages": 7,
+      "bytes": 116067,
+      "sha256": "a6a56ed23c01208ae9c9f22546946ae6afceb7ac05e22adcab5d94649e161fe4",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "27_Runbook_Operacional.pdf",
+      "pages": 4,
+      "bytes": 105407,
+      "sha256": "e8433d0081843ea55f54b64f10a05ba4b818bad29e2c8e1662afea2c62347553",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "28_Deuda_Tecnica_y_Pendientes.pdf",
+      "pages": 3,
+      "bytes": 103185,
+      "sha256": "942a43c6fb5c52dd10039d33fc8631964e04ccf3aa537b8608000ba42ef56182",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "29_Historia_y_Decisiones_Arquitectonicas.pdf",
+      "pages": 6,
+      "bytes": 112073,
+      "sha256": "e647052ab7bdefe9fe8d50a626b1f1eec658926058b119cc5c2f8726d16ec515",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "30_Curso_Practico_Puertas_Blindadas.pdf",
+      "pages": 8,
+      "bytes": 134819,
+      "sha256": "3996e95971fb6fd9a5a5ce50fbdd498d43296dfad2a971eeb833bbfb238b990a",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "31_Banco_de_Preguntas_y_Evaluacion.pdf",
+      "pages": 4,
+      "bytes": 108292,
+      "sha256": "275419739d2ee0b7846e3117984f3cf963a0900f2af653c6794be060fc1295bb",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "32_Cheat_Sheets.pdf",
+      "pages": 4,
+      "bytes": 106635,
+      "sha256": "e1079bb66f733cb8c35315d404507c5aa74b964202186cef46477565b7fa1b23",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "33_Mapa_Completo_del_Repositorio.pdf",
+      "pages": 16,
+      "bytes": 134585,
+      "sha256": "e015f1af6ccd64077aaf3289f731946ed085a4ef45355b6cc17d3cbe81a49b26",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "34_Matriz_Maestra_de_Trazabilidad.pdf",
+      "pages": 30,
+      "bytes": 236840,
+      "sha256": "1a52cc09b0e5ca1b376b63ed48c93b773a42f579e60044e863944fe3585bf414",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "35_Estados_y_Maquinas_de_Estado.pdf",
+      "pages": 16,
+      "bytes": 138039,
+      "sha256": "bd02291f35cf51e5712dd6119f655ac5d7623409f8b556c08440d42788b5c493",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "36_Diccionario_de_Errores.pdf",
+      "pages": 75,
+      "bytes": 281515,
+      "sha256": "2e1acbdf0fce55a7950f8dad8dbb392fe9b0cdadbb15fef1c66f12ddae076ecc",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "37_Seguridad_Documental.pdf",
+      "pages": 4,
+      "bytes": 104782,
+      "sha256": "f433b93e17bd6dd6ff34f0a34888677152fb44e55043e769b8de812ac537ffa8",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    },
+    {
+      "pdf": "38_Cobertura_Documental.pdf",
+      "pages": 3,
+      "bytes": 104041,
+      "sha256": "4a1fbbc6fe89fab1ca0575674ef3cb68972053c9fcd5d0c7c4566792c6bb5544",
+      "emptyPages": [],
+      "outOfBoundsCharacters": 0
+    }
+  ]
+}

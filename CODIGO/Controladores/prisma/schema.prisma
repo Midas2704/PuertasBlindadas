@@ -6,7 +6,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["finanzas", "inventario", "terreno"]
+  schemas  = ["comun", "finanzas", "inventario", "terreno"]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -2943,7 +2943,7 @@ model area_trabajo {
   estados_tareas_produccion  estado_tarea_produccion_ot[]
   etapas_adicionales_ot      etapa_adicional_orden_trabajo[]
 
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 model checklist_de_materiales {
@@ -3274,7 +3274,7 @@ model obra {
   cotizaciones_contexto        cotizacion[]             @relation("cotizacion_obra_contexto")
   proyectos_vinculados         proyecto_obra[]
 
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 model perfil {
@@ -3287,7 +3287,7 @@ model perfil {
   perfil_permiso       perfil_permiso[]
   usuario              usuario[]
 
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 model perfil_permiso {
@@ -3298,7 +3298,7 @@ model perfil_permiso {
   permiso               permiso  @relation(fields: [permiso_id_permiso], references: [permiso_id_permiso], onDelete: NoAction, onUpdate: NoAction, map: "fk_perfil_permiso_permiso_id_permiso")
 
   @@id([perfil_id_perfil, permiso_id_permiso], map: "pk_perfil_permiso")
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 model permiso {
@@ -3315,7 +3315,7 @@ model permiso {
   permiso_nombre_del_permiso String?                      @db.VarChar(150)
   perfil_permiso             perfil_permiso[]
 
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 model prestamo_herramientas {
@@ -3357,7 +3357,7 @@ model proyecto {
 
   @@index([rut_cliente, proyecto_fecha_ingreso], map: "idx_proyecto_cliente_fecha")
 
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 /// Relación explícita entre el pedido/proyecto y sus ubicaciones físicas. No impone una sola Obra por Proyecto.
@@ -3373,7 +3373,7 @@ model proyecto_obra {
 
   @@unique([id_proyecto, id_obra], map: "uq_proyecto_obra")
   @@index([id_obra, id_proyecto], map: "idx_proyecto_obra_obra")
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 model receptor {
@@ -3671,7 +3671,7 @@ model usuario {
   ajustes_ocs_solicitados                          ajuste_orden_compra_servicio_m5[]       @relation("ajuste_ocs_solicitante")
   ajustes_ocs_confirmados                          ajuste_orden_compra_servicio_m5[]       @relation("ajuste_ocs_confirmante")
 
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 /// M8 conserva sólo referencias a los owners M1/M2 y antecedentes propios de la solicitud.
@@ -3813,7 +3813,7 @@ model usuario_contrasena {
   usuario            usuario   @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_usuario_contrasena_usuario_id_usuario")
 
   @@id([usuario_id_usuario, usuario_contrasena], map: "pk_usuario_contrasena")
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 view v_ficha_cliente_resumen {
@@ -5372,7 +5372,7 @@ model usuario_permiso_particular {
   permiso    permiso @relation(fields: [id_permiso], references: [permiso_id_permiso])
 
   @@id([id_usuario, id_permiso])
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 model permiso_dependencia {
@@ -5382,7 +5382,7 @@ model permiso_dependencia {
   requerido    permiso @relation("permiso_requerido", fields: [id_requerido], references: [permiso_id_permiso])
 
   @@id([id_permiso, id_requerido])
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 /// Estado técnico provisional: bloqueo independiente de Activo/Inactivo.
@@ -5396,7 +5396,7 @@ model estado_seguridad_usuario {
   responsable         String?
   usuario             usuario   @relation(fields: [id_usuario], references: [usuario_id_usuario])
 
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 /// Se guarda hash del secreto de sesión; el índice parcial de migración asegura sesión única.
@@ -5414,7 +5414,7 @@ model sesion_usuario {
   usuario           usuario   @relation(fields: [id_usuario], references: [usuario_id_usuario])
 
   @@index([id_usuario])
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 /// Token opaco de un solo uso. Nunca se guarda el secreto recuperable.
@@ -5428,7 +5428,7 @@ model token_recuperacion {
   usuario      usuario   @relation(fields: [id_usuario], references: [usuario_id_usuario])
 
   @@index([id_usuario])
-  @@schema("terreno")
+  @@schema("comun")
 }
 
 /// Evidencia técnica M9. La migración 044 impide UPDATE y DELETE ordinarios.

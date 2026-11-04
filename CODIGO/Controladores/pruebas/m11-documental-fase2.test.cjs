@@ -46,12 +46,14 @@ test('M11 Fase 2 documental', async t => {
     assert.match(sql,/'CU458'/); assert.match(sql,/'CU459'/); assert.match(sql,/'CU461'/); assert.doesNotMatch(sql,/INSERT[\s\S]*'CU456'/);
     assert.doesNotMatch(sql,/DROP TABLE|TRUNCATE|DELETE FROM/i);
   });
-  await t.test('CU458 bloquea GDE correctora sin contrato y la ruta legacy no sobrescribe originales', () => {
+  await t.test('CU458 bloquea GDE correctora sin contrato y CU35 conserva su edición autorizada separada', () => {
     const fuente=readFileSync(resolve('src/comercial/ServicioDocumentalM11.ts'),'utf8');
     const m2=readFileSync(resolve('src/controladores/M2Controller.ts'),'utf8');
+    const cu35=readFileSync(resolve('src/m2/guiaDespacho.ts'),'utf8');
     assert.match(fuente,/M11_CONTRATO_CORRECCION_GDE_PENDIENTE/); assert.doesNotMatch(fuente,/guia_despacho\.create/);
     const bloque=m2.slice(m2.indexOf('async modificarGuia'),m2.indexOf('async definirCondicionesCobro'));
-    assert.match(bloque,/M11_GUIA_INMUTABLE/); assert.doesNotMatch(bloque,/guia_despacho\.update/);
+    assert.doesNotMatch(bloque,/M11_GUIA_INMUTABLE/); assert.match(bloque,/guia_despacho\.update/);
+    assert.match(bloque,/prepararModificacionGuia/); assert.match(cu35,/cerrada','finalizada','anulada/); assert.match(cu35,/campos protegidos/);
   });
   await t.test('DTE exige relación acreditada, detecta ciclos y bloquea tipos sin contrato aprobado', () => {
     const tipoVenta={aplica_venta:true,estado_tipo_documento:'activo'};

@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { calcularNota, NotaFinanciera, fechaNegocio } from './finanzas';
+import { montosNota, NotaFinanciera, fechaNegocio } from './finanzas';
 import { ErrorAplicacion } from './ErrorAplicacion';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
 
@@ -9,16 +9,40 @@ export function clasificarMedioPago(nombre: string) {
  return { credito: normalizado==='credito'||normalizado==='tarjeta de credito', cheque: normalizado==='cheque', efectivo: normalizado==='efectivo' };
 }
 
+export type CategoriaPagoSugerida = 'Pago final' | 'Anticipo' | 'Abono parcial';
+
+const decimalPago = (valor: unknown) => {
+ try {
+  if (valor === null || valor === undefined || valor === '' || typeof valor === 'boolean') throw new Error();
+  const monto = new Prisma.Decimal(valor as Prisma.Decimal.Value);
+  if (!monto.isFinite()) throw new Error();
+  return monto;
+ } catch {
+  throw new ErrorAplicacion(400, 'Monto inválido');
+ }
+};
+
+export function sugerirCategoriaPago(nota: NotaFinanciera, montoEntrada: unknown): CategoriaPagoSugerida {
+ const { saldoPendiente, pagosEfectivos } = montosNota(nota);
+ const monto = decimalPago(montoEntrada);
+ if (saldoPendiente.lte(0)) throw new ErrorAplicacion(409, 'La Nota de Venta no está habilitada para recibir pagos');
+ if (monto.lte(0) || monto.gt(saldoPendiente)) throw new ErrorAplicacion(400, 'El pago debe ser positivo y no superar el saldo disponible');
+ if (monto.eq(saldoPendiente)) return 'Pago final';
+ return pagosEfectivos.gt(0) ? 'Abono parcial' : 'Anticipo';
+}
+
+const normalizarCategoria = (valor: string) => valor.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+
 export function prepararPago(nota:NotaFinanciera, entrada:Record<string,unknown>, catalogo:{medios:{id_medio_pago:number;nombre_medio_pago:string}[];categorias:{id_categoria_pago:number;nombre:string}[];cuotas:{cantidad:number}[]}, idDocumento:number|null, responsable:string) {
- const saldo=calcularNota(nota);
- if(['anulada','cerrada','revertida_total','revertida','provisional'].includes(nota.estado_nota_venta.toLowerCase()) || saldo.saldoPendiente<=0) throw new ErrorAplicacion(409,'La Nota de Venta no está habilitada para recibir pagos');
- const monto=new Prisma.Decimal(numeroNoNegativo(entrada.monto,'Monto'));
- if(monto.lte(0)||monto.gt(saldo.saldoPendiente)) throw new ErrorAplicacion(400,'El pago debe ser positivo y no superar el saldo disponible');
+ if(['anulada','cerrada','revertida_total','revertida','provisional'].includes(nota.estado_nota_venta.toLowerCase())) throw new ErrorAplicacion(409,'La Nota de Venta no está habilitada para recibir pagos');
+ const monto=decimalPago(entrada.monto);
+ const categoriaSugerida=sugerirCategoriaPago(nota,monto);
  if(!entrada.idMedio)throw new ErrorAplicacion(400,'Selecciona un medio de pago');
  const medio=catalogo.medios.find(m=>m.id_medio_pago===identificador(entrada.idMedio));if(!medio)throw new ErrorAplicacion(400,'Selecciona un medio activo');
- if(!entrada.idCategoria)throw new ErrorAplicacion(400,'Selecciona una categoría de pago');
- const categoria=catalogo.categorias.find(c=>c.id_categoria_pago===identificador(entrada.idCategoria));
- if(!categoria)throw new ErrorAplicacion(400,'Selecciona una categoría activa');
+ const categoria=entrada.idCategoria
+  ? catalogo.categorias.find(c=>c.id_categoria_pago===identificador(entrada.idCategoria))
+  : catalogo.categorias.find(c=>normalizarCategoria(c.nombre)===normalizarCategoria(categoriaSugerida));
+ if(!categoria)throw new ErrorAplicacion(409,entrada.idCategoria?'Selecciona una categoría activa':`No existe una categoría activa para «${categoriaSugerida}»`);
 
  const tipoMedio=clasificarMedioPago(medio.nombre_medio_pago);
  if(tipoMedio.credito&&!entrada.cuotas)throw new ErrorAplicacion(400,'El crédito requiere cuotas');

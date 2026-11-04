@@ -1,0 +1,9 @@
+flowchart LR
+CL[Cliente] --> COT[Cotizacion]
+COT --> PRE[Preview]
+COT --> EMI[Emision PDF confirmada]
+EMI --> ACE[Aceptacion]
+ACE --> NV[Nota de Venta]
+NV --> PRO[Proyecto]
+PRO --> UF[Unidades fisicas]
+UF --> OT[Ordenes de Trabajo]
