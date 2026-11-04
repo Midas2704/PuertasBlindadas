@@ -11,4 +11,7 @@ export const puedeAccederTerreno = (sesion: Sesion | null) =>
   Boolean(sesion?.permisos.some((permiso) => permisosExclusivosTerreno.has(permiso)));
 
 export const puedeAccederFinanzas = (sesion: Sesion | null) =>
-  Boolean(sesion?.permisos.some((permiso) => !permisosExclusivosTerreno.has(permiso)));
+  Boolean(sesion?.permisos.some((permiso) => !permisosExclusivosTerreno.has(permiso) && !['CU14','CU15'].includes(permiso)));
+
+export const puedeAccederInventario = (sesion: Sesion | null) =>
+  Boolean(sesion?.permisos.some((permiso) => permiso === 'CU14' || permiso === 'CU15'));

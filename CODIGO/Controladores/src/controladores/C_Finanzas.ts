@@ -8,6 +8,7 @@ import { M6Controller } from './M6Controller';
 import { M7Controller } from './M7Controller';
 import { M8Controller } from './M8Controller';
 import { M9Controller } from './M9Controller';
+import { MInventarioController } from './MInventarioController';
 import { AdaptadorCreditoM8ParaM7 } from '../servicios/AdaptadorCreditoM8ParaM7';
 import { ProductorAuditoriaM9 } from '../m9/contratoProductor';
 import { navegacionOwner, scopeM9DesdeActor } from '../m9/autorizacion';
@@ -33,6 +34,7 @@ const normalizarFiltrosHttpM9 = (consulta?: Record<string, unknown>): FiltrosM9 
 };
 
 export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' | 'crearCliente' | 'actualizarCliente' | 'desactivarCliente' | 'reactivarCliente' | 'inventario' | 'productos' | 'monedas'
+  | 'consultarResumenInventario' | 'listarMaterialesInventario' | 'obtenerMaterialInventario' | 'listarBodegasInventario' | 'listarMovimientosInventario' | 'listarReservasInventario' | 'listarAlertasInventario'
   | 'bandeja' | 'historial' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
   | 'descartarBorrador' | 'aprobarCotizacion' | 'aprobarVenta' | 'editarCotizacion' | 'tipoCambio'
   | 'consultarPago' | 'consultarSaldo' | 'catalogosPago'
@@ -159,6 +161,7 @@ export class C_Finanzas {
     private readonly m8 = new M8Controller(),
     private readonly m9 = new M9Controller(),
     productorM9?: ProductorAuditoriaM9,
+    private readonly mInventario = new MInventarioController(),
   ) {
     this.productorM9 = productorM9 ?? new ProductorAuditoriaM9(this.m9);
     if (typeof (this.m7 as { conectarCreditoM8?: (credito: AdaptadorCreditoM8ParaM7) => void }).conectarCreditoM8 === 'function') {
@@ -511,6 +514,13 @@ export class C_Finanzas {
       }
       case 'inventario': return this.m2.listarInventario();
       case 'productos': return this.m2.listarProductos();
+      case 'consultarResumenInventario': return this.mInventario.consultarResumen();
+      case 'listarMaterialesInventario': return this.mInventario.listarMateriales(solicitud.consulta || {});
+      case 'obtenerMaterialInventario': return this.mInventario.obtenerMaterial(texto(parametros.sku, 16));
+      case 'listarBodegasInventario': return this.mInventario.listarBodegas();
+      case 'listarMovimientosInventario': return this.mInventario.listarMovimientos(solicitud.consulta || {});
+      case 'listarReservasInventario': return this.mInventario.listarReservas(solicitud.consulta || {});
+      case 'listarAlertasInventario': return this.mInventario.listarAlertas(solicitud.consulta || {});
       case 'listarFamiliasProductoComercial': return this.m2.listarFamiliasProductoComercial(solicitud.consulta || {});
       case 'crearFamiliaProductoComercial': return this.m2.crearFamiliaProductoComercial(cuerpo, actor.id);
       case 'actualizarFamiliaProductoComercial': return this.m2.actualizarFamiliaProductoComercial(identificador(parametros.id), cuerpo, actor.id);

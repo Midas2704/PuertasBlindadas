@@ -2,6 +2,7 @@
 // Midas dijo que este catálogo no se toca a la ligera
 export const operacionesPermiso: Record<string, string> = {
  buscarClientes:'CU06',filtrarEstado:'CU07',filtrarFinanzas:'CU08',listarClientes:'CU05', abrirFicha:'CU09', dashboard:'CU05', crearCliente:'CU01', actualizarCliente:'CU02', desactivarCliente:'CU03', reactivarCliente:'CU04', inventario:'CU15', productos:'CU14', monedas:'CU28',
+ consultarResumenInventario:'CU15', listarMaterialesInventario:'CU14', obtenerMaterialInventario:'CU14', listarBodegasInventario:'CU15', listarMovimientosInventario:'CU15', listarReservasInventario:'CU15', listarAlertasInventario:'CU15',
  listarFamiliasProductoComercial:'CU360', listarProductosComerciales:'CU360', obtenerProductoComercial:'CU360', catalogosVinculacionProductoComercial:'CU360', obtenerPlanificacionAprobacionCotizacion:'CU24', consultarTrazabilidadComercialM11:'CU20',
  consultarCadenaDocumentalM11:'CU459', consultarConciliacionDocumentalM11:'CU459', gestionarCorreccionDocumentalM11:'CU458', consultarHistorialCorreccionM11:'CU459', resolverHallazgoDocumentalM11:'CU461',
  listarPreciosComerciales:'CU360', listarServiciosComerciales:'CU360', listarOpcionalesComerciales:'CU360', listarTarifasInstalacionComercial:'CU360', listarCondicionesComerciales:'CU360', resolverCoberturaInstalacionComercial:'CU360', obtenerResumenComercialProducto:'CU360',

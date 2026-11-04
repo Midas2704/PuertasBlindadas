@@ -70,7 +70,10 @@ import AreasTrabajo from './views/Mantenedores/AreasTrabajo';
 import TareasFabricacion from './views/Mantenedores/TareasFabricacion';
 import { permisosAccesoMantenedores } from './views/Mantenedores/permisos';
 import PortalPrincipal from './views/PortalPrincipal/PortalPrincipal';
-import InventarioPendiente from './views/PortalPrincipal/InventarioPendiente';
+import InventarioWrapper from './views/Inventario/InventarioWrapper';
+import { EntradaInventario } from './views/Inventario/InicioInventario';
+import MaterialesInventario from './views/Inventario/MaterialesInventario';
+import ListadosInventario from './views/Inventario/ListadosInventario';
 import TerrenoWrapper from './views/Terreno/TerrenoWrapper';
 import InicioTerreno from './views/Terreno/InicioTerreno';
 import ReportesTerreno from './views/Terreno/ReportesTerreno';
@@ -86,7 +89,14 @@ const App: React.FC = () => {
         <Route path="/login" element={<Acceso modo="login"/>}/>
         <Route path="/recuperar" element={<Acceso modo="recuperar"/>}/>
         <Route path="/" element={<PortalPrincipal/>}/>
-        <Route path="/inventario" element={<InventarioPendiente/>}/>
+        <Route path="/inventario" element={<Protegido permiso={['CU14','CU15']}><InventarioWrapper/></Protegido>}>
+          <Route index element={<EntradaInventario/>}/>
+          <Route path="materiales" element={<Protegido permiso="CU14"><MaterialesInventario/></Protegido>}/>
+          <Route path="bodegas" element={<Protegido permiso="CU15"><ListadosInventario tipo="bodegas"/></Protegido>}/>
+          <Route path="movimientos" element={<Protegido permiso="CU15"><ListadosInventario tipo="movimientos"/></Protegido>}/>
+          <Route path="reservas" element={<Protegido permiso="CU15"><ListadosInventario tipo="reservas"/></Protegido>}/>
+          <Route path="alertas" element={<Protegido permiso="CU15"><ListadosInventario tipo="alertas"/></Protegido>}/>
+        </Route>
         <Route element={<Protegido><DashboardWrapper /></Protegido>}>
           <Route path="usuarios" element={<Protegido permiso="CU67"><Usuarios/></Protegido>}/>
           <Route path="sesiones" element={<Protegido permiso="CU73"><Sesiones/></Protegido>}/>

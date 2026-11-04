@@ -25,6 +25,13 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   // Alias antiguos conservados como contratos HTTP; ninguno accede a módulos o BD.
   // los dejamos juntos para que nadie los confunda con rutas nuevas
   rutas.get('/salud', derivar('salud'));
+  rutas.get('/inventario/resumen', derivar('consultarResumenInventario'));
+  rutas.get('/inventario/materiales', derivar('listarMaterialesInventario'));
+  rutas.get('/inventario/materiales/:sku', derivar('obtenerMaterialInventario'));
+  rutas.get('/inventario/bodegas', derivar('listarBodegasInventario'));
+  rutas.get('/inventario/movimientos', derivar('listarMovimientosInventario'));
+  rutas.get('/inventario/reservas', derivar('listarReservasInventario'));
+  rutas.get('/inventario/alertas', derivar('listarAlertasInventario'));
   rutas.get('/auditoria/exportar/:formato', derivar('exportarAuditoriaM9'));
   rutas.get('/auditoria/resumen', derivar('consultarResumenAuditoriaM9'));
   rutas.get('/auditoria/:id', derivar('obtenerDetalleAuditoriaM9'));

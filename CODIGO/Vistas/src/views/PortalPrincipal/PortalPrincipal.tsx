@@ -1,7 +1,7 @@
 import { ArrowRight, Boxes, Calculator, Factory, LogIn, LogOut, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { operar, usarSesion } from '../../seguridad/Sesion';
-import { puedeAccederFinanzas, puedeAccederTerreno } from '../../seguridad/accesosSistemas';
+import { puedeAccederFinanzas, puedeAccederInventario, puedeAccederTerreno } from '../../seguridad/accesosSistemas';
 
 type TarjetaProps = {
   titulo: string;
@@ -51,6 +51,7 @@ export default function PortalPrincipal() {
   const { sesion, cargando, actualizar } = usarSesion();
   const finanzas = puedeAccederFinanzas(sesion);
   const terreno = puedeAccederTerreno(sesion);
+  const inventario = puedeAccederInventario(sesion);
   return <div className="min-h-screen bg-[#f4f4f3] text-black">
     <header className="relative z-20 border-b border-white/10 bg-[#0b0b0b] text-white"><div className="mx-auto flex min-h-20 max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
       <div className="flex min-w-0 items-center gap-3.5"><span className="rounded-lg border border-[#FE8F01]/60 bg-[#FE8F01]/10 p-2.5 text-[#FE8F01]"><ShieldCheck className="h-6 w-6" /></span><div className="min-w-0"><p className="truncate text-sm font-black tracking-[0.12em] sm:text-base">PUERTAS BLINDADAS</p><p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">Plataforma empresarial</p></div></div>
@@ -72,9 +73,9 @@ export default function PortalPrincipal() {
         {cargando ? <div className="rounded-2xl border border-gray-200 bg-white p-8 text-[#676767] shadow-sm">Cargando accesos disponibles…</div> : <div className="grid gap-5 md:grid-cols-3">
           {(!sesion || finanzas) && <TarjetaSistema titulo="FINANZAS" descripcion="Gestión financiera, comercial, remuneraciones y control gerencial." destino={sesion?'/finanzas':'/login'} icono={Calculator} disponible boton="Ingresar a Finanzas"/>}
           {(!sesion || terreno) && <TarjetaSistema titulo="TERRENO" descripcion="Órdenes de trabajo, visitas, producción y gestión operativa." destino={sesion?'/terreno':'/login'} icono={Factory} disponible boton="Ingresar a Terreno"/>}
-          <TarjetaSistema titulo="INVENTARIO" descripcion="Control de existencias, materiales y recursos de la empresa." icono={Boxes} disponible={false} boton="PRÓXIMAMENTE"/>
+          {(!sesion || inventario) && <TarjetaSistema titulo="INVENTARIO" descripcion="Control de existencias, materiales y recursos de la empresa." destino={sesion?'/inventario':'/login'} icono={Boxes} disponible boton="Ingresar a Inventario"/>}
         </div>}
-        {sesion&&!finanzas&&!terreno&&<p className="mt-6 border-l-4 border-[#FE8F01] bg-white p-4 text-sm shadow-sm">Tu cuenta no tiene sistemas habilitados. Solicita acceso a un administrador.</p>}
+        {sesion&&!finanzas&&!terreno&&!inventario&&<p className="mt-6 border-l-4 border-[#FE8F01] bg-white p-4 text-sm shadow-sm">Tu cuenta no tiene sistemas habilitados. Solicita acceso a un administrador.</p>}
       </section>
     </main>
     <footer className="border-t border-gray-200 bg-white"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-2 px-4 py-6 text-xs text-[#676767] sm:flex-row sm:px-6 lg:px-8"><p>© 2026 Puertas Blindadas</p><p>Plataforma de gestión empresarial</p></div></footer>
