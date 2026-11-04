@@ -6,6 +6,7 @@ import type { FichaProductoCatalogoComercial, ProductoCatalogoComercial } from '
 import ArmarCotizacion from './ArmarCotizacion';
 
 vi.mock('../../api/finanzas',()=>({solicitarFinanzas:vi.fn()}));
+vi.mock('../../components/documental/VisorPdf',()=>({default:()=> <div data-testid="visor-pdf-renderizado"/>}));
 import { solicitarFinanzas } from '../../api/finanzas';
 
 const producto:ProductoCatalogoComercial={
@@ -89,7 +90,8 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
     await completarCotizacionB2C(user);
     await user.click(await screen.findByRole('button',{name:/Vista previa PDF/i}));
     expect(await screen.findByRole('dialog')).toHaveTextContent(/BORRADOR — NO EMITIDO/i);
-    expect(screen.getByTitle('Vista previa PDF')).toHaveAttribute('src','blob:preview-cotizacion');
+    expect(await screen.findByTestId('visor-pdf-renderizado')).toBeInTheDocument();
+    expect(screen.queryByTitle('Vista previa PDF')).not.toBeInTheDocument();
     const llamadas=vi.mocked(solicitarFinanzas).mock.calls;
     expect(llamadas.filter(([ruta,opciones])=>ruta==='/billing/quotes'&&opciones?.method==='POST')).toHaveLength(1);
     expect(llamadas.some(([ruta])=>ruta==='/billing/quotes/901/preview-pdf')).toBe(true);
