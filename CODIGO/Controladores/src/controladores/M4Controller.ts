@@ -24,6 +24,9 @@ export const permisosEfectivos = (cuenta: Cuenta) => {
  return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || cuenta.administrador_original)).map(p => p.codigo_m4!);
 };
 
+/** El perfil propone permisos iniciales; no constituye un límite para personalizaciones autorizadas. */
+export const perfilPermitePersonalizacion = (perfil: { activo_m4: boolean } | null | undefined) => perfil?.activo_m4 === true;
+
 /** Único controlador funcional M4 (CU59–CU74). Ningún otro módulo lo invoca. */
 // En seguridad vamos despacio; Midas tiene la última palabra acá.
 export class M4Controller {
@@ -140,6 +143,7 @@ export class M4Controller {
   return {empleados,configuraciones,permisos:permisos.map(p=>clasificarPermisoM4({codigo:p.codigo_m4!,descripcion:p.permiso_descripcion,activo:p.activo_m4,requiereAdministrador:p.requiere_administrador})),dependencias:dependencias.filter(d=>d.permiso.codigo_m4!=='CU377'&&d.requerido.codigo_m4!=='CU377').map(d=>({permiso:d.permiso.codigo_m4!,requiere:d.requerido.codigo_m4!}))};
  }
  private async validarPermisos(tx:Transaccion,codigos:string[],administrador=false) {
+  if(codigos.includes('CU377')) error(400,'CU377 no está aprobado para asignación');
   const seleccion=await tx.permiso.findMany({where:{codigo_m4:{in:codigos},activo_m4:true},include:{dependencias:{include:{requerido:true}}}});
   if(seleccion.length!==new Set(codigos).size || seleccion.some(p=>{const numero=Number(p.codigo_m4?.slice(2));return (p.requiere_administrador || numero>=59&&numero<=74)&&!administrador;})) error(400,'Permiso no asignable');
   if(seleccion.some(p=>p.dependencias.some(d=>!codigos.includes(d.requerido.codigo_m4!)))) error(409,'No se puede mantener un permiso sin sus dependencias');
@@ -158,7 +162,7 @@ export class M4Controller {
    const correo=texto(entrada.correo,254);if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return error(400,'Correo inválido');
    const cuenta=await tx.usuario.create({data:{acceso_m4:rut.replace(/\./g,'').toLowerCase(),empleado_m4:empleado.rut_empleado,empleado_rut_empleado:empleado.rut_empleado,usuario_correo:correo,usuario_username:rut,usuario_estado_cuenta:'activo',perfil_id_perfil:perfil.perfil_id_perfil,usuario_fecha_de_creacion:new Date(),usuario_es_administrador:false}});
    if(entrada.permisos!==undefined) {
-    if(!perfil.admite_particulares || !Array.isArray(entrada.permisos) || !entrada.permisos.length) return error(400,'Configuración particular no válida');
+    if(!perfilPermitePersonalizacion(perfil) || !Array.isArray(entrada.permisos) || !entrada.permisos.length) return error(400,'Configuración particular no válida');
     const permisos=await this.validarPermisos(tx,entrada.permisos.map(p=>texto(p)));
     await tx.usuario.update({where:{usuario_id_usuario:cuenta.usuario_id_usuario},data:{configuracion_particular:true}});
     await tx.usuario_permiso_particular.createMany({data:permisos.map(p=>({id_usuario:cuenta.usuario_id_usuario,id_permiso:p.permiso_id_permiso}))});
@@ -198,7 +202,7 @@ export class M4Controller {
      await tx.usuario_permiso_particular.deleteMany({where:{id_usuario:id}});
      await tx.usuario.update({where:{usuario_id_usuario:id},data:{configuracion_particular:false}});
     } else if(modo==='particular') {
-     if(!cuenta.perfil?.admite_particulares || cuenta.perfil.codigo_m4==='gerencia') error(409,'Esta configuración base no admite permisos particulares');
+     if(!perfilPermitePersonalizacion(cuenta.perfil)) error(409,'La configuración base no está activa');
      if(!Array.isArray(entrada.permisos)) error(400,'La selección de permisos no es válida');
      const finales=[...new Set((entrada.permisos as unknown[]).map(p=>texto(p)))];
      if(!finales.length && cuenta.usuario_estado_cuenta==='activo') error(409,'Una cuenta Activa particular debe conservar permisos efectivos');
@@ -214,7 +218,7 @@ export class M4Controller {
      await tx.usuario.update({where:{usuario_id_usuario:id},data:{configuracion_particular:true}});
     } else error(400,'Modo de permisos no válido');
    } else if(['asignarPermisos','retirarPermisos'].includes(operacion)) {
-    if(!cuenta.perfil?.admite_particulares || cuenta.perfil.codigo_m4==='gerencia') error(409,'Esta configuración base no admite permisos particulares');
+    if(!perfilPermitePersonalizacion(cuenta.perfil)) error(409,'La configuración base no está activa');
     if(!Array.isArray(entrada.permisos) || !entrada.permisos.length) error(400,'Selecciona permisos');
     const elegidos=(entrada.permisos as unknown[]).map(p=>texto(p));
     const actuales=permisosEfectivos(cuenta);

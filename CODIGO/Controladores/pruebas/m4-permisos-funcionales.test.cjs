@@ -1,8 +1,10 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
+const {readFileSync}=require('node:fs');
 const {AREAS_FUNCIONALES_M4,clasificarPermisoM4}=require('../dist/seguridad/catalogoPermisosFuncional.js');
 const {codigosImplementados,operacionesQueRequierenAdministrador,permisosDeOperacion}=require('../dist/validaciones/permisos.js');
 const {CATALOGO_PRODUCTORES_M9}=require('../dist/m9/contratoProductor.js');
+const {perfilPermitePersonalizacion}=require('../dist/controladores/M4Controller.js');
 
 test('clasificación funcional usa áreas reales y nombres humanos',()=>{
   const casos=[
@@ -27,4 +29,10 @@ test('guardado atómico reutiliza CU62, CU63 y CU64 y exige administrador',()=>{
 
 test('guardado administrativo genera una sola operación coherente para M9',()=>{
   assert.deepEqual(CATALOGO_PRODUCTORES_M9.guardarPermisosUsuario,{modulo:'M4',operacion:'CONFIGURACION_PERMISOS_ACTUALIZADA',entidad:'USUARIO',critico:false});
+});
+
+test('el perfil preselecciona pero no limita la personalización de permisos',()=>{
+  assert.equal(perfilPermitePersonalizacion({activo_m4:true,admite_particulares:false,codigo_m4:'gerencia'}),true);
+  assert.equal(perfilPermitePersonalizacion({activo_m4:false,admite_particulares:true,codigo_m4:'secretaria'}),false);
+  assert.match(readFileSync('src/controladores/M4Controller.ts','utf8'),/codigos\.includes\('CU377'\)/);
 });

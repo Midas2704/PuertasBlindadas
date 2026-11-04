@@ -17,12 +17,13 @@ const permisos=[
 const catalogo={empleados:[],configuraciones:[{codigo_m4:'secretaria',perfil_nombre_perfil:'Secretaría',admite_particulares:true},{codigo_m4:'gerencia',perfil_nombre_perfil:'Gerencia',admite_particulares:false}],permisos,dependencias:[{permiso:'CU02',requiere:'CU05'}]};
 const normal={id:'2',nombre:'Ana Operaciones',acceso:'ana',correo:'ana@example.invalid',estado:'activo',configuracion:'secretaria',configuracionParticular:false,administrador:false,original:false,bloqueada:false,permisos:['CU05'],permisosParticulares:[],permisosPerfil:['CU05']};
 const midas={...normal,id:'1',nombre:'Midas',acceso:'20776101-k',configuracion:'gerencia',configuracionParticular:true,administrador:true,original:true,permisos:['CU05','CU02','CU63','CU378'],permisosParticulares:['CU05','CU02','CU63','CU378'],permisosPerfil:[]};
+const gerencia={...normal,id:'3',nombre:'Gerencia Operativa',acceso:'gerencia',configuracion:'gerencia'};
 
 describe('Administrador funcional de permisos M4',()=>{
  beforeEach(()=>{
   operar.mockReset();
   Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value:vi.fn()});
-  operar.mockImplementation((ruta:string)=>ruta==='/usuarios'?Promise.resolve([normal,midas]):ruta==='/usuarios/catalogos'?Promise.resolve(catalogo):Promise.resolve({mensaje:'Permisos actualizados'}));
+  operar.mockImplementation((ruta:string)=>ruta==='/usuarios'?Promise.resolve([normal,midas,gerencia]):ruta==='/usuarios/catalogos'?Promise.resolve(catalogo):Promise.resolve({mensaje:'Permisos actualizados'}));
  });
  it('reemplaza los chips CU por áreas, acciones humanas, contadores y búsqueda',async()=>{
   render(<Usuarios/>);fireEvent.click((await screen.findAllByRole('button',{name:'Ver accesos'}))[0]);
@@ -46,9 +47,14 @@ describe('Administrador funcional de permisos M4',()=>{
   fireEvent.click(screen.getByRole('button',{name:'Seleccionar todos los permisos'}));expect(screen.getByLabelText('Crear y editar plantillas documentales')).toBeChecked();expect(screen.getByLabelText('Asignar permisos particulares')).toBeDisabled();
  });
  it('resume y confirma un único guardado atómico',async()=>{
-  render(<Usuarios/>);fireEvent.click((await screen.findAllByRole('button',{name:'Ver accesos'}))[0]);fireEvent.click(screen.getByRole('button',{name:'Personalizar este usuario'}));fireEvent.click(screen.getByLabelText('Crear y editar plantillas documentales'));fireEvent.click(screen.getByRole('button',{name:'Guardar cambios'}));
+  render(<Usuarios/>);fireEvent.click((await screen.findAllByRole('button',{name:'Ver accesos'}))[0]);fireEvent.click(screen.getByLabelText('Crear y editar plantillas documentales'));expect(screen.getByText('Modo').parentElement).toHaveTextContent('Personalizado');fireEvent.click(screen.getByRole('button',{name:'Guardar cambios'}));
   expect(screen.getByText(/Se agregarán/)).toHaveTextContent('Se agregarán 1 permisos.');fireEvent.click(screen.getByRole('button',{name:'Confirmar'}));
   await waitFor(()=>expect(operar).toHaveBeenCalledWith('/usuarios/permisos',expect.objectContaining({id:'2',modo:'particular',confirmado:true})));
+ });
+ it('un perfil sólo preselecciona y Gerencia también puede agregar permisos no administrativos',async()=>{
+  render(<Usuarios/>);const botones=await screen.findAllByRole('button',{name:'Ver accesos'});fireEvent.click(botones[2]);
+  const extra=screen.getByLabelText('Crear y editar plantillas documentales');expect(extra).not.toBeDisabled();fireEvent.click(extra);
+  expect(screen.getByText('Modo').parentElement).toHaveTextContent('Personalizado');expect(extra).toBeChecked();
  });
  it('protege Midas y muestra todos los permisos aprobados sin permitir retirarlos',async()=>{
   render(<Usuarios/>);const botones=await screen.findAllByRole('button',{name:'Ver accesos'});fireEvent.click(botones[1]);
