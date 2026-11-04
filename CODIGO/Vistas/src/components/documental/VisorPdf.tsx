@@ -1,8 +1,8 @@
 import {useEffect,useRef,useState} from 'react';
 import {GlobalWorkerOptions,getDocument,type PDFDocumentProxy,type PDFPageProxy} from 'pdfjs-dist';
-import workerPdf from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import WorkerPdf from 'pdfjs-dist/build/pdf.worker.min.mjs?worker&inline';
 
-GlobalWorkerOptions.workerSrc=workerPdf;
+GlobalWorkerOptions.workerPort=new WorkerPdf();
 
 function decodificarPdf(contenido:string){
  const [,base64='']=contenido.split(',');
