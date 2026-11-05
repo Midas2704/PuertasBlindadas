@@ -32,6 +32,7 @@ test('reservas nuevas acreditan bodega y lote conservando históricos nulos',()=
 test('entradas salidas reservas liberaciones y ajustes usan Decimal y transacción serializable',()=>{
   for(const metodo of ['registrarEntrada','registrarSalida','crearReserva','liberarReserva','ajustarExistencia']) assert.match(servicio,new RegExp(`${metodo}\\(`));
   assert.match(servicio,/Prisma\.TransactionIsolationLevel\.Serializable/);
+  assert.match(servicio,/40001\|could not serialize access/);
   assert.match(servicio,/FOR UPDATE/);
   assert.match(servicio,/new Prisma\.Decimal/);
   assert.match(servicio,/P2034/);

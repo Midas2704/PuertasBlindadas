@@ -29,7 +29,12 @@ const texto = (valor:string, campo:string, maximo:number) => {
 const normalizar = (valor:string|null|undefined) => (valor??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
 const jsonSeguro = (valor:unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(valor)) as Prisma.InputJsonValue;
 const hashSolicitud = (tipo:TipoOperacion, datos:Record<string,unknown>) => createHash('sha256').update(JSON.stringify({tipo,...datos}, Object.keys({tipo,...datos}).sort())).digest('hex');
-const esConflictoSerializable = (error:unknown) => ['P2034','P2002'].includes((error as {code?:string}).code??'');
+const esConflictoSerializable = (error:unknown) => {
+  const detalle=error as {code?:string;message?:string;meta?:{code?:string;message?:string}};
+  return ['P2034','P2002','40001'].includes(detalle.code??'')
+    || detalle.meta?.code==='40001'
+    || /(?:40001|could not serialize access)/i.test(`${detalle.message??''} ${detalle.meta?.message??''}`);
+};
 
 type ResultadoOperacion = { operacionId:string; tipo:TipoOperacion; movimientoId?:string; reservaId?:string; sku:string; bodegaId:string; loteId:string; fisico:string; reservado:string; disponible:string; repetida:boolean; __auditoriaM9?:{anterior:Record<string,unknown>;nuevo:Record<string,unknown>} };
 

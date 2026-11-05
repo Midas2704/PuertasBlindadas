@@ -11,7 +11,8 @@ if (!process.env.INVENTARIO_INT03_PG18) {
   const actor={id:0n,sesion:'sintetica',permisos:[],configuracion:'prueba',administrador:false,administradorOriginal:false,cambiarClave:false,nombre:'INT03',acceso:'INT03'};
 
   async function limpiar(){
-    await prisma.evento_auditoria_m9.deleteMany({where:{identidad_logica:{startsWith:`INVENTARIO:`}}});
+    // M9 es evidencia inmutable incluso en pruebas. La base del workflow es
+    // descartable, por lo que sus eventos se conservan hasta eliminar el runner.
     await prisma.operacion_inventario.deleteMany({where:{clave_idempotencia:{startsWith:prefijo}}});
     if(ids.sku){
       await prisma.reserva_inventario.deleteMany({where:{material_sku:ids.sku}});
