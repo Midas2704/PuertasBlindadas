@@ -34,8 +34,8 @@ test('076 conserva los owners de dominio y no introduce operaciones destructivas
 });
 
 test('el modelo mantiene cantidad de entidades y relaciones físicas',()=>{
-  assert.equal((schema.match(/^model\s+/gm)||[]).length,291);
-  assert.equal((schema.match(/@relation\([^\r\n]*fields\s*:/g)||[]).length,480);
+  assert.equal((schema.match(/^model\s+/gm)||[]).length,292);
+  assert.equal((schema.match(/@relation\([^\r\n]*fields\s*:/g)||[]).length,488);
   assert.equal((schema.match(/@@schema\("comun"\)/g)||[]).length,14);
 });
 

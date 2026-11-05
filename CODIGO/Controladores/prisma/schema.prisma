@@ -2492,6 +2492,8 @@ model bodega {
   anaquel               anaquel[]
   inventario_bodega     inventario_bodega[]
   movimiento_inventario movimiento_inventario[]
+  reserva_inventario    reserva_inventario[]
+  operacion_inventario  operacion_inventario[]
 
   @@schema("inventario")
 }
@@ -2572,6 +2574,8 @@ model lote {
   proyecto                  proyecto?               @relation(fields: [proyecto_id_proyecto], references: [proyecto_proyecto_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_lote_proyecto_id_proyecto")
   lote_fecha_pedido         lote_fecha_pedido[]
   movimiento_inventario     movimiento_inventario[]
+  reserva_inventario        reserva_inventario[]
+  operacion_inventario      operacion_inventario[]
 
   @@schema("inventario")
 }
@@ -2621,6 +2625,7 @@ model material {
   material_proveedor                                                                                                                material_proveedor[]
   movimiento_inventario                                                                                                             movimiento_inventario[]
   reserva_inventario                                                                                                                reserva_inventario[]
+  operacion_inventario                                                                                                              operacion_inventario[]
   detalles_herraje                                                                                                                  detalles_herraje[]
   prestamo_herramientas                                                                                                             prestamo_herramientas[]
 
@@ -2748,6 +2753,7 @@ model movimiento_inventario {
   proyecto                                                     proyecto?                                @relation(fields: [proyecto_id_proyecto], references: [proyecto_proyecto_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_movimiento_inventario_proyecto_id_proyecto")
   usuario                                                      usuario?                                 @relation(fields: [usuario_id_usuario], references: [usuario_id_usuario], onDelete: NoAction, onUpdate: NoAction, map: "fk_movimiento_inventario_usuario_id_usuario")
   reporte_movimiento_inventario                                reporte_movimiento_inventario[]
+  operacion_inventario                                         operacion_inventario?
 
   @@schema("inventario")
 }
@@ -2904,11 +2910,41 @@ model reserva_inventario {
   material_sku                          String?              @db.VarChar(16)
   proyecto_id_proyecto                  BigInt?
   orden_trabajo_id_orden                BigInt?
+  bodega_id_bodega                      BigInt?
+  lote_id_lote                          BigInt?
   preparacion_pedido                    preparacion_pedido[]
   material                              material?            @relation(fields: [material_sku], references: [material_sku], onDelete: NoAction, onUpdate: NoAction, map: "fk_reserva_inventario_material_sku")
   orden_trabajo                         orden_trabajo?       @relation(fields: [orden_trabajo_id_orden], references: [orden_trabajo_id_orden], onDelete: NoAction, onUpdate: NoAction, map: "fk_reserva_inventario_orden_trabajo_id_orden")
   proyecto                              proyecto?            @relation(fields: [proyecto_id_proyecto], references: [proyecto_proyecto_id], onDelete: NoAction, onUpdate: NoAction, map: "fk_reserva_inventario_proyecto_id_proyecto")
+  bodega                                bodega?              @relation(fields: [bodega_id_bodega], references: [bodega_id_bodega], onDelete: Restrict, onUpdate: NoAction, map: "fk_reserva_inventario_bodega")
+  lote                                  lote?                @relation(fields: [lote_id_lote], references: [lote_id_lote], onDelete: Restrict, onUpdate: NoAction, map: "fk_reserva_inventario_lote")
+  operacion_inventario                  operacion_inventario[]
 
+  @@schema("inventario")
+}
+
+model operacion_inventario {
+  operacion_inventario_id BigInt    @id(map: "pk_operacion_inventario") @default(autoincrement())
+  clave_idempotencia      String    @unique(map: "uq_operacion_inventario_clave") @db.VarChar(160)
+  tipo_operacion          String    @db.VarChar(20)
+  hash_solicitud          String    @db.Char(64)
+  actor_id                BigInt
+  material_sku            String    @db.VarChar(16)
+  bodega_id_bodega        BigInt
+  lote_id_lote            BigInt
+  movimiento_inventario_id BigInt?  @unique(map: "uq_operacion_inventario_movimiento")
+  reserva_inventario_id   BigInt?
+  resultado               Json
+  creado_en               DateTime  @default(now()) @db.Timestamptz(6)
+  confirmado_en           DateTime  @default(now()) @db.Timestamptz(6)
+  actor                    usuario   @relation(fields: [actor_id], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_operacion_inventario_actor")
+  material                 material  @relation(fields: [material_sku], references: [material_sku], onDelete: Restrict, onUpdate: NoAction, map: "fk_operacion_inventario_material")
+  bodega                   bodega    @relation(fields: [bodega_id_bodega], references: [bodega_id_bodega], onDelete: Restrict, onUpdate: NoAction, map: "fk_operacion_inventario_bodega")
+  lote                     lote      @relation(fields: [lote_id_lote], references: [lote_id_lote], onDelete: Restrict, onUpdate: NoAction, map: "fk_operacion_inventario_lote")
+  movimiento               movimiento_inventario? @relation(fields: [movimiento_inventario_id], references: [movimiento_inventario_id_movimiento], onDelete: Restrict, onUpdate: NoAction, map: "fk_operacion_inventario_movimiento")
+  reserva                  reserva_inventario? @relation(fields: [reserva_inventario_id], references: [reserva_inventario_id_reserva], onDelete: Restrict, onUpdate: NoAction, map: "fk_operacion_inventario_reserva")
+
+  @@index([actor_id, creado_en], map: "idx_operacion_inventario_actor_fecha")
   @@schema("inventario")
 }
 
@@ -3591,6 +3627,7 @@ model usuario {
   tarifas_instalacion_creadas                      tarifa_instalacion_comercial[]          @relation("tarifa_instalacion_creador")
   condiciones_comerciales_creadas                  condicion_comercial[]                   @relation("condicion_comercial_creador")
   operaciones_comerciales_idempotentes             idempotencia_operacion_comercial[]
+  operaciones_inventario                            operacion_inventario[]
   condiciones_comerciales_publicadas               condicion_comercial_version[]           @relation("condicion_comercial_publicador")
   plantillas_documentales_creadas                  plantilla_documental_comercial[]        @relation("plantilla_documental_creador")
   plantillas_documentales_publicadas               plantilla_documental_version[]          @relation("plantilla_documental_publicador")

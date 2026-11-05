@@ -88,13 +88,14 @@ test('listas vacías y errores de base se propagan sin fabricar datos', async ()
   await assert.rejects(()=>new MInventarioController({movimiento_inventario:{count:async()=>{throw error},findMany:async()=>[]}}).listarMovimientos(),/BD no disponible/);
 });
 
-test('rutas y permisos quedan limitados a CU14/CU15 y sin escrituras', () => {
+test('consultas conservan CU14/CU15 y escrituras INT-03 permanecen fail-closed', () => {
   const permisos=readFileSync('src/validaciones/permisos.ts','utf8');
   const rutas=readFileSync('src/rutas/finanzas.ts','utf8');
   assert.match(permisos,/listarMaterialesInventario:'CU14'/);
   assert.match(permisos,/obtenerMaterialInventario:'CU14'/);
   for(const operacion of ['consultarResumenInventario','listarBodegasInventario','listarMovimientosInventario','listarReservasInventario','listarAlertasInventario']) assert.match(permisos,new RegExp(`${operacion}:'CU15'`));
-  assert.doesNotMatch(rutas,/\.(?:post|put|patch|delete)\('\/inventario\//i);
+  for(const ruta of ['entradas','salidas','reservas','ajustes']) assert.match(rutas,new RegExp(`post\\('/inventario/${ruta}`));
+  for(const operacion of ['registrarEntradaInventario','registrarSalidaInventario','crearReservaInventario','liberarReservaInventario','ajustarExistenciaInventario']) assert.doesNotMatch(permisos,new RegExp(`${operacion}:`));
 });
 
 function stock(fisico,reservado){return{inventario_bodega_cantidad_fisica:decimal(fisico),inventario_bodega_cantidad_reservada:decimal(reservado)}}

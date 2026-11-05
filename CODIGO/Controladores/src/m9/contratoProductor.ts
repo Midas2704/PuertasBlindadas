@@ -6,7 +6,7 @@ import type { EventoEntradaM9, JsonM9, ResultadoM9 } from './tipos';
 
 export const VERSION_CONTRATO_M9 = '1.0';
 export const VERSIONES_COMPATIBLES_M9 = [VERSION_CONTRATO_M9] as const;
-export const PRODUCTORES_AUTORIZADOS_M9 = ['M1','M2','M3','M4','M5','M6','M7','M8','M9'] as const;
+export const PRODUCTORES_AUTORIZADOS_M9 = ['M1','M2','M3','M4','M5','M6','M7','M8','INVENTARIO','M9'] as const;
 
 export type ProductorM9 = typeof PRODUCTORES_AUTORIZADOS_M9[number];
 export type AcuseM9 =
@@ -25,6 +25,11 @@ export type EspecificacionAuditableM9 = {
 
 // Catálogo deliberadamente corto: sólo confirmaciones ya existentes y semánticamente inequívocas.
 export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> = {
+  registrarEntradaInventario: { modulo:'INVENTARIO', operacion:'ENTRADA_INVENTARIO_CONFIRMADA', entidad:'MOVIMIENTO_INVENTARIO', critico:true, motivoRequerido:true },
+  registrarSalidaInventario: { modulo:'INVENTARIO', operacion:'SALIDA_INVENTARIO_CONFIRMADA', entidad:'MOVIMIENTO_INVENTARIO', critico:true, motivoRequerido:true },
+  crearReservaInventario: { modulo:'INVENTARIO', operacion:'RESERVA_INVENTARIO_CREADA', entidad:'RESERVA_INVENTARIO', critico:true, motivoRequerido:true },
+  liberarReservaInventario: { modulo:'INVENTARIO', operacion:'RESERVA_INVENTARIO_LIBERADA', entidad:'RESERVA_INVENTARIO', critico:true, motivoRequerido:true },
+  ajustarExistenciaInventario: { modulo:'INVENTARIO', operacion:'EXISTENCIA_INVENTARIO_AJUSTADA', entidad:'MOVIMIENTO_INVENTARIO', critico:true, motivoRequerido:true },
   crearCliente: { modulo:'M1', operacion:'CLIENTE_CREADO', entidad:'CLIENTE', critico:false },
   actualizarCliente: { modulo:'M1', operacion:'CLIENTE_ACTUALIZADO', entidad:'CLIENTE', critico:false },
   desactivarCliente: { modulo:'M1', operacion:'CLIENTE_DESACTIVADO', entidad:'CLIENTE', critico:false },

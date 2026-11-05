@@ -9,6 +9,7 @@ import { M7Controller } from './M7Controller';
 import { M8Controller } from './M8Controller';
 import { M9Controller } from './M9Controller';
 import { MInventarioController } from './MInventarioController';
+import { ServicioOperacionalInventario, type EntradaAjusteInventario, type EntradaLiberacionInventario, type EntradaMovimientoInventario, type EntradaReservaInventario } from '../inventario/ServicioOperacionalInventario';
 import { AdaptadorCreditoM8ParaM7 } from '../servicios/AdaptadorCreditoM8ParaM7';
 import { ProductorAuditoriaM9 } from '../m9/contratoProductor';
 import { navegacionOwner, scopeM9DesdeActor } from '../m9/autorizacion';
@@ -35,6 +36,7 @@ const normalizarFiltrosHttpM9 = (consulta?: Record<string, unknown>): FiltrosM9 
 
 export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' | 'crearCliente' | 'actualizarCliente' | 'desactivarCliente' | 'reactivarCliente' | 'inventario' | 'productos' | 'monedas'
   | 'consultarResumenInventario' | 'listarMaterialesInventario' | 'obtenerMaterialInventario' | 'listarBodegasInventario' | 'listarMovimientosInventario' | 'listarReservasInventario' | 'listarAlertasInventario'
+  | 'registrarEntradaInventario' | 'registrarSalidaInventario' | 'crearReservaInventario' | 'liberarReservaInventario' | 'ajustarExistenciaInventario'
   | 'bandeja' | 'historial' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
   | 'descartarBorrador' | 'aprobarCotizacion' | 'aprobarVenta' | 'editarCotizacion' | 'tipoCambio'
   | 'consultarPago' | 'consultarSaldo' | 'catalogosPago'
@@ -162,6 +164,7 @@ export class C_Finanzas {
     private readonly m9 = new M9Controller(),
     productorM9?: ProductorAuditoriaM9,
     private readonly mInventario = new MInventarioController(),
+    private readonly operacionalInventario = new ServicioOperacionalInventario(),
   ) {
     this.productorM9 = productorM9 ?? new ProductorAuditoriaM9(this.m9);
     if (typeof (this.m7 as { conectarCreditoM8?: (credito: AdaptadorCreditoM8ParaM7) => void }).conectarCreditoM8 === 'function') {
@@ -521,6 +524,11 @@ export class C_Finanzas {
       case 'listarMovimientosInventario': return this.mInventario.listarMovimientos(solicitud.consulta || {});
       case 'listarReservasInventario': return this.mInventario.listarReservas(solicitud.consulta || {});
       case 'listarAlertasInventario': return this.mInventario.listarAlertas(solicitud.consulta || {});
+      case 'registrarEntradaInventario': return this.operacionalInventario.registrarEntrada(cuerpo as unknown as EntradaMovimientoInventario,actor);
+      case 'registrarSalidaInventario': return this.operacionalInventario.registrarSalida(cuerpo as unknown as EntradaMovimientoInventario,actor);
+      case 'crearReservaInventario': return this.operacionalInventario.crearReserva(cuerpo as unknown as EntradaReservaInventario,actor);
+      case 'liberarReservaInventario': return this.operacionalInventario.liberarReserva(parametros.id as string,cuerpo as unknown as EntradaLiberacionInventario,actor);
+      case 'ajustarExistenciaInventario': return this.operacionalInventario.ajustarExistencia(cuerpo as unknown as EntradaAjusteInventario,actor);
       case 'listarFamiliasProductoComercial': return this.m2.listarFamiliasProductoComercial(solicitud.consulta || {});
       case 'crearFamiliaProductoComercial': return this.m2.crearFamiliaProductoComercial(cuerpo, actor.id);
       case 'actualizarFamiliaProductoComercial': return this.m2.actualizarFamiliaProductoComercial(identificador(parametros.id), cuerpo, actor.id);
@@ -748,6 +756,8 @@ export class C_Finanzas {
       case 'consultarResumenAuditoriaM9': return this.m9.resumenAnalitico(scopeM9DesdeActor(actor));
       default: return this.m2.operacionPendiente(operacion);
     }};
+    const auditoriaInterna=new Set<Operacion>(['registrarEntradaInventario','registrarSalidaInventario','crearReservaInventario','liberarReservaInventario','ajustarExistenciaInventario']);
+    if(auditoriaInterna.has(operacion)) return ejecutarOwner();
     return this.productorM9.ejecutar(operacion, actor, { parametros:solicitud.parametros, cuerpo:solicitud.cuerpo, idSolicitud:solicitud.idSolicitud, ocurridoEn:solicitud.ocurridoEn }, ejecutarOwner);
   }
 }

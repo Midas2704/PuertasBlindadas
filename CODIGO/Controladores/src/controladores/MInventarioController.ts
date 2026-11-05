@@ -142,7 +142,7 @@ export class MInventarioController {
   async listarReservas(consulta: Consulta = {}) {
     const pagina = entero(consulta.pagina, 1, 1, 100000), tamano = entero(consulta.tamano, 25, 1, 100);
     const [total, filas] = await Promise.all([this.db.reserva_inventario.count(), this.db.reserva_inventario.findMany({ skip: (pagina - 1) * tamano, take: tamano, orderBy: { reserva_inventario_fecha_reserva: 'desc' }, include: { material: true, proyecto: true, orden_trabajo: true } })]);
-    return { pagina, tamano, total, items: filas.map(f => ({ id: id(f.reserva_inventario_id_reserva), fecha: f.reserva_inventario_fecha_reserva?.toISOString() ?? null, liberadaEn: f.reserva_inventario_fecha_liberacion?.toISOString() ?? null, cantidad: decimalTexto(f.reserva_inventario_cantidad_reservada), estado: f.reserva_inventario_estado_reserva, sku: f.material_sku, material: f.material?.material_nombre_material ?? null, proyectoId: id(f.proyecto_id_proyecto), ordenTrabajoId: id(f.orden_trabajo_id_orden) })) };
+    return { pagina, tamano, total, items: filas.map(f => ({ id: id(f.reserva_inventario_id_reserva), fecha: f.reserva_inventario_fecha_reserva?.toISOString() ?? null, liberadaEn: f.reserva_inventario_fecha_liberacion?.toISOString() ?? null, cantidad: decimalTexto(f.reserva_inventario_cantidad_reservada), estado: f.reserva_inventario_estado_reserva, sku: f.material_sku, material: f.material?.material_nombre_material ?? null, proyectoId: id(f.proyecto_id_proyecto), ordenTrabajoId: id(f.orden_trabajo_id_orden), bodegaId:id(f.bodega_id_bodega), loteId:id(f.lote_id_lote), ubicacionAcreditada:f.bodega_id_bodega!==null&&f.lote_id_lote!==null })) };
   }
 
   async listarAlertas(consulta: Consulta = {}) {

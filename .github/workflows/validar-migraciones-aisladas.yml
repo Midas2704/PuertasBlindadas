@@ -1,4 +1,4 @@
-name: Validar migraciones aisladas 000-076
+name: Validar migraciones aisladas 000-077
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   validar-migraciones:
-    name: PostgreSQL 18 / Prisma 000-076
+    name: PostgreSQL 18 / Prisma 000-077
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -55,18 +55,18 @@ jobs:
           cache: npm
           cache-dependency-path: CODIGO/Controladores/package-lock.json
 
-      - name: Verificar cadena exacta 000-076
+      - name: Verificar cadena exacta 000-077
         run: |
           set -Eeuo pipefail
           mapfile -t migraciones < <(find prisma/migrations -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
 
-          if [[ "${#migraciones[@]}" -ne 77 ]]; then
-            printf 'Se esperaban 77 migraciones (000-076), pero se encontraron %s.\n' "${#migraciones[@]}" >&2
+          if [[ "${#migraciones[@]}" -ne 78 ]]; then
+            printf 'Se esperaban 78 migraciones (000-077), pero se encontraron %s.\n' "${#migraciones[@]}" >&2
             printf '%s\n' "${migraciones[@]}" >&2
             exit 1
           fi
 
-          for numero in $(seq 0 76); do
+          for numero in $(seq 0 77); do
             prefijo=$(printf '%03d_' "$numero")
             coincidencias=0
             for migracion in "${migraciones[@]}"; do
@@ -78,7 +78,7 @@ jobs:
             fi
           done
 
-          printf 'Cadena 000-076 completa y sin numeraciones duplicadas.\n'
+          printf 'Cadena 000-077 completa y sin numeraciones duplicadas.\n'
 
       - name: Instalar dependencias del backend
         run: npm ci
@@ -95,6 +95,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           mv prisma/migrations/076_schema_comun "$RUNNER_TEMP/076_schema_comun_principal"
+          mv prisma/migrations/077_nucleo_operacional_inventario "$RUNNER_TEMP/077_nucleo_operacional_inventario_principal"
           npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-deploy.log"
 
       - name: Validar esquema Prisma
@@ -116,7 +117,17 @@ jobs:
           mv "$RUNNER_TEMP/076_schema_comun_principal" prisma/migrations/076_schema_comun
           npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-076.log"
 
-      - name: Consultar estado de migraciones 000-076
+      - name: Aplicar migración 077 y probar INT-03 en PostgreSQL aislado
+        id: pruebas_integridad_077
+        run: |
+          set -Eeuo pipefail
+          mv "$RUNNER_TEMP/077_nucleo_operacional_inventario_principal" prisma/migrations/077_nucleo_operacional_inventario
+          npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-077.log"
+          npx prisma generate
+          npm run build
+          INVENTARIO_INT03_PG18=1 node --test pruebas/inventario-operacional-int03.test.cjs pruebas/inventario-operacional-pg18.test.cjs
+
+      - name: Consultar estado de migraciones 000-077
         id: migrate_status
         run: npx prisma migrate status
 
@@ -143,8 +154,10 @@ jobs:
 
           migracion_075="$RUNNER_TEMP/075_reconciliacion_catalogo_m4"
           migracion_076="$RUNNER_TEMP/076_schema_comun"
+          migracion_077="$RUNNER_TEMP/077_nucleo_operacional_inventario"
           mv prisma/migrations/075_reconciliacion_catalogo_m4 "$migracion_075"
           mv prisma/migrations/076_schema_comun "$migracion_076"
+          mv prisma/migrations/077_nucleo_operacional_inventario "$migracion_077"
           DATABASE_URL="$DATABASE_URL_COMPAT" npx prisma migrate deploy
           psql "$PSQL_URL_COMPAT" -v ON_ERROR_STOP=1 --file pruebas/migracion-075-preexistente.preparar.sql
           mv "$migracion_075" prisma/migrations/075_reconciliacion_catalogo_m4
@@ -154,6 +167,9 @@ jobs:
           DATABASE_URL="$DATABASE_URL_COMPAT" npx prisma migrate deploy
           DATABASE_URL="$DATABASE_URL_COMPAT" npx prisma migrate status
           psql "$PSQL_URL_COMPAT" -v ON_ERROR_STOP=1 --file pruebas/migracion-076.integridad.sql
+          mv "$migracion_077" prisma/migrations/077_nucleo_operacional_inventario
+          DATABASE_URL="$DATABASE_URL_COMPAT" npx prisma migrate deploy
+          DATABASE_URL="$DATABASE_URL_COMPAT" npx prisma migrate status
 
       - name: Resumen verificable
         if: always()
@@ -188,6 +204,7 @@ jobs:
           estado_074=$(consultar_estado '074_%'); [[ -n "$estado_074" ]] || estado_074="NO VALIDADA"
           estado_075=$(consultar_estado '075_%'); [[ -n "$estado_075" ]] || estado_075="NO VALIDADA"
           estado_076=$(consultar_estado '076_%'); [[ -n "$estado_076" ]] || estado_076="NO VALIDADA"
+          estado_077=$(consultar_estado '077_%'); [[ -n "$estado_077" ]] || estado_077="NO VALIDADA"
           version_postgres=$(psql "$PSQL_URL" -Atc "SHOW server_version;" 2>/dev/null)
           [[ "$version_postgres" == 18.* ]] && estado_postgres="INICIADO (${version_postgres})" || estado_postgres="NO INICIADO O INCOMPATIBLE"
 
@@ -203,12 +220,14 @@ jobs:
             echo "| Migración 074 | ${estado_074} |"
             echo "| Migración 075 | ${estado_075} |"
             echo "| Migración 076 | ${estado_076} |"
+            echo "| Migración 077 | ${estado_077} |"
             echo "| Aplicación controlada 076 | ${{ steps.migrate_076.outcome }} |"
             echo "| Prisma migrate status | ${{ steps.migrate_status.outcome }} |"
             echo "| Prisma validate | ${{ steps.prisma_validate.outcome }} |"
             echo "| Prisma Client | ${{ steps.prisma_generate.outcome }} |"
             echo "| Pruebas sintéticas | ${{ steps.pruebas_integridad.outcome }} |"
             echo "| Integridad schema común 076 | ${{ steps.pruebas_integridad_076.outcome }} |"
+            echo "| Núcleo operacional Inventario 077 | ${{ steps.pruebas_integridad_077.outcome }} |"
             echo "| Segunda ejecución idempotente | ${{ steps.migrate_idempotencia.outcome }} |"
             echo "| CU20/CU36 preexistentes | ${{ steps.compatibilidad_075.outcome }} |"
             echo
