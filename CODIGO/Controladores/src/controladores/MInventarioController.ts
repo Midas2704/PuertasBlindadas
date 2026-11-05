@@ -1,6 +1,7 @@
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { filtroReservaInventarioActiva } from '../inventario/contratosInventario';
 
 type Consulta = Record<string, unknown>;
 
@@ -76,7 +77,7 @@ export class MInventarioController {
         material: { select: { material_unidad_medida_id_medida: true, material_unidad_medida: { select: { material_unidad_medida_nombre: true } } } },
       } }),
       this.db.movimiento_inventario.count(),
-      this.db.reserva_inventario.count({ where: { reserva_inventario_fecha_liberacion: null } }),
+      this.db.reserva_inventario.count({ where: filtroReservaInventarioActiva() }),
       this.db.alerta_inventario.count({ where: { historial_alerta_id_historial: null } }),
     ]);
     return { materiales, bodegas, movimientos, reservasActivas, alertasActivas, existenciasPorUnidad: agruparExistencias(existencias) };
