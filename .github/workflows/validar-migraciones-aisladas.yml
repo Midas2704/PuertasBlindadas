@@ -123,6 +123,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           mv "$RUNNER_TEMP/077_nucleo_operacional_inventario_principal" prisma/migrations/077_nucleo_operacional_inventario
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO "comun"."permiso" ("codigo_m4","permiso_modulo","permiso_nombre_del_permiso","activo_m4","requiere_administrador")
+          VALUES ('CU14','M2','CU14',TRUE,FALSE),('CU15','M2','CU15',TRUE,FALSE)
+          ON CONFLICT ("codigo_m4") DO NOTHING;
+          SQL
           mv "$RUNNER_TEMP/078_propuesta_permisos_operacionales_inventario_principal" prisma/migrations/078_propuesta_permisos_operacionales_inventario
           npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-077.log"
           npx prisma generate

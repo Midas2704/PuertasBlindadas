@@ -186,12 +186,14 @@ export const codigosTodosLosCU = Array.from({ length: 274 }, (_, indice) => `CU$
 export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({length:22},(_,i)=>`CU${360+i}`).filter(c=>c!=='CU377'), 'CU446','CU447','CU449','CU451','CU458','CU459','CU461'];
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
+ if (numero >= 466 && numero <= 472) return 'INVENTARIO';
  if (numero >= 360 && numero <= 381) return 'M2';
  if ([458,459,461].includes(numero)) return 'M11';
  if ([446,447,449,451].includes(numero)) return 'M7';
  return numero >= 275 ? 'M9' : numero >= 259 ? 'M8' : numero >= 215 ? 'M7' : numero >= 155 ? 'M6' : numero >= 75 ? 'M5' : numero >= 59 ? 'M4' : numero >= 42 ? 'M3' : numero >= 12 ? 'M2' : 'M1';
 };
 export const dependenciasPermiso: Record<string, string[]> = {
+ CU466:['CU15'],CU467:['CU15'],CU468:['CU15'],CU469:['CU15'],CU470:['CU15'],CU471:['CU14'],CU472:['CU15'],
  CU02:['CU05'],CU03:['CU05'],CU04:['CU05'],CU06:['CU05'],CU07:['CU05'],CU08:['CU05'],CU09:['CU05'], CU20:['CU05'], CU19:['CU05','CU14','CU15','CU28'], CU27:['CU05'], CU22:['CU20'], CU24:['CU20'], CU25:['CU20'], CU35:['CU09'],CU36:['CU09'],CU37:['CU09'],CU38:['CU09'],CU39:['CU09'],CU41:['CU09'],
  CU13:['CU19'],CU18:['CU19'],CU21:['CU20'],CU23:['CU09'],CU31:['CU19'], CU33:['CU27'], CU40:['CU09'],CU42:['CU05'],CU43:['CU05','CU49','CU45'], CU51:['CU43'],CU52:['CU43'],CU54:['CU43'],CU56:['CU49'],CU57:['CU55'],CU58:['CU43'],
  CU60:['CU67'],CU61:['CU67'],CU62:['CU67'],CU63:['CU67'],CU64:['CU67'],CU65:['CU67'],CU66:['CU67'],CU71:['CU67'],CU72:['CU67'],CU74:['CU73'],

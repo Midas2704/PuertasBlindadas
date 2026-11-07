@@ -12,6 +12,8 @@ test('CU14 y CU15 permanecen de lectura y cada escritura usa una capacidad indep
   assert.match(permisos,/listarMaterialesInventario:'CU14'/);
   for(const [operacion,cu] of Object.entries({registrarEntradaInventario:'CU466',registrarSalidaInventario:'CU467',crearReservaInventario:'CU468',liberarReservaInventario:'CU469',ajustarExistenciaInventario:'CU470'}))assert.match(permisos,new RegExp(`${operacion}:'${cu}'`));
   assert.doesNotMatch(permisos,/registrarEntradaInventario:'CU1[45]'/);
+  assert.match(permisos,/numero >= 466 && numero <= 472\) return 'INVENTARIO'/);
+  assert.match(permisos,/CU466:\['CU15'\].*CU471:\['CU14'\]/s);
 });
 
 test('la propuesta M4 es aditiva, inactiva y no asigna usuarios ni perfiles',()=>{
