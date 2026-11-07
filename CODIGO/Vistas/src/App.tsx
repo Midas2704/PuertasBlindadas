@@ -71,6 +71,7 @@ import TareasFabricacion from './views/Mantenedores/TareasFabricacion';
 import { permisosAccesoMantenedores } from './views/Mantenedores/permisos';
 import PortalPrincipal from './views/PortalPrincipal/PortalPrincipal';
 import InventarioWrapper from './views/Inventario/InventarioWrapper';
+import OperacionesInventario from './views/Inventario/OperacionesInventario';
 import { EntradaInventario } from './views/Inventario/InicioInventario';
 import MaterialesInventario from './views/Inventario/MaterialesInventario';
 import ListadosInventario from './views/Inventario/ListadosInventario';
@@ -96,6 +97,7 @@ const App: React.FC = () => {
           <Route path="movimientos" element={<Protegido permiso="CU15"><ListadosInventario tipo="movimientos"/></Protegido>}/>
           <Route path="reservas" element={<Protegido permiso="CU15"><ListadosInventario tipo="reservas"/></Protegido>}/>
           <Route path="alertas" element={<Protegido permiso="CU15"><ListadosInventario tipo="alertas"/></Protegido>}/>
+          <Route path="operaciones" element={<Protegido permiso={['CU466','CU467','CU468','CU469','CU470']}><OperacionesInventario/></Protegido>}/>
         </Route>
         <Route element={<Protegido><DashboardWrapper /></Protegido>}>
           <Route path="usuarios" element={<Protegido permiso="CU67"><Usuarios/></Protegido>}/>

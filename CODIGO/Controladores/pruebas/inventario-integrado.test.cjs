@@ -88,14 +88,17 @@ test('listas vacías y errores de base se propagan sin fabricar datos', async ()
   await assert.rejects(()=>new MInventarioController({movimiento_inventario:{count:async()=>{throw error},findMany:async()=>[]}}).listarMovimientos(),/BD no disponible/);
 });
 
-test('consultas conservan CU14/CU15 y escrituras INT-03 permanecen fail-closed', () => {
+test('consultas conservan CU14/CU15 y escrituras usan capacidades operacionales separadas', () => {
   const permisos=readFileSync('src/validaciones/permisos.ts','utf8');
   const rutas=readFileSync('src/rutas/finanzas.ts','utf8');
+  const propuesta=readFileSync('prisma/migrations/078_propuesta_permisos_operacionales_inventario/migration.sql','utf8');
   assert.match(permisos,/listarMaterialesInventario:'CU14'/);
   assert.match(permisos,/obtenerMaterialInventario:'CU14'/);
   for(const operacion of ['consultarResumenInventario','listarBodegasInventario','listarMovimientosInventario','listarReservasInventario','listarAlertasInventario']) assert.match(permisos,new RegExp(`${operacion}:'CU15'`));
   for(const ruta of ['entradas','salidas','reservas','ajustes']) assert.match(rutas,new RegExp(`post\\('/inventario/${ruta}`));
-  for(const operacion of ['registrarEntradaInventario','registrarSalidaInventario','crearReservaInventario','liberarReservaInventario','ajustarExistenciaInventario']) assert.doesNotMatch(permisos,new RegExp(`${operacion}:`));
+  for(const [operacion,cu] of Object.entries({registrarEntradaInventario:'CU466',registrarSalidaInventario:'CU467',crearReservaInventario:'CU468',liberarReservaInventario:'CU469',ajustarExistenciaInventario:'CU470'})) assert.match(permisos,new RegExp(`${operacion}:'${cu}'`));
+  assert.match(propuesta,/activo_m4[^;]*FALSE/is);
+  assert.doesNotMatch(propuesta,/INSERT INTO "comun"\."(?:usuario_permiso_particular|perfil_permiso)"/i);
 });
 
 function stock(fisico,reservado){return{inventario_bodega_cantidad_fisica:decimal(fisico),inventario_bodega_cantidad_reservada:decimal(reservado)}}

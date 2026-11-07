@@ -9,14 +9,17 @@ const sql=readFileSync(resolve('prisma/migrations/077_nucleo_operacional_inventa
 const permisos=readFileSync(resolve('src/validaciones/permisos.ts'),'utf8');
 const m9=readFileSync(resolve('src/m9/contratoProductor.ts'),'utf8');
 
-test('INT-03 crea un ledger idempotente aditivo sin otorgar permisos M4',()=>{
+test('INT-03 crea un ledger idempotente y las capacidades posteriores permanecen inactivas',()=>{
+  const propuesta=readFileSync(resolve('prisma/migrations/078_propuesta_permisos_operacionales_inventario/migration.sql'),'utf8');
   assert.match(sql,/CREATE TABLE "inventario"\."operacion_inventario"/);
   assert.match(sql,/UNIQUE \("clave_idempotencia"\)/);
   assert.match(sql,/REFERENCES "comun"\."usuario"/);
   assert.doesNotMatch(sql,/\b(?:DROP\s+(?:TABLE|SCHEMA)|TRUNCATE|DELETE\s+FROM|UPDATE\s+"?\w+"?\s+SET)\b/i);
   assert.doesNotMatch(sql,/INSERT INTO "?comun"?\."?permiso"?/i);
-  assert.doesNotMatch(permisos,/registrarEntradaInventario\s*:/);
-  assert.doesNotMatch(permisos,/registrarSalidaInventario\s*:/);
+  assert.match(permisos,/registrarEntradaInventario:'CU466'/);
+  assert.match(permisos,/registrarSalidaInventario:'CU467'/);
+  assert.match(propuesta,/activo_m4[^;]*FALSE/is);
+  assert.doesNotMatch(propuesta,/INSERT INTO "comun"\."(?:usuario_permiso_particular|perfil_permiso)"/i);
 });
 
 test('reservas nuevas acreditan bodega y lote conservando históricos nulos',()=>{

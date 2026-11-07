@@ -1,4 +1,4 @@
-import { AlertTriangle, Boxes, ClipboardList, Home, House, Menu, PackageSearch, Warehouse, X } from 'lucide-react';
+import { AlertTriangle, Boxes, ClipboardList, Home, House, Menu, PackageSearch, Warehouse, Wrench, X } from 'lucide-react';
 import { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { operar, usarSesion } from '../../seguridad/Sesion';
@@ -10,6 +10,7 @@ const opciones=[
   {ruta:'/inventario/movimientos',etiqueta:'Movimientos',icono:ClipboardList,permisos:['CU15']},
   {ruta:'/inventario/reservas',etiqueta:'Reservas',icono:Boxes,permisos:['CU15']},
   {ruta:'/inventario/alertas',etiqueta:'Alertas',icono:AlertTriangle,permisos:['CU15']},
+  {ruta:'/inventario/operaciones',etiqueta:'Operaciones',icono:Wrench,permisos:['CU466','CU467','CU468','CU469','CU470']},
 ];
 const activa=(actual:string,ruta:string)=>ruta==='/inventario'?actual===ruta:actual===ruta||actual.startsWith(`${ruta}/`);
 

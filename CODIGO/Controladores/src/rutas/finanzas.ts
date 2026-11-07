@@ -32,6 +32,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/inventario/movimientos', derivar('listarMovimientosInventario'));
   rutas.get('/inventario/reservas', derivar('listarReservasInventario'));
   rutas.get('/inventario/alertas', derivar('listarAlertasInventario'));
+  rutas.get('/inventario/catalogos-operacion', derivar('catalogosOperacionInventario'));
   // INT-03: contratos de escritura preparados. M4 los mantiene fail-closed hasta aprobar CU específicos.
   rutas.post('/inventario/entradas', derivar('registrarEntradaInventario'));
   rutas.post('/inventario/salidas', derivar('registrarSalidaInventario'));

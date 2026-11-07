@@ -36,7 +36,7 @@ const normalizarFiltrosHttpM9 = (consulta?: Record<string, unknown>): FiltrosM9 
 
 export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' | 'crearCliente' | 'actualizarCliente' | 'desactivarCliente' | 'reactivarCliente' | 'inventario' | 'productos' | 'monedas'
   | 'consultarResumenInventario' | 'listarMaterialesInventario' | 'obtenerMaterialInventario' | 'listarBodegasInventario' | 'listarMovimientosInventario' | 'listarReservasInventario' | 'listarAlertasInventario'
-  | 'registrarEntradaInventario' | 'registrarSalidaInventario' | 'crearReservaInventario' | 'liberarReservaInventario' | 'ajustarExistenciaInventario'
+  | 'catalogosOperacionInventario' | 'registrarEntradaInventario' | 'registrarSalidaInventario' | 'crearReservaInventario' | 'liberarReservaInventario' | 'ajustarExistenciaInventario'
   | 'bandeja' | 'historial' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
   | 'descartarBorrador' | 'aprobarCotizacion' | 'aprobarVenta' | 'editarCotizacion' | 'tipoCambio'
   | 'consultarPago' | 'consultarSaldo' | 'catalogosPago'
@@ -524,6 +524,7 @@ export class C_Finanzas {
       case 'listarMovimientosInventario': return this.mInventario.listarMovimientos(solicitud.consulta || {});
       case 'listarReservasInventario': return this.mInventario.listarReservas(solicitud.consulta || {});
       case 'listarAlertasInventario': return this.mInventario.listarAlertas(solicitud.consulta || {});
+      case 'catalogosOperacionInventario': return this.mInventario.catalogosOperacion();
       case 'registrarEntradaInventario': return this.operacionalInventario.registrarEntrada(cuerpo as unknown as EntradaMovimientoInventario,actor);
       case 'registrarSalidaInventario': return this.operacionalInventario.registrarSalida(cuerpo as unknown as EntradaMovimientoInventario,actor);
       case 'crearReservaInventario': return this.operacionalInventario.crearReserva(cuerpo as unknown as EntradaReservaInventario,actor);

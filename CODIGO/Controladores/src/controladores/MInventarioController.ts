@@ -133,6 +133,35 @@ export class MInventarioController {
     return filas.map(fila => ({ id: id(fila.bodega_id_bodega), nombre: fila.bodega_nombre_bodega, direccion: fila.bodega_direccion, estado: fila.bodega_estado, anaqueles: fila._count.anaquel, materiales: new Set(fila.inventario_bodega.map(e => e.material_sku)).size, existenciasPorUnidad: agruparExistencias(fila.inventario_bodega) }));
   }
 
+  async catalogosOperacion() {
+    const [materiales, bodegas, lotes, tiposMovimiento, motivosMovimiento] = await Promise.all([
+      this.db.material.findMany({
+        where: { material_estado: { in: ['activo', 'activa', 'ACTIVO', 'ACTIVA'] } },
+        orderBy: [{ material_nombre_material: 'asc' }, { material_sku: 'asc' }],
+        select: { material_sku: true, material_nombre_material: true, material_unidad_medida: { select: { material_unidad_medida_nombre: true } } },
+      }),
+      this.db.bodega.findMany({
+        where: { bodega_estado: { in: ['activo', 'activa', 'ACTIVO', 'ACTIVA'] } },
+        orderBy: { bodega_nombre_bodega: 'asc' },
+        select: { bodega_id_bodega: true, bodega_nombre_bodega: true, bodega_direccion: true },
+      }),
+      this.db.lote.findMany({
+        where: { lote_estado: { in: ['activo', 'activa', 'ACTIVO', 'ACTIVA'] } },
+        orderBy: [{ lote_numero_lote: 'asc' }, { lote_id_lote: 'asc' }],
+        select: { lote_id_lote: true, lote_numero_lote: true, lote_fecha_vencimiento: true, inventario_bodega: { select: { material_sku: true, bodega_id_bodega: true } } },
+      }),
+      this.db.movimiento_inventario_tipo_movimiento.findMany({ orderBy: { movimiento_inventario_tipo_movimiento_nombre: 'asc' } }),
+      this.db.movimiento_inventario_motivo_movimiento.findMany({ orderBy: { movimiento_inventario_motivo_movimiento_nombre: 'asc' } }),
+    ]);
+    return {
+      materiales: materiales.map(f => ({ sku:f.material_sku, nombre:f.material_nombre_material, unidad:f.material_unidad_medida?.material_unidad_medida_nombre ?? null })),
+      bodegas: bodegas.map(f => ({ id:id(f.bodega_id_bodega), nombre:f.bodega_nombre_bodega, direccion:f.bodega_direccion })),
+      lotes: lotes.map(f => ({ id:id(f.lote_id_lote), numero:f.lote_numero_lote, vence:f.lote_fecha_vencimiento?.toISOString().slice(0,10) ?? null, ubicaciones:f.inventario_bodega.map(e => ({ sku:e.material_sku, bodegaId:id(e.bodega_id_bodega) })) })),
+      tiposMovimiento: tiposMovimiento.map(f => ({ id:id(f.movimiento_inventario_tipo_movimiento_id_tipo_movimiento), nombre:f.movimiento_inventario_tipo_movimiento_nombre })),
+      motivosMovimiento: motivosMovimiento.map(f => ({ id:id(f.movimiento_inventario_motivo_movimiento_id_motivo_movimiento), nombre:f.movimiento_inventario_motivo_movimiento_nombre })),
+    };
+  }
+
   async listarMovimientos(consulta: Consulta = {}) {
     const pagina = entero(consulta.pagina, 1, 1, 100000), tamano = entero(consulta.tamano, 25, 1, 100);
     const [total, filas] = await Promise.all([this.db.movimiento_inventario.count(), this.db.movimiento_inventario.findMany({ skip: (pagina - 1) * tamano, take: tamano, orderBy: { movimiento_inventario_fecha_hora: 'desc' }, include: { material: true, bodega: true, movimiento_inventario_tipo_movimiento: true, movimiento_inventario_motivo_movimiento: true } })]);

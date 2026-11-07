@@ -2,7 +2,7 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 
 if (!process.env.INVENTARIO_INT03_PG18) {
-  test('INT-03 PostgreSQL 18 aislado', { skip:'Requiere INVENTARIO_INT03_PG18=1 y una base descartable migrada hasta 077' }, () => {});
+  test('INT-03 PostgreSQL 18 aislado', { skip:'Requiere INVENTARIO_INT03_PG18=1 y una base descartable migrada hasta 078' }, () => {});
 } else {
   const { prisma } = require('../dist/db');
   const { ServicioOperacionalInventario } = require('../dist/inventario/ServicioOperacionalInventario');
@@ -73,5 +73,14 @@ if (!process.env.INVENTARIO_INT03_PG18) {
     const eventos=await prisma.evento_auditoria_m9.findMany({where:{productor:'INVENTARIO',ejecutor_referencia:ids.actor.toString()}});
     assert.equal(eventos.length,5);
     assert.ok(eventos.every(e=>e.hash_contenido&&e.hash_integridad));
+  });
+
+  test('INT-03 prepara CU466-CU472 inactivos y sin asignaciones automáticas',async()=>{
+    const permisos=await prisma.permiso.findMany({where:{codigo_m4:{in:['CU466','CU467','CU468','CU469','CU470','CU471','CU472']}},include:{dependencias:{include:{requerido:true}},particulares:true,perfil_permiso:true},orderBy:{codigo_m4:'asc'}});
+    assert.equal(permisos.length,7);
+    assert.ok(permisos.every(p=>p.activo_m4===false&&p.requiere_administrador===false));
+    assert.ok(permisos.every(p=>p.particulares.length===0&&p.perfil_permiso.length===0));
+    assert.equal(permisos.find(p=>p.codigo_m4==='CU466').dependencias[0].requerido.codigo_m4,'CU15');
+    assert.equal(permisos.find(p=>p.codigo_m4==='CU471').dependencias[0].requerido.codigo_m4,'CU14');
   });
 }
