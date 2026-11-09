@@ -77,9 +77,14 @@ test('CU27: crea NV directa con varias líneas y referencias válidas; rechaza p
   let nota;
 
   try {
-    nota = await m2.crearVentaDirecta({ id_cliente: cliente.ficha_cliente.id_ficha_cliente, monto_neto: 350, moneda: 'CLP', exento_iva: true, detalle: [{ tipo: 'producto', descripcion: 'Puerta', cantidad: 2, valor: 100, idItemComercial: item.id_item_comercial, idProyecto: Number(activo.proyecto_proyecto_id) }, { tipo: 'trabajo posterior', descripcion: 'Ajuste en terreno', cantidad: 1, valor: 150, idProyecto: Number(activo.proyecto_proyecto_id) }] });
+    nota = await m2.crearVentaDirecta({ id_cliente: cliente.ficha_cliente.id_ficha_cliente, monto_neto: 400, moneda: 'CLP', exento_iva: true, detalle: [{ tipo: 'producto', descripcion: 'Puerta', cantidad: 2, valor: 100, idItemComercial: item.id_item_comercial, idProyecto: Number(activo.proyecto_proyecto_id) }, { tipo: 'trabajo posterior', descripcion: 'Ajuste en terreno', cantidad: 1, valor: 150, idProyecto: Number(activo.proyecto_proyecto_id) }] });
     assert.equal(nota.id_proyecto_contexto, activo.proyecto_proyecto_id);
-    assert.equal(JSON.parse(nota.observacion).detalleComercial.length, 2);
+    const observacion = JSON.parse(nota.observacion);
+    assert.equal(observacion.detalleComercial.length, 2);
+    assert.equal(observacion.montoBaseAcordado, '400.00');
+    assert.equal(observacion.sumaReferencialDetalle, '350.00');
+    assert.equal(observacion.diferenciaComercial, '50.00');
+    assert.equal(nota.monto_neto.toString(), '400');
 
     await assert.rejects(m2.crearVentaDirecta({ id_cliente: cliente.ficha_cliente.id_ficha_cliente, monto_neto: 100, moneda: 'CLP', exento_iva: true, detalle: [{ tipo: 'servicio', descripcion: 'Visita', cantidad: 1, valor: 100, idProyecto: Number(inactivo.proyecto_proyecto_id) }] }), /proyecto seleccionado no existe o no está activo/);
   } finally {

@@ -1390,8 +1390,7 @@ export class M2Controller {
       if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
       const detalle = Array.isArray(entrada.detalle) ? entrada.detalle.map((linea: Entrada) => ({ tipo: texto(linea.tipo, 40), descripcion: texto(linea.descripcion, 500), cantidad: numeroNoNegativo(linea.cantidad ?? 1, 'Cantidad'), valor: numeroNoNegativo(linea.valor, 'Valor'), idItemComercial: linea.idItemComercial ? identificador(linea.idItemComercial) : undefined, idProyecto: linea.idProyecto ? identificador(linea.idProyecto) : undefined })) : [];
       if (!detalle.length || detalle.some(linea => !['producto','servicio','reparacion','trabajo posterior','adicional'].includes(linea.tipo.toLowerCase()) || !linea.descripcion || linea.cantidad <= 0 || linea.valor <= 0)) throw new ErrorAplicacion(400, 'Incluye al menos una línea comercial válida');
-      const sumaDetalle = detalle.reduce((suma, linea) => suma + linea.cantidad * linea.valor, 0);
-      if (detalle.length && Math.abs(sumaDetalle - base) > 0.01) throw new ErrorAplicacion(400, 'El monto neto no coincide con el detalle comercial');
+      const sumaDetalle = detalle.reduce((suma, linea) => suma.plus(new Prisma.Decimal(linea.cantidad).mul(linea.valor)), new Prisma.Decimal(0)).toDecimalPlaces(2);
       const idsItem = [...new Set(detalle.flatMap(linea => linea.idItemComercial ? [linea.idItemComercial] : []))];
       if (idsItem.length && await transaccion.item_comercial.count({ where: { id_item_comercial: { in: idsItem }, estado_item: 'activo' } }) !== idsItem.length) throw new ErrorAplicacion(400, 'Uno de los ítems comerciales no existe o está inactivo');
       const idsProyecto = [...new Set(detalle.flatMap(linea => linea.idProyecto ? [linea.idProyecto] : []))];
@@ -1402,7 +1401,7 @@ export class M2Controller {
         fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: montos.neto, monto_impuesto: montos.impuesto,
         monto_total: montos.total, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio ? montos.total.mul(tipoCambio).toDecimalPlaces(2) : null,
         descuento_aplicado: montos.descuento, exento_iva: entrada.exento_iva,
-        estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto, observacion: JSON.stringify({ detalleComercial: detalle, persistencia: 'auxiliar_hasta_detalle_nv_estructurado' }),
+        estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto, observacion: JSON.stringify({ detalleComercial: detalle, montoBaseAcordado: new Prisma.Decimal(base).toFixed(2), sumaReferencialDetalle: sumaDetalle.toFixed(2), diferenciaComercial: new Prisma.Decimal(base).minus(sumaDetalle).toFixed(2), persistencia: 'auxiliar_hasta_detalle_nv_estructurado' }),
       } });
     });
   }

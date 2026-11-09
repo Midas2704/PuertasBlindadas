@@ -46,9 +46,9 @@ export function prepararPago(nota:NotaFinanciera, entrada:Record<string,unknown>
 
  const tipoMedio=clasificarMedioPago(medio.nombre_medio_pago);
  if(tipoMedio.credito&&!entrada.cuotas)throw new ErrorAplicacion(400,'El crédito requiere cuotas');
- const cuotas=tipoMedio.credito?identificador(entrada.cuotas):null;
- const cuotasHabilitadas=cuotas!==null&&Number.isInteger(cuotas)&&cuotas>0&&catalogo.cuotas.some(c=>c.cantidad===cuotas);
- if(tipoMedio.credito&&!cuotasHabilitadas)throw new ErrorAplicacion(400,'Selecciona una cantidad de cuotas habilitada');
+ const cuotasEntrada=tipoMedio.credito?Number(entrada.cuotas):null;
+ const cuotas=cuotasEntrada!==null&&Number.isInteger(cuotasEntrada)&&cuotasEntrada>0?cuotasEntrada:null;
+ if(tipoMedio.credito&&cuotas===null)throw new ErrorAplicacion(400,'Ingresa un número de cuotas válido');
  const respaldo=texto(entrada.respaldo,2000);if(!respaldo)throw new ErrorAplicacion(400,'El respaldo del pago es obligatorio');
  const antecedentes=texto(entrada.antecedentesMedio,500);
  if (!tipoMedio.efectivo && !antecedentes) throw new ErrorAplicacion(400,'Falta el antecedente del medio de pago');

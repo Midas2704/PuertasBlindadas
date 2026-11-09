@@ -56,9 +56,9 @@ describe('Administrador funcional de permisos M4',()=>{
   const extra=screen.getByLabelText('Crear y editar plantillas documentales');expect(extra).not.toBeDisabled();fireEvent.click(extra);
   expect(screen.getByText('Modo').parentElement).toHaveTextContent('Personalizado');expect(extra).toBeChecked();
  });
- it('protege Midas y muestra todos los permisos aprobados sin permitir retirarlos',async()=>{
+ it('protege Midas y muestra todos los permisos registrados sin permitir retirarlos',async()=>{
   render(<Usuarios/>);const botones=await screen.findAllByRole('button',{name:'Ver accesos'});fireEvent.click(botones[1]);
-  expect(screen.getByText((_,elemento)=>elemento?.tagName==='P'&&elemento.textContent?.includes('Cuenta raíz: todos los permisos activos y aprobados')===true)).toBeInTheDocument();
+  expect(screen.getByText((_,elemento)=>elemento?.tagName==='P'&&elemento.textContent?.includes('Cuenta raíz: conserva automáticamente todos los permisos registrados')===true)).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Guardar cambios'})).not.toBeInTheDocument();
   expect(screen.getByLabelText('Asignar permisos particulares')).toBeChecked();expect(screen.getByLabelText('Asignar permisos particulares')).toBeDisabled();
  });

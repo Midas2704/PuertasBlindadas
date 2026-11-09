@@ -3,6 +3,7 @@ import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect, useRef } from 'react';
 import { Send, Calculator, User, DollarSign, Percent, Shield, ChevronDown } from 'lucide-react';
 import { formatearMoneda } from '../../utilidades/moneda';
+import { calcularTotalReferencialDetalle, type LineaComercial } from '../../utilidades/notaVentaDirecta';
 
 interface Cliente {
   id_ficha_cliente: number;
@@ -10,7 +11,6 @@ interface Cliente {
   razonSocial: string;
 }
 interface ClienteApi extends Cliente { nivelFormalizacion: string }
-interface LineaComercial { tipo: string; descripcion: string; cantidad: number; valor: number; idItemComercial?: number; idProyecto?: number }
 interface Proyecto { proyecto_proyecto_id:string;proyecto_nombre_referencia?:string;proyecto_codigo_proyecto?:string;proyecto_estado_operacional?:string }
 interface FichaCliente { resumen_dashboard?: { proyectos?: Proyecto[] } }
 
@@ -32,6 +32,7 @@ const NotaDeVentaDirecta: React.FC = () => {
   const [descuentoTipo, setDescuentoTipo] = useState<'fijo' | 'porcentaje'>('porcentaje');
   const [descuentoValor, setDescuentoValor] = useState<number>(0);
   const [detalle, setDetalle] = useState<LineaComercial[]>([{ tipo: 'producto', descripcion: '', cantidad: 1, valor: 0 }]);
+  const [montoModificadoManualmente, setMontoModificadoManualmente] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState({ text: '', type: '' });
@@ -66,6 +67,7 @@ const NotaDeVentaDirecta: React.FC = () => {
   }, [moneda]);
 
   const netoComercial = montoBase;
+  const totalReferencialDetalle = calcularTotalReferencialDetalle(detalle);
   // el total se arma por partes para que sea fácil seguirlo en clase
   
   let montoDescuentoComercial = 0;
@@ -95,7 +97,6 @@ const NotaDeVentaDirecta: React.FC = () => {
     if (!isDescuentoValido) return setMensaje({ text: 'El descuento excede el límite permitido', type: 'error' });
     const lineas = detalle.filter(linea => linea.descripcion.trim());
     if (!lineas.length || lineas.some(linea => linea.cantidad <= 0 || linea.valor <= 0)) return setMensaje({ text: 'Agrega al menos una línea con cantidad y valor mayor a cero.', type: 'error' });
-    if (Math.abs(lineas.reduce((suma, linea) => suma + linea.cantidad * linea.valor, 0) - montoBase) > 0.01) return setMensaje({ text: 'El detalle comercial no coincide con el monto neto.', type: 'error' });
     if (moneda === 'USD' && (!(Number(tipoCambio) > 0) || (tipoCambioOrigen !== 'Banco Central' && tipoCambioOrigen !== 'manual'))) return setMensaje({ text: 'Confirma un tipo de cambio USD/CLP válido.', type: 'error' });
     if (!await confirmarAccion(`¿Confirmas registrar la Nota de Venta por ${moneda} ${totalFinal.toLocaleString('es-CL')}?`)) return;
 
@@ -132,6 +133,7 @@ const NotaDeVentaDirecta: React.FC = () => {
       setTipoCambio('');
       setTipoCambioOrigen('');
       setDetalle([{ tipo: 'producto', descripcion: '', cantidad: 1, valor: 0 }]);
+      setMontoModificadoManualmente(false);
     } catch (error: unknown) {
       setMensaje({ text: error instanceof Error ? error.message : 'No se pudo emitir la Nota de Venta.', type: 'error' });
     } finally {
@@ -144,6 +146,15 @@ const NotaDeVentaDirecta: React.FC = () => {
     c.razonSocial.toLowerCase().includes(idClienteInput.toLowerCase()) ||
     c.id_ficha_cliente.toString().includes(idClienteInput)
   ).slice(0, 50);
+
+  const actualizarDetalle = (siguiente: LineaComercial[]) => {
+    setDetalle(siguiente);
+    if (!montoModificadoManualmente) setMontoBase(calcularTotalReferencialDetalle(siguiente));
+  };
+
+  const actualizarLinea = (indice: number, cambios: Partial<LineaComercial>) => {
+    actualizarDetalle(detalle.map((linea, posicion) => posicion === indice ? { ...linea, ...cambios } : linea));
+  };
 
   return (
     <div className="p-8 max-w-5xl mx-auto font-sans">
@@ -213,15 +224,15 @@ const NotaDeVentaDirecta: React.FC = () => {
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Detalle comercial</h2>
             <div className="space-y-3">
               {detalle.map((linea, indice) => <div className="grid grid-cols-1 md:grid-cols-6 gap-2" key={indice}>
-                <select className="p-2 border rounded" value={linea.tipo} onChange={e => setDetalle(prev => prev.map((actual, i) => i === indice ? { ...actual, tipo: e.target.value } : actual))}><option value="producto">Producto</option><option value="servicio">Servicio</option><option value="reparacion">Reparación</option><option value="trabajo posterior">Trabajo posterior</option><option value="adicional">Adicional</option></select>
-                <input required className="p-2 border rounded md:col-span-2" placeholder="Descripción" value={linea.descripcion} onChange={e => setDetalle(prev => prev.map((actual, i) => i === indice ? { ...actual, descripcion: e.target.value } : actual))} />
-                <input required className="p-2 border rounded" type="number" min="0.01" step="0.01" placeholder="Cantidad" value={linea.cantidad || ''} onChange={e => setDetalle(prev => prev.map((actual, i) => i === indice ? { ...actual, cantidad: Number(e.target.value) } : actual))} />
-                <input className="p-2 border rounded" type="number" min="0.01" step="0.01" placeholder="Valor unitario" value={linea.valor || ''} onChange={e => setDetalle(prev => prev.map((actual, i) => i === indice ? { ...actual, valor: Number(e.target.value) } : actual))} />
-                <button type="button" className="text-red-600" disabled={detalle.length===1} onClick={()=>setDetalle(prev=>prev.filter((_,i)=>i!==indice))}>Quitar</button>
-                <select className="p-2 border rounded md:col-span-3" value={linea.idItemComercial || ''} onChange={e=>setDetalle(prev=>prev.map((actual,i)=>i===indice?{...actual,idItemComercial:e.target.value?Number(e.target.value):undefined}:actual))}><option value="">Ítem comercial opcional</option>{items.map(item=><option key={item.id_item_comercial} value={item.id_item_comercial}>{item.nombre_item}</option>)}</select>
+                <select className="p-2 border rounded" value={linea.tipo} onChange={e => actualizarLinea(indice, { tipo: e.target.value })}><option value="producto">Producto</option><option value="servicio">Servicio</option><option value="reparacion">Reparación</option><option value="trabajo posterior">Trabajo posterior</option><option value="adicional">Adicional</option></select>
+                <input required className="p-2 border rounded md:col-span-2" placeholder="Descripción" value={linea.descripcion} onChange={e => actualizarLinea(indice, { descripcion: e.target.value })} />
+                <input required className="p-2 border rounded" type="number" min="0.01" step="0.01" placeholder="Cantidad" value={linea.cantidad || ''} onChange={e => actualizarLinea(indice, { cantidad: Number(e.target.value) })} />
+                <input className="p-2 border rounded" type="number" min="0.01" step="0.01" placeholder="Valor unitario" value={linea.valor || ''} onChange={e => actualizarLinea(indice, { valor: Number(e.target.value) })} />
+                <button type="button" className="text-red-600" disabled={detalle.length===1} onClick={()=>actualizarDetalle(detalle.filter((_,i)=>i!==indice))}>Quitar</button>
+                <select className="p-2 border rounded md:col-span-3" value={linea.idItemComercial || ''} onChange={e=>{const id=e.target.value?Number(e.target.value):undefined;const item=items.find(actual=>actual.id_item_comercial===id);actualizarLinea(indice,{idItemComercial:id,...(!linea.descripcion&&item?{descripcion:item.nombre_item}:{})});}}><option value="">Ítem comercial opcional</option>{items.map(item=><option key={item.id_item_comercial} value={item.id_item_comercial}>{item.nombre_item}</option>)}</select>
                 <select className="p-2 border rounded md:col-span-3" value={linea.idProyecto || ''} onChange={e=>setDetalle(prev=>prev.map((actual,i)=>i===indice?{...actual,idProyecto:e.target.value?Number(e.target.value):undefined}:actual))}><option value="">Proyecto opcional</option>{proyectos.map(proyecto=><option key={proyecto.proyecto_proyecto_id} value={proyecto.proyecto_proyecto_id}>{proyecto.proyecto_nombre_referencia || proyecto.proyecto_codigo_proyecto}</option>)}</select>
               </div>)}
-              <button type="button" className="text-primary-700 text-sm" onClick={() => setDetalle(prev => [...prev, { tipo: 'adicional', descripcion: '', cantidad: 1, valor: 0 }])}>+ Agregar línea</button>
+              <button type="button" className="text-primary-700 text-sm" onClick={() => actualizarDetalle([...detalle, { tipo: 'adicional', descripcion: '', cantidad: 1, valor: 0 }])}>+ Agregar línea</button>
             </div>
           </div>
 
@@ -233,15 +244,17 @@ const NotaDeVentaDirecta: React.FC = () => {
             
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Monto Base Neto</label>
+                <label htmlFor="monto-base-neto" className="block text-sm font-medium text-gray-700 mb-1">Monto Base Neto</label>
                 <input 
+                  id="monto-base-neto"
                   type="number" 
                   min="0" step="0.01"
                   required
                   value={montoBase || ''}
-                  onChange={e => setMontoBase(Number(e.target.value))}
+                  onChange={e => { setMontoBase(Number(e.target.value)); setMontoModificadoManualmente(true); }}
                   className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
                 />
+                <div className="mt-1 flex items-center justify-between gap-2 text-xs text-gray-500"><span>Total referencial del detalle: {formatearMoneda(totalReferencialDetalle, moneda)}</span>{montoModificadoManualmente&&<button type="button" className="font-medium text-primary-700" onClick={()=>{setMontoBase(totalReferencialDetalle);setMontoModificadoManualmente(false);}}>Usar total del detalle</button>}</div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>

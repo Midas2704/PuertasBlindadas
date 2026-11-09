@@ -16,7 +16,9 @@ export interface ResumenSincronizacionMidas {
 
 /**
  * Sincroniza la cuenta raíz identificada por acceso_m4 estable con todo el catálogo
- * activo y aprobado. CU377 permanece excluido mientras no exista aprobación formal.
+ * registrado, incluso capacidades pendientes o inactivas. La asignación no vuelve
+ * operativa una capacidad sin contrato backend, pero garantiza que Midas no tenga
+ * que ser actualizado manualmente cuando se incorpore un CU nuevo.
  */
 export async function sincronizarPermisosMidas(
   tx: Prisma.TransactionClient,
@@ -26,9 +28,9 @@ export async function sincronizarPermisosMidas(
   const cuenta = await tx.usuario.findUnique({ where: { acceso_m4: ACCESO_CUENTA_RAIZ } });
   if (!cuenta || !cuenta.administrador_original) throw new Error('La cuenta interna Midas no pudo identificarse inequívocamente');
 
-  const excluidos = ['CU377'];
+  const excluidos: string[] = [];
   const catalogo = await tx.permiso.findMany({
-    where: { activo_m4: true, codigo_m4: { not: null, notIn: excluidos } },
+    where: { codigo_m4: { not: null } },
     orderBy: { codigo_m4: 'asc' },
   });
   const actuales = await tx.usuario_permiso_particular.findMany({
@@ -51,11 +53,11 @@ export async function sincronizarPermisosMidas(
   }
   const resumen = { usuarioId: cuenta.usuario_id_usuario.toString(), catalogoAprobado: catalogo.length, existentes: actuales.length, asignados: faltantes.map(p => p.codigo_m4!), excluidos };
   if (faltantes.length || activarConfiguracionParticular) {
-    const nuevo = { actorId: actorId.toString(), permisosAsignados: resumen.asignados, totalCatalogo: catalogo.length, configuracionParticularActivada: activarConfiguracionParticular };
+    const nuevo = { actorId: actorId.toString(), permisosAsignados: resumen.asignados, totalCatalogo: catalogo.length, configuracionParticularActivada: activarConfiguracionParticular, alcance: 'TODOS_LOS_CU_REGISTRADOS' };
     const actor: ActorAutenticado = { id:actorId, sesion:'sincronizacion-midas', permisos:[], configuracion:'gerencia', administrador:true, cambiarClave:false, nombre:'Sincronización Midas', acceso:'interno' };
     const identidad = hashM9({ usuarioId:resumen.usuarioId, permisosAsignados:resumen.asignados, totalCatalogo:catalogo.length, configuracionParticularActivada:activarConfiguracionParticular });
     await productorM9.ejecutar('sincronizarPermisosMidas', actor, {
-      parametros:{ id:resumen.usuarioId }, cuerpo:{ motivo:'Sincronización explícita de capacidades M4 aprobadas' }, idSolicitud:`MIDAS-PERMISOS-${identidad}`,
+      parametros:{ id:resumen.usuarioId }, cuerpo:{ motivo:'Sincronización de todas las capacidades M4 registradas para la cuenta raíz' }, idSolicitud:`MIDAS-PERMISOS-${identidad}`,
     }, async () => ({ ...resumen, __auditoriaM9:{ nuevo } }));
   }
   return resumen;

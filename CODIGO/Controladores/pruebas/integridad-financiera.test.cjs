@@ -33,8 +33,11 @@ test('contrato de pagos valida categoría, cuotas, cheque y limpia cuotas ajenas
   assert.equal(prepararPago(notaBase(),{...base,idMedio:2,cuotas:12,antecedentesMedio:'TRX'},catalogo,null,'test').cantidad_cuotas,null);
   assert.equal(prepararPago(notaBase(),{...base,idMedio:3,antecedentesMedio:'AUT'},catalogo,null,'test').cantidad_cuotas,null);
   assert.equal(prepararPago(notaBase(),{...base,idMedio:4,cuotas:12,antecedentesMedio:'AUT'},catalogo,null,'test').cantidad_cuotas,12);
+  assert.equal(prepararPago(notaBase(),{...base,idMedio:4,cuotas:7,antecedentesMedio:'AUT'},catalogo,null,'test').cantidad_cuotas,7);
   assert.throws(()=>prepararPago(notaBase(),{...base,idMedio:4,antecedentesMedio:'AUT'},catalogo,null,'test'),/cuotas/);
-  assert.throws(()=>prepararPago(notaBase(),{monto:10,idMedio:1,respaldo:'respaldo'},catalogo,null,'test'),/categoría/);
+  assert.throws(()=>prepararPago(notaBase(),{...base,idMedio:4,cuotas:0,antecedentesMedio:'AUT'},catalogo,null,'test'),/cuotas/);
+  assert.throws(()=>prepararPago(notaBase(),{...base,idMedio:4,cuotas:1.5,antecedentesMedio:'AUT'},catalogo,null,'test'),/cuotas/);
+  assert.equal(prepararPago(notaBase(),{monto:10,idMedio:1,respaldo:'respaldo'},catalogo,null,'test').id_categoria_pago,1);
   assert.throws(()=>prepararPago(notaBase(),{...base,idMedio:'',respaldo:'respaldo'},catalogo,null,'test'),/Identificador|medio/);
   assert.throws(()=>prepararPago(notaBase(),{...base,idMedio:5,antecedentesMedio:'CH-1'},catalogo,null,'test'),/fecha de cobro/);
   const manana=new Date(`${fechaNegocio()}T00:00:00Z`);manana.setUTCDate(manana.getUTCDate()+1);

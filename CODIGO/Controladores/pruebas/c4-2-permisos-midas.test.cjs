@@ -17,8 +17,12 @@ test('070 registra CU378-CU381 y no registra CU377 ni asigna usuarios',()=>{
   assert.doesNotMatch(sql,/INSERT INTO\s+"terreno"\."usuario_permiso_particular"/i);
 });
 
-test('sincronización Midas asigna sólo faltantes y la segunda ejecución es idempotente',async()=>{
-  const permisos=[378,379,380,381].map(n=>({permiso_id_permiso:BigInt(n),codigo_m4:`CU${n}`,activo_m4:true}));
+test('sincronización Midas asigna todo CU registrado y la segunda ejecución es idempotente',async()=>{
+  const permisos=[
+    {permiso_id_permiso:377n,codigo_m4:'CU377',activo_m4:false},
+    ...[378,379,380,381].map(n=>({permiso_id_permiso:BigInt(n),codigo_m4:`CU${n}`,activo_m4:true})),
+    {permiso_id_permiso:466n,codigo_m4:'CU466',activo_m4:false},
+  ];
   const asignados=new Set(['378']); const cuenta={usuario_id_usuario:1n,administrador_original:true,configuracion_particular:false};
   const auditoria=auditoriaOficial();
   const tx={
@@ -29,20 +33,22 @@ test('sincronización Midas asigna sólo faltantes y la segunda ejecución es id
       createMany:async({data})=>{data.forEach(x=>asignados.add(x.id_permiso.toString()));return{count:data.length}},
     },
   };
-  const primera=await sincronizarPermisosMidas(tx,99n,auditoria.productor); assert.deepEqual(primera.asignados,['CU379','CU380','CU381']); assert.equal(await auditoria.repositorio.cantidad(),1);
+  const primera=await sincronizarPermisosMidas(tx,99n,auditoria.productor); assert.deepEqual(primera.asignados,['CU377','CU379','CU380','CU381','CU466']); assert.equal(await auditoria.repositorio.cantidad(),1);
   const segunda=await sincronizarPermisosMidas(tx,99n,auditoria.productor); assert.deepEqual(segunda.asignados,[]); assert.equal(await auditoria.repositorio.cantidad(),1);
-  assert.ok(!asignados.has('377'));
+  assert.ok(asignados.has('377'));assert.ok(asignados.has('466'));
   const evento=(await auditoria.repositorio.listarTodo({}))[0];assert.equal(evento.operacion,'SINCRONIZAR_PERMISOS_MIDAS');assert.notEqual(evento.hashContenido,evento.hashIntegridad);assert.doesNotThrow(()=>auditoria.receptor.verificarIntegridad(evento));
 });
 
-test('regresión: Midas Gerencia conserva todos los CU aprobados con configuración particular',async()=>{
+test('regresión: Midas Gerencia conserva todos los CU registrados con configuración particular',async()=>{
   const codigos=[
     ...Array.from({length:72},(_,indice)=>`CU${String(indice+1).padStart(2,'0')}`),
-    'CU74','CU355','CU359','CU360','CU378','CU379','CU380','CU381',
+    'CU74','CU355','CU359','CU360','CU377','CU378','CU379','CU380','CU381',
+    'CU466','CU467','CU468','CU469','CU470','CU471','CU472',
   ];
   const catalogo=codigos.map((codigo,indice)=>({
     permiso_id_permiso:BigInt(indice+1),codigo_m4:codigo,activo_m4:true,
-    requiere_administrador:['CU65','CU66','CU74'].includes(codigo),
+    requiere_administrador:['CU65','CU66','CU74','CU377'].includes(codigo),
+    ...(Number(codigo.slice(2))>=466?{activo_m4:false}:{}),
   }));
   const asignados=new Set(catalogo.slice(0,76).map(p=>p.permiso_id_permiso.toString()));
   const originales=new Set(asignados);
@@ -64,22 +70,21 @@ test('regresión: Midas Gerencia conserva todos los CU aprobados con configuraci
 
   const primera=await sincronizarPermisosMidas(tx,99n,auditoria.productor);
   const segunda=await sincronizarPermisosMidas(tx,99n,auditoria.productor);
-  const particulares=[...catalogo.map(permiso=>({permiso})),{permiso:{codigo_m4:'CU377',activo_m4:true,requiere_administrador:true}}];
+  const particulares=catalogo.map(permiso=>({permiso}));
   const efectivos=permisosEfectivos({...cuenta,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares});
 
   assert.equal(originales.size,76);
   for(const id of originales) assert.ok(asignados.has(id));
-  assert.deepEqual(primera.asignados,['CU378','CU379','CU380','CU381']);
+  assert.deepEqual(primera.asignados,['CU377','CU378','CU379','CU380','CU381','CU466','CU467','CU468','CU469','CU470','CU471','CU472']);
   assert.deepEqual(segunda.asignados,[]);
   assert.equal(actualizaciones,1);
   assert.equal(await auditoria.repositorio.cantidad(),1);
   assert.equal(cuenta.configuracion_particular,true);
   assert.deepEqual(new Set(efectivos),new Set(codigos));
-  for(const codigo of ['CU65','CU66','CU74','CU378','CU379','CU380','CU381']) assert.ok(efectivos.includes(codigo),codigo);
-  assert.ok(!efectivos.includes('CU377'));
+  for(const codigo of ['CU65','CU66','CU74','CU377','CU378','CU379','CU380','CU381','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(efectivos.includes(codigo),codigo);
 });
 
-test('PostgreSQL aislado sincroniza todos los CU aprobados a Midas sintético sin CU377',{
+test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{
   skip:process.env.C42_PG18_AISLADO!=='1',timeout:30000,
 },async()=>{
   const {prisma}=require('../dist/db');
@@ -89,15 +94,22 @@ test('PostgreSQL aislado sincroniza todos los CU aprobados a Midas sintético si
   const otrosAntes=await prisma.usuario_permiso_particular.count({where:{id_usuario:{not:id}}});
   const primera=await prisma.$transaction(tx=>sincronizarPermisosMidas(tx,id));
   const segunda=await prisma.$transaction(tx=>sincronizarPermisosMidas(tx,id));
-  const catalogo=await prisma.permiso.findMany({where:{activo_m4:true,codigo_m4:{not:null,notIn:['CU377']}},select:{codigo_m4:true}});
+  const catalogo=await prisma.permiso.findMany({where:{codigo_m4:{not:null}},select:{codigo_m4:true}});
   const asignaciones=await prisma.usuario_permiso_particular.findMany({where:{id_usuario:id},include:{permiso:true}});
   const codigos=new Set(asignaciones.map(x=>x.permiso.codigo_m4));
   assert.equal(primera.asignados.length,catalogo.length);
   assert.deepEqual(segunda.asignados,[]);
   for(const permiso of catalogo) assert.ok(codigos.has(permiso.codigo_m4),permiso.codigo_m4);
-  for(const codigo of ['CU378','CU379','CU380','CU381']) assert.ok(codigos.has(codigo));
-  assert.ok(!codigos.has('CU377'));
+  for(const codigo of ['CU377','CU378','CU379','CU380','CU381','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(codigos.has(codigo));
   assert.equal(await prisma.usuario_permiso_particular.count({where:{id_usuario:{not:id}}}),otrosAntes);
   assert.equal(await prisma.evento_auditoria_m9.count({where:{modulo_origen:'M4',operacion:'SINCRONIZAR_PERMISOS_MIDAS',entidad_referencia:id.toString()}}),1);
   await prisma.$disconnect();
+});
+
+test('079 registra CU377 pendiente y asigna todo el catálogo a la cuenta raíz',()=>{
+  const sql=fs.readFileSync('prisma/migrations/079_midas_todos_los_permisos/migration.sql','utf8');
+  assert.match(sql,/CU377/);assert.match(sql,/activo_m4"?,\s*"requiere_administrador/s);
+  assert.match(sql,/CROSS JOIN "comun"\."permiso"/);
+  assert.match(sql,/"administrador_original"=TRUE/);
+  assert.match(sql,/ON CONFLICT \("id_usuario", "id_permiso"\) DO NOTHING/);
 });

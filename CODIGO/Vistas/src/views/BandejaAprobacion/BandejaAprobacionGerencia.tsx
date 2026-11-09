@@ -16,7 +16,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
   const [historyNvs, setHistoryNvs] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'cotizaciones' | 'notas' | 'historial'>('cotizaciones');
   const [activeModal, setActiveModal] = useState<{ tipo: 'cotizacion' | 'nota_venta', data: any } | null>(null);
-  const [cotizacionPlanificacion,setCotizacionPlanificacion]=useState<number|null>(null);
+  const [cotizacionPlanificacion,setCotizacionPlanificacion]=useState<{id:number;modo:'B2B'}|null>(null);
 
   const fetchPendientes = () => {
     setLoading(true);
@@ -66,7 +66,25 @@ const BandejaAprobacionGerencia: React.FC = () => {
   };
 
   const handleApprove = async (tipo: 'quotes' | 'nota-venta', id: number) => {
-    if(tipo==='quotes'){setCotizacionPlanificacion(id);return;}
+    if(tipo==='quotes'){
+      const cotizacion=cotizaciones.find(item=>item.id_cotizacion===id);
+      if(!cotizacion){setMensaje({text:'La cotización ya no está disponible en la bandeja',type:'error'});return;}
+      if(cotizacion.estado_cotizacion!=='emitida'){
+        setMensaje({text:'Primero debes emitir la cotización y confirmar su PDF antes de aprobarla',type:'error'});
+        return;
+      }
+      if(cotizacion.segmento_comercial==='B2B'){
+        setCotizacionPlanificacion({id,modo:'B2B'});
+        return;
+      }
+      if(cotizacion.segmento_comercial==='B2C'){
+        setActiveModal({tipo:'cotizacion',data:cotizacion});
+        setMensaje({text:'Completa el primer pago para consolidar la cotización B2C',type:'success'});
+        return;
+      }
+      setMensaje({text:'La cotización no tiene un segmento B2B/B2C acreditado y no puede aprobarse',type:'error'});
+      return;
+    }
     try {
       const res = await solicitarFinanzas(`/billing/${tipo}/${id}/approve`, {
         method: 'POST',
@@ -416,7 +434,7 @@ const BandejaAprobacionGerencia: React.FC = () => {
 
       {/* Modal Desglose (Universal) */}
       <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)} />
-      {cotizacionPlanificacion&&<ModalPlanificacionOrdenes cotizacionId={cotizacionPlanificacion} modo="B2B" cerrar={()=>setCotizacionPlanificacion(null)} completado={()=>{setCotizacionPlanificacion(null);setMensaje({text:'Cotización aprobada y órdenes de trabajo generadas',type:'success'});fetchPendientes();fetchHistory();}}/>}
+      {cotizacionPlanificacion&&<ModalPlanificacionOrdenes cotizacionId={cotizacionPlanificacion.id} modo={cotizacionPlanificacion.modo} cerrar={()=>setCotizacionPlanificacion(null)} completado={()=>{setCotizacionPlanificacion(null);setMensaje({text:'Cotización aprobada y órdenes de trabajo generadas',type:'success'});fetchPendientes();fetchHistory();}}/>}
 
       {/* Modal Editar Cotizacion */}
       {editingQuote && (

@@ -90,7 +90,7 @@ const App: React.FC = () => {
         <Route path="/login" element={<Acceso modo="login"/>}/>
         <Route path="/recuperar" element={<Acceso modo="recuperar"/>}/>
         <Route path="/" element={<PortalPrincipal/>}/>
-        <Route path="/inventario" element={<Protegido permiso={['CU14','CU15']}><InventarioWrapper/></Protegido>}>
+        <Route path="/inventario" element={<Protegido permiso={['CU14','CU15','CU466','CU467','CU468','CU469','CU470','CU471','CU472']}><InventarioWrapper/></Protegido>}>
           <Route index element={<EntradaInventario/>}/>
           <Route path="materiales" element={<Protegido permiso="CU14"><MaterialesInventario/></Protegido>}/>
           <Route path="bodegas" element={<Protegido permiso="CU15"><ListadosInventario tipo="bodegas"/></Protegido>}/>

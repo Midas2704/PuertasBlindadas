@@ -12,7 +12,7 @@ const contexto={
     {id_nota_venta:1,saldoPendiente:1000,pagosEfectivos:0,estadoPago:'pendiente',estado_pago:'pendiente',estadoNotaVentaVisible:'emitida',moneda:{codigo_moneda:'CLP'}},
     {id_nota_venta:2,saldoPendiente:700,pagosEfectivos:300,estadoPago:'parcial',estado_pago:'parcial',estadoNotaVentaVisible:'parcialmente_pagada',moneda:{codigo_moneda:'CLP'}},
   ],
-  medios:[{id_medio_pago:1,nombre_medio_pago:'Efectivo'}],
+  medios:[{id_medio_pago:1,nombre_medio_pago:'Efectivo'},{id_medio_pago:2,nombre_medio_pago:'Crédito'}],
   categorias:[{id_categoria_pago:11,nombre:'Anticipo'},{id_categoria_pago:12,nombre:'Abono parcial'},{id_categoria_pago:13,nombre:'Pago final'}],
   cuotas:[],documentos:[],
 };
@@ -35,5 +35,15 @@ describe('CU44 en formulario de pagos',()=>{
     await user.clear(monto);await user.type(monto,'200');await user.click(screen.getByRole('button',{name:/NV-2/}));
     await waitFor(()=>expect(categoria).toHaveValue('12'));expect(screen.getByText(/sugerida automáticamente/i)).toBeInTheDocument();
     await user.clear(monto);await user.type(monto,'700');await waitFor(()=>expect(categoria).toHaveValue('13'));
+  });
+
+  it('permite escribir cuotas aunque el catálogo de sugerencias esté vacío',async()=>{
+    const user=userEvent.setup();render(<PagosCliente/>);
+    await user.click(await screen.findByRole('button',{name:/Cliente prueba/}));
+    await user.click(await screen.findByRole('button',{name:/NV-1/}));
+    await user.selectOptions(screen.getByRole('combobox',{name:'Medio de pago'}),'2');
+    const cuotas=screen.getByRole('spinbutton',{name:/^Número de cuotas/});
+    await user.type(cuotas,'7');
+    expect(cuotas).toHaveValue(7);
   });
 });

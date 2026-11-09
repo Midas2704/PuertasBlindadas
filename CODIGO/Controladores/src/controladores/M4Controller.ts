@@ -7,6 +7,7 @@ import { codigosAdministrador, operacionesPermiso, operacionesQueRequierenAdmini
 import { texto } from '../validaciones/solicitudes';
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 import { clasificarPermisoM4 } from '../seguridad/catalogoPermisosFuncional';
+import { sincronizarPermisosMidas } from '../administracion/sincronizarPermisosMidas';
 
 type Transaccion = Prisma.TransactionClient;
 type Entrada = Record<string, unknown>;
@@ -18,7 +19,7 @@ const error = (estado: number, mensaje: string): never => { throw new ErrorAplic
 const idCuenta = (valor: unknown) => { if (!/^\d+$/.test(String(valor))) return error(400,'Usuario inválido'); return BigInt(String(valor)); };
 const confirmar = (entrada: Entrada) => { if (entrada.confirmado !== true) error(400,'Debes confirmar la operación'); };
 export const permisosEfectivos = (cuenta: Cuenta) => {
- if(cuenta.administrador_original && cuenta.configuracion_particular) return cuenta.particulares.map(v=>v.permiso).filter(p=>p.activo_m4&&p.codigo_m4&&p.codigo_m4!=='CU377').map(p=>p.codigo_m4!);
+ if(cuenta.administrador_original) return [...new Set(cuenta.particulares.map(v=>v.permiso.codigo_m4).filter((codigo):codigo is string=>!!codigo))];
  if(cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia') return codigosAdministrador;
  const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
  return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || cuenta.administrador_original)).map(p => p.codigo_m4!);
@@ -112,15 +113,19 @@ export class M4Controller {
    if(cuenta!.usuario_estado_cuenta!=='activo') return {fallo:403,mensaje:'Cuenta inactiva'};
    if(cuenta!.seguridad?.bloqueo_persistente || (cuenta!.seguridad?.bloqueo_hasta && cuenta!.seguridad.bloqueo_hasta>new Date())) return {fallo:403,mensaje:'Cuenta bloqueada'};
    if(credencial!.temporal && credencial!.vence && credencial!.vence<=new Date()) return {fallo:403,mensaje:'Credencial temporal vencida; solicita restablecimiento'};
-   await tx.sesion_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null,vence:{lte:new Date()}},data:{invalidada:new Date(),motivo:'Vencimiento'}});
-   const anterior=await tx.sesion_usuario.findFirst({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null,vence:{gt:new Date()}},orderBy:{inicio:'desc'}});
+   if(cuenta!.administrador_original) await sincronizarPermisosMidas(tx,cuenta!.usuario_id_usuario);
+   const cuentaSesion=cuenta!.administrador_original
+    ? await tx.usuario.findUniqueOrThrow({where:{usuario_id_usuario:cuenta!.usuario_id_usuario},include:incluirAccesos})
+    : cuenta!;
+   await tx.sesion_usuario.updateMany({where:{id_usuario:cuentaSesion.usuario_id_usuario,invalidada:null,vence:{lte:new Date()}},data:{invalidada:new Date(),motivo:'Vencimiento'}});
+   const anterior=await tx.sesion_usuario.findFirst({where:{id_usuario:cuentaSesion.usuario_id_usuario,invalidada:null,vence:{gt:new Date()}},orderBy:{inicio:'desc'}});
    if(anterior && entrada.reemplazarSesion!==true) return {fallo:409,mensaje:'Ya existe una sesión activa. Confirma si quieres cerrarla e iniciar una nueva.',codigo:'SESION_ACTIVA_REQUIERE_CONFIRMACION'};
-   if(anterior) await tx.sesion_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario,invalidada:null},data:{invalidada:new Date(),motivo:'Reemplazo confirmado por el usuario'}});
+   if(anterior) await tx.sesion_usuario.updateMany({where:{id_usuario:cuentaSesion.usuario_id_usuario,invalidada:null},data:{invalidada:new Date(),motivo:'Reemplazo confirmado por el usuario'}});
    const token=secreto();
-   await tx.sesion_usuario.create({data:{id_usuario:cuenta!.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(Math.min(politica.sesionMinutos,politica.inactividadMinutos)),version_seguridad:cuenta!.version_seguridad,direccion:contexto.direccion,agente:contexto.agente?.slice(0,300)}});
-   await tx.usuario.update({where:{usuario_id_usuario:cuenta!.usuario_id_usuario},data:{usuario_fecha_ultima_conexion:new Date()}});
-   await tx.estado_seguridad_usuario.updateMany({where:{id_usuario:cuenta!.usuario_id_usuario},data:{intentos:0,bloqueos:0}});
-   return {token,usuario:{...this.presentar(cuenta!),cambiarClave:credencial!.temporal || !!(credencial!.vence && credencial!.vence<=new Date())}};
+   await tx.sesion_usuario.create({data:{id_usuario:cuentaSesion.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(Math.min(politica.sesionMinutos,politica.inactividadMinutos)),version_seguridad:cuentaSesion.version_seguridad,direccion:contexto.direccion,agente:contexto.agente?.slice(0,300)}});
+   await tx.usuario.update({where:{usuario_id_usuario:cuentaSesion.usuario_id_usuario},data:{usuario_fecha_ultima_conexion:new Date()}});
+   await tx.estado_seguridad_usuario.updateMany({where:{id_usuario:cuentaSesion.usuario_id_usuario},data:{intentos:0,bloqueos:0}});
+   return {token,usuario:{...this.presentar(cuentaSesion),cambiarClave:credencial!.temporal || !!(credencial!.vence && credencial!.vence<=new Date())}};
   });
   if(resultado.fallo) throw new ErrorAplicacion(resultado.fallo,resultado.mensaje!,'codigo' in resultado?resultado.codigo:undefined); return resultado;
  }

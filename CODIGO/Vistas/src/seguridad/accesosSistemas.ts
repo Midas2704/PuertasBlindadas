@@ -6,12 +6,14 @@ export const permisosTerreno = [
 ] as const;
 
 const permisosExclusivosTerreno = new Set<string>(permisosTerreno);
+export const permisosInventario = ['CU14','CU15','CU466','CU467','CU468','CU469','CU470','CU471','CU472'] as const;
+const permisosExclusivosInventario = new Set<string>(permisosInventario);
 
 export const puedeAccederTerreno = (sesion: Sesion | null) =>
   Boolean(sesion?.permisos.some((permiso) => permisosExclusivosTerreno.has(permiso)));
 
 export const puedeAccederFinanzas = (sesion: Sesion | null) =>
-  Boolean(sesion?.permisos.some((permiso) => !permisosExclusivosTerreno.has(permiso) && !['CU14','CU15'].includes(permiso)));
+  Boolean(sesion?.permisos.some((permiso) => !permisosExclusivosTerreno.has(permiso) && !permisosExclusivosInventario.has(permiso)));
 
 export const puedeAccederInventario = (sesion: Sesion | null) =>
-  Boolean(sesion?.permisos.some((permiso) => permiso === 'CU14' || permiso === 'CU15'));
+  Boolean(sesion?.permisos.some((permiso) => permisosExclusivosInventario.has(permiso)));
