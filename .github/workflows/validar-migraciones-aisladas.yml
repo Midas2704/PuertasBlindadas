@@ -143,7 +143,7 @@ jobs:
           mv "$RUNNER_TEMP/079_midas_todos_los_permisos_principal" prisma/migrations/079_midas_todos_los_permisos
           npx prisma migrate deploy 2>&1 | tee "$RUNNER_TEMP/prisma-migrate-079.log"
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 --file pruebas/migracion-079-verificar.sql
-          node --test --test-isolation=none --test-name-pattern="sincronización Midas|regresión: Midas|079 registra" pruebas/c4-2-permisos-midas.test.cjs
+          node --test --test-name-pattern="sincronización Midas|regresión: Midas|079 registra" pruebas/c4-2-permisos-midas.test.cjs
 
       - name: Consultar estado de migraciones 000-079
         id: migrate_status
