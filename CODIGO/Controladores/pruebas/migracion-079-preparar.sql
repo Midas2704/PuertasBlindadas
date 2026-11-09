@@ -25,8 +25,12 @@ FROM comun.usuario u
 JOIN comun.permiso p ON p.codigo_m4='CU14'
 WHERE u.acceso_m4='ci-personalizado-079';
 
-INSERT INTO comun.sesion_usuario (id_usuario,secreto_hash,vence,version_seguridad)
-SELECT usuario_id_usuario, 'sesion-ci-' || acceso_m4, CURRENT_TIMESTAMP + INTERVAL '1 hour', version_seguridad
+INSERT INTO comun.sesion_usuario (id,id_usuario,secreto_hash,vence,version_seguridad)
+SELECT 'sesion-ci-079-' || usuario_id_usuario::text,
+       usuario_id_usuario,
+       'sesion-ci-' || acceso_m4,
+       CURRENT_TIMESTAMP + INTERVAL '1 hour',
+       version_seguridad
 FROM comun.usuario
 WHERE acceso_m4 IN ('Midas','ci-ordinario-079','ci-personalizado-079');
 
