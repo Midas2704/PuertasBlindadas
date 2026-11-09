@@ -19,7 +19,7 @@ const error = (estado: number, mensaje: string): never => { throw new ErrorAplic
 const idCuenta = (valor: unknown) => { if (!/^\d+$/.test(String(valor))) return error(400,'Usuario inválido'); return BigInt(String(valor)); };
 const confirmar = (entrada: Entrada) => { if (entrada.confirmado !== true) error(400,'Debes confirmar la operación'); };
 export const permisosEfectivos = (cuenta: Cuenta) => {
- if(cuenta.administrador_original) return [...new Set(cuenta.particulares.map(v=>v.permiso.codigo_m4).filter((codigo):codigo is string=>!!codigo))];
+ if(cuenta.administrador_original) return [...new Set(cuenta.particulares.map(v=>v.permiso).filter(p=>p.activo_m4&&p.codigo_m4&&p.codigo_m4!=='CU377').map(p=>p.codigo_m4!))];
  if(cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia') return codigosAdministrador;
  const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
  return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || cuenta.administrador_original)).map(p => p.codigo_m4!);

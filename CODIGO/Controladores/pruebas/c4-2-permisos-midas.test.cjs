@@ -39,7 +39,7 @@ test('sincronización Midas asigna todo CU registrado y la segunda ejecución es
   const evento=(await auditoria.repositorio.listarTodo({}))[0];assert.equal(evento.operacion,'SINCRONIZAR_PERMISOS_MIDAS');assert.notEqual(evento.hashContenido,evento.hashIntegridad);assert.doesNotThrow(()=>auditoria.receptor.verificarIntegridad(evento));
 });
 
-test('regresión: Midas Gerencia conserva todos los CU registrados con configuración particular',async()=>{
+test('regresión: Midas Gerencia conserva todos los CU activos aprobados y mantiene inactivos en reserva',async()=>{
   const codigos=[
     ...Array.from({length:72},(_,indice)=>`CU${String(indice+1).padStart(2,'0')}`),
     'CU74','CU355','CU359','CU360','CU377','CU378','CU379','CU380','CU381',
@@ -80,8 +80,10 @@ test('regresión: Midas Gerencia conserva todos los CU registrados con configura
   assert.equal(actualizaciones,1);
   assert.equal(await auditoria.repositorio.cantidad(),1);
   assert.equal(cuenta.configuracion_particular,true);
-  assert.deepEqual(new Set(efectivos),new Set(codigos));
-  for(const codigo of ['CU65','CU66','CU74','CU377','CU378','CU379','CU380','CU381','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(efectivos.includes(codigo),codigo);
+  const activos=codigos.filter(codigo=>codigo!=='CU377'&&!['CU466','CU467','CU468','CU469','CU470','CU471','CU472'].includes(codigo));
+  assert.deepEqual(new Set(efectivos),new Set(activos));
+  for(const codigo of ['CU65','CU66','CU74','CU378','CU379','CU380','CU381']) assert.ok(efectivos.includes(codigo),codigo);
+  for(const codigo of ['CU377','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(!efectivos.includes(codigo),codigo);
 });
 
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{
@@ -109,6 +111,7 @@ test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético'
 test('079 registra CU377 pendiente y asigna todo el catálogo a la cuenta raíz',()=>{
   const sql=fs.readFileSync('prisma/migrations/079_midas_todos_los_permisos/migration.sql','utf8');
   assert.match(sql,/CU377/);assert.match(sql,/activo_m4"?,\s*"requiere_administrador/s);
+  assert.match(sql,/"activo_m4" IS DISTINCT FROM FALSE/);
   assert.match(sql,/CROSS JOIN "comun"\."permiso"/);
   assert.match(sql,/"administrador_original"=TRUE/);
   assert.match(sql,/ON CONFLICT \("id_usuario", "id_permiso"\) DO NOTHING/);

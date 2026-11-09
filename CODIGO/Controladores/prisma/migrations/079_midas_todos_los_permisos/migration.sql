@@ -10,7 +10,8 @@ BEGIN
   WHERE p."codigo_m4"='CU377'
     AND (p."permiso_modulo" IS DISTINCT FROM 'DOCUMENTAL'
       OR p."permiso_accion" IS DISTINCT FROM 'administrar conservación documental'
-      OR p."requiere_administrador" IS DISTINCT FROM TRUE);
+      OR p."requiere_administrador" IS DISTINCT FROM TRUE
+      OR p."activo_m4" IS DISTINCT FROM FALSE);
   IF FOUND THEN
     RAISE EXCEPTION 'CU377 ya existe con una definición incompatible';
   END IF;
