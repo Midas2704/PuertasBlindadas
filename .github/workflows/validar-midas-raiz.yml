@@ -44,11 +44,11 @@ jobs:
         run: |
           npm ci
           npx prisma migrate deploy
+          npx prisma generate
           TS_NODE_TRANSPILE_ONLY=1 npm run db:seed
           TS_NODE_TRANSPILE_ONLY=1 npm run db:seed
           npx prisma migrate status
           npx prisma validate
-          npx prisma generate
           npm run build
       - name: Probar Midas y operaciones protegidas
         working-directory: CODIGO/Controladores
