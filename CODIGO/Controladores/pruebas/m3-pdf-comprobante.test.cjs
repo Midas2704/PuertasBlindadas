@@ -38,4 +38,10 @@ test('M3 genera comprobantes de pago profesionales sin alterar la semántica fin
     const pdf = textoPdf(archivoComprobantePagoM3({ ...pagoBase, montoEfectivo: 300000, reversion_pago: [{ monto: 150000, fecha: new Date('2026-09-15T00:00:00Z'), motivo: 'Devolución parcial', responsable: 'Tesorería' }] }));
     assert.match(pdf, /Con reversión/); assert.match(pdf, /Reversiones registradas/); assert.match(pdf, /Reversión confirmada/); assert.match(pdf, /\$150.000/); assert.match(pdf, /\$300.000/); assert.match(pdf, /Neto resultante/);
   });
+
+  await t.test('pago anulado conserva el original y muestra monto efectivo cero', () => {
+    const pdf = textoPdf(archivoComprobantePagoM3({ ...pagoBase, montoEfectivo: 0, anulacion_pago: { motivo: 'Registro duplicado', respaldo: 'evidencia.pdf' } }));
+    assert.match(pdf, /Anulado/); assert.match(pdf, /Registro duplicado/); assert.match(pdf, /Monto pagado/); assert.match(pdf, /Monto efectivo vigente/);
+    assert.match(pdf, /\$0/);
+  });
 });

@@ -109,6 +109,17 @@ test('CU36/CU51/CU57: documentos, anulaciones y comprobante PDF', async t => {
     await t.test('CU51 rechaza pago con reversión previa',async()=>{await assert.rejects(m3.anularPago(conReversion.id_pago_cliente,{motivo:'Anular',respaldo:'Respaldo'},'test'),/reversión previa/);});
     const anulable=await crearPago();
     await t.test('CU51 conserva el pago, retira su efecto y recalcula la NV',async()=>{const resultado=await m3.anularPago(anulable.id_pago_cliente,{motivo:'Error de registro',respaldo:'Respaldo'},'test');assert.equal(resultado.saldoPendiente,70);assert.ok(await prisma.pago_cliente.findUnique({where:{id_pago_cliente:anulable.id_pago_cliente}}));assert.ok(await prisma.anulacion_pago.findUnique({where:{id_pago_cliente:anulable.id_pago_cliente}}));});
+    await t.test('CU51 rechaza una segunda anulación',async()=>{await assert.rejects(m3.anularPago(anulable.id_pago_cliente,{motivo:'Duplicada',respaldo:'Respaldo'},'test'),/ya está anulado/);});
+
+    const reversible=await crearPago();
+    await t.test('CU52 permite reversión parcial y total sin superar el disponible',async()=>{
+      await m3.revertirPago(reversible.id_pago_cliente,{monto:10,motivo:'Parcial',respaldo:'Respaldo'},'test');
+      assert.equal((await m3.consultarPago(reversible.id_pago_cliente)).montoEfectivo,30);
+      await assert.rejects(m3.revertirPago(reversible.id_pago_cliente,{monto:31,motivo:'Exceso',respaldo:'Respaldo'},'test'),/supera el monto aún disponible/);
+      await m3.revertirPago(reversible.id_pago_cliente,{monto:30,motivo:'Total',respaldo:'Respaldo'},'test');
+      assert.equal((await m3.consultarPago(reversible.id_pago_cliente)).montoEfectivo,0);
+    });
+    await t.test('CU52 rechaza la reversión de un pago anulado',async()=>{await assert.rejects(m3.revertirPago(anulable.id_pago_cliente,{monto:1,motivo:'No disponible',respaldo:'Respaldo'},'test'),/no está disponible/);});
 
     await t.test('CU57 produce un PDF con catálogo, página y referencias válidas',async()=>{
       const resultado=await m3.generarComprobante(anulable.id_pago_cliente); const pdf=Buffer.from(resultado.contenido.split(',')[1],'base64'); const texto=pdf.toString('latin1');
@@ -120,7 +131,7 @@ test('CU36/CU51/CU57: documentos, anulaciones y comprobante PDF', async t => {
     await t.test('CU57 rechaza un comprobante sin identificación obligatoria',async()=>{
       const incompleto=await prisma.cliente_financiero.create({data:{id_tipo_cliente_financiero:cliente.id_tipo_cliente_financiero,nombre_razon_social_referencia:'Cliente sin identificacion',nivel_formalizacion:'provisional',estado_financiero:'activo',ficha_cliente:{create:{}}},include:{ficha_cliente:true}}); clientes.push(incompleto.id_cliente_financiero); fichas.push(incompleto.ficha_cliente.id_ficha_cliente);
       const pago=await prisma.pago_cliente.create({data:{id_ficha_cliente:incompleto.ficha_cliente.id_ficha_cliente,id_moneda:moneda.id_moneda,id_medio_pago:medio.id_medio_pago,fecha_pago:new Date(),monto_pago:20,comprobante_pago:'Prueba'}}); pagos.push(pago.id_pago_cliente);
-      await assert.rejects(m3.generarComprobante(pago.id_pago_cliente),/antecedentes obligatorios/);
+      await assert.rejects(m3.generarComprobante(pago.id_pago_cliente),/falta RUT del cliente/);
     });
   } finally {
     await prisma.$transaction(async tx=>{await tx.anulacion_pago.deleteMany({where:{id_pago_cliente:{in:pagos}}});await tx.reversion_pago.deleteMany({where:{id_pago_cliente:{in:pagos}}});await tx.asignacion_pago_cliente.deleteMany({where:{id_pago_cliente:{in:pagos}}});await tx.pago_cliente.deleteMany({where:{id_pago_cliente:{in:pagos}}});await tx.documento_tributario_nota_venta.deleteMany({where:{id_documento_tributario:{in:documentos}}});await tx.documento_tributario.deleteMany({where:{id_documento_tributario:{in:documentos}}});await tx.nota_venta.deleteMany({where:{id_nota_venta:{in:notas}}});await tx.ficha_cliente.deleteMany({where:{id_ficha_cliente:{in:fichas}}});await tx.cliente_financiero.deleteMany({where:{id_cliente_financiero:{in:clientes}}});});

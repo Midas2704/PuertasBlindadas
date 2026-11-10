@@ -1,10 +1,16 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { confirmarAccion, solicitarTexto } from '../../components/DialogosSistema';
 import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Phone, Mail, CreditCard, FileText, Activity, Briefcase, TrendingUp, DollarSign, AlertCircle } from 'lucide-react';
 import ModalDetalleDocumento from '../../components/ModalDetalleDocumento';
+import ModalFormulario from '../../components/ModalFormulario';
 import CreditoCliente from '../Credito/CreditoCliente';
 import DocumentosHistoricosCotizacion from '../../components/documental/DocumentosHistoricosCotizacion';
+import { usarSesion } from '../../seguridad/Sesion';
+import { abrirPdfOperacional, leerPdfOperacional } from '../../utilidades/pdfOperacional';
+
+const VisorPdf = React.lazy(() => import('../../components/documental/VisorPdf'));
 
 interface FichaCompleta {
   resumen: {
@@ -46,6 +52,7 @@ const referenciaDesdeRuta = () => {
 };
 
 const VerFicha: React.FC = () => {
+  const { sesion } = usarSesion();
   const [data, setData] = useState<FichaCompleta | null>(null);
   const [loading, setLoading] = useState(true);
   const [ordenFicha, setOrdenFicha] = useState('fecha_desc');
@@ -64,6 +71,9 @@ const VerFicha: React.FC = () => {
   const [montoAplicacion, setMontoAplicacion] = useState('');
   const [pagoDetalle, setPagoDetalle] = useState<any | null>(null);
   const [comprobante, setComprobante] = useState<{nombre:string;contenido:string}|null>(null);
+  const [operacionPago, setOperacionPago] = useState<{id:number;accion:'anular'|'revertir'|'conciliar'}|null>(null);
+  const [formOperacionPago, setFormOperacionPago] = useState({monto:'',motivo:'',respaldo:'',nombreRespaldo:''});
+  const [procesandoPago, setProcesandoPago] = useState(false);
 
   useEffect(() => {
     const rut = referenciaDesdeRuta();
@@ -143,9 +153,26 @@ const VerFicha: React.FC = () => {
   const operarPago = async (id:number, accion:'anular'|'revertir'|'conciliar'|'comprobante') => {
     try {
       if (accion === 'comprobante') { const r=await solicitarFinanzas(`/pagos/${id}/comprobante`); const d=await r.json(); if(!r.ok)throw new Error(d.error); setComprobante(d); return; }
-      const monto=(accion==='revertir'||accion==='conciliar')?await solicitarTexto(accion==='revertir'?'Monto a revertir':'Monto conciliado'):undefined; const motivo=await solicitarTexto(accion==='conciliar'?'Observación de conciliación':'Motivo'); if(!motivo)return;
-      const ruta=accion==='conciliar'?`/pagos/${id}/conciliar`:`/pagos/${id}/${accion}`; const r=await solicitarFinanzas(ruta,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(accion==='conciliar'?{monto:Number(monto||0),evidencia:motivo}:{monto:monto?Number(monto):undefined,motivo,respaldo:motivo})}); const d=await r.json(); if(!r.ok)throw new Error(d.error); window.location.reload();
+      setModalMsg({text:'',type:''});
+      setFormOperacionPago({monto:'',motivo:'',respaldo:'',nombreRespaldo:''});
+      setOperacionPago({id,accion});
     } catch(e){setModalMsg({text:(e as Error).message,type:'error'});}
+  };
+  const confirmarOperacionPago = async () => {
+    if (!operacionPago) return;
+    if (!formOperacionPago.motivo.trim() || !formOperacionPago.respaldo) { setModalMsg({text:'Ingresa el motivo y adjunta el respaldo PDF.',type:'error'}); return; }
+    const requiereMonto=operacionPago.accion!=='anular',monto=Number(formOperacionPago.monto);
+    if(requiereMonto&&(!Number.isFinite(monto)||monto<=0)){setModalMsg({text:'Ingresa un monto válido mayor a cero.',type:'error'});return;}
+    setProcesandoPago(true);
+    try{
+      const ruta=operacionPago.accion==='conciliar'?`/pagos/${operacionPago.id}/conciliar`:`/pagos/${operacionPago.id}/${operacionPago.accion}`;
+      const cuerpo=operacionPago.accion==='conciliar'
+        ?{monto,evidencia:formOperacionPago.respaldo}
+        :{monto:operacionPago.accion==='revertir'?monto:undefined,motivo:formOperacionPago.motivo,respaldo:formOperacionPago.respaldo};
+      const respuesta=await solicitarFinanzas(ruta,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cuerpo)}),resultado=await respuesta.json();
+      if(!respuesta.ok)throw new Error(resultado.error||'No fue posible completar la operación');
+      window.location.reload();
+    }catch(error){setModalMsg({text:(error as Error).message,type:'error'});}finally{setProcesandoPago(false);}
   };
   const verDetallePago = async (id:number) => { const respuesta = await solicitarFinanzas(`/pagos/${id}`); const datos = await respuesta.json(); if (respuesta.ok) setPagoDetalle(datos); else setModalMsg({text:datos.error,type:'error'}); };
   const formalizar = async () => { const rut=await solicitarTexto('RUT del cliente'); if(!rut)return; try { const r=await solicitarFinanzas('/clientes/formalizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idCliente:resumen.id_cliente_financiero,rut})}); const d=await r.json(); if(!r.ok)throw new Error(d.error); window.location.reload(); } catch(e){setModalMsg({text:(e as Error).message,type:'error'});} };
@@ -164,6 +191,7 @@ const VerFicha: React.FC = () => {
         <ArrowLeft className="w-4 h-4" />
         Volver al catálogo
       </button>
+      {modalMsg.text&&!operacionPago&&!activeModal&&<div className={`mb-6 rounded-lg p-4 text-sm ${modalMsg.type==='error'?'bg-red-50 text-red-700':'bg-green-50 text-green-700'}`}>{modalMsg.text}</div>}
 
       {/* Cabecera de la ficha */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
@@ -367,11 +395,25 @@ const VerFicha: React.FC = () => {
       </div>
       <h2 className="text-xl font-bold text-gray-900 mb-4">Pagos del cliente</h2>
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
-        <table className="w-full text-left text-sm"><thead className="bg-gray-50"><tr><th className="py-3 px-6">Pago</th><th className="py-3 px-6">Estado</th><th className="py-3 px-6">Monto original / efectivo</th></tr></thead>
-          <tbody>{resumen_dashboard.pagos.map(pago => <tr key={pago.id_pago_cliente} className="border-t border-gray-100"><td className="py-3 px-6">#{pago.id_pago_cliente} · {new Date(pago.fecha_pago).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</td><td className="py-3 px-6">{pago.anulacion_pago ? 'Anulado' : pago.reversion_pago.length ? 'Con reversión' : pago.estado_verificacion}</td><td className="py-3 px-6">{pago.moneda.codigo_moneda} {Number(pago.monto_pago).toLocaleString('es-CL')} / {pago.montoEfectivo.toLocaleString('es-CL')}</td><td className="py-3 px-6 flex gap-2"><button className="text-primary-700" onClick={()=>operarPago(pago.id_pago_cliente,'comprobante')}>PDF</button>{!pago.anulacion_pago&&<><button className="text-red-700" onClick={()=>operarPago(pago.id_pago_cliente,'anular')}>Anular</button><button className="text-orange-700" onClick={()=>operarPago(pago.id_pago_cliente,'revertir')}>Revertir</button><button className="text-green-700" onClick={()=>operarPago(pago.id_pago_cliente,'conciliar')}>Conciliar</button></>}</td></tr>)}
-          {!resumen_dashboard.pagos.length && <tr><td colSpan={3} className="py-6 text-center text-gray-500">Sin pagos registrados.</td></tr>}</tbody>
+        <table className="w-full text-left text-sm"><thead className="bg-gray-50"><tr><th className="py-3 px-6">Pago</th><th className="py-3 px-6">Estado</th><th className="py-3 px-6">Monto original / efectivo</th><th className="py-3 px-6">Acciones autorizadas</th></tr></thead>
+          <tbody>{resumen_dashboard.pagos.map(pago => <tr key={pago.id_pago_cliente} className="border-t border-gray-100"><td className="py-3 px-6">#{pago.id_pago_cliente} · {new Date(pago.fecha_pago).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</td><td className="py-3 px-6">{pago.anulacion_pago ? 'Anulado' : pago.reversion_pago.length ? 'Con reversión' : pago.estado_verificacion}</td><td className="py-3 px-6">{pago.moneda.codigo_moneda} {Number(pago.monto_pago).toLocaleString('es-CL')} / {pago.montoEfectivo.toLocaleString('es-CL')}</td><td className="py-3 px-6 flex flex-wrap gap-2">{sesion?.permisos.includes('CU57')&&<button className="text-primary-700" onClick={()=>operarPago(pago.id_pago_cliente,'comprobante')}>PDF</button>}{!pago.anulacion_pago&&<>{sesion?.permisos.includes('CU51')&&!pago.reversion_pago.length&&<button className="text-red-700" onClick={()=>operarPago(pago.id_pago_cliente,'anular')}>Anular</button>}{sesion?.permisos.includes('CU52')&&Number(pago.montoEfectivo)>0&&<button className="text-orange-700" onClick={()=>operarPago(pago.id_pago_cliente,'revertir')}>Revertir</button>}{sesion?.permisos.includes('CU58')&&<button className="text-green-700" onClick={()=>operarPago(pago.id_pago_cliente,'conciliar')}>Conciliar</button>}</>}</td></tr>)}
+          {!resumen_dashboard.pagos.length && <tr><td colSpan={4} className="py-6 text-center text-gray-500">Sin pagos registrados.</td></tr>}</tbody>
         </table>
       </div>
+      {operacionPago&&<ModalFormulario
+        titulo={operacionPago.accion==='anular'?'Anular pago':operacionPago.accion==='revertir'?'Revertir pago':'Conciliar pago'}
+        subtitulo={`Pago #${operacionPago.id}. El movimiento original se conservará íntegramente.`}
+        cerrar={()=>!procesandoPago&&setOperacionPago(null)}
+        cierreBloqueado={procesandoPago}
+        pie={<div className="flex justify-end gap-3"><button type="button" disabled={procesandoPago} className="rounded-lg border px-4 py-2" onClick={()=>setOperacionPago(null)}>Cancelar</button><button type="button" disabled={procesandoPago} className="rounded-lg bg-[#FE8F01] px-4 py-2 font-semibold text-white disabled:opacity-50" onClick={()=>void confirmarOperacionPago()}>{procesandoPago?'Procesando…':'Confirmar operación'}</button></div>}
+      >
+        <div className="space-y-4">
+          {modalMsg.text&&<div className={`rounded-lg p-3 text-sm ${modalMsg.type==='error'?'bg-red-50 text-red-700':'bg-green-50 text-green-700'}`}>{modalMsg.text}</div>}
+          {operacionPago.accion!=='anular'&&<label className="block text-sm font-medium text-gray-700">Monto<input data-autofocus required type="number" min="0.01" step="0.01" value={formOperacionPago.monto} onChange={e=>setFormOperacionPago(actual=>({...actual,monto:e.target.value}))} className="mt-1 w-full rounded-lg border border-gray-300 p-2.5"/></label>}
+          <label className="block text-sm font-medium text-gray-700">{operacionPago.accion==='conciliar'?'Observación':'Motivo'}<textarea data-autofocus={operacionPago.accion==='anular'||undefined} required value={formOperacionPago.motivo} onChange={e=>setFormOperacionPago(actual=>({...actual,motivo:e.target.value}))} className="mt-1 min-h-24 w-full rounded-lg border border-gray-300 p-2.5"/></label>
+          <label className="block text-sm font-medium text-gray-700">Respaldo PDF<input required type="file" accept="application/pdf,.pdf" className="mt-1 w-full rounded-lg border border-gray-300 p-2.5" onChange={async e=>{const archivo=e.target.files?.[0];if(!archivo)return;try{const respaldo=await leerPdfOperacional(archivo);setFormOperacionPago(actual=>({...actual,respaldo,nombreRespaldo:archivo.name}))}catch(error){setModalMsg({text:(error as Error).message,type:'error'});e.target.value=''}}}/>{formOperacionPago.nombreRespaldo&&<span className="mt-1 block text-xs text-gray-500">{formOperacionPago.nombreRespaldo} quedará conservado como evidencia.</span>}</label>
+        </div>
+      </ModalFormulario>}
       {/* Detalle compartido por cotizaciones y notas */}
       <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)} onViewPago={verDetallePago}>
         {/* Administración del Documento (Solo NV no anulada) */}
@@ -427,7 +469,7 @@ const VerFicha: React.FC = () => {
         )}
       </ModalDetalleDocumento>
       {pagoDetalle && <div className="fixed inset-0 z-[60] bg-slate-900/50 flex items-center justify-center p-4"><div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6"><div className="flex justify-between mb-4"><h3 className="text-xl font-bold">Detalle de pago #{pagoDetalle.id_pago_cliente}</h3><button className="text-gray-500" onClick={()=>setPagoDetalle(null)}>Cerrar</button></div><dl className="grid grid-cols-2 gap-3 text-sm"><dt className="text-gray-500">Cliente</dt><dd>{resumen.nombre_razon_social_referencia}</dd><dt className="text-gray-500">Nota de Venta</dt><dd>{pagoDetalle.asignacion_pago_cliente?.id_nota_venta || '—'}</dd><dt className="text-gray-500">Categoría</dt><dd>{pagoDetalle.categoria_pago?.nombre || '—'}</dd><dt className="text-gray-500">Medio</dt><dd>{pagoDetalle.medio_pago?.nombre_medio_pago || '—'}</dd><dt className="text-gray-500">Monto</dt><dd>{pagoDetalle.moneda?.codigo_moneda} {Number(pagoDetalle.monto_pago).toLocaleString('es-CL')}</dd><dt className="text-gray-500">Equivalente CLP / tipo cambio</dt><dd>{pagoDetalle.monto_convertido ? `${Number(pagoDetalle.monto_convertido).toLocaleString('es-CL')} / ${pagoDetalle.tipo_cambio_usado}` : '—'}</dd><dt className="text-gray-500">Estado</dt><dd>{pagoDetalle.estado_verificacion}</dd><dt className="text-gray-500">Conciliación</dt><dd>{pagoDetalle.conciliacion?.[0]?.estado_conciliacion || pagoDetalle.estado_conciliacion}</dd><dt className="text-gray-500">Anulación/Reversión</dt><dd>{pagoDetalle.anulacion_pago?'Anulado':pagoDetalle.reversion_pago?.length?'Con reversión':'Sin movimientos'}</dd><dt className="text-gray-500">Documento tributario</dt><dd>{pagoDetalle.asignacion_pago_cliente?.documento_tributario ? `${pagoDetalle.asignacion_pago_cliente.documento_tributario.tipo_documento?.nombre_tipo_documento || 'Documento'} · ${pagoDetalle.asignacion_pago_cliente.documento_tributario.folio_documento}` : '—'}</dd></dl></div></div>}
-      {comprobante && <div className="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4"><div className="bg-white rounded-xl shadow-xl w-full max-w-4xl p-5"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold">Comprobante de pago</h3><button className="text-gray-500" onClick={()=>setComprobante(null)}>Cerrar</button></div><iframe title="Vista previa del comprobante" src={comprobante.contenido} className="w-full h-[65vh] border rounded"/><div className="flex justify-end gap-3 mt-4"><button type="button" className="px-4 py-2 border rounded" onClick={()=>window.open(comprobante.contenido,'_blank','noopener,noreferrer')}>Abrir para imprimir</button><a className="px-4 py-2 bg-primary-600 text-white rounded" href={comprobante.contenido} download={comprobante.nombre}>Descargar PDF</a></div></div></div>}
+      {comprobante&&<ModalFormulario titulo="Comprobante de pago" tamano="grande" cerrar={()=>setComprobante(null)} pie={<div className="flex justify-end gap-3"><button type="button" className="rounded-lg border px-4 py-2" onClick={()=>abrirPdfOperacional(comprobante.contenido)}>Abrir para imprimir</button><a className="rounded-lg bg-primary-600 px-4 py-2 text-white" href={comprobante.contenido} download={comprobante.nombre}>Descargar PDF</a></div>}><React.Suspense fallback={<div className="flex h-[65vh] items-center justify-center">Cargando comprobante…</div>}><VisorPdf contenido={comprobante.contenido}/></React.Suspense></ModalFormulario>}
     </div>
   );
 };

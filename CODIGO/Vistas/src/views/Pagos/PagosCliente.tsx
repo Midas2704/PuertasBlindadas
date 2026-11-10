@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { formatearMoneda } from '../../utilidades/moneda';
 import { esMedioCheque, esMedioCredito, filtrarClientesPago, normalizarTextoPago, sugerirIdCategoriaPago, type ClientePago } from '../../utilidades/pagos';
+import { leerPdfOperacional } from '../../utilidades/pdfOperacional';
 
 type Documento={id_documento_tributario:number;folio_documento:string;tipo_documento:{nombre_tipo_documento:string};documento_tributario_nota_venta:{id_nota_venta:number}[]};
 type Nota={id_nota_venta:number;saldoPendiente:number;pagosEfectivos:number;estadoPago:string;estado_pago:string;estadoNotaVentaVisible:string;moneda:{codigo_moneda:string}};
@@ -23,6 +24,7 @@ export default function PagosCliente(){
  const [tipoCambioOrigen,setTipoCambioOrigen]=useState<'C_BancoCentral'|'manual-fallback'|''>('');
  const [form,setForm]=useState<Formulario>(formularioVacio);
  const [categoriaModificadaManualmente,setCategoriaModificadaManualmente]=useState(false);
+ const [nombreRespaldo,setNombreRespaldo]=useState('');
  const clientes=useMemo(()=>filtrarClientesPago(clientesOrigen,busqueda),[clientesOrigen,busqueda]);
  const medio=ctx?.medios.find(m=>String(m.id_medio_pago)===form.idMedio);
  const credito=!!medio&&esMedioCredito(medio.nombre_medio_pago);
@@ -38,7 +40,7 @@ export default function PagosCliente(){
  const categoriaSugerida=sugerirIdCategoriaPago(nota,form.monto,ctx?.categorias||[]);
  const idCategoriaEfectiva=categoriaModificadaManualmente?form.idCategoria:categoriaSugerida;
 
- const cargar=async(c:ClientePago)=>{setCliente(c);setNota(null);setTipoCambioOrigen('');setCategoriaModificadaManualmente(false);setForm(formularioVacio);if(!c.id_ficha_cliente)return;const r=await solicitarFinanzas(`/pagos/contexto/${c.id_ficha_cliente}`);const d=await r.json();if(!r.ok)throw new Error(d.error);setCtx(d);};
+ const cargar=async(c:ClientePago)=>{setCliente(c);setNota(null);setTipoCambioOrigen('');setCategoriaModificadaManualmente(false);setNombreRespaldo('');setForm(formularioVacio);if(!c.id_ficha_cliente)return;const r=await solicitarFinanzas(`/pagos/contexto/${c.id_ficha_cliente}`);const d=await r.json();if(!r.ok)throw new Error(d.error);setCtx(d);};
  const cambiarMedio=(idMedio:string)=>{const seleccionado=ctx?.medios.find(m=>String(m.id_medio_pago)===idMedio);const esCredito=!!seleccionado&&esMedioCredito(seleccionado.nombre_medio_pago);const esCheque=!!seleccionado&&esMedioCheque(seleccionado.nombre_medio_pago);const esEfectivo=!!seleccionado&&normalizarTextoPago(seleccionado.nombre_medio_pago)==='efectivo';setForm(v=>({...v,idMedio,cuotas:esCredito?v.cuotas:'',fechaCobro:esCheque?v.fechaCobro:'',antecedentesMedio:esEfectivo?'':v.antecedentesMedio}));};
  const registrar=async(e:React.FormEvent)=>{e.preventDefault();if(!nota){setMensaje('Selecciona una Nota de Venta');return;}try{
    const payload:Record<string,unknown>={idNota:nota.id_nota_venta,monto:form.monto,idMedio:form.idMedio,idCategoria:idCategoriaEfectiva,respaldo:form.respaldo,antecedentesMedio:form.antecedentesMedio};
@@ -65,7 +67,7 @@ export default function PagosCliente(){
       {cheque&&<label className="block text-sm font-medium text-gray-700">Fecha de cobro<input required type="date" min={fechaMinima} className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5" value={form.fechaCobro} onChange={e=>setForm({...form,fechaCobro:e.target.value})}/></label>}
       <label className="block text-sm font-medium text-gray-700">Documento tributario (opcional)<select className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5" value={form.idDocumento} onChange={e=>setForm({...form,idDocumento:e.target.value})}><option value="">Sin documento asociado</option>{documentos.map(d=><option key={d.id_documento_tributario} value={d.id_documento_tributario}>{d.tipo_documento.nombre_tipo_documento} · {d.folio_documento}</option>)}</select></label>
       {nota?.moneda?.codigo_moneda==='USD'&&<label className="block text-sm font-medium text-gray-700">Tipo de cambio USD/CLP ({tipoCambioOrigen||'pendiente'})<input required type="number" min="0.0001" step="0.0001" readOnly={tipoCambioOrigen==='C_BancoCentral'} className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 read-only:bg-gray-100" value={form.tipoCambio} onChange={e=>setForm({...form,tipoCambio:e.target.value})}/></label>}
-      <label className="block text-sm font-medium text-gray-700">Respaldo<textarea required className="mt-1 min-h-24 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5" value={form.respaldo} onChange={e=>setForm({...form,respaldo:e.target.value})}/></label>
+      <label className="block text-sm font-medium text-gray-700">Respaldo PDF<input required type="file" accept="application/pdf,.pdf" className="mt-1 w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5" onChange={async e=>{const archivo=e.target.files?.[0];if(!archivo)return;try{setForm({...form,respaldo:await leerPdfOperacional(archivo)});setNombreRespaldo(archivo.name)}catch(error){setMensaje((error as Error).message);e.target.value=''}}}/>{nombreRespaldo&&<span className="mt-1 block text-xs text-gray-500">{nombreRespaldo} quedará conservado con el pago.</span>}</label>
       <button disabled={!nota} className="w-full rounded-lg bg-primary-600 p-3 font-semibold text-white hover:bg-primary-700 disabled:opacity-50">Registrar pago</button>
     </form>
    </div>

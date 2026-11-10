@@ -96,6 +96,7 @@ export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> 
   revertirVenta: { modulo:'M2', operacion:'VENTA_REVERTIDA', entidad:'NOTA_VENTA', critico:false, motivoRequerido:true },
   registrarPago: { modulo:'M3', operacion:'PAGO_REGISTRADO', entidad:'PAGO_CLIENTE', critico:false },
   anularPago: { modulo:'M3', operacion:'PAGO_ANULADO', entidad:'PAGO_CLIENTE', critico:false, motivoRequerido:true },
+  revertirPago: { modulo:'M3', operacion:'PAGO_REVERTIDO', entidad:'PAGO_CLIENTE', critico:false, motivoRequerido:true },
   conciliarPago: { modulo:'M3', operacion:'PAGO_CONCILIADO', entidad:'PAGO_CLIENTE', critico:false },
   registrarUsuario: { modulo:'M4', operacion:'CUENTA_CREADA', entidad:'USUARIO', critico:false },
   asignarPermisos: { modulo:'M4', operacion:'PERMISOS_ASIGNADOS', entidad:'USUARIO', critico:false },

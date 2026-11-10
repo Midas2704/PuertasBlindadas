@@ -7,6 +7,7 @@ import { calcularNota, incluirNota, incluirPago, efectoPago, fechaNegocio, sincr
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 import { archivoComprobantePagoM3 } from '../m3/comprobantePagoPdf';
 import { reducirCompromisoPorPago } from '../utilidades/creditoM8';
+import { respaldoOperacional } from '../utilidades/pdfOperacional';
 
 /** M3 CU42–CU58: pagos, reversas, saldos a favor y conciliación. */
 export class M3Controller {
@@ -14,7 +15,7 @@ export class M3Controller {
   async registrarPago(entrada:Record<string,unknown>,responsable:string) {
     const idNota = identificador(entrada.idNota);
     const notaPrevia = await prisma.nota_venta.findUnique({ where: { id_nota_venta: idNota }, include: { moneda: true } });
-    let datosEntrada = { ...entrada };
+    let datosEntrada: Record<string, unknown> = { ...entrada, respaldo: respaldoOperacional(entrada.respaldo, 'Respaldo del pago') };
     if (notaPrevia?.moneda.codigo_moneda === 'USD') {
       try {
         const externo = await this.bancoCentral.obtenerTipoCambio('USD');
@@ -100,9 +101,10 @@ export class M3Controller {
   }
 
   async anularPago(idPago: number, entrada: Record<string, unknown>, responsable: string) {
-    const motivo = texto(entrada.motivo, 2000); const respaldo = texto(entrada.respaldo, 4500000);
+    const motivo = texto(entrada.motivo, 2000); const respaldo = respaldoOperacional(entrada.respaldo, 'Respaldo de la anulación');
     if (!motivo || !respaldo) throw new ErrorAplicacion(400, 'Motivo y respaldo son obligatorios');
     return prisma.$transaction(async tx => {
+      await tx.$queryRaw(Prisma.sql`SELECT id_pago_cliente FROM finanzas.pago_cliente WHERE id_pago_cliente = ${idPago} FOR UPDATE`);
       const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { anulacion_pago: true, reversion_pago: true, asignacion_pago_cliente: true } });
       if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado');
       if (pago.anulacion_pago) throw new ErrorAplicacion(409, 'El pago ya está anulado');
@@ -114,9 +116,12 @@ export class M3Controller {
   }
 
   async revertirPago(idPago: number, entrada: Record<string, unknown>, responsable: string) {
-    const monto = new Prisma.Decimal(Number(entrada.monto)); const motivo = texto(entrada.motivo, 2000); const respaldo = texto(entrada.respaldo, 4500000);
-    if (monto.lte(0) || !motivo || !respaldo) throw new ErrorAplicacion(400, 'Monto, motivo y respaldo son obligatorios');
+    const montoEntrada = Number(entrada.monto);
+    const motivo = texto(entrada.motivo, 2000); const respaldo = respaldoOperacional(entrada.respaldo, 'Respaldo de la reversión');
+    if (!Number.isFinite(montoEntrada) || montoEntrada <= 0 || !motivo || !respaldo) throw new ErrorAplicacion(400, 'Monto, motivo y respaldo son obligatorios');
+    const monto = new Prisma.Decimal(montoEntrada);
     return prisma.$transaction(async tx => {
+      await tx.$queryRaw(Prisma.sql`SELECT id_pago_cliente FROM finanzas.pago_cliente WHERE id_pago_cliente = ${idPago} FOR UPDATE`);
       const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { reversion_pago: true, anulacion_pago: true, asignacion_pago_cliente: true } });
       if (!pago || pago.anulacion_pago) throw new ErrorAplicacion(409, 'El pago no está disponible para reversión');
       const ya = pago.reversion_pago.reduce((s, r) => s.plus(r.monto), new Prisma.Decimal(0));
@@ -155,7 +160,11 @@ export class M3Controller {
     const cliente = pago.ficha_cliente.cliente_financiero;
     const rut = cliente.rut_cliente?.trim(); const nombre = cliente.nombre_razon_social_referencia?.trim();
     const medio = pago.medio_pago.nombre_medio_pago?.trim(); const moneda = pago.moneda.codigo_moneda?.trim();
-    if (!rut || !nombre || !pago.fecha_pago || !medio || !moneda || !pago.monto_pago.gt(0)) throw new ErrorAplicacion(409,'El pago no tiene todos los antecedentes obligatorios para generar el comprobante');
+    const faltantes = [
+      !rut && 'RUT del cliente', !nombre && 'nombre o razón social', !pago.fecha_pago && 'fecha del pago',
+      !medio && 'medio de pago', !moneda && 'moneda', !pago.monto_pago.gt(0) && 'monto válido',
+    ].filter((dato): dato is string => typeof dato === 'string');
+    if (faltantes.length) throw new ErrorAplicacion(409, `No se puede generar el comprobante: falta ${faltantes.join(', ')}`);
     return archivoComprobantePagoM3(pago);
   }
 
@@ -164,7 +173,7 @@ export class M3Controller {
     return prisma.$transaction(async tx => {
       const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { anulacion_pago: true, conciliacion: true } }); if (!pago) throw new ErrorAplicacion(404, 'Pago no encontrado');
       if (pago.anulacion_pago || pago.estado_conciliacion === 'conciliado' || pago.conciliacion.some(c => c.estado_conciliacion === 'conciliado')) throw new ErrorAplicacion(409, 'El pago no está disponible para conciliación');
-      const evidencia = texto(entrada.evidencia, 4500000); if (!evidencia) throw new ErrorAplicacion(400, 'La evidencia de conciliación es obligatoria');
+      const evidencia = respaldoOperacional(entrada.evidencia, 'Evidencia de conciliación');
       if (monto.gt(pago.monto_pago)) throw new ErrorAplicacion(400, 'El monto conciliado no puede superar el pago');
       const conciliacion = await tx.conciliacion.create({ data: { id_pago_cliente: idPago, monto_conciliado: monto, diferencia_conciliacion: monto.minus(pago.monto_pago), evidencia, estado_conciliacion: monto.eq(pago.monto_pago) ? 'conciliado' : 'con_diferencia', responsable_conciliacion: responsable } });
       await tx.pago_cliente.update({ where: { id_pago_cliente: idPago }, data: { estado_conciliacion: conciliacion.estado_conciliacion } });

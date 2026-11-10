@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { montosNota, NotaFinanciera, fechaNegocio } from './finanzas';
 import { ErrorAplicacion } from './ErrorAplicacion';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
+import { respaldoOperacional } from './pdfOperacional';
 
 // Los módulos traen los datos desde Prisma; acá sólo preparamos el pago.
 export function clasificarMedioPago(nombre: string) {
@@ -49,7 +50,7 @@ export function prepararPago(nota:NotaFinanciera, entrada:Record<string,unknown>
  const cuotasEntrada=tipoMedio.credito?Number(entrada.cuotas):null;
  const cuotas=cuotasEntrada!==null&&Number.isInteger(cuotasEntrada)&&cuotasEntrada>0?cuotasEntrada:null;
  if(tipoMedio.credito&&cuotas===null)throw new ErrorAplicacion(400,'Ingresa un número de cuotas válido');
- const respaldo=texto(entrada.respaldo,2000);if(!respaldo)throw new ErrorAplicacion(400,'El respaldo del pago es obligatorio');
+ const respaldo=respaldoOperacional(entrada.respaldo,'Respaldo del pago');
  const antecedentes=texto(entrada.antecedentesMedio,500);
  if (!tipoMedio.efectivo && !antecedentes) throw new ErrorAplicacion(400,'Falta el antecedente del medio de pago');
  const fechaCobro=texto(entrada.fechaCobro,20);
