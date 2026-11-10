@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { formalizarProyectoCotizacion, validarCoherenciaContextualM12 } from '../comercial/ServicioObraProyectoComercial';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
-import { calcularNota, consolidarNotasClp, estadoVisibleNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas } from '../utilidades/finanzas';
+import { calcularNota, consolidarNotasClp, estadoVisibleNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas, totalLineasComerciales } from '../utilidades/finanzas';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 import { registrarCompromisoCredito, validarCreditoParaFormalizacion } from '../utilidades/creditoM8';
@@ -14,6 +14,7 @@ import { exigirCotejoAcreditadoM11, prepararCorrespondenciasTecnicasM11, prepara
 import { ServicioDocumentalM11 } from '../comercial/ServicioDocumentalM11';
 import { prepararModificacionGuia } from '../m2/guiaDespacho';
 import { cantidadPendienteCompraAbierta, decimalInventario } from '../inventario/contratosInventario';
+import { respaldoOperacional } from '../utilidades/pdfOperacional';
 
 type Entrada = Record<string, any>; // viene del contrato HTTP antiguo; los datos se validan antes de guardar
 const ESTADOS_FAMILIA_COMERCIAL = ['ACTIVA', 'INACTIVA'] as const;
@@ -626,8 +627,8 @@ export class M2Controller {
       if (!cot || cot.estado_cotizacion !== 'emitida' || cot.nota_venta) throw new ErrorAplicacion(409, 'La Cotización no está disponible para aceptación');
       if (cot.segmento_comercial && cot.segmento_comercial !== 'B2B') throw new ErrorAplicacion(409, 'La Cotización no pertenece al segmento B2B');
       if (!cot.fecha_vigencia || cot.fecha_vigencia.toISOString().slice(0, 10) < fechaNegocio()) throw new ErrorAplicacion(409, 'La Cotización está vencida; no se puede aceptar');
-      const folio = texto(entrada.folioOrdenCompra, 100); const respaldo = texto(entrada.respaldoOrdenCompra, 4500000);
-      if (!folio || !respaldo) throw new ErrorAplicacion(400, 'El folio y respaldo de la Orden de Compra son obligatorios');
+      const folio = texto(entrada.folioOrdenCompra, 100); const respaldo = respaldoOperacional(entrada.respaldoOrdenCompra, 'Respaldo de la Orden de Compra');
+      if (!folio) throw new ErrorAplicacion(400, 'El folio de la Orden de Compra es obligatorio');
       if(entrada.idVersionOfertaAceptada === undefined || entrada.idVersionOfertaAceptada === null || entrada.idVersionOfertaAceptada === '') throw new ErrorAplicacion(400,'Debes identificar la versión documental de la oferta aceptada');
       const idVersionOferta = identificador(entrada.idVersionOfertaAceptada);
       const ofertaAceptada = await tx.cotizacion_version.findFirst({where:{id_cotizacion_version:idVersionOferta,id_cotizacion:idCotizacion,numero_version_comercial:{not:null},tipo_version:'EMISION',estado_documental:'DISPONIBLE',id_documento_logico:{not:null}}});
@@ -1369,9 +1370,11 @@ export class M2Controller {
 
   async crearVentaDirecta(entrada: Entrada) {
     const idFicha = identificador(entrada.id_cliente);
-    const base = numeroNoNegativo(entrada.monto_neto, 'Monto neto');
-    if (!base) throw new ErrorAplicacion(400, 'El monto debe ser mayor a cero');
-    const montos = importes(new Prisma.Decimal(base), entrada.descuento?.tipo, entrada.descuento?.valor, entrada.exento_iva);
+    const detalle = Array.isArray(entrada.detalle) ? entrada.detalle.map((linea: Entrada) => ({ tipo: texto(linea.tipo, 40), descripcion: texto(linea.descripcion, 500), cantidad: numeroNoNegativo(linea.cantidad ?? 1, 'Cantidad'), valor: numeroNoNegativo(linea.valor, 'Valor'), idItemComercial: linea.idItemComercial ? identificador(linea.idItemComercial) : undefined, idProyecto: linea.idProyecto ? identificador(linea.idProyecto) : undefined })) : [];
+    if (!detalle.length || detalle.some(linea => !['producto','servicio','reparacion','trabajo posterior','adicional'].includes(linea.tipo.toLowerCase()) || !linea.descripcion || linea.cantidad <= 0 || linea.valor <= 0)) throw new ErrorAplicacion(400, 'Incluye al menos una línea comercial válida');
+    const base = totalLineasComerciales(detalle);
+    if (!base.isFinite() || base.lte(0)) throw new ErrorAplicacion(400, 'El monto calculado debe ser mayor a cero');
+    const montos = importes(base, entrada.descuento?.tipo, entrada.descuento?.valor, entrada.exento_iva);
     const codigoMoneda = texto(entrada.moneda).toUpperCase() || 'CLP';
     let tipoCambio: Prisma.Decimal | null = null;
     if (codigoMoneda === 'USD') {
@@ -1388,9 +1391,6 @@ export class M2Controller {
       if (!ficha || ficha.cliente_financiero.estado_financiero !== 'activo' || ficha.cliente_financiero.nivel_formalizacion !== 'formal') throw new ErrorAplicacion(400, 'La venta directa requiere cliente activo y formal');
       const moneda = await transaccion.moneda.findUnique({ where: { codigo_moneda: codigoMoneda } });
       if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
-      const detalle = Array.isArray(entrada.detalle) ? entrada.detalle.map((linea: Entrada) => ({ tipo: texto(linea.tipo, 40), descripcion: texto(linea.descripcion, 500), cantidad: numeroNoNegativo(linea.cantidad ?? 1, 'Cantidad'), valor: numeroNoNegativo(linea.valor, 'Valor'), idItemComercial: linea.idItemComercial ? identificador(linea.idItemComercial) : undefined, idProyecto: linea.idProyecto ? identificador(linea.idProyecto) : undefined })) : [];
-      if (!detalle.length || detalle.some(linea => !['producto','servicio','reparacion','trabajo posterior','adicional'].includes(linea.tipo.toLowerCase()) || !linea.descripcion || linea.cantidad <= 0 || linea.valor <= 0)) throw new ErrorAplicacion(400, 'Incluye al menos una línea comercial válida');
-      const sumaDetalle = detalle.reduce((suma, linea) => suma.plus(new Prisma.Decimal(linea.cantidad).mul(linea.valor)), new Prisma.Decimal(0)).toDecimalPlaces(2);
       const idsItem = [...new Set(detalle.flatMap(linea => linea.idItemComercial ? [linea.idItemComercial] : []))];
       if (idsItem.length && await transaccion.item_comercial.count({ where: { id_item_comercial: { in: idsItem }, estado_item: 'activo' } }) !== idsItem.length) throw new ErrorAplicacion(400, 'Uno de los ítems comerciales no existe o está inactivo');
       const idsProyecto = [...new Set(detalle.flatMap(linea => linea.idProyecto ? [linea.idProyecto] : []))];
@@ -1401,7 +1401,7 @@ export class M2Controller {
         fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: montos.neto, monto_impuesto: montos.impuesto,
         monto_total: montos.total, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio ? montos.total.mul(tipoCambio).toDecimalPlaces(2) : null,
         descuento_aplicado: montos.descuento, exento_iva: entrada.exento_iva,
-        estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto, observacion: JSON.stringify({ detalleComercial: detalle, montoBaseAcordado: new Prisma.Decimal(base).toFixed(2), sumaReferencialDetalle: sumaDetalle.toFixed(2), diferenciaComercial: new Prisma.Decimal(base).minus(sumaDetalle).toFixed(2), persistencia: 'auxiliar_hasta_detalle_nv_estructurado' }),
+        estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto, observacion: JSON.stringify({ detalleComercial: detalle, montoBaseCalculado: base.toFixed(2), persistencia: 'auxiliar_hasta_detalle_nv_estructurado' }),
       } });
     });
   }
@@ -1458,7 +1458,7 @@ export class M2Controller {
       if (tipo.requiere_vencimiento && (!/^\d{4}-\d{2}-\d{2}$/.test(fechaVencimiento) || !Number.isFinite(Date.parse(fechaVencimiento)))) throw new ErrorAplicacion(400, 'Fecha de vencimiento obligatoria o inválida');
       const neto = new Prisma.Decimal(numeroNoNegativo(entrada.monto_neto,'Monto neto')); const impuesto = new Prisma.Decimal(numeroNoNegativo(entrada.monto_impuesto,'Monto impuesto')); const total = new Prisma.Decimal(numeroNoNegativo(entrada.monto_total,'Monto total'));
       if (!total.gt(0) || !neto.plus(impuesto).eq(total)) throw new ErrorAplicacion(400, 'Los montos del documento no son coherentes');
-      const respaldo = texto(entrada.respaldo,4500000); if (!respaldo) throw new ErrorAplicacion(400, 'El respaldo del documento externo es obligatorio');
+      const respaldo = respaldoOperacional(entrada.respaldo, 'Respaldo del documento externo');
       const documento = await transaccion.documento_tributario.create({ data: {
         id_ficha_cliente: primera.id_ficha_cliente, id_nota_venta: primera.id_nota_venta, id_tipo_documento: tipo.id_tipo_documento,
         id_moneda: primera.id_moneda, folio_documento: folio, fecha_emision: new Date(`${fechaEmision}T00:00:00Z`), fecha_vencimiento: fechaVencimiento ? new Date(`${fechaVencimiento}T00:00:00Z`) : null,

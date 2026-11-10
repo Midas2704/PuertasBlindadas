@@ -77,16 +77,16 @@ test('CU27: crea NV directa con varias líneas y referencias válidas; rechaza p
   let nota;
 
   try {
-    nota = await m2.crearVentaDirecta({ id_cliente: cliente.ficha_cliente.id_ficha_cliente, monto_neto: 400, moneda: 'CLP', exento_iva: true, detalle: [{ tipo: 'producto', descripcion: 'Puerta', cantidad: 2, valor: 100, idItemComercial: item.id_item_comercial, idProyecto: Number(activo.proyecto_proyecto_id) }, { tipo: 'trabajo posterior', descripcion: 'Ajuste en terreno', cantidad: 1, valor: 150, idProyecto: Number(activo.proyecto_proyecto_id) }] });
+    nota = await m2.crearVentaDirecta({ id_cliente: cliente.ficha_cliente.id_ficha_cliente, moneda: 'CLP', exento_iva: true, detalle: [{ tipo: 'producto', descripcion: 'Puerta', cantidad: 2, valor: 100, idItemComercial: item.id_item_comercial, idProyecto: Number(activo.proyecto_proyecto_id) }, { tipo: 'trabajo posterior', descripcion: 'Ajuste en terreno', cantidad: 1, valor: 150, idProyecto: Number(activo.proyecto_proyecto_id) }] });
     assert.equal(nota.id_proyecto_contexto, activo.proyecto_proyecto_id);
     const observacion = JSON.parse(nota.observacion);
     assert.equal(observacion.detalleComercial.length, 2);
     assert.equal(observacion.montoBaseAcordado, '400.00');
     assert.equal(observacion.sumaReferencialDetalle, '350.00');
     assert.equal(observacion.diferenciaComercial, '50.00');
-    assert.equal(nota.monto_neto.toString(), '400');
+    assert.equal(nota.monto_neto.toString(), '350');
 
-    await assert.rejects(m2.crearVentaDirecta({ id_cliente: cliente.ficha_cliente.id_ficha_cliente, monto_neto: 100, moneda: 'CLP', exento_iva: true, detalle: [{ tipo: 'servicio', descripcion: 'Visita', cantidad: 1, valor: 100, idProyecto: Number(inactivo.proyecto_proyecto_id) }] }), /proyecto seleccionado no existe o no está activo/);
+    await assert.rejects(m2.crearVentaDirecta({ id_cliente: cliente.ficha_cliente.id_ficha_cliente, moneda: 'CLP', exento_iva: true, detalle: [{ tipo: 'servicio', descripcion: 'Visita', cantidad: 1, valor: 100, idProyecto: Number(inactivo.proyecto_proyecto_id) }] }), /proyecto seleccionado no existe o no está activo/);
   } finally {
     if (nota) await prisma.nota_venta.delete({ where: { id_nota_venta: nota.id_nota_venta } });
     await prisma.proyecto.deleteMany({ where: { proyecto_proyecto_id: { in: [activo.proyecto_proyecto_id, inactivo.proyecto_proyecto_id] } } });

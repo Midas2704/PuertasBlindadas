@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
+import { respaldoOperacional } from '../utilidades/pdfOperacional';
 
 type Entrada = Record<string, unknown>;
 export type LineaCantidadM11 = { idLinea: string; cantidad: number; moneda?: string | null; monto?: number | null; compartido?: boolean };
@@ -88,10 +89,10 @@ export class ServicioDocumentalM11 {
     const guias = nota?.guia_despacho ?? [];
     const documentos = nota?.documento_tributario_nota_venta.map(vinculo => vinculo.documento_tributario) ?? [];
     return {
-      idCotizacion, ordenCompra: { id: oc.id_orden_compra_b2b, folio: oc.folio, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA', lineas: oc.lineas },
+      idCotizacion, ordenCompra: { id: oc.id_orden_compra_b2b, folio: oc.folio, respaldo: oc.respaldo, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA', lineas: oc.lineas },
       notaVenta: nota ? { id: nota.id_nota_venta, numero: nota.numero_nota_venta, relacion: 'RELACION_ACREDITADA' } : null,
       guias: guias.map(guia => ({ id: guia.id_guia_despacho, folio: guia.folio, fecha: guia.fecha_emision, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA', salidaFisica: 'NO_ACREDITADA' })),
-      documentosTributarios: documentos.map(documento => ({ id: documento.id_documento_tributario, folio: documento.folio_documento, tipo: documento.tipo_documento.nombre_tipo_documento, moneda: documento.moneda.codigo_moneda, monto: documento.monto_total, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA_A_NOTA_VENTA' })),
+      documentosTributarios: documentos.map(documento => ({ id: documento.id_documento_tributario, folio: documento.folio_documento, tipo: documento.tipo_documento.nombre_tipo_documento, moneda: documento.moneda.codigo_moneda, monto: documento.monto_total, respaldo: documento.respaldo_documento, estado: 'DOCUMENTO_EXISTENTE', relacion: 'RELACION_ACREDITADA_A_NOTA_VENTA' })),
       relacionesDirectasGuiaDte: [] as Array<{idGuia:number;idDocumentoTributario:number;evidencia:string}>,
       eslabones: { guiaDespacho: guias.length ? 'CONFIRMADO' : 'DOCUMENTO_FALTANTE', facturacion: documentos.length ? 'CONFIRMADO' : 'DOCUMENTO_FALTANTE', guiaDteDirecto: 'INFORMACION_INSUFICIENTE', salidaFisica: 'INFORMACION_INSUFICIENTE' },
       advertenciaRelacionDocumental: 'Compartir Nota de Venta no acredita una relación directa entre GDE y DTE',
@@ -128,7 +129,7 @@ export class ServicioDocumentalM11 {
 
   async gestionarCorreccion(entrada: Entrada, actorId: bigint) {
     const tipo = requerido(entrada.tipoDocumento, 'Tipo documental', 20).toUpperCase();
-    const motivo = requerido(entrada.motivo, 'Motivo'); const respaldo = requerido(entrada.respaldo, 'Respaldo', 4500000);
+    const motivo = requerido(entrada.motivo, 'Motivo'); const respaldo = respaldoOperacional(entrada.respaldo, 'Respaldo documental');
     const clave = requerido(entrada.claveIdempotencia, 'Clave de idempotencia', 120);
     return prisma.$transaction(async tx => {
       const repetida = await tx.correccion_documental_m11.findUnique({ where: { clave_idempotencia: clave } });
@@ -196,7 +197,7 @@ export class ServicioDocumentalM11 {
 
   async resolverHallazgo(idHallazgo: bigint, entrada: Entrada, actorId: bigint) {
     const decision = requerido(entrada.decision, 'Decisión', 120); const motivo = requerido(entrada.motivo, 'Motivo');
-    const respaldo = requerido(entrada.respaldo, 'Respaldo', 4500000); const resultado = requerido(entrada.resultado, 'Resultado');
+    const respaldo = respaldoOperacional(entrada.respaldo, 'Respaldo de la decisión'); const resultado = requerido(entrada.resultado, 'Resultado');
     const clave = requerido(entrada.claveIdempotencia, 'Clave de idempotencia', 120); const revision = idPositivo(entrada.revision, 'Revisión');
     return prisma.$transaction(async tx => {
       const repetida = await tx.resolucion_hallazgo_m11.findUnique({ where: { clave_idempotencia: clave } }); if (repetida) return repetida;

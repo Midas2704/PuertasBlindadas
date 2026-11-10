@@ -29,6 +29,14 @@ export type PagoFinanciero = Prisma.pago_clienteGetPayload<{ include: typeof inc
 export type NotaFinanciera = Prisma.nota_ventaGetPayload<{ include: typeof incluirNota }>;
 const cero = () => new Prisma.Decimal(0);
 
+/** Suma monetaria autoritativa de líneas: cantidad × valor unitario. */
+export function totalLineasComerciales(lineas: ReadonlyArray<{ cantidad: Prisma.Decimal.Value; valor: Prisma.Decimal.Value }>) {
+  return lineas.reduce(
+    (total, linea) => total.plus(new Prisma.Decimal(linea.cantidad).mul(linea.valor)),
+    cero(),
+  ).toDecimalPlaces(2);
+}
+
 // LUNA: la fecha del negocio tiene su propio reloj, el de Santiago
 export const fechaNegocio = (ahora = new Date()) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',

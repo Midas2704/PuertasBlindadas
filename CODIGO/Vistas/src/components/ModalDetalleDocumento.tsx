@@ -4,42 +4,105 @@ import { solicitarFinanzas } from '../api/finanzas';
 import React, { useEffect, useState } from 'react';
 import { X, DollarSign } from 'lucide-react';
 import TrazabilidadDocumentalM11 from './TrazabilidadDocumentalM11';
+import { leerPdfOperacional } from '../utilidades/pdfOperacional';
 
 interface ModalDetalleDocumentoProps {
-  activeModal: { tipo: 'cotizacion' | 'nota_venta', data: any } | null;
+  activeModal: { tipo: 'cotizacion' | 'nota_venta'; data: any } | null;
   onClose: () => void;
   children?: React.ReactNode;
   onViewPago?: (id: number) => void;
 }
-type GuiaDetalle={id_guia_despacho:number;folio:string;estado?:string;antecedentes?:unknown};
+type GuiaDetalle = {
+  id_guia_despacho: number;
+  folio: string;
+  estado?: string;
+  antecedentes?: unknown;
+};
 
 const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeModal, onClose, children, onViewPago }) => {
-  const [documentoExterno, setDocumentoExterno] = useState({ tipo: 'Factura Electrónica', folio: '', fechaEmision: new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago'}).format(new Date()), fechaVencimiento: '', montoNeto: '', montoImpuesto: '', montoTotal: '', respaldo: '', observacion: '', idsNotas: '' });
-  const [guiasLocales,setGuiasLocales]=useState<GuiaDetalle[]>([]);
-  const [guiaEnEdicion,setGuiaEnEdicion]=useState<{id:number;folio:string;antecedentes:string}|null>(null);
+  const [documentoExterno, setDocumentoExterno] = useState({
+    tipo: 'Factura Electrónica',
+    folio: '',
+    fechaEmision: new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Santiago',
+    }).format(new Date()),
+    fechaVencimiento: '',
+    montoNeto: '',
+    montoImpuesto: '',
+    montoTotal: '',
+    respaldo: '',
+    observacion: '',
+    idsNotas: '',
+  });
+  const [guiasLocales, setGuiasLocales] = useState<GuiaDetalle[]>([]);
+  const [guiaEnEdicion, setGuiaEnEdicion] = useState<{
+    id: number;
+    folio: string;
+    antecedentes: string;
+  } | null>(null);
   // El modal permanece montado al cambiar de documento; ambos estados locales deben acompañar esa identidad.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(()=>{setGuiasLocales(activeModal?.data?.guia_despacho||[]);setGuiaEnEdicion(null);},[activeModal]);
+  useEffect(() => {
+    setGuiasLocales(activeModal?.data?.guia_despacho || []);
+    setGuiaEnEdicion(null);
+  }, [activeModal]);
   if (!activeModal) return null;
   const guias = guiasLocales;
-  const guiaEditable=(guia:GuiaDetalle)=>!['cerrada','finalizada','anulada'].includes(String(guia.estado||'emitida').toLowerCase());
+  const guiaEditable = (guia: GuiaDetalle) => !['cerrada', 'finalizada', 'anulada'].includes(String(guia.estado || 'emitida').toLowerCase());
 
-  const guardarGuia=async()=>{
-    if(!guiaEnEdicion)return;
-    let antecedentes:Record<string,unknown>;
-    try{const valor=JSON.parse(guiaEnEdicion.antecedentes||'{}');if(!valor||typeof valor!=='object'||Array.isArray(valor))throw new Error();antecedentes=valor;}
-    catch{void notificarUsuario('Los antecedentes deben tener formato JSON de objeto.');return;}
-    const respuesta=await solicitarFinanzas(`/billing/guides/${guiaEnEdicion.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({folio:guiaEnEdicion.folio,antecedentes})});
-    const resultado=await respuesta.json();
-    if(!respuesta.ok){void notificarUsuario(resultado.error||'No se pudo modificar la guía');return;}
-    setGuiasLocales(actuales=>actuales.map(guia=>guia.id_guia_despacho===resultado.id_guia_despacho?resultado:guia));
-    setGuiaEnEdicion(null);void notificarUsuario('Guía de Despacho modificada correctamente');
+  const guardarGuia = async () => {
+    if (!guiaEnEdicion) return;
+    let antecedentes: Record<string, unknown>;
+    try {
+      const valor = JSON.parse(guiaEnEdicion.antecedentes || '{}');
+      if (!valor || typeof valor !== 'object' || Array.isArray(valor)) throw new Error();
+      antecedentes = valor;
+    } catch {
+      void notificarUsuario('Los antecedentes deben tener formato JSON de objeto.');
+      return;
+    }
+    const respuesta = await solicitarFinanzas(`/billing/guides/${guiaEnEdicion.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folio: guiaEnEdicion.folio, antecedentes }),
+    });
+    const resultado = await respuesta.json();
+    if (!respuesta.ok) {
+      void notificarUsuario(resultado.error || 'No se pudo modificar la guía');
+      return;
+    }
+    setGuiasLocales((actuales) => actuales.map((guia) => (guia.id_guia_despacho === resultado.id_guia_despacho ? resultado : guia)));
+    setGuiaEnEdicion(null);
+    void notificarUsuario('Guía de Despacho modificada correctamente');
   };
 
   const registrarDocumentoExterno = async () => {
-    const ids = (documentoExterno.idsNotas || String(activeModal.data.id_nota_venta)).split(',').map(valor=>Number(valor.trim())).filter(Number.isSafeInteger);
-    const respuesta = await solicitarFinanzas('/billing/documents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipo_documento:documentoExterno.tipo,folio:documentoExterno.folio,fecha_emision:documentoExterno.fechaEmision,fecha_vencimiento:documentoExterno.fechaVencimiento||undefined,monto_neto:Number(documentoExterno.montoNeto),monto_impuesto:Number(documentoExterno.montoImpuesto),monto_total:Number(documentoExterno.montoTotal),respaldo:documentoExterno.respaldo,observacion:documentoExterno.observacion,ids_notas_venta:ids})});
-    const resultado=await respuesta.json(); if(!respuesta.ok){void notificarUsuario(resultado.error||'No se pudo registrar el documento');return;} window.location.reload();
+    const ids = (documentoExterno.idsNotas || String(activeModal.data.id_nota_venta))
+      .split(',')
+      .map((valor) => Number(valor.trim()))
+      .filter(Number.isSafeInteger);
+    const respuesta = await solicitarFinanzas('/billing/documents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tipo_documento: documentoExterno.tipo,
+        folio: documentoExterno.folio,
+        fecha_emision: documentoExterno.fechaEmision,
+        fecha_vencimiento: documentoExterno.fechaVencimiento || undefined,
+        monto_neto: Number(documentoExterno.montoNeto),
+        monto_impuesto: Number(documentoExterno.montoImpuesto),
+        monto_total: Number(documentoExterno.montoTotal),
+        respaldo: documentoExterno.respaldo,
+        observacion: documentoExterno.observacion,
+        ids_notas_venta: ids,
+      }),
+    });
+    const resultado = await respuesta.json();
+    if (!respuesta.ok) {
+      void notificarUsuario(resultado.error || 'No se pudo registrar el documento');
+      return;
+    }
+    window.location.reload();
   };
 
   return (
@@ -47,9 +110,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center p-6 border-b border-gray-100">
           <div>
-            <h3 className="text-xl font-bold text-gray-900">
-              {activeModal.tipo === 'cotizacion' ? `COT-${activeModal.data.id_cotizacion}` : `NV-${activeModal.data.id_nota_venta || activeModal.data.numero_nota_venta}`}
-            </h3>
+            <h3 className="text-xl font-bold text-gray-900">{activeModal.tipo === 'cotizacion' ? `COT-${activeModal.data.id_cotizacion}` : `NV-${activeModal.data.id_nota_venta || activeModal.data.numero_nota_venta}`}</h3>
             <p className="text-sm text-gray-500 mt-0.5">
               {activeModal.data.ficha_cliente?.cliente_financiero?.nombre_razon_social_referencia || '—'}
               <span className="mx-2 text-gray-300">|</span>
@@ -64,51 +125,75 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
         <div className="p-6 space-y-5">
           {/* Info general */}
           <div className="grid grid-cols-3 gap-3 text-sm bg-gray-50 p-4 rounded-lg">
-            <div><span className="text-gray-500 block text-xs">Fecha Emisión</span><span className="font-medium">{new Date(activeModal.data.fecha_emision).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</span></div>
-            <div><span className="text-gray-500 block text-xs">Estado</span>
-              <span className={`font-semibold uppercase text-xs px-2 py-0.5 rounded ${
-                (activeModal.data.estado_cotizacion === 'aprobada' || activeModal.data.estado_nota_venta === 'confirmada') ? 'bg-green-100 text-green-700' :
-                (activeModal.data.estado_cotizacion === 'rechazada' || activeModal.data.estado_nota_venta === 'anulada') ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
-              }`}>{activeModal.tipo === 'cotizacion' ? activeModal.data.estado_cotizacion : String(activeModal.data.estadoNotaVentaVisible || activeModal.data.estado_nota_venta).replaceAll('_',' ')}</span>
+            <div>
+              <span className="text-gray-500 block text-xs">Fecha Emisión</span>
+              <span className="font-medium">{new Date(activeModal.data.fecha_emision).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</span>
             </div>
-            {activeModal.tipo === 'nota_venta' && <div><span className="text-gray-500 block text-xs">Estado de pago</span><span className={`font-semibold uppercase text-xs px-2 py-0.5 rounded ${activeModal.data.estadoPago === 'pagada' ? 'bg-green-100 text-green-700' : activeModal.data.estadoPago === 'parcial' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-700'}`}>{['anulada','revertida_total'].includes(activeModal.data.estado_nota_venta) ? 'Sin obligación' : activeModal.data.estadoPago || activeModal.data.estado_pago}</span>{Number(activeModal.data.diasAtrasoPagoFinal)>0&&<span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{activeModal.data.diasAtrasoPagoFinal} días de atraso</span>}</div>}
-            <div><span className="text-gray-500 block text-xs">Tipo Producto</span><span className="font-medium">{activeModal.data.detalle_cotizacion?.[0]?.item_comercial?.nombre_item || '—'}</span></div>
+            <div>
+              <span className="text-gray-500 block text-xs">Estado</span>
+              <span className={`font-semibold uppercase text-xs px-2 py-0.5 rounded ${activeModal.data.estado_cotizacion === 'aprobada' || activeModal.data.estado_nota_venta === 'confirmada' ? 'bg-green-100 text-green-700' : activeModal.data.estado_cotizacion === 'rechazada' || activeModal.data.estado_nota_venta === 'anulada' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{activeModal.tipo === 'cotizacion' ? activeModal.data.estado_cotizacion : String(activeModal.data.estadoNotaVentaVisible || activeModal.data.estado_nota_venta).replaceAll('_', ' ')}</span>
+            </div>
+            {activeModal.tipo === 'nota_venta' && (
+              <div>
+                <span className="text-gray-500 block text-xs">Estado de pago</span>
+                <span className={`font-semibold uppercase text-xs px-2 py-0.5 rounded ${activeModal.data.estadoPago === 'pagada' ? 'bg-green-100 text-green-700' : activeModal.data.estadoPago === 'parcial' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-700'}`}>{['anulada', 'revertida_total'].includes(activeModal.data.estado_nota_venta) ? 'Sin obligación' : activeModal.data.estadoPago || activeModal.data.estado_pago}</span>
+                {Number(activeModal.data.diasAtrasoPagoFinal) > 0 && <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{activeModal.data.diasAtrasoPagoFinal} días de atraso</span>}
+              </div>
+            )}
+            <div>
+              <span className="text-gray-500 block text-xs">Tipo Producto</span>
+              <span className="font-medium">{activeModal.data.detalle_cotizacion?.[0]?.item_comercial?.nombre_item || '—'}</span>
+            </div>
             {activeModal.data.observacion && activeModal.data.observacion !== 'PENDIENTE_APROBACION' && (
-              <div className="col-span-3"><span className="text-gray-500 block text-xs">Observación</span><span>{activeModal.data.observacion}</span></div>
+              <div className="col-span-3">
+                <span className="text-gray-500 block text-xs">Observación</span>
+                <span>{activeModal.data.observacion}</span>
+              </div>
             )}
           </div>
 
           {/* Medidas */}
-          {activeModal.tipo === 'cotizacion' && activeModal.data.detalle_cotizacion?.[0] && (() => {
-            const det = activeModal.data.detalle_cotizacion[0];
-            // las cotizaciones nuevas ya traen las medidas en sus campos
-            let alto = Number(det.medida_alto_referencial || 0);
-            let ancho = Number(det.medida_ancho_referencial || 0);
-            let espesor = Number(det.medida_espesor_referencial || 0);
+          {activeModal.tipo === 'cotizacion' &&
+            activeModal.data.detalle_cotizacion?.[0] &&
+            (() => {
+              const det = activeModal.data.detalle_cotizacion[0];
+              // las cotizaciones nuevas ya traen las medidas en sus campos
+              let alto = Number(det.medida_alto_referencial || 0);
+              let ancho = Number(det.medida_ancho_referencial || 0);
+              let espesor = Number(det.medida_espesor_referencial || 0);
 
-            // Castaña: para las antiguas queda el rescate desde "Puerta (120x80x5)"
-            if (alto === 0 && ancho === 0 && espesor === 0 && det.descripcion_item_cotizado) {
-              const match = det.descripcion_item_cotizado.match(/(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)/);
-              if (match) {
-                alto = Number(match[1]);
-                ancho = Number(match[2]);
-                espesor = Number(match[3]);
+              // Castaña: para las antiguas queda el rescate desde "Puerta (120x80x5)"
+              if (alto === 0 && ancho === 0 && espesor === 0 && det.descripcion_item_cotizado) {
+                const match = det.descripcion_item_cotizado.match(/(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)/);
+                if (match) {
+                  alto = Number(match[1]);
+                  ancho = Number(match[2]);
+                  espesor = Number(match[3]);
+                }
               }
-            }
 
-            if (alto === 0 && ancho === 0 && espesor === 0) return null;
+              if (alto === 0 && ancho === 0 && espesor === 0) return null;
 
-            return (
-              <div>
-                <h4 className="text-sm font-semibold text-gray-700 mb-2">Medidas Referenciales</h4>
-                <div className="grid grid-cols-3 gap-3 text-sm bg-blue-50 p-3 rounded-lg">
-                  <div><span className="text-blue-500 block text-xs">Alto (mm)</span><span className="font-mono font-medium">{alto}</span></div>
-                  <div><span className="text-blue-500 block text-xs">Ancho (mm)</span><span className="font-mono font-medium">{ancho}</span></div>
-                  <div><span className="text-blue-500 block text-xs">Grosor (mm)</span><span className="font-mono font-medium">{espesor}</span></div>
+              return (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">Medidas Referenciales</h4>
+                  <div className="grid grid-cols-3 gap-3 text-sm bg-blue-50 p-3 rounded-lg">
+                    <div>
+                      <span className="text-blue-500 block text-xs">Alto (mm)</span>
+                      <span className="font-mono font-medium">{alto}</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-500 block text-xs">Ancho (mm)</span>
+                      <span className="font-mono font-medium">{ancho}</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-500 block text-xs">Grosor (mm)</span>
+                      <span className="font-mono font-medium">{espesor}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
 
           {/* Tabla materiales */}
           {activeModal.tipo === 'cotizacion' && activeModal.data.detalle_cotizacion?.[0]?.detalle_costo_material_cotizacion?.length > 0 && (
@@ -149,28 +234,77 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
               <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="font-semibold text-gray-700">Resumen Financiero</h4>
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${isExento ? 'bg-gray-200 text-gray-700' : 'bg-blue-100 text-blue-800'}`}>
-                    {isExento ? 'Exento de IVA' : 'Incluye IVA'}
-                  </span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${isExento ? 'bg-gray-200 text-gray-700' : 'bg-blue-100 text-blue-800'}`}>{isExento ? 'Exento de IVA' : 'Incluye IVA'}</span>
                 </div>
                 {activeModal.tipo === 'cotizacion' ? (
                   <>
-                    <div className="flex justify-between text-gray-600"><span>Subtotal Costos</span><span className="font-mono">{sym}{Number(activeModal.data.subtotal_costos_estimados || 0).toLocaleString('es-CL')}</span></div>
-                    <div className="flex justify-between text-gray-600"><span>Precio Sugerido (Neto)</span><span className="font-mono">{sym}{Number(activeModal.data.precio_sugerido || 0).toLocaleString('es-CL')}</span></div>
-                    {Number(activeModal.data.margen_esperado) > 0 && <div className="flex justify-between text-gray-600"><span>Margen</span><span className="font-mono">{Number(activeModal.data.margen_esperado)}%</span></div>}
-                    <div className="flex justify-between font-bold text-gray-900 text-base border-t pt-2 mt-1"><span>Total Estimado</span><span className="font-mono">{sym}{Number(activeModal.data.monto_total_estimado || 0).toLocaleString('es-CL')}</span></div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Subtotal Costos</span>
+                      <span className="font-mono">
+                        {sym}
+                        {Number(activeModal.data.subtotal_costos_estimados || 0).toLocaleString('es-CL')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Precio Sugerido (Neto)</span>
+                      <span className="font-mono">
+                        {sym}
+                        {Number(activeModal.data.precio_sugerido || 0).toLocaleString('es-CL')}
+                      </span>
+                    </div>
+                    {Number(activeModal.data.margen_esperado) > 0 && (
+                      <div className="flex justify-between text-gray-600">
+                        <span>Margen</span>
+                        <span className="font-mono">{Number(activeModal.data.margen_esperado)}%</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-bold text-gray-900 text-base border-t pt-2 mt-1">
+                      <span>Total Estimado</span>
+                      <span className="font-mono">
+                        {sym}
+                        {Number(activeModal.data.monto_total_estimado || 0).toLocaleString('es-CL')}
+                      </span>
+                    </div>
                   </>
                 ) : (
                   <>
-                    <div className="flex justify-between text-gray-600"><span>Monto Neto</span><span className="font-mono">{sym}{Number(activeModal.data.monto_neto || 0).toLocaleString('es-CL')}</span></div>
-                    {Number(activeModal.data.descuento_aplicado) > 0 && <div className="flex justify-between text-orange-600"><span>Descuento Aplicado</span><span className="font-mono">-{sym}{Number(activeModal.data.descuento_aplicado).toLocaleString('es-CL')}</span></div>}
-                    <div className="flex justify-between text-gray-600"><span>IVA (19%)</span><span className="font-mono">{sym}{Number(activeModal.data.monto_impuesto || 0).toLocaleString('es-CL')}</span></div>
-                    <div className="flex justify-between font-bold text-gray-900 text-base border-t pt-2 mt-1"><span>Total Final</span><span className="font-mono">{sym}{Number(activeModal.data.monto_total || 0).toLocaleString('es-CL')}</span></div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Monto Neto</span>
+                      <span className="font-mono">
+                        {sym}
+                        {Number(activeModal.data.monto_neto || 0).toLocaleString('es-CL')}
+                      </span>
+                    </div>
+                    {Number(activeModal.data.descuento_aplicado) > 0 && (
+                      <div className="flex justify-between text-orange-600">
+                        <span>Descuento Aplicado</span>
+                        <span className="font-mono">
+                          -{sym}
+                          {Number(activeModal.data.descuento_aplicado).toLocaleString('es-CL')}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-gray-600">
+                      <span>IVA (19%)</span>
+                      <span className="font-mono">
+                        {sym}
+                        {Number(activeModal.data.monto_impuesto || 0).toLocaleString('es-CL')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-bold text-gray-900 text-base border-t pt-2 mt-1">
+                      <span>Total Final</span>
+                      <span className="font-mono">
+                        {sym}
+                        {Number(activeModal.data.monto_total || 0).toLocaleString('es-CL')}
+                      </span>
+                    </div>
                   </>
                 )}
                 {isForeign && (
                   <div className="border-t pt-3 mt-3">
-                    <div className="text-lg font-bold text-slate-800">Monto Original: {Number(activeModal.data.monto_total || activeModal.data.monto_total_estimado || 0).toLocaleString('es-CL')} {activeModal.data.moneda?.codigo_moneda || 'USD'}</div>
+                    <div className="text-lg font-bold text-slate-800">
+                      Monto Original: {Number(activeModal.data.monto_total || activeModal.data.monto_total_estimado || 0).toLocaleString('es-CL')} {activeModal.data.moneda?.codigo_moneda || 'USD'}
+                    </div>
                   </div>
                 )}
               </div>
@@ -184,7 +318,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                 <DollarSign className="w-5 h-5 text-green-600" />
                 Historial de Pagos de la Transacción
               </h4>
-              
+
               {(() => {
                 const totalPagadoNV = Number(activeModal.data.pagosEfectivos || 0);
                 const saldoNV = Number(activeModal.data.saldoPendiente || 0);
@@ -194,25 +328,39 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                 return (
                   <div className="flex gap-4 mb-4">
                     <div className="bg-green-50 text-green-800 px-4 py-2 rounded-lg text-sm border border-green-100 flex-1">
-                      <span className="font-semibold">Total Pagado:</span> {isForeign ? '' : '$'}{totalPagadoNV.toLocaleString('es-CL', { maximumFractionDigits: 0 })} {isForeign ? sigla : ''}
+                      <span className="font-semibold">Total Pagado:</span> {isForeign ? '' : '$'}
+                      {totalPagadoNV.toLocaleString('es-CL', {
+                        maximumFractionDigits: 0,
+                      })}{' '}
+                      {isForeign ? sigla : ''}
                     </div>
                     <div className="bg-orange-50 text-orange-800 px-4 py-2 rounded-lg text-sm border border-orange-100 flex-1 flex items-center">
                       {isForeign ? (
                         <div className="flex flex-col">
-                          <span><span className="font-semibold">Falta por Pagar (Original):</span> {saldoNV.toLocaleString('es-CL', { maximumFractionDigits: 0 })} {sigla}</span>
+                          <span>
+                            <span className="font-semibold">Falta por Pagar (Original):</span>{' '}
+                            {saldoNV.toLocaleString('es-CL', {
+                              maximumFractionDigits: 0,
+                            })}{' '}
+                            {sigla}
+                          </span>
                         </div>
                       ) : (
-                        <span><span className="font-semibold">Falta por Pagar:</span> ${saldoNV.toLocaleString('es-CL', { maximumFractionDigits: 0 })} CLP</span>
+                        <span>
+                          <span className="font-semibold">Falta por Pagar:</span> $
+                          {saldoNV.toLocaleString('es-CL', {
+                            maximumFractionDigits: 0,
+                          })}{' '}
+                          CLP
+                        </span>
                       )}
                     </div>
                   </div>
                 );
               })()}
 
-              {(!activeModal.data.asignacion_pago_cliente || activeModal.data.asignacion_pago_cliente.length === 0) ? (
-                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500 text-center">
-                  Esta nota de venta aún no tiene pagos registrados.
-                </div>
+              {!activeModal.data.asignacion_pago_cliente || activeModal.data.asignacion_pago_cliente.length === 0 ? (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-500 text-center">Esta nota de venta aún no tiene pagos registrados.</div>
               ) : (
                 <div className="border border-gray-200 rounded-lg overflow-x-auto">
                   <table className="w-full text-left text-sm border-collapse">
@@ -230,21 +378,24 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                         <tr key={pIdx} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
                           <td className="py-2 px-3 text-gray-800">
                             Pago #{asig.pago_cliente?.id_pago_cliente}
-                            {onViewPago && <button className="ml-2 text-primary-700 text-xs underline" onClick={() => onViewPago(Number(asig.pago_cliente?.id_pago_cliente))}>Ver detalle</button>}
+                            {onViewPago && (
+                              <button className="ml-2 text-primary-700 text-xs underline" onClick={() => onViewPago(Number(asig.pago_cliente?.id_pago_cliente))}>
+                                Ver detalle
+                              </button>
+                            )}
                           </td>
                           <td className="py-2 px-3 text-gray-600">
-                            {new Date(asig.pago_cliente?.fecha_pago).toLocaleDateString('es-CL', { timeZone: 'UTC' })}
+                            {new Date(asig.pago_cliente?.fecha_pago).toLocaleDateString('es-CL', {
+                              timeZone: 'UTC',
+                            })}
                           </td>
-                          <td className="py-2 px-3 text-gray-600 capitalize">
-                            {asig.pago_cliente?.medio_pago?.nombre_medio_pago || 'N/A'}
-                          </td>
+                          <td className="py-2 px-3 text-gray-600 capitalize">{asig.pago_cliente?.medio_pago?.nombre_medio_pago || 'N/A'}</td>
                           <td className="py-2 px-3">
-                            <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-green-50 text-green-700 capitalize">
-                              {asig.pago_cliente?.anulacion_pago ? 'Anulado' : asig.pago_cliente?.reversion_pago?.length ? 'Con reversión' : asig.pago_cliente?.estado_verificacion}
-                           </span>
+                            <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-green-50 text-green-700 capitalize">{asig.pago_cliente?.anulacion_pago ? 'Anulado' : asig.pago_cliente?.reversion_pago?.length ? 'Con reversión' : asig.pago_cliente?.estado_verificacion}</span>
                           </td>
                           <td className="py-2 px-3 text-right font-medium text-green-600">
-                            +${Number(asig.monto_asignado).toLocaleString('es-CL')}
+                            +$
+                            {Number(asig.monto_asignado).toLocaleString('es-CL')}
                           </td>
                         </tr>
                       ))}
@@ -264,45 +415,254 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
                   <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Guía de Despacho</label>
                   <div className="flex gap-2">
                     <input type="text" id="input_guia" placeholder="Ej: 99402" className="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
-                    <button onClick={async () => {
-                      const input = document.getElementById('input_guia') as HTMLInputElement;
-                      if (!input.value) return;
-                      try {
-                        const res = await solicitarFinanzas('/billing/documents', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ id_nota_venta: activeModal.data.id_nota_venta, tipo_documento: 'guia_despacho', folio: input.value })
-                        });
-                        const data = await res.json();
-                        if (res.ok) { void notificarUsuario('Guía de Despacho vinculada correctamente'); input.value = ''; }
-                        else { void notificarUsuario(data.error || 'Error al vincular Guía'); }
-                      } catch (e) { void notificarUsuario('Error de conexión'); }
-                    }} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded transition-colors">Vincular</button>
+                    <button
+                      onClick={async () => {
+                        const input = document.getElementById('input_guia') as HTMLInputElement;
+                        if (!input.value) return;
+                        try {
+                          const res = await solicitarFinanzas('/billing/documents', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              id_nota_venta: activeModal.data.id_nota_venta,
+                              tipo_documento: 'guia_despacho',
+                              folio: input.value,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            void notificarUsuario('Guía de Despacho vinculada correctamente');
+                            input.value = '';
+                          } else {
+                            void notificarUsuario(data.error || 'Error al vincular Guía');
+                          }
+                        } catch (e) {
+                          void notificarUsuario('Error de conexión');
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded transition-colors"
+                    >
+                      Vincular
+                    </button>
                   </div>
-                  {guias.map((guia) => <div key={guia.id_guia_despacho} className="mt-3 rounded bg-blue-50 p-2 text-sm">
-                    {guiaEnEdicion?.id===guia.id_guia_despacho?<div className="space-y-2">
-                      <label className="block text-xs font-semibold text-gray-700">Folio<input aria-label="Folio de Guía de Despacho" className="mt-1 w-full rounded border border-gray-300 bg-white p-2 text-sm" value={guiaEnEdicion!.folio} onChange={e=>setGuiaEnEdicion(actual=>actual?{...actual,folio:e.target.value}:actual)}/></label>
-                      <label className="block text-xs font-semibold text-gray-700">Antecedentes autorizados (JSON)<textarea aria-label="Antecedentes de Guía de Despacho" className="mt-1 min-h-20 w-full rounded border border-gray-300 bg-white p-2 font-mono text-xs" value={guiaEnEdicion!.antecedentes} onChange={e=>setGuiaEnEdicion(actual=>actual?{...actual,antecedentes:e.target.value}:actual)}/></label>
-                      <div className="flex justify-end gap-2"><button type="button" onClick={()=>setGuiaEnEdicion(null)} className="rounded border px-3 py-1 text-xs">Cancelar</button><button type="button" onClick={guardarGuia} className="rounded bg-blue-700 px-3 py-1 text-xs font-semibold text-white">Guardar guía</button></div>
-                    </div>:<><div className="flex items-center justify-between gap-2"><span>Guía {guia.folio}</span>{guiaEditable(guia)?<button type="button" onClick={()=>setGuiaEnEdicion({id:guia.id_guia_despacho,folio:guia.folio,antecedentes:JSON.stringify(guia.antecedentes||{},null,2)})} className="rounded border border-blue-300 bg-white px-2 py-1 text-xs font-semibold text-blue-800">Editar guía</button>:<span className="text-xs font-semibold text-gray-600">Estado {guia.estado}</span>}</div><p className="mt-1 text-xs text-amber-800">La edición CU35 actualiza antecedentes autorizados. Una corrección documental formal continúa bajo CU458.</p></>}
-                  </div>)}
+                  {guias.map((guia) => (
+                    <div key={guia.id_guia_despacho} className="mt-3 rounded bg-blue-50 p-2 text-sm">
+                      {guiaEnEdicion?.id === guia.id_guia_despacho ? (
+                        <div className="space-y-2">
+                          <label className="block text-xs font-semibold text-gray-700">
+                            Folio
+                            <input aria-label="Folio de Guía de Despacho" className="mt-1 w-full rounded border border-gray-300 bg-white p-2 text-sm" value={guiaEnEdicion!.folio} onChange={(e) => setGuiaEnEdicion((actual) => (actual ? { ...actual, folio: e.target.value } : actual))} />
+                          </label>
+                          <label className="block text-xs font-semibold text-gray-700">
+                            Antecedentes autorizados (JSON)
+                            <textarea
+                              aria-label="Antecedentes de Guía de Despacho"
+                              className="mt-1 min-h-20 w-full rounded border border-gray-300 bg-white p-2 font-mono text-xs"
+                              value={guiaEnEdicion!.antecedentes}
+                              onChange={(e) =>
+                                setGuiaEnEdicion((actual) =>
+                                  actual
+                                    ? {
+                                        ...actual,
+                                        antecedentes: e.target.value,
+                                      }
+                                    : actual,
+                                )
+                              }
+                            />
+                          </label>
+                          <div className="flex justify-end gap-2">
+                            <button type="button" onClick={() => setGuiaEnEdicion(null)} className="rounded border px-3 py-1 text-xs">
+                              Cancelar
+                            </button>
+                            <button type="button" onClick={guardarGuia} className="rounded bg-blue-700 px-3 py-1 text-xs font-semibold text-white">
+                              Guardar guía
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between gap-2">
+                            <span>Guía {guia.folio}</span>
+                            {guiaEditable(guia) ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setGuiaEnEdicion({
+                                    id: guia.id_guia_despacho,
+                                    folio: guia.folio,
+                                    antecedentes: JSON.stringify(guia.antecedentes || {}, null, 2),
+                                  })
+                                }
+                                className="rounded border border-blue-300 bg-white px-2 py-1 text-xs font-semibold text-blue-800"
+                              >
+                                Editar guía
+                              </button>
+                            ) : (
+                              <span className="text-xs font-semibold text-gray-600">Estado {guia.estado}</span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-amber-800">La edición CU35 actualiza antecedentes autorizados. Una corrección documental formal continúa bajo CU458.</p>
+                        </>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                
+
                 <div className="bg-white border border-gray-200 p-3 rounded-lg shadow-sm col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Documento tributario externo</label>
                   <div className="space-y-2 text-sm">
-                    <input required className="w-full p-2 border rounded" placeholder="Tipo configurado, por ejemplo Factura Electrónica" value={documentoExterno.tipo} onChange={e=>setDocumentoExterno({...documentoExterno,tipo:e.target.value})}/>
-                    <input required className="w-full p-2 border rounded" placeholder="Folio" value={documentoExterno.folio} onChange={e=>setDocumentoExterno({...documentoExterno,folio:e.target.value})}/>
-                    <div className="grid grid-cols-2 gap-2"><label className="text-xs text-gray-500">Emisión<input required type="date" className="block w-full p-2 border rounded" value={documentoExterno.fechaEmision} onChange={e=>setDocumentoExterno({...documentoExterno,fechaEmision:e.target.value})}/></label><label className="text-xs text-gray-500">Vencimiento<input type="date" className="block w-full p-2 border rounded" value={documentoExterno.fechaVencimiento} onChange={e=>setDocumentoExterno({...documentoExterno,fechaVencimiento:e.target.value})}/></label></div>
-                    <div className="grid grid-cols-3 gap-2"><input required type="number" min="0" step="0.01" className="p-2 border rounded" placeholder="Neto" value={documentoExterno.montoNeto} onChange={e=>setDocumentoExterno({...documentoExterno,montoNeto:e.target.value})}/><input required type="number" min="0" step="0.01" className="p-2 border rounded" placeholder="Impuesto" value={documentoExterno.montoImpuesto} onChange={e=>setDocumentoExterno({...documentoExterno,montoImpuesto:e.target.value})}/><input required type="number" min="0.01" step="0.01" className="p-2 border rounded" placeholder="Total" value={documentoExterno.montoTotal} onChange={e=>setDocumentoExterno({...documentoExterno,montoTotal:e.target.value})}/></div>
-                    <input className="w-full p-2 border rounded" placeholder={`NV asociadas, separadas por coma (actual: ${activeModal.data.id_nota_venta})`} value={documentoExterno.idsNotas} onChange={e=>setDocumentoExterno({...documentoExterno,idsNotas:e.target.value})}/>
-                    <textarea required className="w-full p-2 border rounded" placeholder="Respaldo o referencia del documento" value={documentoExterno.respaldo} onChange={e=>setDocumentoExterno({...documentoExterno,respaldo:e.target.value})}/>
-                    <textarea className="w-full p-2 border rounded" placeholder="Observación opcional" value={documentoExterno.observacion} onChange={e=>setDocumentoExterno({...documentoExterno,observacion:e.target.value})}/>
-                    <button type="button" onClick={registrarDocumentoExterno} className="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded">Registrar y vincular</button>
+                    <input
+                      required
+                      className="w-full p-2 border rounded"
+                      placeholder="Tipo configurado, por ejemplo Factura Electrónica"
+                      value={documentoExterno.tipo}
+                      onChange={(e) =>
+                        setDocumentoExterno({
+                          ...documentoExterno,
+                          tipo: e.target.value,
+                        })
+                      }
+                    />
+                    <input
+                      required
+                      className="w-full p-2 border rounded"
+                      placeholder="Folio"
+                      value={documentoExterno.folio}
+                      onChange={(e) =>
+                        setDocumentoExterno({
+                          ...documentoExterno,
+                          folio: e.target.value,
+                        })
+                      }
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="text-xs text-gray-500">
+                        Emisión
+                        <input
+                          required
+                          type="date"
+                          className="block w-full p-2 border rounded"
+                          value={documentoExterno.fechaEmision}
+                          onChange={(e) =>
+                            setDocumentoExterno({
+                              ...documentoExterno,
+                              fechaEmision: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="text-xs text-gray-500">
+                        Vencimiento
+                        <input
+                          type="date"
+                          className="block w-full p-2 border rounded"
+                          value={documentoExterno.fechaVencimiento}
+                          onChange={(e) =>
+                            setDocumentoExterno({
+                              ...documentoExterno,
+                              fechaVencimiento: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="p-2 border rounded"
+                        placeholder="Neto"
+                        value={documentoExterno.montoNeto}
+                        onChange={(e) =>
+                          setDocumentoExterno({
+                            ...documentoExterno,
+                            montoNeto: e.target.value,
+                          })
+                        }
+                      />
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="p-2 border rounded"
+                        placeholder="Impuesto"
+                        value={documentoExterno.montoImpuesto}
+                        onChange={(e) =>
+                          setDocumentoExterno({
+                            ...documentoExterno,
+                            montoImpuesto: e.target.value,
+                          })
+                        }
+                      />
+                      <input
+                        required
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        className="p-2 border rounded"
+                        placeholder="Total"
+                        value={documentoExterno.montoTotal}
+                        onChange={(e) =>
+                          setDocumentoExterno({
+                            ...documentoExterno,
+                            montoTotal: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                    <input
+                      className="w-full p-2 border rounded"
+                      placeholder={`NV asociadas, separadas por coma (actual: ${activeModal.data.id_nota_venta})`}
+                      value={documentoExterno.idsNotas}
+                      onChange={(e) =>
+                        setDocumentoExterno({
+                          ...documentoExterno,
+                          idsNotas: e.target.value,
+                        })
+                      }
+                    />
+                    <label className="block rounded border p-2 text-sm">
+                      Respaldo PDF del documento
+                      <input
+                        required
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        className="mt-1 block w-full"
+                        onChange={async (e) => {
+                          const archivo = e.target.files?.[0];
+                          if (!archivo) return;
+                          try {
+                            setDocumentoExterno({ ...documentoExterno, respaldo: await leerPdfOperacional(archivo) });
+                          } catch (causa) {
+                            void notificarUsuario((causa as Error).message);
+                            e.target.value = '';
+                          }
+                        }}
+                      />
+                      {documentoExterno.respaldo && <span className="mt-1 block text-green-700">PDF cargado</span>}
+                    </label>
+                    <textarea
+                      className="w-full p-2 border rounded"
+                      placeholder="Observación opcional"
+                      value={documentoExterno.observacion}
+                      onChange={(e) =>
+                        setDocumentoExterno({
+                          ...documentoExterno,
+                          observacion: e.target.value,
+                        })
+                      }
+                    />
+                    <button type="button" onClick={registrarDocumentoExterno} className="w-full px-3 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded">
+                      Registrar y vincular
+                    </button>
                   </div>
                 </div>
               </div>
-              
+
               {activeModal.data.documento_tributario && activeModal.data.documento_tributario.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-2">
                   {activeModal.data.documento_tributario.map((doc: any, idx: number) => (
@@ -314,15 +674,16 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
               )}
             </div>
           )}
-          
+
           {children}
           {(activeModal.tipo === 'cotizacion' || activeModal.data.id_cotizacion) && <TrazabilidadDocumentalM11 idCotizacion={Number(activeModal.data.id_cotizacion)} />}
-          <OperacionesFinancieras key={`${activeModal.tipo}-${activeModal.data.id_nota_venta || activeModal.data.id_cotizacion}`} tipo={activeModal.tipo} documento={activeModal.data}/>
-
+          <OperacionesFinancieras key={`${activeModal.tipo}-${activeModal.data.id_nota_venta || activeModal.data.id_cotizacion}`} tipo={activeModal.tipo} documento={activeModal.data} />
         </div>
 
         <div className="p-4 border-t bg-gray-50 flex justify-end">
-          <button onClick={onClose} className="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors text-sm">Cerrar</button>
+          <button onClick={onClose} className="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors text-sm">
+            Cerrar
+          </button>
         </div>
       </div>
     </div>

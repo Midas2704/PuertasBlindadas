@@ -22,7 +22,6 @@ const NotaDeVentaDirecta: React.FC = () => {
   const [idClienteInput, setIdClienteInput] = useState('');
   const [dropdownClienteOpen, setDropdownClienteOpen] = useState(false);
 
-  const [montoBase, setMontoBase] = useState<number>(0);
   const [moneda, setMoneda] = useState('CLP');
   const [tipoCambio, setTipoCambio] = useState('');
   const [tipoCambioOrigen, setTipoCambioOrigen] = useState<'Banco Central'|'manual'|''>('');
@@ -32,7 +31,6 @@ const NotaDeVentaDirecta: React.FC = () => {
   const [descuentoTipo, setDescuentoTipo] = useState<'fijo' | 'porcentaje'>('porcentaje');
   const [descuentoValor, setDescuentoValor] = useState<number>(0);
   const [detalle, setDetalle] = useState<LineaComercial[]>([{ tipo: 'producto', descripcion: '', cantidad: 1, valor: 0 }]);
-  const [montoModificadoManualmente, setMontoModificadoManualmente] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [mensaje, setMensaje] = useState({ text: '', type: '' });
@@ -66,8 +64,8 @@ const NotaDeVentaDirecta: React.FC = () => {
     });
   }, [moneda]);
 
+  const montoBase = calcularTotalReferencialDetalle(detalle);
   const netoComercial = montoBase;
-  const totalReferencialDetalle = calcularTotalReferencialDetalle(detalle);
   // el total se arma por partes para que sea fácil seguirlo en clase
   
   let montoDescuentoComercial = 0;
@@ -104,7 +102,6 @@ const NotaDeVentaDirecta: React.FC = () => {
     try {
       const payload = {
         id_cliente: parseInt(idVal),
-        monto_neto: montoBase,
         moneda: moneda,
         exento_iva: exentoIva,
         descuento: aplicarDescuento ? {
@@ -126,14 +123,12 @@ const NotaDeVentaDirecta: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
 
       setMensaje({ text: `Nota de Venta ${data.numero_nota_venta} emitida exitosamente.`, type: 'success' });
-      setMontoBase(0);
       setAplicarDescuento(false);
       setIdClienteInput('');
       setMoneda('CLP');
       setTipoCambio('');
       setTipoCambioOrigen('');
       setDetalle([{ tipo: 'producto', descripcion: '', cantidad: 1, valor: 0 }]);
-      setMontoModificadoManualmente(false);
     } catch (error: unknown) {
       setMensaje({ text: error instanceof Error ? error.message : 'No se pudo emitir la Nota de Venta.', type: 'error' });
     } finally {
@@ -149,7 +144,6 @@ const NotaDeVentaDirecta: React.FC = () => {
 
   const actualizarDetalle = (siguiente: LineaComercial[]) => {
     setDetalle(siguiente);
-    if (!montoModificadoManualmente) setMontoBase(calcularTotalReferencialDetalle(siguiente));
   };
 
   const actualizarLinea = (indice: number, cambios: Partial<LineaComercial>) => {
@@ -245,16 +239,14 @@ const NotaDeVentaDirecta: React.FC = () => {
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label htmlFor="monto-base-neto" className="block text-sm font-medium text-gray-700 mb-1">Monto Base Neto</label>
-                <input 
+                <output
                   id="monto-base-neto"
-                  type="number" 
-                  min="0" step="0.01"
-                  required
-                  value={montoBase || ''}
-                  onChange={e => { setMontoBase(Number(e.target.value)); setMontoModificadoManualmente(true); }}
-                  className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
-                />
-                <div className="mt-1 flex items-center justify-between gap-2 text-xs text-gray-500"><span>Total referencial del detalle: {formatearMoneda(totalReferencialDetalle, moneda)}</span>{montoModificadoManualmente&&<button type="button" className="font-medium text-primary-700" onClick={()=>{setMontoBase(totalReferencialDetalle);setMontoModificadoManualmente(false);}}>Usar total del detalle</button>}</div>
+                  aria-label="Monto Base Neto"
+                  className="block w-full p-2.5 bg-gray-100 border border-gray-300 rounded-lg font-semibold text-gray-800"
+                >
+                  {formatearMoneda(montoBase, moneda)}
+                </output>
+                <div className="mt-1 text-xs text-gray-500">Se calcula automáticamente sumando cantidad × valor unitario de cada línea.</div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>

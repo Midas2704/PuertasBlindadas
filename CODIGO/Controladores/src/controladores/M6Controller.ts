@@ -11,6 +11,7 @@ import { AuditoriaDocumental, AuditoriaDocumentalLegacyPrisma, CondicionDocument
 import { calcularPrevisionLegal } from '../m6/calculoPrevisional';
 import { archivoCsvAdministrativo } from '../utilidades/csv';
 import { resumirIncidenciasTerreno, resumirOperacionTerreno, type OtDashboard, type TareaDashboard } from '../m6/dashboardTerreno';
+import { respaldoOperacional } from '../utilidades/pdfOperacional';
 
 interface ActorDocumentoM6 { id: bigint; alcanceEmpleadoId?: number | null }
 interface ActorTerrenoM6 { id: bigint; administrador: boolean; administradorOriginal?: boolean; permisos?: string[]; alcanceEmpleadoId?: number | null }
@@ -1943,7 +1944,7 @@ export class M6Controller {
 
   private async prepararPagoRemuneracion(origen: OrigenPagoRemuneracion, entrada: Record<string, unknown>, idUsuario: bigint) {
     const monto = decimalMonetario(entrada.monto, 'Monto del pago', true); const idMedio = enteroPositivo(entrada.idMedioPago, 'Medio de pago'); const clave = this.claveIdempotencia(entrada.claveIdempotencia);
-    const respaldo = texto(entrada.respaldo, 2000) || null; const referencia = texto(entrada.referencia, 200) || null;
+    const respaldo = entrada.respaldo ? respaldoOperacional(entrada.respaldo, 'Respaldo del pago') : null; const referencia = texto(entrada.referencia, 200) || null;
     try {
       const id = await prisma.$transaction(async tx => {
         const existente = await this.repositorioPago.buscarPorClave(tx, clave); if (existente) return existente.id_pago_remuneracion;
@@ -1982,7 +1983,7 @@ export class M6Controller {
     if (actual.estado !== 'PREPARADO') throw new ErrorAplicacion(409, 'Sólo un pago PREPARADO puede corregirse');
     const monto = entrada.monto === undefined ? actual.monto : decimalMonetario(entrada.monto, 'Monto del pago', true);
     const idMedio = entrada.idMedioPago === undefined ? actual.id_medio_pago : enteroPositivo(entrada.idMedioPago, 'Medio de pago');
-    const respaldo = entrada.respaldo === undefined ? actual.respaldo : texto(entrada.respaldo, 2000) || null;
+    const respaldo = entrada.respaldo === undefined ? actual.respaldo : entrada.respaldo ? respaldoOperacional(entrada.respaldo, 'Respaldo del pago') : null;
     const referencia = entrada.referencia === undefined ? actual.referencia : texto(entrada.referencia, 200) || null;
     const medio = await prisma.medio_pago.findUnique({ where: { id_medio_pago: idMedio } });
     if (!medio || medio.estado_medio_pago !== 'activo' || !medio.codigo_medio_pago || medio.requiere_respaldo === null) throw new ErrorAplicacion(409, 'El medio de pago no tiene configuración M6 válida');
@@ -2125,7 +2126,7 @@ export class M6Controller {
     const fechaEmision = fechaEntrada(entrada.fechaEmision, 'Fecha de emisión')!;
     const bruto = decimalMonetario(entrada.bruto, 'Bruto', true);
     const modalidadTributaria = texto(entrada.modalidadTributaria, 40);
-    const respaldo = texto(entrada.respaldo, 2000) || null;
+    const respaldo = entrada.respaldo ? respaldoOperacional(entrada.respaldo, 'Respaldo de la boleta') : null;
     const referencia = texto(entrada.referencia, 200) || null;
     if (!folio) throw new ErrorAplicacion(400, 'El folio es obligatorio');
     if (!modalidadTributaria) throw new ErrorAplicacion(400, 'La modalidad tributaria es obligatoria');

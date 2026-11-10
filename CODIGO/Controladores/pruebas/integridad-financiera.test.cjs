@@ -91,7 +91,7 @@ test('venta directa conserva original, tasa histórica y equivalente CLP', async
   const cliente=await prisma.cliente_financiero.findFirstOrThrow({where:{estado_financiero:'activo',nivel_formalizacion:'formal'},include:{ficha_cliente:true}});
   const creadas=[];
   try {
-    for(const moneda of ['CLP','USD']){const nota=await m2.crearVentaDirecta({id_cliente:cliente.ficha_cliente.id_ficha_cliente,monto_neto:100,moneda,exento_iva:true,detalle:[{tipo:'servicio',descripcion:'Prueba',cantidad:1,valor:100}]});creadas.push(nota.id_nota_venta);assert.equal(nota.monto_total.toNumber(),100);if(moneda==='USD'){assert.equal(nota.tipo_cambio_usado.toNumber(),900);assert.equal(nota.monto_convertido.toNumber(),90000);}else{assert.equal(nota.tipo_cambio_usado,null);assert.equal(nota.monto_convertido,null);}}
+    for(const moneda of ['CLP','USD']){const nota=await m2.crearVentaDirecta({id_cliente:cliente.ficha_cliente.id_ficha_cliente,moneda,exento_iva:true,detalle:[{tipo:'servicio',descripcion:'Prueba',cantidad:1,valor:100}]});creadas.push(nota.id_nota_venta);assert.equal(nota.monto_total.toNumber(),100);if(moneda==='USD'){assert.equal(nota.tipo_cambio_usado.toNumber(),900);assert.equal(nota.monto_convertido.toNumber(),90000);}else{assert.equal(nota.tipo_cambio_usado,null);assert.equal(nota.monto_convertido,null);}}
   } finally {if(creadas.length)await prisma.nota_venta.deleteMany({where:{id_nota_venta:{in:creadas}}});}
 });
 
