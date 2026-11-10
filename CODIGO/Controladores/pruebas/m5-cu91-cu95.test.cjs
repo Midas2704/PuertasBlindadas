@@ -50,7 +50,7 @@ async function crearProveedor(nombre) {
 }
 
 async function crearOcs(proveedor, monto = 1000) {
-  const orden = await modulo.crearOrdenCompraServicio({ idProveedor: proveedor.id_proveedor, montoAutorizado: monto, referencia: `P3-${Date.now()}-${secuencia++}` }, usuario.usuario_id_usuario);
+  const orden = await modulo.crearOrdenCompraServicio({ idProveedor: proveedor.id_proveedor, idMoneda: moneda.id_moneda, montoAutorizado: monto, referencia: `P3-${Date.now()}-${secuencia++}` }, usuario.usuario_id_usuario);
   ordenes.push(orden.id);
   return orden;
 }

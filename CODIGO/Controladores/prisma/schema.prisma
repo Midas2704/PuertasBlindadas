@@ -771,6 +771,7 @@ model moneda {
   alternativas_b2c           alternativa_b2c[]
   precios_servicio_comercial precio_servicio_comercial[]
   lineas_orden_compra_b2b    linea_orden_compra_b2b[]
+  ordenes_compra_servicio_m5 orden_compra_servicio_m5[]
 
   @@schema("finanzas")
 }
@@ -1182,6 +1183,7 @@ model orden_compra_servicio_m5 {
   id_orden_trabajo_contexto       BigInt?
   fecha_esperada_recepcion        DateTime?                            @db.Date
   proveedor                       proveedor                            @relation(fields: [id_proveedor], references: [id_proveedor], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_proveedor")
+  moneda                          moneda?                              @relation(fields: [id_moneda], references: [id_moneda], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_moneda")
   usuario_creador                 usuario                              @relation("ocs_m5_creador", fields: [creado_por], references: [usuario_id_usuario], onDelete: Restrict, onUpdate: NoAction, map: "fk_ocs_m5_creador")
   historial                       historial_orden_compra_servicio_m5[]
   ajustes                         ajuste_orden_compra_servicio_m5[]

@@ -181,14 +181,18 @@ test('CU88-CU90 crean, consultan y modifican OCS abierta sin alterar campos inmu
   const otroActivo = await crearProveedor('Servicios OCS Alternativo');
   const inactivo = await crearProveedor('Servicios OCS Inactivo', 'inactivo');
   const bloqueado = await crearProveedor('Servicios OCS Bloqueado', 'bloqueado');
-  await assert.rejects(modulo.crearOrdenCompraServicio({ idProveedor: activo.id_proveedor, montoAutorizado: 0 }, usuario.usuario_id_usuario), /mayor que cero/);
-  await assert.rejects(modulo.crearOrdenCompraServicio({ idProveedor: inactivo.id_proveedor, montoAutorizado: 100 }, usuario.usuario_id_usuario), error => error.estado === 409);
-  await assert.rejects(modulo.crearOrdenCompraServicio({ idProveedor: bloqueado.id_proveedor, montoAutorizado: 100 }, usuario.usuario_id_usuario), error => error.estado === 409);
-  const creada = await modulo.crearOrdenCompraServicio({ idProveedor: activo.id_proveedor, montoAutorizado: 125000, referencia: 'Prueba CU89', periodo: '2026-09' }, usuario.usuario_id_usuario);
+  await assert.rejects(modulo.crearOrdenCompraServicio({ idProveedor: activo.id_proveedor, montoAutorizado: 100 }, usuario.usuario_id_usuario), /Identificador inválido/);
+  await assert.rejects(modulo.crearOrdenCompraServicio({ idProveedor: activo.id_proveedor, idMoneda: moneda.id_moneda, montoAutorizado: 0 }, usuario.usuario_id_usuario), /mayor que cero/);
+  await assert.rejects(modulo.crearOrdenCompraServicio({ idProveedor: inactivo.id_proveedor, idMoneda: moneda.id_moneda, montoAutorizado: 100 }, usuario.usuario_id_usuario), error => error.estado === 409);
+  await assert.rejects(modulo.crearOrdenCompraServicio({ idProveedor: bloqueado.id_proveedor, idMoneda: moneda.id_moneda, montoAutorizado: 100 }, usuario.usuario_id_usuario), error => error.estado === 409);
+  await assert.rejects(modulo.crearOrdenCompraServicio({ idProveedor: activo.id_proveedor, idMoneda: moneda.id_moneda, montoAutorizado: 100, periodo: 'septiembre 2026' }, usuario.usuario_id_usuario), /AAAA-MM/);
+  const creada = await modulo.crearOrdenCompraServicio({ idProveedor: activo.id_proveedor, idMoneda: moneda.id_moneda, montoAutorizado: 125000, referencia: 'Prueba CU89', periodo: '2026-09' }, usuario.usuario_id_usuario);
   ordenes.push(creada.id);
   assert.equal(creada.estado, 'abierta');
   assert.equal(creada.montoDocumentado, 0);
   assert.equal(creada.saldoDisponible, 125000);
+  assert.equal(creada.moneda.codigo, 'CLP');
+  assert.equal(creada.periodo, '2026-09');
   assert.equal(await prisma.$transaction(tx => ocsTieneEfectosFinancieros(tx, creada.id)), false);
   const listado = await modulo.listarOrdenesCompraServicios();
   assert.ok(listado.some(item => item.id === creada.id));
@@ -203,6 +207,20 @@ test('CU88-CU90 crean, consultan y modifican OCS abierta sin alterar campos inmu
   assert.ok(modificada.historial.some(item => item.campo === 'monto_autorizado'));
   assert.ok(modificada.historial.some(item => item.campo === 'proveedor'));
   await assert.rejects(modulo.modificarOrdenCompraServicio(creada.id, { estado: 'cerrada' }, usuario.usuario_id_usuario), /No puede modificarse/);
+});
+
+test('CU90 permite corregir moneda histórica sólo mientras la OCS no tenga efectos financieros', async () => {
+  await preparar();
+  const proveedor = await crearProveedor('Corrección moneda OCS histórica');
+  const usd = await prisma.moneda.findFirstOrThrow({ where: { codigo_moneda: 'USD', estado_moneda: 'activo' } });
+  const historica = await prisma.orden_compra_servicio_m5.create({ data: { id_proveedor: proveedor.id_proveedor, id_moneda: null, monto_autorizado: 100, monto_autorizado_original: 100, creado_por: usuario.usuario_id_usuario } });
+  ordenes.push(historica.id_orden_compra_servicio_m5);
+  const corregida = await modulo.modificarOrdenCompraServicio(historica.id_orden_compra_servicio_m5, { idMoneda: usd.id_moneda }, usuario.usuario_id_usuario);
+  assert.equal(corregida.moneda.codigo, 'USD');
+  assert.ok(corregida.historial.some(item => item.campo === 'moneda' && item.valorAnterior === null && item.valorNuevo === String(usd.id_moneda)));
+  await prisma.efecto_financiero_ocs_m5.create({ data: { id_ocs_m5: historica.id_orden_compra_servicio_m5, tipo_efecto: 'documento_definitivo', referencia: `MONEDA-${Date.now()}`, monto_documentado: 10 } });
+  await assert.rejects(modulo.modificarOrdenCompraServicio(historica.id_orden_compra_servicio_m5, { idMoneda: moneda.id_moneda }, usuario.usuario_id_usuario), error => error.estado === 409);
+  await prisma.efecto_financiero_ocs_m5.deleteMany({ where: { id_ocs_m5: historica.id_orden_compra_servicio_m5 } });
 });
 
 test('permisos CU85-CU90 respetan actores, operaciones y módulo M5', () => {

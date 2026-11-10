@@ -18,7 +18,7 @@ vi.mock('../seguridad/Sesion',()=>({usarSesion:()=>({sesion:{id:'1',nombre:'Fixt
 vi.mock('../components/DialogosSistema',()=>({solicitarTexto:control.texto,confirmarAccion:control.confirmar}));
 
 const respuesta=(dato:unknown,ok=true)=>Promise.resolve({ok,json:async()=>dato});
-const ocs={id:7,proveedor:{id:3,razonSocial:'Proveedor Fixture',estado:'activo'},estado:'abierta',montoAutorizado:250000,montoAutorizadoOriginal:250000,montoDocumentado:0,saldoDisponible:250000,tieneEfectosFinancieros:false,referencia:'REF-7',periodo:'2026-10',descripcion:'Servicio controlado',fechaCreacion:'2026-10-01T00:00:00Z',fechaActualizacion:'2026-10-01T00:00:00Z',creadoPor:{id:'1',nombre:'Fixture'},historial:[],ajustes:[]};
+const ocs={id:7,proveedor:{id:3,razonSocial:'Proveedor Fixture',estado:'activo'},estado:'abierta',montoAutorizado:250000,montoAutorizadoOriginal:250000,montoDocumentado:0,saldoDisponible:250000,tieneEfectosFinancieros:false,idMoneda:1,moneda:{id:1,codigo:'CLP',nombre:'Peso chileno',simbolo:'$'},referencia:'REF-7',periodo:'2026-10',descripcion:'Servicio controlado',fechaCreacion:'2026-10-01T00:00:00Z',fechaActualizacion:'2026-10-01T00:00:00Z',creadoPor:{id:'1',nombre:'Fixture'},historial:[],ajustes:[]};
 
 describe('acciones finales reportadas por usuarios',()=>{
   beforeEach(()=>{
@@ -42,6 +42,34 @@ describe('acciones finales reportadas por usuarios',()=>{
     control.solicitar.mockImplementation((ruta:string)=>ruta==='/ordenes-compra-servicios/999'?respuesta({error:'OCS no encontrada'},false):respuesta([]));
     render(<MemoryRouter initialEntries={['/ordenes-compra-servicios/999']}><Routes><Route path="ordenes-compra-servicios/:id" element={<OrdenesCompraServicios/>}/></Routes></MemoryRouter>);
     expect(await screen.findByText('OCS no encontrada')).toBeInTheDocument();
+  });
+
+  it('Nueva OCS exige moneda activa, estructura el período como mes y evita doble envío',async()=>{
+    control.permisos=['CU88','CU89'];
+    let resolverCreacion:(valor:unknown)=>void=()=>undefined;
+    const creacionPendiente=new Promise(resolve=>{resolverCreacion=resolve});
+    control.solicitar.mockImplementation((ruta:string,opciones?:RequestInit)=>{
+      if(ruta==='/proveedores?estado=activo')return respuesta([{idProveedor:3,razonSocial:'Proveedor Fixture'}]);
+      if(ruta==='/monedas')return respuesta([{id_moneda:1,codigo_moneda:'CLP',nombre_moneda:'Peso chileno',simbolo_moneda:'$',estado_moneda:'activo'}]);
+      if(ruta==='/ordenes-compra-servicios'&&opciones?.method==='POST')return creacionPendiente;
+      return respuesta([]);
+    });
+    render(<MemoryRouter initialEntries={['/ordenes-compra-servicios']}><Routes><Route path="ordenes-compra-servicios" element={<OrdenesCompraServicios/>}/></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button',{name:/Nueva OCS/}));
+    const confirmar=screen.getByRole('button',{name:'Confirmar'});
+    expect(confirmar).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Proveedor activo'),{target:{value:'3'}});
+    fireEvent.change(screen.getByLabelText('Moneda de la OCS'),{target:{value:'1'}});
+    fireEvent.change(screen.getByLabelText('Monto autorizado'),{target:{value:'10000'}});
+    fireEvent.change(screen.getByLabelText('Período del servicio'),{target:{value:'2026-11'}});
+    fireEvent.click(confirmar);
+    expect(screen.getByRole('button',{name:'Guardando...'})).toBeDisabled();
+    fireEvent.click(screen.getByRole('button',{name:'Guardando...'}));
+    expect(control.solicitar.mock.calls.filter(([ruta,opciones])=>ruta==='/ordenes-compra-servicios'&&opciones?.method==='POST')).toHaveLength(1);
+    const llamada=control.solicitar.mock.calls.find(([ruta,opciones])=>ruta==='/ordenes-compra-servicios'&&opciones?.method==='POST');
+    expect(JSON.parse(llamada?.[1]?.body as string)).toMatchObject({idProveedor:3,idMoneda:1,montoAutorizado:10000,periodo:'2026-11'});
+    resolverCreacion(respuesta({id:8}));
+    await waitFor(()=>expect(screen.queryByRole('button',{name:'Guardando...'})).not.toBeInTheDocument());
   });
 
   it('Editar honorario carga la boleta pendiente y guarda por PATCH',async()=>{
