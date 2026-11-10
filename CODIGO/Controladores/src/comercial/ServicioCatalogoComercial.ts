@@ -1,6 +1,6 @@
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
-import { fechaComercial, normalizarUbicacion, resolverCoberturaDesdeTarifas, type SegmentoComercial, type TarifaResoluble } from './contratosCatalogoComercial';
+import { fechaComercial, normalizarUbicacion, resolverCoberturaDesdeTarifas, variantesRegionNormalizada, type SegmentoComercial, type TarifaResoluble } from './contratosCatalogoComercial';
 
 type Consulta = Record<string, unknown>;
 
@@ -142,7 +142,7 @@ export class ServicioCatalogoComercial {
     const comuna = String(consulta.comuna ?? '').trim() || null;
     const fecha = fechaComercial(consulta.fecha);
     const filas = await prisma.tarifa_instalacion_comercial.findMany({ where: {
-      region_normalizada: normalizarUbicacion(region), estado: 'ACTIVA', vigencia_desde: { lte: fecha },
+      region_normalizada: { in: variantesRegionNormalizada(region) }, estado: 'ACTIVA', vigencia_desde: { lte: fecha },
       OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: fecha } }],
     }, include: { moneda: true }, orderBy: { vigencia_desde: 'desc' } });
     const candidatas: TarifaResoluble[] = filas.map(item => ({ id: item.id_tarifa_instalacion_comercial.toString(), alcance: item.alcance_geografico,

@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
-import { normalizarUbicacion } from './contratosCatalogoComercial';
+import { normalizarRegion, normalizarUbicacion } from './contratosCatalogoComercial';
 import { AutorizadorCapacidadComercial, validarSolicitudEscrituraComercial, type ActorComercialM4, type OperacionSeguraComercial } from './SeguridadCapacidadesComerciales';
 
 type Entrada = Record<string, unknown>;
@@ -90,12 +90,12 @@ export class ServicioEscrituraComercial {
       const cobertura=op==='REGISTRAR_EXCLUSION_COMUNAL'?'NO_DISPONIBLE':String(e.cobertura), alcance=String(e.alcance);
       const anterior=op==='VERSIONAR_TARIFA'?await tx.tarifa_instalacion_comercial.findUnique({where:{id_tarifa_instalacion_comercial:BigInt(id(e.idAnterior,'Tarifa anterior'))}}):null;
       const region=str(e.region,'Región',120), comuna=alcance==='COMUNA'?str(e.comuna,'Comuna',120):null;
-      if(anterior && (anterior.alcance_geografico!==alcance || anterior.region_normalizada!==normalizarUbicacion(region) || anterior.comuna_normalizada!==(comuna?normalizarUbicacion(comuna):null))) throw new ErrorAplicacion(409,'La nueva versión debe conservar su alcance geográfico');
+      if(anterior && (anterior.alcance_geografico!==alcance || normalizarRegion(anterior.region_normalizada)!==normalizarRegion(region) || anterior.comuna_normalizada!==(comuna?normalizarUbicacion(comuna):null))) throw new ErrorAplicacion(409,'La nueva versión debe conservar su alcance geográfico');
       if(anterior){
         const retirada=await tx.tarifa_instalacion_comercial.updateMany({where:{id_tarifa_instalacion_comercial:anterior.id_tarifa_instalacion_comercial,revision:anterior.revision,estado:'ACTIVA'},data:{estado:'INACTIVA',revision:{increment:1},actualizado_en:new Date()}});
         if(!retirada.count)throw new ErrorAplicacion(409,'La tarifa fue modificada por otro usuario','REVISION_DESACTUALIZADA');
       }
-      const fila=await tx.tarifa_instalacion_comercial.create({data:{alcance_geografico:alcance,region,region_normalizada:normalizarUbicacion(region),ciudad:opt(e.ciudad,120),comuna,comuna_normalizada:comuna?normalizarUbicacion(comuna):null,estado_cobertura:cobertura,id_moneda:cobertura==='DISPONIBLE'?id(e.idMoneda,'Moneda'):null,precio_comercial:cobertura==='DISPONIBLE'?new Prisma.Decimal(Number(e.precio)):null,vigencia_desde:date(e.vigenciaDesde),vigencia_hasta:e.vigenciaHasta?date(e.vigenciaHasta):null,condiciones:opt(e.condiciones),observaciones:opt(e.observaciones),revision:(anterior?.revision??0)+1,creado_por:actor}});
+      const fila=await tx.tarifa_instalacion_comercial.create({data:{alcance_geografico:alcance,region,region_normalizada:normalizarRegion(region),ciudad:opt(e.ciudad,120),comuna,comuna_normalizada:comuna?normalizarUbicacion(comuna):null,estado_cobertura:cobertura,id_moneda:cobertura==='DISPONIBLE'?id(e.idMoneda,'Moneda'):null,precio_comercial:cobertura==='DISPONIBLE'?new Prisma.Decimal(Number(e.precio)):null,vigencia_desde:date(e.vigenciaDesde),vigencia_hasta:e.vigenciaHasta?date(e.vigenciaHasta):null,condiciones:opt(e.condiciones),observaciones:opt(e.observaciones),revision:(anterior?.revision??0)+1,creado_por:actor}});
       return {id:fila.id_tarifa_instalacion_comercial.toString(),version:fila.revision,__auditoriaM9:{nuevo:{id:fila.id_tarifa_instalacion_comercial.toString(),cobertura,revision:fila.revision}}};
     }
     if(op==='DESACTIVAR_TARIFA') return this.desactivar(tx.tarifa_instalacion_comercial,'id_tarifa_instalacion_comercial',e,actor);

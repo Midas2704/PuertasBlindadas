@@ -24,6 +24,21 @@ export type ResolucionCobertura = {
 export const normalizarUbicacion = (valor: unknown) => String(valor ?? '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
 
+/** Canoniza nombres oficiales y abreviados sin perder compatibilidad con tarifas históricas. */
+export const normalizarRegion = (valor: unknown) => {
+  const original = normalizarUbicacion(valor);
+  if (['RM', 'REGION METROPOLITANA', 'REGION METROPOLITANA DE SANTIAGO', 'METROPOLITANA DE SANTIAGO'].includes(original)) return 'METROPOLITANA';
+  return original.replace(/^REGION\s+(?:DE(?:L)?\s+)?/, '');
+};
+
+export const variantesRegionNormalizada = (valor: unknown) => {
+  const original = normalizarUbicacion(valor);
+  const canonica = normalizarRegion(valor);
+  const variantes = [original, canonica, `REGION DE ${canonica}`];
+  if (canonica === 'METROPOLITANA') variantes.push('RM', 'REGION METROPOLITANA', 'REGION METROPOLITANA DE SANTIAGO', 'METROPOLITANA DE SANTIAGO');
+  return [...new Set(variantes)];
+};
+
 export const fechaComercial = (valor: unknown, defecto = new Date()) => {
   const texto = typeof valor === 'string' ? valor.trim() : '';
   const fecha = texto ? new Date(`${texto.slice(0, 10)}T12:00:00.000Z`) : defecto;
@@ -38,9 +53,9 @@ export const estaVigente = (desde: Date, hasta: Date | null, fecha: Date) =>
 export function resolverCoberturaDesdeTarifas(
   tarifas: TarifaResoluble[], region: string, comuna: string | null | undefined,
 ): ResolucionCobertura {
-  const regionNormalizada = normalizarUbicacion(region);
+  const regionNormalizada = normalizarRegion(region);
   const comunaNormalizada = normalizarUbicacion(comuna) || null;
-  const candidatas = tarifas.filter(item => item.regionNormalizada === regionNormalizada);
+  const candidatas = tarifas.filter(item => normalizarRegion(item.regionNormalizada) === regionNormalizada);
   const exacta = comunaNormalizada
     ? candidatas.find(item => item.comunaNormalizada === comunaNormalizada && item.alcance === 'COMUNA')
     : undefined;

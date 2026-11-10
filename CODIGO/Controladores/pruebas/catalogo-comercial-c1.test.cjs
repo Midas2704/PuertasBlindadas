@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizarUbicacion, resolverCoberturaDesdeTarifas } = require('../dist/comercial/contratosCatalogoComercial');
+const { normalizarUbicacion, normalizarRegion, resolverCoberturaDesdeTarifas } = require('../dist/comercial/contratosCatalogoComercial');
 process.env.DATABASE_URL ||= 'postgresql://usuario:clave@127.0.0.1:1/c1_no_conectar';
 const { ServicioCatalogoComercial } = require('../dist/comercial/ServicioCatalogoComercial');
 const { permiteOperacion, operacionesPermiso } = require('../dist/validaciones/permisos');
@@ -10,6 +10,13 @@ const base = { id:'1', alcance:'REGION', regionNormalizada:'VALPARAISO', comunaN
 
 test('normaliza región y comuna sin depender de tildes ni espacios', () => {
   assert.equal(normalizarUbicacion('  Región   de Valparaíso '), 'REGION DE VALPARAISO');
+  assert.equal(normalizarRegion('Región Metropolitana de Santiago'), 'METROPOLITANA');
+});
+test('Maipú reutiliza una tarifa metropolitana aunque la región use su nombre oficial', () => {
+  const metropolitana = {...base,regionNormalizada:'METROPOLITANA',comunaNormalizada:'MAIPU',alcance:'COMUNA'};
+  const resultado = resolverCoberturaDesdeTarifas([metropolitana], 'Región Metropolitana de Santiago', 'Maipú');
+  assert.equal(resultado.estado, 'VIGENTE');
+  assert.equal(resultado.origen, 'COMUNA');
 });
 test('resuelve una tarifa regional vigente como fallback', () => {
   const resultado = resolverCoberturaDesdeTarifas([base], 'Valparaíso', 'Quilpué');
