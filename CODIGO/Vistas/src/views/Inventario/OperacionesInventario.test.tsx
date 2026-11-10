@@ -19,13 +19,13 @@ const detalle={sku:'MAT-01',nombre:'Acero',existencias:[{bodegaId:'1',bodega:'Ce
 describe('Operaciones reales de Inventario',()=>{
   beforeEach(()=>{
     vi.clearAllMocks();
-    vi.mocked(usarSesion).mockReturnValue({sesion:{id:'1',nombre:'Operador',acceso:'op',permisos:['CU15','CU466'],configuracion:'particular',administrador:false,cambiarClave:false},cargando:false,actualizar:vi.fn()});
+    vi.mocked(usarSesion).mockReturnValue({sesion:{id:'1',nombre:'Operador',acceso:'op',permisos:['CU15','CU466'],configuracion:'particular',administrador:false,administradorOriginal:false,cambiarClave:false},cargando:false,actualizar:vi.fn()});
     vi.mocked(consultarInventario).mockImplementation(async ruta=>ruta==='/catalogos-operacion'?catalogos:ruta.startsWith('/materiales/')?detalle:{items:[]});
     vi.mocked(operarInventario).mockResolvedValue({operacionId:'10',movimientoId:'20',fisico:'12',reservado:'2',disponible:'10',repetida:false});
   });
 
   it('mantiene las operaciones ocultas sin una capacidad efectiva',async()=>{
-    vi.mocked(usarSesion).mockReturnValue({sesion:{id:'2',nombre:'Consulta',acceso:'consulta',permisos:['CU14','CU15'],configuracion:'perfil',administrador:false,cambiarClave:false},cargando:false,actualizar:vi.fn()});
+    vi.mocked(usarSesion).mockReturnValue({sesion:{id:'2',nombre:'Consulta',acceso:'consulta',permisos:['CU14','CU15'],configuracion:'perfil',administrador:false,administradorOriginal:false,cambiarClave:false},cargando:false,actualizar:vi.fn()});
     render(<OperacionesInventario/>);
     expect(screen.getByText(/permanecen inactivas hasta su aprobación formal/i)).toBeInTheDocument();
     expect(screen.queryByRole('button',{name:/confirmar operación/i})).not.toBeInTheDocument();

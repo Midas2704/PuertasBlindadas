@@ -3,11 +3,10 @@ import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { comprobarClave, hashClave, validarClave, secreto, huella, futuro, politica } from '../utilidades/seguridad';
 import { CorreoRecuperacion, CorreoDesarrollo } from '../utilidades/correo';
-import { codigosAdministrador, operacionesPermiso, operacionesQueRequierenAdministrador, permiteOperacion } from '../validaciones/permisos';
+import { codigosAdministrador, codigosImplementados, operacionesPermiso, operacionesQueRequierenAdministrador, permiteOperacion } from '../validaciones/permisos';
 import { texto } from '../validaciones/solicitudes';
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 import { clasificarPermisoM4 } from '../seguridad/catalogoPermisosFuncional';
-import { sincronizarPermisosMidas } from '../administracion/sincronizarPermisosMidas';
 
 type Transaccion = Prisma.TransactionClient;
 type Entrada = Record<string, unknown>;
@@ -18,15 +17,20 @@ export interface ActorAutenticado { id: bigint; sesion: string; permisos: string
 const error = (estado: number, mensaje: string): never => { throw new ErrorAplicacion(estado,mensaje); };
 const idCuenta = (valor: unknown) => { if (!/^\d+$/.test(String(valor))) return error(400,'Usuario inválido'); return BigInt(String(valor)); };
 const confirmar = (entrada: Entrada) => { if (entrada.confirmado !== true) error(400,'Debes confirmar la operación'); };
-export const permisosEfectivos = (cuenta: Cuenta) => {
- if(cuenta.administrador_original) return [...new Set(cuenta.particulares.map(v=>v.permiso).filter(p=>p.activo_m4&&p.codigo_m4&&p.codigo_m4!=='CU377').map(p=>p.codigo_m4!))];
+const codigosRaizImplementados = new Set(codigosImplementados.filter(codigo=>codigo!=='CU377'));
+export const esAdministradorRaiz = (cuenta: Pick<Cuenta,'administrador_original'>) => cuenta.administrador_original === true;
+export const permisosEfectivos = (cuenta: Cuenta, catalogoRaiz?: string[]) => {
+ if(esAdministradorRaiz(cuenta)) return [...new Set((catalogoRaiz || codigosImplementados).filter(codigo=>codigo!=='CU377'))];
  if(cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia') return codigosAdministrador;
  const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
  return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || cuenta.administrador_original)).map(p => p.codigo_m4!);
 };
-export const requiereSincronizacionMidas = (cuenta: Cuenta, operacion: string) => {
- const permisoSolicitado=operacionesPermiso[operacion];
- return cuenta.administrador_original && (operacion==='miSesion' || !!(permisoSolicitado && !permisosEfectivos(cuenta).includes(permisoSolicitado)));
+/** La autorización raíz no depende de materializar asignaciones particulares. */
+export const requiereSincronizacionMidas = () => false;
+
+const permisosActivosAdministradorRaiz = async (tx: Transaccion | typeof prisma) => {
+ const catalogo=await tx.permiso.findMany({where:{activo_m4:true,codigo_m4:{not:null}},select:{codigo_m4:true}});
+ return catalogo.map(item=>item.codigo_m4).filter((codigo):codigo is string=>!!codigo&&codigosRaizImplementados.has(codigo));
 };
 
 /** El perfil propone permisos iniciales; no constituye un límite para personalizaciones autorizadas. */
@@ -67,11 +71,11 @@ export class M4Controller {
  private async reiniciarSeguridad(tx:Transaccion,id:bigint,responsable:string) {
   await tx.estado_seguridad_usuario.upsert({where:{id_usuario:id},create:{id_usuario:id,responsable},update:{intentos:0,bloqueos:0,bloqueo_hasta:null,bloqueo_persistente:false,actualizado:new Date(),responsable}});
  }
- private presentar(cuenta:Cuenta) {
+ private presentar(cuenta:Cuenta, permisosRaiz?:string[]) {
   return {id:cuenta.usuario_id_usuario.toString(),acceso:cuenta.acceso_m4 || 'Pendiente de habilitación M4',nombre:cuenta.empleado_seguridad?`${cuenta.empleado_seguridad.nombres} ${cuenta.empleado_seguridad.apellido_paterno}`:(cuenta.usuario_nombre_completo_primer_nombre_usuario || cuenta.usuario_username || `Cuenta heredada ${cuenta.usuario_id_usuario}`),
    correo:cuenta.usuario_correo,estado:cuenta.usuario_estado_cuenta,configuracion:cuenta.perfil?.codigo_m4,configuracionParticular:cuenta.configuracion_particular,
    administrador:!!cuenta.usuario_es_administrador,original:cuenta.administrador_original,bloqueada:!!cuenta.seguridad?.bloqueo_persistente,bloqueoHasta:cuenta.seguridad?.bloqueo_hasta,
-   permisos:permisosEfectivos(cuenta),permisosParticulares:cuenta.particulares.map(p=>p.permiso.codigo_m4).filter((codigo):codigo is string=>!!codigo),
+   permisos:permisosEfectivos(cuenta,permisosRaiz),permisosParticulares:cuenta.particulares.map(p=>p.permiso.codigo_m4).filter((codigo):codigo is string=>!!codigo),
    permisosPerfil:cuenta.perfil?.perfil_permiso.filter(v=>v.perfil_permiso_activo&&v.permiso.activo_m4&&v.permiso.codigo_m4).map(v=>v.permiso.codigo_m4!) || [],rutEmpleado:cuenta.empleado_m4};
  }
  async autorizar(operacion:string, contexto:ContextoSesion, adicionales:string[]=[]):Promise<ActorAutenticado> {
@@ -80,31 +84,23 @@ export class M4Controller {
   const ahora = new Date();
   const finAbsoluto = sesion ? new Date(sesion.inicio.getTime() + politica.sesionMinutos * 60000) : ahora;
   if(!sesion || sesion.invalidada || sesion.vence<=ahora || finAbsoluto<=ahora || sesion.version_seguridad!==sesion.usuario.version_seguridad || sesion.usuario.usuario_estado_cuenta!=='activo') return error(401,'La sesión finalizó; vuelve a iniciar sesión');
-  if(requiereSincronizacionMidas(sesion.usuario,operacion)) {
-   await prisma.$transaction(async tx=>{
-    await sincronizarPermisosMidas(tx,sesion!.usuario.usuario_id_usuario);
-    const cuenta=await tx.usuario.findUniqueOrThrow({where:{usuario_id_usuario:sesion!.usuario.usuario_id_usuario},select:{version_seguridad:true}});
-    await tx.sesion_usuario.update({where:{id:sesion!.id},data:{version_seguridad:cuenta.version_seguridad}});
-   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
-   sesion=await prisma.sesion_usuario.findUnique({where:{id:sesion.id},include:{usuario:{include:incluirAccesos}}});
-   if(!sesion) return error(401,'La sesión finalizó; vuelve a iniciar sesión');
-  }
   const cuenta=sesion.usuario;
   if(cuenta.seguridad?.bloqueo_persistente || (cuenta.seguridad?.bloqueo_hasta && cuenta.seguridad.bloqueo_hasta>new Date())) return error(401,'Cuenta bloqueada');
   const credencial=await this.credencial(prisma,cuenta.usuario_id_usuario);
   const cambiarClave=credencial.temporal || !!(credencial.vence && credencial.vence<=new Date());
   const personales=['miSesion','cambiarClave','cerrarSesion'];
   if(cambiarClave && !personales.includes(operacion)) return error(403,'Debes cambiar tu contraseña antes de continuar');
-  const permisos=permisosEfectivos(cuenta);
+  const raiz=esAdministradorRaiz(cuenta);
+  const permisos=raiz?await permisosActivosAdministradorRaiz(prisma):permisosEfectivos(cuenta);
   const numeroCU = Number(operacionesPermiso[operacion]?.slice(2));
-  if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia') return error(403,'La operación requiere configuración de Gerencia');
-  if (operacionesQueRequierenAdministrador.has(operacion) && !cuenta.usuario_es_administrador && !cuenta.administrador_original) return error(403,'La operación requiere rol Administrador');
+  if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia' && !raiz) return error(403,'La operación requiere configuración de Gerencia');
+  if (operacionesQueRequierenAdministrador.has(operacion) && !cuenta.usuario_es_administrador && !raiz) return error(403,'La operación requiere rol Administrador');
   if(!personales.includes(operacion) && !permiteOperacion(operacion, permisos)) return error(403,'No tienes permiso para esta operación');
   if(adicionales.some(p=>!permisos.includes(p))) return error(403,'No tienes permiso para los filtros o condiciones solicitados');
   const vencePorInactividad = new Date(Math.min(finAbsoluto.getTime(), ahora.getTime() + politica.inactividadMinutos * 60000));
   await prisma.sesion_usuario.update({where:{id:sesion.id},data:{vence:vencePorInactividad}});
   const perfilInterno = ['gerencia','contador','secretaria'].includes(cuenta.perfil?.codigo_m4 || '');
-  return {id:cuenta.usuario_id_usuario,sesion:sesion.id,permisos,configuracion:cuenta.perfil?.codigo_m4 || '',administrador:!!cuenta.usuario_es_administrador,administradorOriginal:cuenta.administrador_original,cambiarClave,nombre:this.presentar(cuenta).nombre || '',acceso:cuenta.acceso_m4 || '',alcanceEmpleadoId:perfilInterno||cuenta.administrador_original?undefined:(cuenta.empleado_seguridad?.id_empleado ?? null)};
+  return {id:cuenta.usuario_id_usuario,sesion:sesion.id,permisos,configuracion:cuenta.perfil?.codigo_m4 || '',administrador:!!cuenta.usuario_es_administrador,administradorOriginal:raiz,cambiarClave,nombre:this.presentar(cuenta,permisos).nombre || '',acceso:cuenta.acceso_m4 || '',alcanceEmpleadoId:perfilInterno||raiz?undefined:(cuenta.empleado_seguridad?.id_empleado ?? null)};
  }
  async iniciarSesion(entrada:Entrada, contexto:ContextoSesion) {
   const acceso=texto(entrada.acceso,100).replace(/\./g,'').toLowerCase();
@@ -126,10 +122,7 @@ export class M4Controller {
    if(cuenta!.usuario_estado_cuenta!=='activo') return {fallo:403,mensaje:'Cuenta inactiva'};
    if(cuenta!.seguridad?.bloqueo_persistente || (cuenta!.seguridad?.bloqueo_hasta && cuenta!.seguridad.bloqueo_hasta>new Date())) return {fallo:403,mensaje:'Cuenta bloqueada'};
    if(credencial!.temporal && credencial!.vence && credencial!.vence<=new Date()) return {fallo:403,mensaje:'Credencial temporal vencida; solicita restablecimiento'};
-   if(cuenta!.administrador_original) await sincronizarPermisosMidas(tx,cuenta!.usuario_id_usuario);
-   const cuentaSesion=cuenta!.administrador_original
-    ? await tx.usuario.findUniqueOrThrow({where:{usuario_id_usuario:cuenta!.usuario_id_usuario},include:incluirAccesos})
-    : cuenta!;
+   const cuentaSesion=cuenta!;
    await tx.sesion_usuario.updateMany({where:{id_usuario:cuentaSesion.usuario_id_usuario,invalidada:null,vence:{lte:new Date()}},data:{invalidada:new Date(),motivo:'Vencimiento'}});
    const anterior=await tx.sesion_usuario.findFirst({where:{id_usuario:cuentaSesion.usuario_id_usuario,invalidada:null,vence:{gt:new Date()}},orderBy:{inicio:'desc'}});
    if(anterior && entrada.reemplazarSesion!==true) return {fallo:409,mensaje:'Ya existe una sesión activa. Confirma si quieres cerrarla e iniciar una nueva.',codigo:'SESION_ACTIVA_REQUIERE_CONFIRMACION'};
@@ -138,7 +131,8 @@ export class M4Controller {
    await tx.sesion_usuario.create({data:{id_usuario:cuentaSesion.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(Math.min(politica.sesionMinutos,politica.inactividadMinutos)),version_seguridad:cuentaSesion.version_seguridad,direccion:contexto.direccion,agente:contexto.agente?.slice(0,300)}});
    await tx.usuario.update({where:{usuario_id_usuario:cuentaSesion.usuario_id_usuario},data:{usuario_fecha_ultima_conexion:new Date()}});
    await tx.estado_seguridad_usuario.updateMany({where:{id_usuario:cuentaSesion.usuario_id_usuario},data:{intentos:0,bloqueos:0}});
-   return {token,usuario:{...this.presentar(cuentaSesion),cambiarClave:credencial!.temporal || !!(credencial!.vence && credencial!.vence<=new Date())}};
+   const permisosRaiz=esAdministradorRaiz(cuentaSesion)?await permisosActivosAdministradorRaiz(tx):undefined;
+   return {token,usuario:{...this.presentar(cuentaSesion,permisosRaiz),administradorOriginal:esAdministradorRaiz(cuentaSesion),cambiarClave:credencial!.temporal || !!(credencial!.vence && credencial!.vence<=new Date())}};
   });
   if(resultado.fallo) throw new ErrorAplicacion(resultado.fallo,resultado.mensaje!,'codigo' in resultado?resultado.codigo:undefined); return resultado;
  }
@@ -151,7 +145,10 @@ export class M4Controller {
   });
  }
  async cerrarSesion(actor:ActorAutenticado) { await prisma.sesion_usuario.updateMany({where:{id:actor.sesion,id_usuario:actor.id,invalidada:null},data:{invalidada:new Date(),motivo:'Cierre propio'}});return {mensaje:'Sesión cerrada'}; }
- async usuarios() { return (await prisma.usuario.findMany({include:incluirAccesos,orderBy:{acceso_m4:'asc'}})).map(c=>this.presentar(c)); }
+ async usuarios() {
+  const [cuentas,permisosRaiz]=await Promise.all([prisma.usuario.findMany({include:incluirAccesos,orderBy:{acceso_m4:'asc'}}),permisosActivosAdministradorRaiz(prisma)]);
+  return cuentas.map(c=>this.presentar(c,esAdministradorRaiz(c)?permisosRaiz:undefined));
+ }
  async catalogosUsuarios() {
   const [empleados,configuraciones,permisos,dependencias]=await Promise.all([
    prisma.empleado.findMany({where:{estado_laboral:'activo',cuenta_m4:null,usuario:{none:{}}},select:{rut_empleado:true,nombres:true,apellido_paterno:true}}),

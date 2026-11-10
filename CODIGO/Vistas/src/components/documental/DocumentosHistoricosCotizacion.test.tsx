@@ -9,7 +9,7 @@ import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
 
 const json = (datos: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(datos), { status, headers: { 'Content-Type': 'application/json' } }));
-const sesion = (permisos: string[]) => ({ sesion: { id: '7', nombre: 'Prueba', acceso: 'interno', permisos, configuracion: '', administrador: false, cambiarClave: false }, cargando: false, actualizar: vi.fn() });
+const sesion = (permisos: string[]) => ({ sesion: { id: '7', nombre: 'Prueba', acceso: 'interno', permisos, configuracion: '', administrador: false, administradorOriginal: false, cambiarClave: false }, cargando: false, actualizar: vi.fn() });
 
 describe('consulta histórica de PDF de cotización', () => {
   beforeEach(() => {

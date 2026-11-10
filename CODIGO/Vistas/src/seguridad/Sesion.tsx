@@ -1,8 +1,10 @@
+/* eslint-disable react-refresh/only-export-components, react-hooks/rules-of-hooks */
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { solicitarFinanzas } from '../api/finanzas';
-export interface Sesion {id:string;nombre:string;acceso:string;permisos:string[];configuracion:string;administrador:boolean;cambiarClave:boolean}
+import { tieneAlgunPermiso, tienePermiso } from './autorizacionSesion';
+export interface Sesion {id:string;nombre:string;acceso:string;permisos:string[];configuracion:string;administrador:boolean;administradorOriginal:boolean;cambiarClave:boolean}
 const Contexto = createContext<{sesion:Sesion|null;cargando:boolean;actualizar:()=>Promise<void>}>({sesion:null,cargando:true,actualizar:async()=>{}});
 export function ProveedorSesion({children}:{children:ReactNode}) {
  const [sesion,establecer]=useState<Sesion|null>(null);const [cargando,cargar]=useState(true);
@@ -17,7 +19,7 @@ export function Protegido({children,permiso}:{children:ReactNode;permiso?:string
  if(cargando)return <p className="p-8">Cargando sesión…</p>;
  if(!sesion)return <Navigate to="/login" state={{desde:`${ubicacion.pathname}${ubicacion.search}${ubicacion.hash}`}} replace/>;
  if(sesion.cambiarClave && window.location.pathname!=='/cuenta/clave')return <Navigate to="/cuenta/clave" replace/>;
- const autorizado=!permiso || (Array.isArray(permiso) ? permiso.some((codigo)=>sesion.permisos.includes(codigo)) : sesion.permisos.includes(permiso));
+ const autorizado=!permiso || (Array.isArray(permiso) ? tieneAlgunPermiso(sesion,permiso) : tienePermiso(sesion,permiso));
  if(!autorizado)return <div className="p-8"><h1 className="text-2xl font-bold">Acceso no disponible</h1><p className="mt-3 text-gray-500">Tu cuenta no tiene permiso para esta operación.</p></div>;
  return <>{children}</>;
 }

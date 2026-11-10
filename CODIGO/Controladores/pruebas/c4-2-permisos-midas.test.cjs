@@ -2,7 +2,8 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {sincronizarPermisosMidas}=require('../dist/administracion/sincronizarPermisosMidas.js');
-const {permisosEfectivos,requiereSincronizacionMidas}=require('../dist/controladores/M4Controller.js');
+const {esAdministradorRaiz,permisosEfectivos,requiereSincronizacionMidas}=require('../dist/controladores/M4Controller.js');
+const {permiteOperacion}=require('../dist/validaciones/permisos.js');
 const {M9Controller}=require('../dist/controladores/M9Controller.js');
 const {ProductorAuditoriaM9}=require('../dist/m9/contratoProductor.js');
 const {RepositorioAuditoriaM9Memoria}=require('../dist/m9/RepositorioAuditoriaM9.js');
@@ -71,7 +72,8 @@ test('regresión: Midas Gerencia conserva todos los CU activos aprobados y manti
   const primera=await sincronizarPermisosMidas(tx,99n,auditoria.productor);
   const segunda=await sincronizarPermisosMidas(tx,99n,auditoria.productor);
   const particulares=catalogo.map(permiso=>({permiso}));
-  const efectivos=permisosEfectivos({...cuenta,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares});
+  const activos=codigos.filter(codigo=>codigo!=='CU377'&&!['CU466','CU467','CU468','CU469','CU470','CU471','CU472'].includes(codigo));
+  const efectivos=permisosEfectivos({...cuenta,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares},activos);
 
   assert.equal(originales.size,76);
   for(const id of originales) assert.ok(asignados.has(id));
@@ -80,19 +82,23 @@ test('regresión: Midas Gerencia conserva todos los CU activos aprobados y manti
   assert.equal(actualizaciones,1);
   assert.equal(await auditoria.repositorio.cantidad(),1);
   assert.equal(cuenta.configuracion_particular,true);
-  const activos=codigos.filter(codigo=>codigo!=='CU377'&&!['CU466','CU467','CU468','CU469','CU470','CU471','CU472'].includes(codigo));
   assert.deepEqual(new Set(efectivos),new Set(activos));
   for(const codigo of ['CU65','CU66','CU74','CU378','CU379','CU380','CU381']) assert.ok(efectivos.includes(codigo),codigo);
   for(const codigo of ['CU377','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(!efectivos.includes(codigo),codigo);
 });
 
-test('una sesión Midas abierta se resincroniza al consultar sesión o al requerir CU19 faltante',()=>{
+test('la autorización raíz no depende de sincronizar asignaciones particulares',()=>{
   const cuenta={administrador_original:true,usuario_es_administrador:true,configuracion_particular:true,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares:[]};
-  assert.equal(requiereSincronizacionMidas(cuenta,'miSesion'),true);
-  assert.equal(requiereSincronizacionMidas(cuenta,'guardarCotizacion'),true);
-  cuenta.particulares.push({permiso:{codigo_m4:'CU19',activo_m4:true,requiere_administrador:false}});
+  assert.equal(esAdministradorRaiz(cuenta),true);
+  assert.equal(requiereSincronizacionMidas(cuenta,'miSesion'),false);
   assert.equal(requiereSincronizacionMidas(cuenta,'guardarCotizacion'),false);
   assert.equal(requiereSincronizacionMidas({...cuenta,administrador_original:false},'guardarCotizacion'),false);
+  const efectivos=permisosEfectivos(cuenta,['CU14','CU19','CU51','CU52','CU57','CU199','CU466','CU377']);
+  for(const codigo of ['CU14','CU19','CU51','CU52','CU57','CU199','CU466']) assert.ok(efectivos.includes(codigo),codigo);
+  assert.equal(efectivos.includes('CU377'),false);
+  for(const operacion of ['guardarCotizacion','anularPago','revertirPago','generarComprobante','listarVisitasTerreno','listarMaterialesInventario']) assert.equal(permiteOperacion(operacion,efectivos),true,operacion);
+  assert.equal(permiteOperacion('operacionInexistente',efectivos),false);
+  assert.equal(esAdministradorRaiz({administrador_original:false,usuario_es_administrador:true}),false);
 });
 
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{

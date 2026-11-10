@@ -11,7 +11,7 @@ vi.mock('../../seguridad/Sesion', async (importarOriginal) => {
 });
 
 const renderizar=()=>render(<MemoryRouter><PortalPrincipal/></MemoryRouter>);
-const sesion=(permisos:string[]):Sesion=>({id:'1',nombre:'Persona de prueba',acceso:'prueba',permisos,configuracion:'',administrador:false,cambiarClave:false});
+const sesion=(permisos:string[],administradorOriginal=false):Sesion=>({id:'1',nombre:'Persona de prueba',acceso:'prueba',permisos,configuracion:'',administrador:false,administradorOriginal,cambiarClave:false});
 
 describe('Portal principal',()=>{
   beforeEach(()=>{estado.sesion=null;estado.actualizar.mockReset();});
@@ -19,4 +19,5 @@ describe('Portal principal',()=>{
   it('muestra Finanzas sólo a quien dispone de permisos financieros',()=>{estado.sesion=sesion(['CU05']);renderizar();expect(screen.getByRole('link',{name:/FINANZAS/i})).toHaveAttribute('href','/finanzas');expect(screen.queryByText('TERRENO')).not.toBeInTheDocument();});
   it('muestra Terreno sólo a quien dispone de permisos operacionales',()=>{estado.sesion=sesion(['CU202']);renderizar();expect(screen.getByRole('link',{name:/TERRENO/i})).toHaveAttribute('href','/terreno');expect(screen.queryByText('FINANZAS')).not.toBeInTheDocument();});
   it('habilita Inventario con permisos generales u operacionales sin abrir Finanzas',()=>{estado.sesion=sesion(['CU468']);renderizar();expect(screen.getByRole('link',{name:/INVENTARIO/i})).toHaveAttribute('href','/inventario');expect(screen.queryByText('FINANZAS')).not.toBeInTheDocument();expect(screen.queryByText('TERRENO')).not.toBeInTheDocument();});
+  it('muestra los tres sistemas a Midas aunque su sesión no tenga asignaciones particulares',()=>{estado.sesion=sesion([],true);renderizar();expect(screen.getByRole('link',{name:/FINANZAS/i})).toHaveAttribute('href','/finanzas');expect(screen.getByRole('link',{name:/TERRENO/i})).toHaveAttribute('href','/terreno');expect(screen.getByRole('link',{name:/INVENTARIO/i})).toHaveAttribute('href','/inventario');});
 });
