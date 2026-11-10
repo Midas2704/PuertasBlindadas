@@ -24,6 +24,10 @@ export const permisosEfectivos = (cuenta: Cuenta) => {
  const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
  return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || cuenta.administrador_original)).map(p => p.codigo_m4!);
 };
+export const requiereSincronizacionMidas = (cuenta: Cuenta, operacion: string) => {
+ const permisoSolicitado=operacionesPermiso[operacion];
+ return cuenta.administrador_original && (operacion==='miSesion' || !!(permisoSolicitado && !permisosEfectivos(cuenta).includes(permisoSolicitado)));
+};
 
 /** El perfil propone permisos iniciales; no constituye un límite para personalizaciones autorizadas. */
 export const perfilPermitePersonalizacion = (perfil: { activo_m4: boolean } | null | undefined) => perfil?.activo_m4 === true;
@@ -72,10 +76,19 @@ export class M4Controller {
  }
  async autorizar(operacion:string, contexto:ContextoSesion, adicionales:string[]=[]):Promise<ActorAutenticado> {
   if(!contexto.secretoSesion) return error(401,'Inicia sesión para continuar');
-  const sesion=await prisma.sesion_usuario.findUnique({where:{secreto_hash:huella(contexto.secretoSesion)},include:{usuario:{include:incluirAccesos}}});
+  let sesion=await prisma.sesion_usuario.findUnique({where:{secreto_hash:huella(contexto.secretoSesion)},include:{usuario:{include:incluirAccesos}}});
   const ahora = new Date();
   const finAbsoluto = sesion ? new Date(sesion.inicio.getTime() + politica.sesionMinutos * 60000) : ahora;
   if(!sesion || sesion.invalidada || sesion.vence<=ahora || finAbsoluto<=ahora || sesion.version_seguridad!==sesion.usuario.version_seguridad || sesion.usuario.usuario_estado_cuenta!=='activo') return error(401,'La sesión finalizó; vuelve a iniciar sesión');
+  if(requiereSincronizacionMidas(sesion.usuario,operacion)) {
+   await prisma.$transaction(async tx=>{
+    await sincronizarPermisosMidas(tx,sesion!.usuario.usuario_id_usuario);
+    const cuenta=await tx.usuario.findUniqueOrThrow({where:{usuario_id_usuario:sesion!.usuario.usuario_id_usuario},select:{version_seguridad:true}});
+    await tx.sesion_usuario.update({where:{id:sesion!.id},data:{version_seguridad:cuenta.version_seguridad}});
+   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+   sesion=await prisma.sesion_usuario.findUnique({where:{id:sesion.id},include:{usuario:{include:incluirAccesos}}});
+   if(!sesion) return error(401,'La sesión finalizó; vuelve a iniciar sesión');
+  }
   const cuenta=sesion.usuario;
   if(cuenta.seguridad?.bloqueo_persistente || (cuenta.seguridad?.bloqueo_hasta && cuenta.seguridad.bloqueo_hasta>new Date())) return error(401,'Cuenta bloqueada');
   const credencial=await this.credencial(prisma,cuenta.usuario_id_usuario);

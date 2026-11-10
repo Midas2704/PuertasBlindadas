@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {sincronizarPermisosMidas}=require('../dist/administracion/sincronizarPermisosMidas.js');
-const {permisosEfectivos}=require('../dist/controladores/M4Controller.js');
+const {permisosEfectivos,requiereSincronizacionMidas}=require('../dist/controladores/M4Controller.js');
 const {M9Controller}=require('../dist/controladores/M9Controller.js');
 const {ProductorAuditoriaM9}=require('../dist/m9/contratoProductor.js');
 const {RepositorioAuditoriaM9Memoria}=require('../dist/m9/RepositorioAuditoriaM9.js');
@@ -84,6 +84,15 @@ test('regresión: Midas Gerencia conserva todos los CU activos aprobados y manti
   assert.deepEqual(new Set(efectivos),new Set(activos));
   for(const codigo of ['CU65','CU66','CU74','CU378','CU379','CU380','CU381']) assert.ok(efectivos.includes(codigo),codigo);
   for(const codigo of ['CU377','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(!efectivos.includes(codigo),codigo);
+});
+
+test('una sesión Midas abierta se resincroniza al consultar sesión o al requerir CU19 faltante',()=>{
+  const cuenta={administrador_original:true,usuario_es_administrador:true,configuracion_particular:true,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares:[]};
+  assert.equal(requiereSincronizacionMidas(cuenta,'miSesion'),true);
+  assert.equal(requiereSincronizacionMidas(cuenta,'guardarCotizacion'),true);
+  cuenta.particulares.push({permiso:{codigo_m4:'CU19',activo_m4:true,requiere_administrador:false}});
+  assert.equal(requiereSincronizacionMidas(cuenta,'guardarCotizacion'),false);
+  assert.equal(requiereSincronizacionMidas({...cuenta,administrador_original:false},'guardarCotizacion'),false);
 });
 
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{
