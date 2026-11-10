@@ -183,8 +183,10 @@ export class C_Finanzas {
     if(operacion==='listarClientes') {
       if(solicitud.consulta?.busqueda || solicitud.consulta?.search) adicionales.push('CU06');
       if(solicitud.consulta?.estado && solicitud.consulta.estado!=='activos') adicionales.push('CU07');
-      if(solicitud.consulta?.deuda==='true' || solicitud.consulta?.morosos==='true') adicionales.push('CU08');
+      if(solicitud.consulta?.deuda==='true' || solicitud.consulta?.morosos==='true' || solicitud.consulta?.situacion) adicionales.push('CU08');
+      if(solicitud.consulta?.ordenar==='ultimaActividad' || solicitud.consulta?.fechaDesde || solicitud.consulta?.fechaHasta) adicionales.push('CU11');
     }
+    if(operacion==='abrirFicha' && ((solicitud.consulta?.tipoAntecedente && solicitud.consulta.tipoAntecedente !== 'todos') || solicitud.consulta?.fechaDesde || solicitud.consulta?.fechaHasta || (solicitud.consulta?.direccion && solicitud.consulta.direccion !== 'desc'))) adicionales.push('CU10');
     if(operacion==='listarProveedores') {
       if(solicitud.consulta?.busqueda) adicionales.push('CU81');
       if(solicitud.consulta?.estado && String(solicitud.consulta.estado).toLowerCase()!=='todos') adicionales.push('CU82');

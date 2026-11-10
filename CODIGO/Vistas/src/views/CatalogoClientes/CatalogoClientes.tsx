@@ -2,7 +2,7 @@ import { confirmarAccion, solicitarTexto } from '../../components/DialogosSistem
 import { usarSesion } from '../../seguridad/Sesion';
 import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Eye, Plus, Power, Edit3 } from 'lucide-react';
+import { Search, Eye, Plus, Power, Edit3 } from 'lucide-react';
 import { esRutValido, formatearRutValido } from '../../utilidades/rut';
 
 interface Cliente {
@@ -18,6 +18,8 @@ interface Cliente {
   isMoroso: boolean;
   incompleto: boolean;
   estado: string;
+  situacionFinanciera: string;
+  ultimaActividad: string | null;
   saldosPorMoneda: { moneda: string; saldoPendiente: number }[];
 }
 
@@ -25,8 +27,9 @@ const CatalogoClientes: React.FC = () => {
   const {sesion}=usarSesion();
   const [clientes, fijarClientes] = useState<Cliente[]>([]);
   const [busqueda, fijarBusqueda] = useState('');
-  const [soloDeuda, fijarSoloDeuda] = useState(false);
-  const [soloMorosos, fijarSoloMorosos] = useState(false);
+  const [situacion, fijarSituacion] = useState('todas');
+  const [fechaDesde, fijarFechaDesde] = useState('');
+  const [fechaHasta, fijarFechaHasta] = useState('');
   const [estado, fijarEstado] = useState('activos');
   const [ordenar, fijarOrdenar] = useState('nombre');
   const [direccion, fijarDireccion] = useState('asc');
@@ -42,7 +45,10 @@ const CatalogoClientes: React.FC = () => {
     const cancelacion = new AbortController();
     fijarCargando(true);
     fijarError('');
-    const parametros = new URLSearchParams({ busqueda, estado, deuda: String(soloDeuda), morosos: String(soloMorosos), ordenar, direccion });
+    const parametros = new URLSearchParams({ busqueda, estado, ordenar, direccion });
+    if (situacion !== 'todas') parametros.set('situacion', situacion);
+    if (fechaDesde) parametros.set('fechaDesde', fechaDesde);
+    if (fechaHasta) parametros.set('fechaHasta', fechaHasta);
     solicitarFinanzas(`/clientes?${parametros}`, { signal: cancelacion.signal })
       .then(async respuesta => {
         const resultado = await respuesta.json();
@@ -53,7 +59,7 @@ const CatalogoClientes: React.FC = () => {
       .catch(causa => { if (!cancelacion.signal.aborted) fijarError(causa.message); })
       .finally(() => { if (!cancelacion.signal.aborted) fijarCargando(false); });
     return () => cancelacion.abort();
-  }, [busqueda, estado, soloDeuda, soloMorosos, ordenar, direccion]);
+  }, [busqueda, estado, situacion, fechaDesde, fechaHasta, ordenar, direccion]);
 
   const enviar = async (ruta: string, metodo: string, cuerpo: Record<string, unknown>) => {
     const respuesta = await solicitarFinanzas(ruta, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
@@ -100,41 +106,11 @@ const CatalogoClientes: React.FC = () => {
             <select disabled={!sesion?.permisos.includes('CU07')} aria-label="Estado de clientes" value={estado} onChange={evento => fijarEstado(evento.target.value)} className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 sm:w-auto">
               <option value="activos">Activos</option><option value="inactivos">Inactivos</option><option value="todos">Todos</option>
             </select>
-            <select aria-label="Ordenar catálogo" value={ordenar} onChange={e=>fijarOrdenar(e.target.value)} className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 sm:w-auto"><option value="nombre">Nombre</option><option value="rut">RUT</option><option value="saldo">Saldo</option></select>
+            <select aria-label="Situación financiera" disabled={!sesion?.permisos.includes('CU08')} value={situacion} onChange={e=>fijarSituacion(e.target.value)} className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 sm:w-auto"><option value="todas">Todas las situaciones</option><option value="al_dia">Al día</option><option value="deuda_vigente">Deuda vigente</option><option value="moroso">Moroso</option></select>
+            <select aria-label="Ordenar catálogo" value={ordenar} onChange={e=>fijarOrdenar(e.target.value)} className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 sm:w-auto"><option value="nombre">Nombre</option><option value="rut">RUT</option><option value="saldo">Saldo</option><option value="ultimaActividad">Última actividad</option></select>
             <select aria-label="Dirección de orden" value={direccion} onChange={e=>fijarDireccion(e.target.value)} className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 sm:w-auto"><option value="asc">Ascendente</option><option value="desc">Descendente</option></select>
-            <label className="flex w-full cursor-pointer select-none items-center justify-center gap-3 rounded-lg border border-orange-100 bg-orange-50 px-4 py-2.5 transition-colors hover:bg-orange-100 sm:w-auto">
-              <div className="relative">
-                <input
-                  type="checkbox" disabled={!sesion?.permisos.includes('CU08')}
-                  className="sr-only"
-                  checked={soloDeuda}
-                  onChange={(e) => fijarSoloDeuda(e.target.checked)}
-                />
-                <div className={`block w-10 h-6 rounded-full transition-colors ${soloDeuda ? 'bg-orange-500' : 'bg-gray-300'}`}></div>
-                <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${soloDeuda ? 'translate-x-4' : ''}`}></div>
-              </div>
-              <span className="font-medium text-orange-900 flex items-center gap-2">
-                <Filter className="w-4 h-4" />
-                Con Deuda
-              </span>
-            </label>
-
-            <label className="flex w-full cursor-pointer select-none items-center justify-center gap-3 rounded-lg border border-red-100 bg-red-50 px-4 py-2.5 transition-colors hover:bg-red-100 sm:w-auto">
-              <div className="relative">
-                <input
-                  type="checkbox" disabled={!sesion?.permisos.includes('CU08')}
-                  className="sr-only"
-                  checked={soloMorosos}
-                  onChange={(e) => fijarSoloMorosos(e.target.checked)}
-                />
-                <div className={`block w-10 h-6 rounded-full transition-colors ${soloMorosos ? 'bg-red-600' : 'bg-gray-300'}`}></div>
-                <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${soloMorosos ? 'translate-x-4' : ''}`}></div>
-              </div>
-              <span className="font-medium text-red-900 flex items-center gap-2">
-                <Filter className="w-4 h-4" />
-                Morosos
-              </span>
-            </label>
+            <label className="text-xs text-gray-600">Actividad desde<input aria-label="Actividad desde" type="date" disabled={!sesion?.permisos.includes('CU11')} value={fechaDesde} onChange={e=>fijarFechaDesde(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"/></label>
+            <label className="text-xs text-gray-600">Actividad hasta<input aria-label="Actividad hasta" type="date" disabled={!sesion?.permisos.includes('CU11')} value={fechaHasta} onChange={e=>fijarFechaHasta(e.target.value)} className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"/></label>
           </div>
         </div>
       </div>
@@ -147,6 +123,7 @@ const CatalogoClientes: React.FC = () => {
                 <th className="py-4 px-6 font-semibold text-gray-600 text-sm">RUT</th>
                 <th className="py-4 px-6 font-semibold text-gray-600 text-sm">Razón Social</th>
                 <th className="py-4 px-6 font-semibold text-gray-600 text-sm">Contacto</th>
+                <th className="py-4 px-6 font-semibold text-gray-600 text-sm">Situación / actividad</th>
                 <th className="py-4 px-6 font-semibold text-gray-600 text-sm text-right">Saldo Deudor</th>
                 <th className="py-4 px-6 font-semibold text-gray-600 text-sm text-center">Acciones</th>
               </tr>
@@ -154,13 +131,13 @@ const CatalogoClientes: React.FC = () => {
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-gray-500">Cargando clientes...</td>
+                  <td colSpan={6} className="py-12 text-center text-gray-500">Cargando clientes...</td>
                 </tr>
               ) : error ? (
-                <tr><td colSpan={5} className="py-12 text-center text-red-600" role="alert">{error}</td></tr>
+                <tr><td colSpan={6} className="py-12 text-center text-red-600" role="alert">{error}</td></tr>
               ) : clientes.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-gray-500">No se encontraron clientes.</td>
+                  <td colSpan={6} className="py-12 text-center text-gray-500">No se encontraron clientes.</td>
                 </tr>
               ) : (
                 clientes.map((c) => (
@@ -171,6 +148,7 @@ const CatalogoClientes: React.FC = () => {
                       <div>{c.telefono || '-'}</div>
                       <div className="text-xs">{c.correo || '-'}</div>
                     </td>
+                    <td className="py-4 px-6 text-sm text-gray-600"><span className="font-medium">{c.situacionFinanciera}</span><div className="text-xs text-gray-500">{c.ultimaActividad ? new Date(c.ultimaActividad).toLocaleDateString('es-CL', { timeZone:'UTC' }) : 'Sin actividad'}</div></td>
                     <td className="py-4 px-6 text-sm text-right font-medium">
                       <div className="flex flex-col items-end gap-1">
                         <span className={c.saldoDeudor > 0 ? 'text-orange-600 bg-orange-50 px-2 py-1 rounded' : 'text-green-600'}>

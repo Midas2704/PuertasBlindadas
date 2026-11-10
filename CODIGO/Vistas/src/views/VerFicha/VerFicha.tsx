@@ -50,6 +50,10 @@ const VerFicha: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [ordenFicha, setOrdenFicha] = useState('fecha_desc');
   const [estadoFicha, setEstadoFicha] = useState('todos');
+  const [tipoHistorial, setTipoHistorial] = useState('todos');
+  const [historialDesde, setHistorialDesde] = useState('');
+  const [historialHasta, setHistorialHasta] = useState('');
+  const [direccionHistorial, setDireccionHistorial] = useState('desc');
 
   const [activeModal, setActiveModal] = useState<{ tipo: 'cotizacion' | 'nota_venta', data: any } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState('');
@@ -65,7 +69,12 @@ const VerFicha: React.FC = () => {
     const rut = referenciaDesdeRuta();
     if (!rut || rut === 'clientes') return;
 
-    solicitarFinanzas(`/clientes/${encodeURIComponent(rut)}/ficha`)
+    const parametros = new URLSearchParams();
+    if (tipoHistorial !== 'todos') parametros.set('tipoAntecedente', tipoHistorial);
+    if (direccionHistorial !== 'desc') parametros.set('direccion', direccionHistorial);
+    if (historialDesde) parametros.set('fechaDesde', historialDesde);
+    if (historialHasta) parametros.set('fechaHasta', historialHasta);
+    solicitarFinanzas(`/clientes/${encodeURIComponent(rut)}/ficha${parametros.size ? `?${parametros}` : ''}`)
       .then(async res => { const resultado = await res.json(); if (!res.ok) throw new Error(resultado.error); return resultado; })
       .then(d => {
         setData(d);
@@ -75,7 +84,7 @@ const VerFicha: React.FC = () => {
         console.error(e);
         setLoading(false);
       });
-  }, []);
+  }, [tipoHistorial, historialDesde, historialHasta, direccionHistorial]);
 
   if (loading) return <div className="p-8 text-center text-gray-500">Cargando ficha...</div>;
   if (!data || !data.resumen) return <div className="p-8 text-center text-red-500">Ficha no encontrada.</div>;
@@ -233,6 +242,10 @@ const VerFicha: React.FC = () => {
           <p className="mt-3 text-gray-700" key={saldo.moneda}>{saldo.moneda}: saldo pendiente {saldo.saldoPendiente.toLocaleString('es-CL')} · deuda vigente {saldo.deudaVigente.toLocaleString('es-CL')} · moroso {saldo.obligacionesMorosas.toLocaleString('es-CL')}</p>
         ))}
       </div>
+      <section className="mb-8 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-end gap-3"><div><h2 className="text-lg font-bold text-gray-900">Historial del cliente</h2><p className="text-xs text-gray-500">Antecedentes acreditados, filtrados por tipo y período.</p></div><select aria-label="Tipo de antecedente del historial" value={tipoHistorial} onChange={e=>setTipoHistorial(e.target.value)} className="rounded border px-3 py-2 text-sm"><option value="todos">Todos</option><option value="cotizacion">Cotizaciones</option><option value="nota_venta">Notas de venta</option><option value="pago">Pagos</option><option value="proyecto">Proyectos</option></select><label className="text-xs text-gray-600">Desde<input aria-label="Historial desde" type="date" value={historialDesde} onChange={e=>setHistorialDesde(e.target.value)} className="mt-1 block rounded border px-3 py-2 text-sm"/></label><label className="text-xs text-gray-600">Hasta<input aria-label="Historial hasta" type="date" value={historialHasta} onChange={e=>setHistorialHasta(e.target.value)} className="mt-1 block rounded border px-3 py-2 text-sm"/></label><select aria-label="Orden del historial" value={direccionHistorial} onChange={e=>setDireccionHistorial(e.target.value)} className="rounded border px-3 py-2 text-sm"><option value="desc">Más recientes</option><option value="asc">Más antiguos</option></select></div>
+        <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-gray-50"><tr><th className="px-4 py-2">Tipo</th><th className="px-4 py-2">Referencia</th><th className="px-4 py-2">Fecha</th><th className="px-4 py-2">Estado</th></tr></thead><tbody>{data.historial.map(item=><tr key={`${item.tipo}-${item.id}`} className="border-t"><td className="px-4 py-2">{String(item.tipo).replaceAll('_',' ')}</td><td className="px-4 py-2">#{item.id}</td><td className="px-4 py-2">{item.fecha ? new Date(item.fecha).toLocaleDateString('es-CL',{timeZone:'UTC'}) : 'Sin fecha'}</td><td className="px-4 py-2">{String(item.estado || 'Sin estado').replaceAll('_',' ')}</td></tr>)}{!data.historial.length&&<tr><td colSpan={4} className="px-4 py-6 text-center text-gray-500">No hay antecedentes para los filtros seleccionados.</td></tr>}</tbody></table></div>
+      </section>
       {(resumen_dashboard as any).saldosFavor?.length > 0 && <div className="bg-white rounded-xl shadow-sm border border-purple-200 p-6 mb-8"><h3 className="font-semibold text-purple-900 mb-3">Saldos a favor disponibles</h3><div className="grid md:grid-cols-4 gap-3 items-end"><label className="text-sm">Saldo<select className="w-full border rounded p-2 mt-1" value={saldoSeleccionado} onChange={e=>setSaldoSeleccionado(e.target.value)}><option value="">Seleccionar saldo</option>{(resumen_dashboard as any).saldosFavor.map((s:any)=><option key={s.id_saldo_favor_cliente} value={s.id_saldo_favor_cliente}>#{s.id_saldo_favor_cliente} · disponible {Number(s.monto_disponible).toLocaleString('es-CL')}</option>)}</select></label><label className="text-sm">Nota de Venta<select className="w-full border rounded p-2 mt-1" value={notaAplicacion} onChange={e=>setNotaAplicacion(e.target.value)}><option value="">Seleccionar NV</option>{notasVisibles.filter(n=>!['anulada','cerrada','revertida_total'].includes(n.estado_nota_venta)).map(n=><option key={n.id_nota_venta} value={n.id_nota_venta}>NV-{n.id_nota_venta} · pendiente {Number(n.saldoPendiente||0).toLocaleString('es-CL')}</option>)}</select></label><input className="border rounded p-2" type="number" min="0.01" step="0.01" placeholder="Monto" value={montoAplicacion} onChange={e=>setMontoAplicacion(e.target.value)}/><button className="px-3 py-2 bg-purple-700 text-white rounded" onClick={aplicarSaldo}>Aplicar saldo</button></div></div>}
       {/* Cotizaciones Históricas */}
       <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2 mt-8">

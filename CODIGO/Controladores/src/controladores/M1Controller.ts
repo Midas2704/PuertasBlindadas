@@ -65,7 +65,11 @@ export class M1Controller {
     if (filtros.segmento) condicion.tipo_cliente_financiero = { nombre_tipo_cliente_financiero: { equals: filtros.segmento, mode: 'insensitive' } };
     const clientes = await prisma.cliente_financiero.findMany({
       where: condicion, orderBy: [{ nombre_razon_social_referencia: 'asc' }, { id_cliente_financiero: 'asc' }],
-      include: { tipo_cliente_financiero: true, ficha_cliente: { include: { nota_venta: { include: incluirNota } } } },
+      include: { tipo_cliente_financiero: true, ficha_cliente: { include: {
+        nota_venta: { include: incluirNota },
+        cotizacion: { select: { fecha_emision: true } },
+        pago_cliente: { select: { fecha_pago: true } },
+      } } },
     });
     // Hay RUT heredados con y sin puntos; los quitamos sólo para buscar.
     const busqueda = filtros.busqueda.toLocaleLowerCase('es-CL');
@@ -76,6 +80,13 @@ export class M1Controller {
       const consolidadoClp = consolidarNotasClp(cliente.ficha_cliente?.nota_venta || []);
       const esMoroso = saldosPorMoneda.some(saldo => saldo.obligacionesMorosas > 0);
       const tieneDeuda = saldosPorMoneda.some(saldo => saldo.saldoPendiente > 0);
+      const fechasActividad = [
+        ...(cliente.ficha_cliente?.cotizacion || []).map(item => item.fecha_emision),
+        ...(cliente.ficha_cliente?.nota_venta || []).map(item => item.fecha_emision),
+        ...(cliente.ficha_cliente?.pago_cliente || []).map(item => item.fecha_pago),
+      ].filter((fecha): fecha is Date => fecha instanceof Date);
+      const ultimaActividad = fechasActividad.length ? fechasActividad.reduce((ultima, fecha) => fecha > ultima ? fecha : ultima) : null;
+      const situacionClave = esMoroso ? 'moroso' : tieneDeuda ? 'deuda_vigente' : 'al_dia';
       return {
         id_cliente_financiero: cliente.id_cliente_financiero,
         id_ficha_cliente: cliente.ficha_cliente?.id_ficha_cliente ?? null,
@@ -88,9 +99,14 @@ export class M1Controller {
         saldoDeudor: consolidadoClp.saldoPendiente,
         saldosPorMoneda, consolidadoClp, tieneDeuda, esMoroso, isMoroso: esMoroso,
         situacionFinanciera: esMoroso ? 'Moroso' : tieneDeuda ? 'Deuda vigente' : 'Al día',
+        situacionClave, ultimaActividad,
       };
-    }).filter(cliente => (!filtros.deuda || cliente.tieneDeuda) && (!filtros.morosos || cliente.esMoroso));
-    resultado.sort((a,b)=>{ const av=filtros.ordenar==='saldo'?a.saldoDeudor:filtros.ordenar==='rut'?(a.rut||''):a.razonSocial; const bv=filtros.ordenar==='saldo'?b.saldoDeudor:filtros.ordenar==='rut'?(b.rut||''):b.razonSocial; const n=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),'es'); return filtros.direccion==='asc'?n:-n; });
+    }).filter(cliente => (!filtros.deuda || cliente.tieneDeuda)
+      && (!filtros.morosos || cliente.esMoroso)
+      && (!filtros.situacion || cliente.situacionClave === filtros.situacion)
+      && (!filtros.fechaDesde || !!cliente.ultimaActividad && cliente.ultimaActividad >= filtros.fechaDesde)
+      && (!filtros.fechaHasta || !!cliente.ultimaActividad && cliente.ultimaActividad <= filtros.fechaHasta));
+    resultado.sort((a,b)=>{ const av=filtros.ordenar==='saldo'?a.saldoDeudor:filtros.ordenar==='rut'?(a.rut||''):filtros.ordenar==='ultimaActividad'?(a.ultimaActividad?.getTime() ?? 0):a.razonSocial; const bv=filtros.ordenar==='saldo'?b.saldoDeudor:filtros.ordenar==='rut'?(b.rut||''):filtros.ordenar==='ultimaActividad'?(b.ultimaActividad?.getTime() ?? 0):b.razonSocial; const n=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),'es'); return filtros.direccion==='asc'?n:-n; });
     return resultado;
   }
 
@@ -131,6 +147,28 @@ export class M1Controller {
         if (fechaPagoFinal <= nota.fecha_vencimiento) return null;
         return Math.floor((Date.UTC(fechaPagoFinal.getUTCFullYear(), fechaPagoFinal.getUTCMonth(), fechaPagoFinal.getUTCDate()) - Date.UTC(nota.fecha_vencimiento.getUTCFullYear(), nota.fecha_vencimiento.getUTCMonth(), nota.fecha_vencimiento.getUTCDate())) / 86400000);
       };
+      const tipoAntecedente = typeof consulta.tipoAntecedente === 'string' ? consulta.tipoAntecedente : 'todos';
+      if (!['todos','cotizacion','nota_venta','pago','proyecto'].includes(tipoAntecedente)) throw new ErrorAplicacion(400, 'Tipo de antecedente inválido');
+      const leerFecha = (valor: unknown, finDelDia = false) => {
+        if (valor === undefined || valor === null || valor === '') return undefined;
+        if (typeof valor !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) throw new ErrorAplicacion(400, 'El período del historial debe usar formato AAAA-MM-DD');
+        const fecha = new Date(`${valor}T${finDelDia ? '23:59:59.999' : '00:00:00.000'}Z`);
+        if (Number.isNaN(fecha.getTime()) || fecha.toISOString().slice(0,10) !== valor) throw new ErrorAplicacion(400, 'El período del historial contiene una fecha inválida');
+        return fecha;
+      };
+      const fechaDesde = leerFecha(consulta.fechaDesde);
+      const fechaHasta = leerFecha(consulta.fechaHasta, true);
+      if (fechaDesde && fechaHasta && fechaDesde > fechaHasta) throw new ErrorAplicacion(400, 'El período del historial es inválido');
+      const direccionHistorial = consulta.direccion === 'asc' ? 'asc' : 'desc';
+      const historial = [
+        ...cotizaciones.map(cotizacion => ({ tipo: 'cotizacion', id: cotizacion.id_cotizacion, fecha: cotizacion.fecha_emision, estado: cotizacion.estado_cotizacion })),
+        ...notas.map(nota => ({ tipo: 'nota_venta', id: nota.id_nota_venta, fecha: nota.fecha_emision, estado: nota.estado_nota_venta })),
+        ...pagos.map(pago => ({ tipo: 'pago', id: pago.id_pago_cliente, fecha: pago.fecha_pago, estado: pago.anulacion_pago ? 'anulado' : pago.reversion_pago.length ? 'revertido_parcial_o_total' : 'vigente' })),
+        ...proyectos.map(proyecto => ({ tipo: 'proyecto', id: proyecto.proyecto_proyecto_id.toString(), fecha: proyecto.proyecto_fecha_ingreso, estado: proyecto.proyecto_estado_operacional })),
+      ].filter(item => (tipoAntecedente === 'todos' || item.tipo === tipoAntecedente)
+        && (!fechaDesde || !!item.fecha && item.fecha >= fechaDesde)
+        && (!fechaHasta || !!item.fecha && item.fecha <= fechaHasta))
+        .sort((primero, segundo) => ((primero.fecha?.getTime() || 0) - (segundo.fecha?.getTime() || 0)) * (direccionHistorial === 'asc' ? 1 : -1));
       return {
         resumen: {
           id_cliente_financiero: cliente.id_cliente_financiero, id_ficha_cliente: ficha?.id_ficha_cliente ?? null,
@@ -154,12 +192,7 @@ export class M1Controller {
           })).filter(n => !consulta.estado || n.estado_nota_venta === consulta.estado).sort((a,b) => String(a.fecha_emision).localeCompare(String(b.fecha_emision)) * (consulta.direccion === 'desc' ? -1 : 1)), pagos, proyectos,
           saldosFavor: await transaccion.saldo_favor_cliente.findMany({ where: { id_cliente_financiero: cliente.id_cliente_financiero, monto_disponible: { gt: 0 } }, include: { nota_venta: true } }),
         },
-        historial: [
-          ...cotizaciones.map(cotizacion => ({ tipo: 'cotizacion', id: cotizacion.id_cotizacion, fecha: cotizacion.fecha_emision, estado: cotizacion.estado_cotizacion })),
-          ...notas.map(nota => ({ tipo: 'nota_venta', id: nota.id_nota_venta, fecha: nota.fecha_emision, estado: nota.estado_nota_venta })),
-          ...pagos.map(pago => ({ tipo: 'pago', id: pago.id_pago_cliente, fecha: pago.fecha_pago, estado: pago.anulacion_pago ? 'anulado' : pago.reversion_pago.length ? 'revertido_parcial_o_total' : 'vigente' })),
-          ...proyectos.map(proyecto => ({ tipo: 'proyecto', id: proyecto.proyecto_proyecto_id.toString(), fecha: proyecto.proyecto_fecha_ingreso, estado: proyecto.proyecto_estado_operacional })),
-        ].sort((primero, segundo) => (segundo.fecha?.getTime() || 0) - (primero.fecha?.getTime() || 0)),
+        historial,
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
