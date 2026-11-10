@@ -1,0 +1,61 @@
+name: Validar administrador raiz Midas
+
+on:
+  push:
+    branches:
+      - feature/terreno-agenda-visitas
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: puertas_prueba
+          POSTGRES_PASSWORD: clave_sintetica_midas
+          POSTGRES_DB: puertas_midas_aislada
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U puertas_prueba -d puertas_midas_aislada"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://puertas_prueba:clave_sintetica_midas@127.0.0.1:5432/puertas_midas_aislada?schema=public
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            CODIGO/Controladores/package-lock.json
+            CODIGO/Vistas/package-lock.json
+      - name: Preparar PostgreSQL aislado y backend
+        working-directory: CODIGO/Controladores
+        run: |
+          npm ci
+          npx prisma migrate deploy
+          npm run db:seed
+          npm run db:seed
+          npx prisma migrate status
+          npx prisma validate
+          npx prisma generate
+          npm run build
+      - name: Probar Midas y operaciones protegidas
+        working-directory: CODIGO/Controladores
+        run: node --test --test-isolation=none pruebas/c4-2-permisos-midas.test.cjs pruebas/m4.test.cjs pruebas/rf-vigente.test.cjs pruebas/m3-operaciones-pago-regresion.test.cjs pruebas/m2-aprobacion-ot-unidad.test.cjs pruebas/m6-ficha-operativa-ot.test.cjs
+      - name: Probar y compilar frontend
+        working-directory: CODIGO/Vistas
+        run: |
+          npm ci
+          npm test -- src/seguridad/Sesion.test.ts src/views/PortalPrincipal/PortalPrincipal.test.tsx
+          npm run build
