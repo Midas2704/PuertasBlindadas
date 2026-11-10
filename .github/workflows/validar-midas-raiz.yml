@@ -52,7 +52,7 @@ jobs:
           npm run build
       - name: Probar Midas y operaciones protegidas
         working-directory: CODIGO/Controladores
-        run: node --test --test-isolation=none pruebas/c4-2-permisos-midas.test.cjs pruebas/m4.test.cjs pruebas/rf-vigente.test.cjs pruebas/m3-operaciones-pago-regresion.test.cjs pruebas/m2-aprobacion-ot-unidad.test.cjs pruebas/m6-ficha-operativa-ot.test.cjs
+        run: node --test --test-isolation=none pruebas/c4-2-permisos-midas.test.cjs pruebas/m4-permisos-funcionales.test.cjs pruebas/m3-operaciones-pago-regresion.test.cjs pruebas/cotizaciones-c3-3-estructura.test.cjs pruebas/m6-ficha-operativa-ot.test.cjs pruebas/inventario-operacional-int03.test.cjs
       - name: Probar y compilar frontend
         working-directory: CODIGO/Vistas
         run: |
