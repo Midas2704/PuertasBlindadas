@@ -4,6 +4,7 @@ import { DollarSign, Users, FileSignature, TrendingUp, AlertCircle, ShieldCheck 
 import { formatearMoneda } from '../../utilidades/moneda';
 import { usarSesion } from '../../seguridad/Sesion';
 import PanelGeneralM7 from '../DashboardM7/PanelGeneralM7';
+import { tienePermiso } from '../../seguridad/autorizacionSesion';
 
 interface DashboardStats {
   clientesActivos: number;
@@ -150,7 +151,7 @@ const DashboardAnterior: React.FC = () => {
 
 const DashboardPrincipal: React.FC = () => {
   const { sesion } = usarSesion();
-  return sesion?.permisos.includes('CU215') ? <PanelGeneralM7 /> : <DashboardAnterior />;
+  return tienePermiso(sesion, 'CU215') ? <PanelGeneralM7 /> : <DashboardAnterior />;
 };
 
 export default DashboardPrincipal;

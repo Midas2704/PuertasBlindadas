@@ -37,7 +37,7 @@ export const operacionesPermiso: Record<string, string> = {
  restablecerClave:'CU71', desbloquearUsuario:'CU72', consultarSesiones:'CU73', cerrarSesionAdministrativa:'CU74',
  crearProveedor:'CU75', actualizarProveedor:'CU76', corregirIdentidadProveedor:'CU77', desactivarProveedor:'CU78', reactivarProveedor:'CU79',
  listarProveedores:'CU80', abrirFichaProveedor:'CU84', catalogosProveedores:'CU80',
- actualizarCondicionPagoProveedor:'CU87', listarOrdenesCompraServicios:'CU88', obtenerOrdenCompraServicio:'CU88', crearOrdenCompraServicio:'CU89', modificarOrdenCompraServicio:'CU90',
+ actualizarCondicionPagoProveedor:'CU87', listarOrdenesCompraServicios:'CU88', obtenerOrdenCompraServicio:'CU88', listarClientesB2BContextoOcs:'CU89', crearOrdenCompraServicio:'CU89', modificarOrdenCompraServicio:'CU90',
  prepararAjusteOrdenCompraServicio:'CU91', confirmarAjusteOrdenCompraServicio:'CU91', anularOrdenCompraServicio:'CU92', cerrarOrdenCompraServicio:'CU93', reabrirOrdenCompraServicio:'CU94',
  listarDocumentosProveedor:'CU95', obtenerDocumentoProveedor:'CU95',
  catalogosDocumentosProveedor:'CU95', registrarDocumentoPreliminar:'CU96', registrarDocumentoDefinitivo:'CU97', asociarDocumentoOrdenes:'CU98', resolverDiferenciaDocumento:'CU99', resolverExcedenteDocumento:'CU100', determinarVencimientoDocumento:'CU101', clasificarDocumento:'CU102', prepararImputacionDocumento:'CU103', confirmarImputacionDocumento:'CU103', registrarTipoCambioManual:'CU104', generarObligacionDocumento:'CU105',

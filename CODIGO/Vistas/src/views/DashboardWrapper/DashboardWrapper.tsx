@@ -33,6 +33,7 @@ import {
   PiggyBank,
 } from 'lucide-react';
 import { permisosAccesoMantenedores } from '../Mantenedores/permisos';
+import { tieneAlgunPermiso, tienePermiso } from '../../seguridad/autorizacionSesion';
 
 type MenuItem = {
   path: string;
@@ -233,8 +234,8 @@ const DashboardWrapper: React.FC = () => {
   }, [location.pathname, mobileMenuOpen]);
 
   const canSee = (item: MenuItem) =>
-    (!item.permission || Boolean(sesion?.permisos.includes(item.permission))) &&
-    (!item.permissions || item.permissions.some((permiso) => sesion?.permisos.includes(permiso)));
+    (!item.permission || tienePermiso(sesion, item.permission)) &&
+    (!item.permissions || tieneAlgunPermiso(sesion, item.permissions));
 
   const visibleGroups = menuGroups
     .map((group) => ({ ...group, items: group.items.filter(canSee) }))

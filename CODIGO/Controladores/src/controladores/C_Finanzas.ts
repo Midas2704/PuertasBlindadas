@@ -45,7 +45,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
   | 'asignarPermisos' | 'retirarPermisos' | 'guardarPermisosUsuario' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
   | 'crearProveedor' | 'actualizarProveedor' | 'corregirIdentidadProveedor' | 'desactivarProveedor' | 'reactivarProveedor' | 'listarProveedores' | 'abrirFichaProveedor' | 'catalogosProveedores'
-  | 'actualizarCondicionPagoProveedor' | 'listarOrdenesCompraServicios' | 'obtenerOrdenCompraServicio' | 'crearOrdenCompraServicio' | 'modificarOrdenCompraServicio'
+  | 'actualizarCondicionPagoProveedor' | 'listarOrdenesCompraServicios' | 'obtenerOrdenCompraServicio' | 'listarClientesB2BContextoOcs' | 'crearOrdenCompraServicio' | 'modificarOrdenCompraServicio'
   | 'prepararAjusteOrdenCompraServicio' | 'confirmarAjusteOrdenCompraServicio' | 'anularOrdenCompraServicio' | 'cerrarOrdenCompraServicio' | 'reabrirOrdenCompraServicio'
   | 'listarDocumentosProveedor' | 'obtenerDocumentoProveedor' | 'catalogosDocumentosProveedor'
   | 'registrarDocumentoPreliminar' | 'registrarDocumentoDefinitivo' | 'asociarDocumentoOrdenes' | 'resolverDiferenciaDocumento' | 'resolverExcedenteDocumento'
@@ -414,6 +414,7 @@ export class C_Finanzas {
       case 'catalogosProveedores': return this.m5.catalogosProveedores();
       case 'actualizarCondicionPagoProveedor': return this.m5.actualizarCondicionPagoProveedor(identificador(parametros.id), cuerpo, actor.id);
       case 'listarOrdenesCompraServicios': return this.m5.listarOrdenesCompraServicios();
+      case 'listarClientesB2BContextoOcs': return this.m5.listarClientesB2BContextoOcs(solicitud.consulta || {});
       case 'obtenerOrdenCompraServicio': return this.m5.obtenerOrdenCompraServicio(identificador(parametros.id));
       case 'crearOrdenCompraServicio': return this.m5.crearOrdenCompraServicio(cuerpo, actor.id);
       case 'modificarOrdenCompraServicio': return this.m5.modificarOrdenCompraServicio(identificador(parametros.id), cuerpo, actor.id);

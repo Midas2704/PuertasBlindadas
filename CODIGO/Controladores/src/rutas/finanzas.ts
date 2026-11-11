@@ -387,6 +387,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.get('/proveedores/:id/compensaciones', derivar('listarCompensaciones'));
   rutas.get('/proveedores/:id/ficha', derivar('abrirFichaProveedor'));
   rutas.get('/ordenes-compra-servicios', derivar('listarOrdenesCompraServicios'));
+  rutas.get('/ordenes-compra-servicios/clientes-b2b', derivar('listarClientesB2BContextoOcs'));
   rutas.get('/ordenes-compra-servicios/:id', derivar('obtenerOrdenCompraServicio'));
   rutas.post('/ordenes-compra-servicios', derivar('crearOrdenCompraServicio'));
   rutas.put('/ordenes-compra-servicios/:id', derivar('modificarOrdenCompraServicio'));

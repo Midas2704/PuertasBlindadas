@@ -653,6 +653,36 @@ export class M5Controller {
     return ordenes.map(orden => this.presentarOcs(orden));
   }
 
+  async listarClientesB2BContextoOcs(consulta: Entrada) {
+    const busqueda = texto(consulta.busqueda, 120);
+    const clientes = await prisma.cliente_financiero.findMany({
+      where: {
+        estado_financiero: 'activo',
+        tipo_cliente_financiero: { nombre_tipo_cliente_financiero: { equals: 'B2B', mode: 'insensitive' } },
+        ficha_cliente: { is: { estado_ficha: 'activa' } },
+        ...(busqueda ? { OR: [
+          { nombre_razon_social_referencia: { contains: busqueda, mode: 'insensitive' } },
+          { rut_cliente: { contains: busqueda.replace(/\./g, ''), mode: 'insensitive' } },
+          { rut_cliente: { contains: busqueda, mode: 'insensitive' } },
+        ] } : {}),
+      },
+      select: {
+        id_cliente_financiero: true,
+        rut_cliente: true,
+        nombre_razon_social_referencia: true,
+        ficha_cliente: { select: { id_ficha_cliente: true, estado_ficha: true } },
+      },
+      orderBy: [{ nombre_razon_social_referencia: 'asc' }, { id_cliente_financiero: 'asc' }],
+      take: 30,
+    });
+    return clientes.map(cliente => ({
+      idCliente: cliente.id_cliente_financiero,
+      idFichaCliente: cliente.ficha_cliente!.id_ficha_cliente,
+      razonSocial: cliente.nombre_razon_social_referencia,
+      rut: cliente.rut_cliente,
+    }));
+  }
+
   async obtenerOrdenCompraServicio(id: number) {
     const orden = await prisma.orden_compra_servicio_m5.findUnique({ where: { id_orden_compra_servicio_m5: id }, include: incluirOcs });
     if (!orden) throw new ErrorAplicacion(404, 'Orden de compra de servicios no encontrada');
@@ -687,7 +717,12 @@ export class M5Controller {
       if (!proveedor) throw new ErrorAplicacion(404, 'Proveedor no encontrado');
       if (proveedor.estado_proveedor !== 'activo') throw new ErrorAplicacion(409, 'Sólo puede utilizarse un proveedor Activo para una OCS');
       if (!await tx.moneda.findFirst({ where: { id_moneda: idMoneda, estado_moneda: 'activo' } })) throw new ErrorAplicacion(404, 'Moneda activa no encontrada');
-      if (idFichaCliente && !await tx.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFichaCliente } })) throw new ErrorAplicacion(404, 'Ficha de Cliente de contexto no encontrada');
+      if (idFichaCliente) {
+        const ficha = await tx.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFichaCliente }, include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } });
+        if (!ficha) throw new ErrorAplicacion(404, 'Ficha de Cliente de contexto no encontrada');
+        if (ficha.estado_ficha !== 'activa' || ficha.cliente_financiero.estado_financiero !== 'activo') throw new ErrorAplicacion(409, 'La ficha seleccionada no está activa');
+        if (ficha.cliente_financiero.tipo_cliente_financiero.nombre_tipo_cliente_financiero.toUpperCase() !== 'B2B') throw new ErrorAplicacion(409, 'La OCS sólo admite un Cliente B2B como contexto');
+      }
       const cotizacion = idCotizacion ? await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion } }) : null;
       if (idCotizacion && !cotizacion) throw new ErrorAplicacion(404, 'Cotización de contexto no encontrada');
       if (cotizacion && idFichaCliente && cotizacion.id_ficha_cliente !== idFichaCliente) throw new ErrorAplicacion(409, 'La Cotización no pertenece al Cliente indicado');

@@ -17,7 +17,6 @@ export interface ActorAutenticado { id: bigint; sesion: string; permisos: string
 const error = (estado: number, mensaje: string): never => { throw new ErrorAplicacion(estado,mensaje); };
 const idCuenta = (valor: unknown) => { if (!/^\d+$/.test(String(valor))) return error(400,'Usuario inválido'); return BigInt(String(valor)); };
 const confirmar = (entrada: Entrada) => { if (entrada.confirmado !== true) error(400,'Debes confirmar la operación'); };
-const codigosRaizImplementados = new Set(codigosImplementados.filter(codigo=>codigo!=='CU377'));
 export const esAdministradorRaiz = (cuenta: Pick<Cuenta,'administrador_original'>) => cuenta.administrador_original === true;
 export const permisosEfectivos = (cuenta: Cuenta, catalogoRaiz?: string[]) => {
  if(esAdministradorRaiz(cuenta)) return [...new Set((catalogoRaiz || codigosImplementados).filter(codigo=>codigo!=='CU377'))];
@@ -30,7 +29,9 @@ export const requiereSincronizacionMidas = () => false;
 
 const permisosActivosAdministradorRaiz = async (tx: Transaccion | typeof prisma) => {
  const catalogo=await tx.permiso.findMany({where:{activo_m4:true,codigo_m4:{not:null}},select:{codigo_m4:true}});
- return catalogo.map(item=>item.codigo_m4).filter((codigo):codigo is string=>!!codigo&&codigosRaizImplementados.has(codigo));
+ // El catálogo M4 activo es la fuente autorizada. Filtrarlo nuevamente por el mapa
+ // técnico de rutas dejaba fuera capacidades aprobadas incorporadas con posterioridad.
+ return catalogo.map(item=>item.codigo_m4).filter((codigo):codigo is string=>!!codigo&&codigo!=='CU377');
 };
 
 /** El perfil propone permisos iniciales; no constituye un límite para personalizaciones autorizadas. */
