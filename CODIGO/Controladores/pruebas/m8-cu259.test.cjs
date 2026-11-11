@@ -32,7 +32,7 @@ before(limpiarFixturesM8Huerfanos);
 async function preparar() {
   if (fichas) return;
   const [tipoCliente, moneda] = await Promise.all([
-    prisma.tipo_cliente_financiero.findFirstOrThrow(),
+    prisma.tipo_cliente_financiero.findFirstOrThrow({ where: { nombre_tipo_cliente_financiero: { equals: 'B2B', mode: 'insensitive' } } }),
     prisma.moneda.findUniqueOrThrow({ where: { codigo_moneda: 'CLP' } }),
   ]);
   const marca = randomUUID().slice(0, 8);
@@ -78,6 +78,15 @@ test('M8 CU259 consulta solicitudes crediticias', async t => {
   await t.test('16 contexto M1 parcialmente no disponible', async () => { const r = await modulo.listarSolicitudes({ cliente: String(fichas[1].id_ficha_cliente) }, autorizado); assert.equal(r.solicitudes[0].cliente.estadoContexto, 'PARCIALMENTE_DISPONIBLE'); });
   await t.test('17 contexto M2 presente', async () => { const r = await modulo.obtenerSolicitud(ids.solicitudes[0], autorizado); assert.equal(r.contextoComercial.estado, 'DISPONIBLE'); assert.equal(r.contextoComercial.cotizacion.id, cotizacion.id_cotizacion); assert.equal(r.contextoComercial.notaVenta.id, nota.id_nota_venta); });
   await t.test('18 contexto M2 ausente no rompe solicitud', async () => { const r = await modulo.obtenerSolicitud(ids.solicitudes[1], autorizado); assert.equal(r.contextoComercial.estado, 'SIN_REFERENCIA'); });
+  await t.test('19 buscador CU115 resuelve ficha B2B por razón social y rechaza usuario sin permiso', async () => {
+    const encontrados = await modulo.listarClientesB2B({ busqueda: 'Cliente M8 0' }, { id:1n, permisos:['CU260'] });
+    assert.equal(encontrados.length, 1); assert.equal(encontrados[0].idFichaCliente, fichas[0].id_ficha_cliente);
+    await assert.rejects(modulo.listarClientesB2B({}, denegado), error => error.estado === 403);
+  });
+  await t.test('20 CU119 exporta exactamente los resultados filtrados', async () => {
+    const archivo = await modulo.exportar('solicitudes', { ...ambito, estado:'APROBADA' }, { id:1n, permisos:['CU272'] });
+    assert.equal(archivo.total, 1); assert.match(Buffer.from(archivo.contenido.split(',')[1], 'base64').toString('utf8'), /APROBADA/);
+  });
   await t.test('19 consultar no cambia estado', async () => { const antes = await prisma.solicitud_crediticia_m8.findUniqueOrThrow({ where: { id_solicitud_crediticia: ids.solicitudes[2] } }); await modulo.obtenerSolicitud(ids.solicitudes[2], autorizado); const despues = await prisma.solicitud_crediticia_m8.findUniqueOrThrow({ where: { id_solicitud_crediticia: ids.solicitudes[2] } }); assert.equal(despues.estado_solicitud, antes.estado_solicitud); assert.equal(despues.fecha_actualizacion.getTime(), antes.fecha_actualizacion.getTime()); });
   await t.test('20 CU259 conserva permiso independiente tras ampliar M8', () => { assert.equal(operacionesPermiso.listarSolicitudesCreditoM8, 'CU259'); assert.equal(operacionesPermiso.obtenerSolicitudCreditoM8, 'CU259'); assert.equal(permiteOperacion('resolverSolicitudInicialM8', ['CU259']), false); assert.equal(permiteOperacion('cancelarSolicitudCreditoM8', ['CU259']), false); assert.deepEqual(matrizPermisosPorCU.CU259, ['gerencia', 'secretaria']); assert.equal(moduloPermiso('CU259'), 'M8'); assert.equal(codigosTodosLosCU.at(-1), 'CU274'); const migracion = readFileSync(resolve('prisma/migrations/042_m8_solicitudes_crediticias/migration.sql'), 'utf8'); assert.match(migracion, /'CU259'[\s\S]+codigo_m4" IN \('gerencia', 'secretaria'\)/); });
 });

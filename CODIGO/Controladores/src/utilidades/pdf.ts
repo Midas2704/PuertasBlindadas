@@ -90,6 +90,26 @@ const acotarInforme = (valor: unknown, ancho: number, tamano = 8) => {
   const maximo = Math.max(4, Math.floor(ancho / (tamano * 0.48)));
   return texto.length <= maximo ? texto : `${texto.slice(0, Math.max(1, maximo - 3))}...`;
 };
+const envolverInformeCompleto = (valor: unknown, ancho: number, tamano = 8) => {
+  const texto = String(valor ?? '').replace(/\s+/g, ' ').trim() || '-';
+  const maximo = Math.max(4, Math.floor(ancho / (tamano * 0.48)));
+  const lineas: string[] = [];
+  for (const palabraOriginal of texto.split(' ')) {
+    let palabra = palabraOriginal;
+    if (!lineas.length) lineas.push('');
+    while (palabra.length > maximo) {
+      if (lineas[lineas.length - 1]) lineas.push('');
+      lineas[lineas.length - 1] = palabra.slice(0, maximo);
+      palabra = palabra.slice(maximo);
+      lineas.push('');
+    }
+    const actual = lineas[lineas.length - 1];
+    if (!actual) lineas[lineas.length - 1] = palabra;
+    else if (`${actual} ${palabra}`.length <= maximo) lineas[lineas.length - 1] = `${actual} ${palabra}`;
+    else lineas.push(palabra);
+  }
+  return lineas.filter(Boolean);
+};
 
 const ensamblarPaginasPdf = (paginas: string[][], anchoPagina = 595, altoPagina = 842) => {
   const objetos: string[] = ['', '<< /Type /Catalog /Pages 2 0 R >>', ''];
@@ -178,17 +198,19 @@ export function crearInformePdf(informe: InformePdf) {
   dibujarCabeceraTabla(y);
   y -= 23;
   for (const [indice, fila] of informe.tabla.filas.entries()) {
-    if (y < 65) { nuevaPagina(); actual().push(textoInforme(margen, 785, 'Detalle de eventos', 11, 'F2')); y = 758; dibujarCabeceraTabla(y); y -= 23; }
-    if (indice % 2 === 1) actual().push(rectanguloInforme(margen, y - 7, anchoUtil, 22, '0.965 0.965 0.965'));
+    const lineasPorColumna = informe.tabla.columnas.map(columna => envolverInformeCompleto(fila[columna.clave], columna.ancho - 8, 7));
+    const cantidadLineas = Math.max(1, ...lineasPorColumna.map(lineas => lineas.length));
+    const altoFila = Math.max(22, cantidadLineas * 9 + 8);
+    if (y - altoFila < 55) { nuevaPagina(); actual().push(textoInforme(margen, 785, 'Detalle de eventos', 11, 'F2')); y = 758; dibujarCabeceraTabla(y); y -= 23; }
+    if (indice % 2 === 1) actual().push(rectanguloInforme(margen, y - altoFila + 15, anchoUtil, altoFila, '0.965 0.965 0.965'));
     let x = margen;
-    for (const columna of informe.tabla.columnas) {
-      const valor = acotarInforme(fila[columna.clave], columna.ancho - 8, 7);
+    for (const [columnaIndice, columna] of informe.tabla.columnas.entries()) {
       const color = columna.clave === 'resultado' ? coloresInforme[(fila.tonoResultado as TonoInformePdf) || 'neutro'] : '0 0 0';
-      actual().push(textoInforme(x + 4, y, valor, 7, columna.clave === 'resultado' ? 'F2' : 'F1', color));
+      lineasPorColumna[columnaIndice].forEach((linea, lineaIndice) => actual().push(textoInforme(x + 4, y - lineaIndice * 9, linea, 7, columna.clave === 'resultado' ? 'F2' : 'F1', color)));
       x += columna.ancho;
     }
-    actual().push('0.875 0.875 0.875 RG 0.3 w 42 ' + (y - 8) + ' m 553 ' + (y - 8) + ' l S');
-    y -= 23;
+    actual().push('0.875 0.875 0.875 RG 0.3 w 42 ' + (y - altoFila + 14) + ' m 553 ' + (y - altoFila + 14) + ' l S');
+    y -= altoFila;
   }
 
   const totalPaginas = paginas.length;

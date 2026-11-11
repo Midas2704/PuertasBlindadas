@@ -108,7 +108,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'registrarAjusteLiquidezM7' | 'consultarCatalogosAjusteLiquidezM7' | 'crearCuentaBancariaM7' | 'actualizarCuentaBancariaM7' | 'crearSaldoInicialBancarioM7' | 'actualizarSaldoInicialBancarioM7' | 'consultarParametrosLiquidezM7' | 'configurarParametroLiquidezM7' | 'consultarCostosInstalacionM7' | 'configurarCostoInstalacionM7' | 'consultarParametroStockInmovilM7' | 'configurarParametroStockInmovilM7'
   | 'consultarExposicionCreditoM7' | 'consultarAlertasCreditoM7' | 'consultarResumenIvaM7' | 'consultarCostosFabricacionM7' | 'consultarBloqueosEconomicosM7' | 'consultarMargenInstalacionesM7'
   | 'consultarInventarioValorizadoM7' | 'consultarMaterialesProyectoOtM7' | 'consultarRiesgoStockM7' | 'consultarRotacionInventarioM7' | 'consultarComprasRecepcionesM7'
-  | 'listarSolicitudesCreditoM8' | 'obtenerSolicitudCreditoM8' | 'crearSolicitudInicialM8' | 'crearSolicitudExcepcionM8' | 'enviarSolicitudCreditoM8' | 'cancelarSolicitudCreditoM8'
+  | 'listarSolicitudesCreditoM8' | 'listarClientesB2BCreditoM8' | 'obtenerSolicitudCreditoM8' | 'crearSolicitudInicialM8' | 'crearSolicitudExcepcionM8' | 'enviarSolicitudCreditoM8' | 'cancelarSolicitudCreditoM8'
   | 'resolverSolicitudInicialM8' | 'resolverSolicitudExcepcionM8' | 'modificarCupoCreditoM8' | 'suspenderCreditoM8' | 'reactivarCreditoM8' | 'configurarLimiteCreditoM8'
   | 'consultarExposicionCreditoM8' | 'consultarSituacionCreditoM8' | 'consultarHistorialCreditoM8' | 'exportarCreditoM8' | 'consultarDistribucionCreditoM8' | 'consultarComposicionCreditoM8' | 'validarFormalizacionCreditoM8'
   | 'consultarAuditoriaM9' | 'obtenerDetalleAuditoriaM9' | 'exportarAuditoriaM9' | 'consultarResumenAuditoriaM9'
@@ -732,6 +732,7 @@ export class C_Finanzas {
       case 'consultarUmbralMargenM7': return this.m7.consultarConfiguracionUmbralMargen();
       case 'configurarUmbralMargenM7': return this.m7.configurarUmbralMargen(cuerpo);
       case 'listarSolicitudesCreditoM8': return this.m8.listarSolicitudes(solicitud.consulta || {}, actor);
+      case 'listarClientesB2BCreditoM8': return this.m8.listarClientesB2B(solicitud.consulta || {}, actor);
       case 'obtenerSolicitudCreditoM8': return this.m8.obtenerSolicitud(identificador(parametros.id), actor);
       case 'crearSolicitudInicialM8': return this.m8.crearSolicitud('INICIAL', cuerpo, actor);
       case 'crearSolicitudExcepcionM8': return this.m8.crearSolicitud('EXCEPCION', cuerpo, actor);

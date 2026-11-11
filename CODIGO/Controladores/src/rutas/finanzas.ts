@@ -116,6 +116,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.put('/mantenedores/familias-producto/:id/plantilla-fabricacion', derivar('guardarBorradorPlantillaFabricacion'));
   rutas.post('/mantenedores/familias-producto/:id/plantilla-fabricacion/publicar', derivar('publicarPlantillaFabricacionFamilia'));
   rutas.get('/credito/solicitudes', derivar('listarSolicitudesCreditoM8'));
+  rutas.get('/credito/clientes-b2b', derivar('listarClientesB2BCreditoM8'));
   rutas.get('/credito/solicitudes/:id', derivar('obtenerSolicitudCreditoM8'));
   rutas.post('/credito/solicitudes/inicial', derivar('crearSolicitudInicialM8'));
   rutas.post('/credito/solicitudes/excepcion', derivar('crearSolicitudExcepcionM8'));

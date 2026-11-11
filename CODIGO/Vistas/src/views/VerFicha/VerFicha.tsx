@@ -8,6 +8,7 @@ import ModalFormulario from '../../components/ModalFormulario';
 import CreditoCliente from '../Credito/CreditoCliente';
 import DocumentosHistoricosCotizacion from '../../components/documental/DocumentosHistoricosCotizacion';
 import { usarSesion } from '../../seguridad/Sesion';
+import { tienePermiso } from '../../seguridad/autorizacionSesion';
 import { abrirPdfOperacional, leerPdfOperacional } from '../../utilidades/pdfOperacional';
 
 const VisorPdf = React.lazy(() => import('../../components/documental/VisorPdf'));
@@ -53,6 +54,7 @@ const referenciaDesdeRuta = () => {
 
 const VerFicha: React.FC = () => {
   const { sesion } = usarSesion();
+  const puede = (codigo: string) => tienePermiso(sesion, codigo);
   const [data, setData] = useState<FichaCompleta | null>(null);
   const [loading, setLoading] = useState(true);
   const [ordenFicha, setOrdenFicha] = useState('fecha_desc');
@@ -396,7 +398,7 @@ const VerFicha: React.FC = () => {
       <h2 className="text-xl font-bold text-gray-900 mb-4">Pagos del cliente</h2>
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
         <table className="w-full text-left text-sm"><thead className="bg-gray-50"><tr><th className="py-3 px-6">Pago</th><th className="py-3 px-6">Estado</th><th className="py-3 px-6">Monto original / efectivo</th><th className="py-3 px-6">Acciones autorizadas</th></tr></thead>
-          <tbody>{resumen_dashboard.pagos.map(pago => <tr key={pago.id_pago_cliente} className="border-t border-gray-100"><td className="py-3 px-6">#{pago.id_pago_cliente} · {new Date(pago.fecha_pago).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</td><td className="py-3 px-6">{pago.anulacion_pago ? 'Anulado' : pago.reversion_pago.length ? 'Con reversión' : pago.estado_verificacion}</td><td className="py-3 px-6">{pago.moneda.codigo_moneda} {Number(pago.monto_pago).toLocaleString('es-CL')} / {pago.montoEfectivo.toLocaleString('es-CL')}</td><td className="py-3 px-6 flex flex-wrap gap-2">{sesion?.permisos.includes('CU57')&&<button className="text-primary-700" onClick={()=>operarPago(pago.id_pago_cliente,'comprobante')}>PDF</button>}{!pago.anulacion_pago&&<>{sesion?.permisos.includes('CU51')&&!pago.reversion_pago.length&&<button className="text-red-700" onClick={()=>operarPago(pago.id_pago_cliente,'anular')}>Anular</button>}{sesion?.permisos.includes('CU52')&&Number(pago.montoEfectivo)>0&&<button className="text-orange-700" onClick={()=>operarPago(pago.id_pago_cliente,'revertir')}>Revertir</button>}{sesion?.permisos.includes('CU58')&&<button className="text-green-700" onClick={()=>operarPago(pago.id_pago_cliente,'conciliar')}>Conciliar</button>}</>}</td></tr>)}
+          <tbody>{resumen_dashboard.pagos.map(pago => <tr key={pago.id_pago_cliente} className="border-t border-gray-100"><td className="py-3 px-6">#{pago.id_pago_cliente} · {new Date(pago.fecha_pago).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</td><td className="py-3 px-6">{pago.anulacion_pago ? 'Anulado' : pago.reversion_pago.length ? 'Con reversión' : pago.estado_verificacion}</td><td className="py-3 px-6">{pago.moneda.codigo_moneda} {Number(pago.monto_pago).toLocaleString('es-CL')} / {pago.montoEfectivo.toLocaleString('es-CL')}</td><td className="py-3 px-6 flex flex-wrap gap-2">{puede('CU57')&&<button className="text-primary-700" onClick={()=>operarPago(pago.id_pago_cliente,'comprobante')}>PDF</button>}{!pago.anulacion_pago&&<>{puede('CU51')&&!pago.reversion_pago.length&&<button className="text-red-700" onClick={()=>operarPago(pago.id_pago_cliente,'anular')}>Anular</button>}{puede('CU52')&&Number(pago.montoEfectivo)>0&&<button className="text-orange-700" onClick={()=>operarPago(pago.id_pago_cliente,'revertir')}>Revertir</button>}{puede('CU58')&&<button className="text-green-700" onClick={()=>operarPago(pago.id_pago_cliente,'conciliar')}>Conciliar</button>}</>}</td></tr>)}
           {!resumen_dashboard.pagos.length && <tr><td colSpan={4} className="py-6 text-center text-gray-500">Sin pagos registrados.</td></tr>}</tbody>
         </table>
       </div>

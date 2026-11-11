@@ -3,8 +3,13 @@ const assert = require('node:assert/strict');
 const { M9Controller } = require('../dist/controladores/M9Controller');
 const { RepositorioAuditoriaM9Memoria } = require('../dist/m9/RepositorioAuditoriaM9');
 const { RelojFijoM9 } = require('../dist/m9/puertos');
+const { MotorPoliticasM9, RepositorioPoliticasMemoriaM9 } = require('../dist/m9/politicas');
 
 const decodificar = salida => Buffer.from(salida.contenido.split(',')[1], 'base64').toString('latin1');
+const textoDibujado = pdf => pdf.split('\n').flatMap(linea => {
+  const coincidencia = linea.match(/ Td \((.*)\) Tj ET$/);
+  return coincidencia ? [coincidencia[1]] : [];
+}).join('');
 const entrada = indice => ({
   identidadLogica: `DEMO-UI_ESCENARIO_${indice}`,
   versionContrato: '1.0',
@@ -21,7 +26,7 @@ const entrada = indice => ({
 
 test('M9 exporta un informe PDF profesional, completo y paginado', async t => {
   const repo = new RepositorioAuditoriaM9Memoria();
-  const modulo = new M9Controller({ repositorio: repo, reloj: new RelojFijoM9(new Date('2026-10-03T15:30:00Z')) });
+  const modulo = new M9Controller({ repositorio: repo, reloj: new RelojFijoM9(new Date('2026-10-03T15:30:00Z')), politicas:new MotorPoliticasM9(new RepositorioPoliticasMemoriaM9()) });
   for (let indice = 1; indice <= 44; indice++) await modulo.recibir(entrada(indice));
   const scope = { solicitante: '8', permitirCambios: true, permitirMotivos: true };
   const salida = await modulo.exportar('PDF', {}, scope), pdf = decodificar(salida);
@@ -40,7 +45,7 @@ test('M9 exporta un informe PDF profesional, completo y paginado', async t => {
   });
   await t.test('muestra módulos ordenados y operaciones humanizadas', () => {
     for (let modulo = 1; modulo <= 9; modulo++) assert.match(pdf, new RegExp(`\\(M${modulo}\\)`));
-    assert.match(pdf, /Consulta de evidencia/); assert.match(pdf, /Exportación de Dashboard confirmada/);
+    assert.match(pdf, /Consulta de evidencia/); assert.match(textoDibujado(pdf), /Exportación de Dashboardconfirmada/);
   });
   await t.test('pagina tabla sin cortar filas y repite cabecera y pie', () => {
     const paginas = (pdf.match(/\/Type \/Page\b/g) || []).length;
@@ -56,5 +61,12 @@ test('M9 exporta un informe PDF profesional, completo y paginado', async t => {
   });
   await t.test('no presenta valores nulos ni payloads técnicos en el cuerpo', () => {
     assert.doesNotMatch(pdf, /\bnull\b|\bundefined\b|\{\}/); assert.doesNotMatch(pdf, /hashIntegridad|versionContrato|payload/i);
+  });
+  await t.test('conserva referencias extensas completas distribuyéndolas en varias líneas', async () => {
+    const referenciaLarga = 'REFERENCIA-OPERACIONAL-COMPLETA-SEGMENTO-ALFA-SEGMENTO-BETA-SEGMENTO-GAMMA';
+    await modulo.recibir({ ...entrada(45), identidadLogica:'REFERENCIA-LARGA-45', referencia:{ tipo:'DOCUMENTO', id:referenciaLarga } });
+    const contenido = decodificar(await modulo.exportar('PDF', { identidadLogica:'REFERENCIA-LARGA-45' }, scope));
+    assert.ok(textoDibujado(contenido).includes(referenciaLarga));
+    assert.doesNotMatch(contenido, /REFERENCIA-OPERACIONAL\.\.\./);
   });
 });

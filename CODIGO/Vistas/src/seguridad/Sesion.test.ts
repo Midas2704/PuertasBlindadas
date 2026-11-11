@@ -11,6 +11,8 @@ describe('autorización centralizada de sesión',()=>{
   it('Midas accede a operaciones y módulos habilitados sin asignaciones particulares',()=>{
     const midas=sesion([],true);
     for(const codigo of ['CU19','CU51','CU52','CU57','CU199','CU466']) expect(tienePermiso(midas,codigo)).toBe(true);
+    expect(tienePermiso(midas,'CU377')).toBe(false);
+    expect(tieneAlgunPermiso(midas,['CU377'])).toBe(false);
     expect(tieneAlgunPermiso(midas,['CU202','CU205'])).toBe(true);
     expect(puedeAccederFinanzas(midas)).toBe(true);
     expect(puedeAccederTerreno(midas)).toBe(true);
