@@ -110,3 +110,10 @@ test('modo endurecido mantiene el bloqueo cuando storage y antivirus no están c
   assert.equal(estado.almacenamientoPrivado, 'NO_CONFIGURADO');
   assert.equal(estado.antivirus, 'ANTIVIRUS_NO_CONFIGURADO');
 });
+
+test('migración admite LOCAL_PRIVADO sin retirar R2 ni S3 y no modifica datos', async () => {
+  const sql = await readFile(join(__dirname, '../prisma/migrations/081_storage_local_servidor_personal/migration.sql'), 'utf8');
+  assert.match(sql, /proveedor_logico[^;]+R2[^;]+S3[^;]+LOCAL_PRIVADO/s);
+  assert.match(sql, /VALIDATE CONSTRAINT "chk_version_documento_proveedor"/);
+  assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i);
+});
