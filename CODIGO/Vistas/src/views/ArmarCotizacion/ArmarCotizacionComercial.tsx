@@ -8,6 +8,7 @@ import ComparadorProductosComerciales from '../../components/comercial/Comparado
 import FichaProductoComercialModal from '../../components/comercial/FichaProductoComercialModal';
 import type {FichaProductoCatalogoComercial,ProductoCatalogoComercial,SegmentoComercial} from '../../components/comercial/tipos';
 import {usarSesion} from '../../seguridad/Sesion';
+import {tienePermiso} from '../../seguridad/autorizacionSesion';
 import {formatearMoneda} from '../../utilidades/moneda';
 import {esRutValido,formatearRutValido} from '../../utilidades/rut';
 import './ArmarCotizacionComercial.css';
@@ -41,7 +42,7 @@ export default function ArmarCotizacionComercial(){
  const [alternativaSeleccionada,setAlternativaSeleccionada]=useState(''),[revisionGrupoAlternativas,setRevisionGrupoAlternativas]=useState<number>();
  const [vistaPrevia,setVistaPrevia]=useState<{contenido:string;nombre:string;paginas:number;sha256:string;estado:string}|null>(null),[urlVistaPrevia,setUrlVistaPrevia]=useState(''),[cargandoVistaPrevia,setCargandoVistaPrevia]=useState(false);
  const [estadoEmision,setEstadoEmision]=useState<EstadoEmision|null>(null),[errorEstadoEmision,setErrorEstadoEmision]=useState(''),[cargandoEstadoEmision,setCargandoEstadoEmision]=useState(false);
- const puedeAjustar=sesion?.configuracion==='gerencia'||sesion?.administrador;const tieneCu18=Boolean(sesion?.permisos.includes('CU18'));
+ const puedeAjustar=sesion?.configuracion==='gerencia'||sesion?.administrador;const tieneCu18=tienePermiso(sesion,'CU18');
 
  useEffect(()=>{Promise.all([solicitarFinanzas('/monedas').then(r=>r.json()),solicitarFinanzas('/billing/inventory').then(r=>r.json())]).then(([ms,materiales])=>{setMonedas(ms);setMoneda(ms.find((m:{codigo_moneda:string})=>m.codigo_moneda==='CLP')?.id_moneda||0);setInventario(materiales)}).catch(()=>setAviso({text:'No fue posible cargar monedas o materiales',type:'error'}))},[]);
  useEffect(()=>{if(!segmento)return;const c=new AbortController(),q=new URLSearchParams({segmento});Promise.all([solicitarFinanzas(`/clients?${q}`,{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error);return d}),solicitarFinanzas(`/mantenedores/comercial/condiciones?${q}`,{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error);return d})]).then(([cs,conds])=>{setClientes(cs);setCondiciones(conds);const vigente=conds.flatMap((x:Condicion)=>x.versiones).find((v:Condicion['versiones'][number])=>v.vigente);setCondicionId(vigente?.id||'')}).catch(e=>{if(e.name!=='AbortError')setAviso({text:mensajeError(e),type:'error'})});return()=>c.abort()},[segmento]);

@@ -8,12 +8,13 @@ const sesion=(permisos:string[],administradorOriginal=false):Sesion=>({
 });
 
 describe('autorización centralizada de sesión',()=>{
-  it('Midas accede a operaciones y módulos habilitados sin asignaciones particulares',()=>{
-    const midas=sesion([],true);
-    for(const codigo of ['CU19','CU51','CU52','CU57','CU199','CU466']) expect(tienePermiso(midas,codigo)).toBe(true);
+  it('Midas accede a todo CU activo entregado por M4 sin habilitar capacidades inactivas',()=>{
+    const midas=sesion(['CU19','CU51','CU52','CU57','CU199'],true);
+    for(const codigo of ['CU19','CU51','CU52','CU57','CU199']) expect(tienePermiso(midas,codigo)).toBe(true);
     expect(tienePermiso(midas,'CU377')).toBe(false);
+    expect(tienePermiso(midas,'CU466')).toBe(false);
     expect(tieneAlgunPermiso(midas,['CU377'])).toBe(false);
-    expect(tieneAlgunPermiso(midas,['CU202','CU205'])).toBe(true);
+    expect(tieneAlgunPermiso(midas,['CU202','CU205'])).toBe(false);
     expect(puedeAccederFinanzas(midas)).toBe(true);
     expect(puedeAccederTerreno(midas)).toBe(true);
     expect(puedeAccederInventario(midas)).toBe(true);

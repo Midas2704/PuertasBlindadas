@@ -2,7 +2,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {sincronizarPermisosMidas}=require('../dist/administracion/sincronizarPermisosMidas.js');
-const {esAdministradorRaiz,permisosEfectivos,requiereSincronizacionMidas}=require('../dist/controladores/M4Controller.js');
+const {configuracionEfectiva,esAdministradorEfectivo,esAdministradorRaiz,permisosEfectivos,requiereSincronizacionMidas}=require('../dist/controladores/M4Controller.js');
 const {permiteOperacion}=require('../dist/validaciones/permisos.js');
 const {M9Controller}=require('../dist/controladores/M9Controller.js');
 const {ProductorAuditoriaM9}=require('../dist/m9/contratoProductor.js');
@@ -99,6 +99,14 @@ test('la autorización raíz no depende de sincronizar asignaciones particulares
   for(const operacion of ['guardarCotizacion','emitirCotizacion','estadoDocumentalComercial','anularPago','revertirPago','generarComprobante','listarVisitasTerreno','listarMaterialesInventario']) assert.equal(permiteOperacion(operacion,efectivos),true,operacion);
   assert.equal(permiteOperacion('operacionInexistente',efectivos),false);
   assert.equal(esAdministradorRaiz({administrador_original:false,usuario_es_administrador:true}),false);
+});
+
+test('Midas conserva semántica de Administrador y Gerencia aunque esos campos estén desalineados',()=>{
+  const cuenta={administrador_original:true,usuario_es_administrador:false,perfil:{codigo_m4:'secretaria'}};
+  assert.equal(esAdministradorEfectivo(cuenta),true);
+  assert.equal(configuracionEfectiva(cuenta),'gerencia');
+  assert.equal(esAdministradorEfectivo({...cuenta,administrador_original:false}),false);
+  assert.equal(configuracionEfectiva({...cuenta,administrador_original:false}),'secretaria');
 });
 
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{

@@ -18,6 +18,10 @@ const error = (estado: number, mensaje: string): never => { throw new ErrorAplic
 const idCuenta = (valor: unknown) => { if (!/^\d+$/.test(String(valor))) return error(400,'Usuario inválido'); return BigInt(String(valor)); };
 const confirmar = (entrada: Entrada) => { if (entrada.confirmado !== true) error(400,'Debes confirmar la operación'); };
 export const esAdministradorRaiz = (cuenta: Pick<Cuenta,'administrador_original'>) => cuenta.administrador_original === true;
+export const esAdministradorEfectivo = (cuenta: Pick<Cuenta,'administrador_original'|'usuario_es_administrador'>) =>
+ esAdministradorRaiz(cuenta) || cuenta.usuario_es_administrador === true;
+export const configuracionEfectiva = (cuenta: Pick<Cuenta,'administrador_original'|'perfil'>) =>
+ esAdministradorRaiz(cuenta) ? 'gerencia' : (cuenta.perfil?.codigo_m4 || '');
 export const permisosEfectivos = (cuenta: Cuenta, catalogoRaiz?: string[]) => {
  if(esAdministradorRaiz(cuenta)) return [...new Set((catalogoRaiz || codigosImplementados).filter(codigo=>codigo!=='CU377'))];
  if(cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia') return codigosAdministrador;
@@ -73,9 +77,10 @@ export class M4Controller {
   await tx.estado_seguridad_usuario.upsert({where:{id_usuario:id},create:{id_usuario:id,responsable},update:{intentos:0,bloqueos:0,bloqueo_hasta:null,bloqueo_persistente:false,actualizado:new Date(),responsable}});
  }
  private presentar(cuenta:Cuenta, permisosRaiz?:string[]) {
+  const raiz=esAdministradorRaiz(cuenta);
   return {id:cuenta.usuario_id_usuario.toString(),acceso:cuenta.acceso_m4 || 'Pendiente de habilitación M4',nombre:cuenta.empleado_seguridad?`${cuenta.empleado_seguridad.nombres} ${cuenta.empleado_seguridad.apellido_paterno}`:(cuenta.usuario_nombre_completo_primer_nombre_usuario || cuenta.usuario_username || `Cuenta heredada ${cuenta.usuario_id_usuario}`),
-   correo:cuenta.usuario_correo,estado:cuenta.usuario_estado_cuenta,configuracion:cuenta.perfil?.codigo_m4,configuracionParticular:cuenta.configuracion_particular,
-   administrador:!!cuenta.usuario_es_administrador,original:cuenta.administrador_original,bloqueada:!!cuenta.seguridad?.bloqueo_persistente,bloqueoHasta:cuenta.seguridad?.bloqueo_hasta,
+   correo:cuenta.usuario_correo,estado:cuenta.usuario_estado_cuenta,configuracion:configuracionEfectiva(cuenta),configuracionParticular:raiz?false:cuenta.configuracion_particular,
+   administrador:esAdministradorEfectivo(cuenta),original:raiz,bloqueada:!!cuenta.seguridad?.bloqueo_persistente,bloqueoHasta:cuenta.seguridad?.bloqueo_hasta,
    permisos:permisosEfectivos(cuenta,permisosRaiz),permisosParticulares:cuenta.particulares.map(p=>p.permiso.codigo_m4).filter((codigo):codigo is string=>!!codigo),
    permisosPerfil:cuenta.perfil?.perfil_permiso.filter(v=>v.perfil_permiso_activo&&v.permiso.activo_m4&&v.permiso.codigo_m4).map(v=>v.permiso.codigo_m4!) || [],rutEmpleado:cuenta.empleado_m4};
  }
@@ -100,8 +105,9 @@ export class M4Controller {
   if(adicionales.some(p=>!permisos.includes(p))) return error(403,'No tienes permiso para los filtros o condiciones solicitados');
   const vencePorInactividad = new Date(Math.min(finAbsoluto.getTime(), ahora.getTime() + politica.inactividadMinutos * 60000));
   await prisma.sesion_usuario.update({where:{id:sesion.id},data:{vence:vencePorInactividad}});
-  const perfilInterno = ['gerencia','contador','secretaria'].includes(cuenta.perfil?.codigo_m4 || '');
-  return {id:cuenta.usuario_id_usuario,sesion:sesion.id,permisos,configuracion:cuenta.perfil?.codigo_m4 || '',administrador:!!cuenta.usuario_es_administrador,administradorOriginal:raiz,cambiarClave,nombre:this.presentar(cuenta,permisos).nombre || '',acceso:cuenta.acceso_m4 || '',alcanceEmpleadoId:perfilInterno||raiz?undefined:(cuenta.empleado_seguridad?.id_empleado ?? null)};
+  const configuracion=configuracionEfectiva(cuenta);
+  const perfilInterno = ['gerencia','contador','secretaria'].includes(configuracion);
+  return {id:cuenta.usuario_id_usuario,sesion:sesion.id,permisos,configuracion,administrador:esAdministradorEfectivo(cuenta),administradorOriginal:raiz,cambiarClave,nombre:this.presentar(cuenta,permisos).nombre || '',acceso:cuenta.acceso_m4 || '',alcanceEmpleadoId:perfilInterno||raiz?undefined:(cuenta.empleado_seguridad?.id_empleado ?? null)};
  }
  async iniciarSesion(entrada:Entrada, contexto:ContextoSesion) {
   const acceso=texto(entrada.acceso,100).replace(/\./g,'').toLowerCase();
