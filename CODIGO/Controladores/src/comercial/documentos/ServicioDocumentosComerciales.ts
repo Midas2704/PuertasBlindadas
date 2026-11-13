@@ -5,6 +5,7 @@ import { prisma } from '../../db';
 import { ErrorAplicacion } from '../../utilidades/ErrorAplicacion';
 import { cargarConfiguracionStorage } from '../../documental/adaptadores/configuracionStorage';
 import { crearStorageAdapterDesdeEntorno } from '../../documental/adaptadores/crearStorageAdapter';
+import { cargarConfiguracionStorageLocalPrivado, modoServidorPersonalHabilitado } from '../../documental/adaptadores/LocalPrivateStorageAdapter';
 import { crearAntivirusAdapterDesdeEntorno } from '../../documental/seguridad/configuracionSeguridadDocumental';
 import { escanearConIntegridad, exigirResultadoLimpio, type AntivirusAdapter } from '../../documental/seguridad/AntivirusAdapter';
 import type { StorageAdapter } from '../../documental/StorageAdapter';
@@ -98,23 +99,29 @@ export class ServicioDocumentosComerciales {
 
   private storage() { return this.dependencias.storage ?? crearStorageAdapterDesdeEntorno(this.entorno); }
   private antivirus() { return this.dependencias.antivirus ?? crearAntivirusAdapterDesdeEntorno(this.entorno); }
-  private configuracionStorage() { return cargarConfiguracionStorage(this.entorno); }
+  private modoPersonal() { return modoServidorPersonalHabilitado(this.entorno); }
+  private contenedorStorage() { return this.modoPersonal() ? cargarConfiguracionStorageLocalPrivado(this.entorno).contenedor : cargarConfiguracionStorage(this.entorno).bucket; }
   async estadoInfraestructura() {
     let almacenamientoPrivado = 'NO_CONFIGURADO';
-    if (this.entorno.STORAGE_PROVIDER || this.entorno.STORAGE_BUCKET) {
+    if (this.modoPersonal()) {
+      try { cargarConfiguracionStorageLocalPrivado(this.entorno); almacenamientoPrivado = 'LOCAL_PRIVADO'; }
+      catch { almacenamientoPrivado = 'CONFIGURACION_INVALIDA'; }
+    } else if (this.entorno.STORAGE_PROVIDER || this.entorno.STORAGE_BUCKET) {
       try { cargarConfiguracionStorage(this.entorno); almacenamientoPrivado = 'CONFIGURADO'; }
       catch { almacenamientoPrivado = 'CONFIGURACION_INVALIDA'; }
     }
     let antivirus = 'NO_CONFIGURADO';
-    try {
+    if (this.modoPersonal()) {
+      antivirus = 'OMITIDO_MODO_PERSONAL';
+    } else try {
       const adaptador = this.antivirus();
       const disponibilidad = adaptador.comprobarDisponibilidad
         ? await adaptador.comprobarDisponibilidad()
         : { disponible: false, codigo: 'DIAGNOSTICO_NO_SOPORTADO' };
       antivirus = disponibilidad.disponible ? 'CLAMAV_VALIDADO' : disponibilidad.codigo ?? 'NO_DISPONIBLE';
     } catch { antivirus = 'CONFIGURACION_INVALIDA'; }
-    const storageValidado = almacenamientoPrivado === 'CONFIGURADO';
-    const antivirusValidado = antivirus === 'CLAMAV_VALIDADO';
+    const storageValidado = ['CONFIGURADO', 'LOCAL_PRIVADO'].includes(almacenamientoPrivado);
+    const antivirusValidado = ['CLAMAV_VALIDADO', 'OMITIDO_MODO_PERSONAL'].includes(antivirus);
     const plantillas = await this.cliente.plantilla_documental_comercial.findMany({
       where: { tipo_documento: 'COTIZACION', segmento: { in: ['B2B', 'B2C'] }, estado: 'ACTIVA' },
       select: { segmento: true, versiones: { where: { estado: 'PUBLICADA' }, select: { id_plantilla_documental_version: true }, take: 1 } },
@@ -128,8 +135,13 @@ export class ServicioDocumentosComerciales {
       almacenamientoPrivado,
       antivirus,
       plantillasPublicadas,
+      modo: this.modoPersonal() ? 'SERVIDOR_PERSONAL' : 'PRODUCCION_ENDURECIDA',
       emisionDefinitiva: storageValidado && antivirusValidado ? 'HABILITADA_CON_CONFIRMACION_BACKEND' : 'BLOQUEADA',
-      motivo: storageValidado && antivirusValidado ? 'Cada publicación valida antivirus, almacenamiento, recuperación y SHA-256 antes de confirmar.' : 'La emisión exige storage privado configurado y antivirus disponible.',
+      motivo: this.modoPersonal() && storageValidado
+        ? 'Modo servidor personal: almacenamiento local privado y SHA-256 activos; antivirus externo temporalmente omitido.'
+        : storageValidado && antivirusValidado
+          ? 'Cada publicación valida antivirus, almacenamiento, recuperación y SHA-256 antes de confirmar.'
+          : 'La emisión exige almacenamiento documental configurado y antivirus disponible.',
     };
   }
 
@@ -285,12 +297,16 @@ export class ServicioDocumentosComerciales {
   private async almacenarPdf(pdf: Buffer, clave: string, idempotencia: string) {
     if (pdf.length > 20 * 1024 * 1024 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') throw new ErrorAplicacion(400, 'El archivo generado no es un PDF válido');
     const esperado = createHash('sha256').update(pdf).digest('hex');
-    const escaneo = await escanearConIntegridad(this.antivirus(), Readable.from(pdf));
-    exigirResultadoLimpio(escaneo.resultado);
-    if (!escaneo.completo || escaneo.sha256 !== esperado || escaneo.tamanoBytes !== BigInt(pdf.length)) throw new ErrorAplicacion(409, 'La integridad previa al almacenamiento no coincide');
-    const storage = this.storage(); const configuracion = this.configuracionStorage();
+    let validacionAntivirus = 'OMITIDO_MODO_PERSONAL';
+    if (!this.modoPersonal()) {
+      const escaneo = await escanearConIntegridad(this.antivirus(), Readable.from(pdf));
+      exigirResultadoLimpio(escaneo.resultado);
+      if (!escaneo.completo || escaneo.sha256 !== esperado || escaneo.tamanoBytes !== BigInt(pdf.length)) throw new ErrorAplicacion(409, 'La integridad previa al almacenamiento no coincide');
+      validacionAntivirus = 'LIMPIO';
+    }
+    const storage = this.storage();
     if (!storage.crearObjetoExclusivo || !storage.abrirLectura) throw new ErrorAplicacion(503, 'El storage no soporta escritura exclusiva y recuperación');
-    const referencia = { contenedor: configuracion.bucket, clave };
+    const referencia = { contenedor: this.contenedorStorage(), clave };
     try {
       await storage.crearObjetoExclusivo({ referencia, contenido: Readable.from(pdf), mime: 'application/pdf', tamanoEsperado: BigInt(pdf.length), claveIdempotencia: idempotencia, sha256: esperado });
     } catch (error) {
@@ -301,7 +317,7 @@ export class ServicioDocumentosComerciales {
     const recuperado = await leerCompleto(await storage.abrirLectura(referencia));
     const hashRecuperado = createHash('sha256').update(recuperado).digest('hex');
     if (recuperado.length !== pdf.length || hashRecuperado !== esperado || metadata.tamanoBytes !== BigInt(pdf.length)) throw new ErrorAplicacion(409, 'El PDF almacenado no supera la verificación de integridad');
-    return { referencia, sha256: esperado, tamano: BigInt(pdf.length), proveedor: storage.proveedor, versionProveedor: metadata.versionProveedor ?? null };
+    return { referencia, sha256: esperado, tamano: BigInt(pdf.length), proveedor: storage.proveedor, versionProveedor: metadata.versionProveedor ?? null, validacionAntivirus };
   }
 
   private async limpiarObjetoNoConfirmado(referencia: { contenedor: string; clave: string; versionProveedor?: string }) {
@@ -375,7 +391,7 @@ export class ServicioDocumentosComerciales {
           proveedor_logico: guardado.proveedor, contenedor_logico: guardado.referencia.contenedor, clave_objeto: guardado.referencia.clave,
           version_proveedor: guardado.versionProveedor, nombre_original: `${carta.codigo}.pdf`, nombre_seguro: `${carta.codigo}.pdf`,
           mime_declarado: 'application/pdf', mime_detectado: 'application/pdf', tamano_bytes: guardado.tamano, sha256: guardado.sha256,
-          estado: 'DISPONIBLE', creado_por: actor.id, validado_en: this.ahora(), resultado_validaciones: json({ antivirus: 'LIMPIO', integridad: 'SHA256_VERIFICADO', origen: 'GENERADO_INTERNO' }) } });
+          estado: 'DISPONIBLE', creado_por: actor.id, validado_en: this.ahora(), resultado_validaciones: json({ antivirus: guardado.validacionAntivirus, integridad: 'SHA256_VERIFICADO', origen: 'GENERADO_INTERNO' }) } });
         const versionCartaPendiente = await tx.carta_comercial_b2c_version.create({ data: { id_carta_comercial_b2c: idCarta,
           numero_version: (ultimo._max.numero_version ?? 0) + 1, id_plantilla_documental_version: plantilla.id_plantilla_documental_version,
           id_condicion_comercial_version: plantilla.id_condicion_comercial_version, snapshot_publicacion: json(snapshot),
@@ -432,7 +448,7 @@ export class ServicioDocumentosComerciales {
           proveedor_logico: guardado.proveedor, contenedor_logico: guardado.referencia.contenedor, clave_objeto: guardado.referencia.clave,
           version_proveedor: guardado.versionProveedor, nombre_original: `cotizacion-${idCotizacion}.pdf`, nombre_seguro: `cotizacion-${idCotizacion}.pdf`,
           mime_declarado: 'application/pdf', mime_detectado: 'application/pdf', tamano_bytes: guardado.tamano, sha256: guardado.sha256,
-          estado: 'DISPONIBLE', creado_por: actor.id, validado_en: this.ahora(), resultado_validaciones: json({ antivirus: 'LIMPIO', integridad: 'SHA256_VERIFICADO', origen: 'GENERADO_INTERNO' }) } });
+          estado: 'DISPONIBLE', creado_por: actor.id, validado_en: this.ahora(), resultado_validaciones: json({ antivirus: guardado.validacionAntivirus, integridad: 'SHA256_VERIFICADO', origen: 'GENERADO_INTERNO' }) } });
         const version = await tx.cotizacion_version.create({ data: { id_cotizacion: idCotizacion, antecedentes: json(snapshot), motivo: requerido(entrada.motivo, 'Motivo', 2000),
           numero_version_comercial: numeroVersion, tipo_version: 'EMISION', snapshot_comercial: json(snapshot), id_documento_logico: documento.id_documento_logico,
           estado_documental: 'DISPONIBLE', usuario_id_usuario: actor.id, clave_idempotencia: idempotencia } });

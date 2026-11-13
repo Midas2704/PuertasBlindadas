@@ -2,6 +2,9 @@ import { S3Client } from '@aws-sdk/client-s3';
 import type { StorageAdapter } from '../StorageAdapter';
 import { cargarConfiguracionStorage, type ConfiguracionStorage } from './configuracionStorage';
 import { S3CompatibleStorageAdapter, type DependenciasS3Compatible } from './S3CompatibleStorageAdapter';
+import {
+  cargarConfiguracionStorageLocalPrivado, LocalPrivateStorageAdapter, modoServidorPersonalHabilitado,
+} from './LocalPrivateStorageAdapter';
 
 export const crearStorageAdapter = (
   configuracion: ConfiguracionStorage,
@@ -12,7 +15,9 @@ export const crearStorageAdapter = (
 export const crearStorageAdapterDesdeEntorno = (
   entorno: NodeJS.ProcessEnv = process.env,
   dependencias: DependenciasS3Compatible = {},
-): StorageAdapter => crearStorageAdapter(cargarConfiguracionStorage(entorno), dependencias);
+): StorageAdapter => modoServidorPersonalHabilitado(entorno)
+  ? new LocalPrivateStorageAdapter(cargarConfiguracionStorageLocalPrivado(entorno))
+  : crearStorageAdapter(cargarConfiguracionStorage(entorno), dependencias);
 
-export { S3CompatibleStorageAdapter, S3Client };
+export { LocalPrivateStorageAdapter, S3CompatibleStorageAdapter, S3Client };
 export type { ConfiguracionStorage, DependenciasS3Compatible };
