@@ -139,3 +139,15 @@ test('079 registra CU377 pendiente y asigna todo el catálogo a la cuenta raíz'
   assert.match(sql,/"administrador_original"=TRUE/);
   assert.match(sql,/ON CONFLICT \("id_usuario", "id_permiso"\) DO NOTHING/);
 });
+
+test('080 reconcilia CU18 activo sin habilitar capacidades reservadas',()=>{
+  const sql=fs.readFileSync('prisma/migrations/080_reconciliacion_cu18_emision_cotizacion/migration.sql','utf8');
+  assert.match(sql,/['"]CU18['"]/);
+  assert.match(sql,/['"]CU19['"]/);
+  assert.match(sql,/"activo_m4"=TRUE/);
+  assert.match(sql,/"perfil_permiso"/);
+  assert.match(sql,/\('gerencia','secretaria'\)/);
+  assert.match(sql,/"administrador_original"=TRUE/);
+  assert.match(sql,/CU377 y CU466-CU472 permanecen/);
+  assert.doesNotMatch(sql,/UPDATE\s+"comun"\."permiso"[\s\S]*CU466/i);
+});
