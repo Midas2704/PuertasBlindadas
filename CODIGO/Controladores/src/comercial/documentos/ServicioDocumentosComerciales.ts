@@ -115,10 +115,19 @@ export class ServicioDocumentosComerciales {
     } catch { antivirus = 'CONFIGURACION_INVALIDA'; }
     const storageValidado = almacenamientoPrivado === 'CONFIGURADO';
     const antivirusValidado = antivirus === 'CLAMAV_VALIDADO';
+    const plantillas = await this.cliente.plantilla_documental_comercial.findMany({
+      where: { tipo_documento: 'COTIZACION', segmento: { in: ['B2B', 'B2C'] }, estado: 'ACTIVA' },
+      select: { segmento: true, versiones: { where: { estado: 'PUBLICADA' }, select: { id_plantilla_documental_version: true }, take: 1 } },
+    });
+    const plantillasPublicadas = {
+      B2B: plantillas.some(item => item.segmento === 'B2B' && item.versiones.length > 0),
+      B2C: plantillas.some(item => item.segmento === 'B2C' && item.versiones.length > 0),
+    };
     return {
       motorPdf: 'DISPONIBLE',
       almacenamientoPrivado,
       antivirus,
+      plantillasPublicadas,
       emisionDefinitiva: storageValidado && antivirusValidado ? 'HABILITADA_CON_CONFIRMACION_BACKEND' : 'BLOQUEADA',
       motivo: storageValidado && antivirusValidado ? 'Cada publicación valida antivirus, almacenamiento, recuperación y SHA-256 antes de confirmar.' : 'La emisión exige storage privado configurado y antivirus disponible.',
     };

@@ -4,6 +4,7 @@ const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { crearPdfComercial } = require('../dist/comercial/documentos/MotorPdfComercial');
+const { ServicioDocumentosComerciales } = require('../dist/comercial/documentos/ServicioDocumentosComerciales');
 const { permiteOperacion } = require('../dist/validaciones/permisos');
 const { MATRIZ_CAPACIDADES_COMERCIALES, AutorizadorCapacidadComercial } = require('../dist/comercial/SeguridadCapacidadesComerciales');
 
@@ -28,6 +29,16 @@ test('C4 genera PDF B2B binario, íntegro y paginado sin información interna',(
   assert.match(texto,/BORRADOR - NO EMITIDO/);
   assert.match(texto,/PARTIDAS DE PRODUCTOS/);
   assert.doesNotMatch(texto,/costo interno|margen confidencial|remuneraciones/i);
+});
+
+test('C4 ajusta observaciones a los márgenes, conserva saltos y no imprime marcado',()=>{
+  const larga='X'.repeat(240);
+  const resultado=crearPdfComercial({...base,tipo:'B2B',titulo:'Presupuesto comercial',observaciones:[`Primera línea\n<b>Segunda línea</b>\n${larga}`]});
+  const texto=resultado.pdf.toString('latin1');
+  assert.match(texto,/Primera línea/);
+  assert.match(texto,/Segunda línea/);
+  assert.doesNotMatch(texto,/<b>|<\/b>/);
+  assert.doesNotMatch(texto,new RegExp(`X{89}`));
 });
 
 test('C4 presenta alternativas B2C separadas y la emisión no constituye aceptación',()=>{
@@ -59,10 +70,25 @@ test('C4.3 habilita rutas reales con CU separados y conserva CU377 bloqueado',()
   assert.equal(permiteOperacion('publicarPlantillaDocumentalComercial',['CU379']),true);
   assert.equal(permiteOperacion('publicarCartaComercialB2C',['CU381']),true);
   assert.equal(permiteOperacion('publicarCartaComercialB2C',['CU377']),false);
+  assert.equal(permiteOperacion('estadoDocumentalComercial',['CU18']),true);
   assert.match(servicio,/almacenarPdf/);
   assert.match(servicio,/COTIZACION_PDF_CONFIRMADO/);
   assert.match(rutas,/plantillas\/:id\/publicar/);
   assert.match(rutas,/cartas-b2c\/:id\/publicar/);
+});
+
+test('CU18 consulta un preflight que distingue infraestructura y plantillas publicadas',async()=>{
+  const servicio=new ServicioDocumentosComerciales({
+    cliente:{plantilla_documental_comercial:{findMany:async()=>[
+      {segmento:'B2B',versiones:[{id_plantilla_documental_version:1n}]},
+      {segmento:'B2C',versiones:[]},
+    ]}},
+    entorno:{},
+  });
+  const estado=await servicio.estadoInfraestructura();
+  assert.deepEqual(estado.plantillasPublicadas,{B2B:true,B2C:false});
+  assert.equal(estado.emisionDefinitiva,'BLOQUEADA');
+  assert.equal(estado.almacenamientoPrivado,'NO_CONFIGURADO');
 });
 
 test('C4.2 autoriza CU378-CU381 separando edición y publicación',async()=>{

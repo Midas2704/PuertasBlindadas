@@ -128,6 +128,7 @@ export const operacionesPermiso: Record<string, string> = {
 };
 
 const permisosAlternativosOperacion: Record<string, string[]> = {
+ estadoDocumentalComercial: ['CU18'],
  guardarPermisosUsuario:['CU64','CU62'],
  consultarDashboardTerreno: ['CU199','CU200','CU205','CU207','CU209','CU210','CU211','CU212','CU213'],
  exportarReporteTerreno: ['CU199','CU200','CU205','CU207','CU209','CU210','CU211','CU212','CU213'],

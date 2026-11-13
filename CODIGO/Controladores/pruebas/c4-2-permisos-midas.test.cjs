@@ -93,10 +93,10 @@ test('la autorización raíz no depende de sincronizar asignaciones particulares
   assert.equal(requiereSincronizacionMidas(cuenta,'miSesion'),false);
   assert.equal(requiereSincronizacionMidas(cuenta,'guardarCotizacion'),false);
   assert.equal(requiereSincronizacionMidas({...cuenta,administrador_original:false},'guardarCotizacion'),false);
-  const efectivos=permisosEfectivos(cuenta,['CU14','CU19','CU51','CU52','CU57','CU199','CU466','CU377']);
-  for(const codigo of ['CU14','CU19','CU51','CU52','CU57','CU199','CU466']) assert.ok(efectivos.includes(codigo),codigo);
+  const efectivos=permisosEfectivos(cuenta,['CU14','CU18','CU19','CU51','CU52','CU57','CU199','CU466','CU377']);
+  for(const codigo of ['CU14','CU18','CU19','CU51','CU52','CU57','CU199','CU466']) assert.ok(efectivos.includes(codigo),codigo);
   assert.equal(efectivos.includes('CU377'),false);
-  for(const operacion of ['guardarCotizacion','anularPago','revertirPago','generarComprobante','listarVisitasTerreno','listarMaterialesInventario']) assert.equal(permiteOperacion(operacion,efectivos),true,operacion);
+  for(const operacion of ['guardarCotizacion','emitirCotizacion','estadoDocumentalComercial','anularPago','revertirPago','generarComprobante','listarVisitasTerreno','listarMaterialesInventario']) assert.equal(permiteOperacion(operacion,efectivos),true,operacion);
   assert.equal(permiteOperacion('operacionInexistente',efectivos),false);
   assert.equal(esAdministradorRaiz({administrador_original:false,usuario_es_administrador:true}),false);
 });

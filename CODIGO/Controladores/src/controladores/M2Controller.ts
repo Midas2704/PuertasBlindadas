@@ -605,7 +605,7 @@ export class M2Controller {
       // Midas: nota y pago salen juntos de esta transacción, o no sale ninguno
       const tipoCambio=await obtenerTipoCambioCotizacion(tx,idCotizacion,cotizacion.moneda.codigo_moneda,entrada.tipoCambio);
       const proyecto=await formalizarProyectoCotizacion(tx,idCotizacion);
-      const nota=await tx.nota_venta.create({data:{numero_nota_venta:`B2C-${randomUUID()}`,id_cotizacion:idCotizacion,id_ficha_cliente:cotizacion.id_ficha_cliente,id_moneda:cotizacion.id_moneda,id_proyecto_contexto:proyecto.proyecto_proyecto_id,fecha_emision:new Date(`${fechaNegocio()}T00:00:00Z`),monto_neto:cotizacion.monto_neto,monto_impuesto:cotizacion.monto_impuesto,monto_total:cotizacion.monto_total_estimado,tipo_cambio_usado:tipoCambio,monto_convertido:tipoCambio?cotizacion.monto_total_estimado.mul(tipoCambio).toDecimalPlaces(2):null,exento_iva:cotizacion.exento_iva,estado_nota_venta:'emitida'},include:incluirNota});
+      const nota=await tx.nota_venta.create({data:{numero_nota_venta:`B2C-${randomUUID()}`,id_cotizacion:idCotizacion,id_ficha_cliente:cotizacion.id_ficha_cliente,id_moneda:cotizacion.id_moneda,id_proyecto_contexto:proyecto.proyecto_proyecto_id,fecha_emision:new Date(`${fechaNegocio()}T00:00:00Z`),monto_neto:cotizacion.monto_neto,monto_impuesto:cotizacion.monto_impuesto,monto_total:cotizacion.monto_total_estimado,tipo_cambio_usado:tipoCambio,monto_convertido:tipoCambio?cotizacion.monto_total_estimado.mul(tipoCambio).toDecimalPlaces(2):null,exento_iva:cotizacion.exento_iva,estado_nota_venta:'emitida',observacion:cotizacion.observacion},include:incluirNota});
       await tx.proyecto_financiero.create({data:{id_ficha_cliente:cotizacion.id_ficha_cliente,id_nota_venta:nota.id_nota_venta,id_proyecto_terreno:proyecto.proyecto_proyecto_id,id_moneda:cotizacion.id_moneda,codigo_proyecto_financiero:`COT-${idCotizacion}`,fecha_inicio_financiera:new Date(`${fechaNegocio()}T00:00:00Z`),estado_financiero_proyecto:'activo',monto_venta_estimado:cotizacion.monto_neto,monto_costo_estimado:cotizacion.subtotal_costos_estimados}});
       const idDocumento=entrada.idDocumento?identificador(entrada.idDocumento):null;
       const documento=idDocumento?await tx.documento_tributario.findUnique({where:{id_documento_tributario:idDocumento}}):null;
@@ -651,7 +651,7 @@ export class M2Controller {
         if (autorizacionCredito.resultado !== 'AUTORIZADO') throw new ErrorAplicacion(409, `${autorizacionCredito.resultado}: ${autorizacionCredito.motivos.join(', ')}`);
       }
       const proyecto=await formalizarProyectoCotizacion(tx,idCotizacion);
-      const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, id_proyecto_contexto:proyecto.proyecto_proyecto_id, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: montoTotal, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio?montoTotal.mul(tipoCambio).toDecimalPlaces(2):null, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente' } });
+      const nota = await tx.nota_venta.create({ data: { numero_nota_venta: `B2B-${randomUUID()}`, id_cotizacion: idCotizacion, id_ficha_cliente: cot.id_ficha_cliente, id_moneda: cot.id_moneda, id_proyecto_contexto:proyecto.proyecto_proyecto_id, fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: cot.monto_neto || 0, monto_impuesto: cot.monto_impuesto || 0, monto_total: montoTotal, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio?montoTotal.mul(tipoCambio).toDecimalPlaces(2):null, exento_iva: cot.exento_iva, estado_nota_venta: 'emitida', estado_pago: 'pendiente', observacion: cot.observacion } });
       await tx.proyecto_financiero.create({data:{id_ficha_cliente:cot.id_ficha_cliente,id_nota_venta:nota.id_nota_venta,id_proyecto_terreno:proyecto.proyecto_proyecto_id,id_moneda:cot.id_moneda,codigo_proyecto_financiero:`COT-${idCotizacion}`,fecha_inicio_financiera:new Date(`${fechaNegocio()}T00:00:00Z`),estado_financiero_proyecto:'activo',monto_venta_estimado:cot.monto_neto,monto_costo_estimado:cot.subtotal_costos_estimados}});
       if (montoFinanciado) await registrarCompromisoCredito(tx, { idFicha: cot.id_ficha_cliente, idNota: nota.id_nota_venta, montoFinanciado, idSolicitudExcepcion: autorizacionCredito?.idSolicitudExcepcion });
       const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,usuario,proyecto.proyecto_proyecto_id);
@@ -723,21 +723,8 @@ export class M2Controller {
   }
 
   async emitirCotizacion(idCotizacion: number) {
-    return prisma.$transaction(async tx => {
-      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { detalle_cotizacion: true, contactos_b2b:{where:{estado:'ACTIVO'}}, ficha_cliente:{include:{cliente_financiero:{include:{tipo_cliente_financiero:true}}}} } });
-      if (!cot || cot.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'Sólo se puede emitir un borrador disponible');
-      if (!cot.id_ficha_cliente || !cot.fecha_vigencia || !cot.monto_total_estimado || cot.monto_total_estimado.lte(0) || !cot.detalle_cotizacion.length) throw new ErrorAplicacion(409, 'La Cotización está incompleta');
-      if (cot.segmento_comercial) {
-        const tipoCliente=cot.ficha_cliente.cliente_financiero.tipo_cliente_financiero.nombre_tipo_cliente_financiero.toUpperCase();
-        if(tipoCliente!==cot.segmento_comercial) throw new ErrorAplicacion(409,'El cliente no corresponde al segmento persistido de la Cotización');
-        if(cot.segmento_comercial==='B2B'&&(!cot.ficha_cliente.cliente_financiero.rut_cliente||cot.ficha_cliente.cliente_financiero.nivel_formalizacion!=='formal')) throw new ErrorAplicacion(409,'La emisión B2B requiere un cliente formal con RUT');
-        if(cot.segmento_comercial==='B2B'&&(cot.contactos_b2b.length<1||cot.contactos_b2b.filter(contacto=>contacto.es_principal).length!==1)) throw new ErrorAplicacion(409,'La emisión B2B requiere exactamente un contacto principal propio de la cotización');
-        if(cot.detalle_cotizacion.some(detalle=>detalle.tipo_linea_comercial==='PRODUCTO'&&(!detalle.id_extension_producto_comercial||!detalle.id_producto_comercial_version||!detalle.id_precio_producto_comercial||!detalle.precio_unitario_autorizado))) throw new ErrorAplicacion(409,'La Cotización contiene productos comerciales incompletos');
-        if(cot.requiere_instalacion==='SI'&&cot.estado_cobertura_instalacion!=='DISPONIBLE'&&cot.estado_cobertura_instalacion!=='REQUIERE_EVALUACION') throw new ErrorAplicacion(409,'La cobertura de instalación es inconsistente');
-      }
-      const emitida=await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'emitida' } });
-      return auditableM9(emitida,{estado:'borrador'},{estado:'emitida',revision:emitida.revision});
-    });
+    void idCotizacion;
+    throw new ErrorAplicacion(409, 'La emisión requiere un PDF documental confirmado; utiliza el servicio documental de CU18');
   }
 
   async seleccionarAlternativaB2C(idCotizacion:number, entrada:Entrada, actorId:bigint) {
@@ -1254,7 +1241,7 @@ export class M2Controller {
         subtotal_costos_estimados: costoTotal, margen_esperado: margen, precio_sugerido: baseCotizacion,
         monto_neto: montos.neto, monto_impuesto: montos.impuesto, monto_total_estimado: montos.total,
         descuento_tipo: entrada.descuento_tipo || null, descuento_valor: entrada.descuento_valor || 0,
-        exento_iva: entrada.exento_iva, estado_cotizacion: 'borrador', detalle_cotizacion: { create: detallesConvertidos }, detalles_servicio:{create:contrato?.servicios??[]},
+        exento_iva: entrada.exento_iva, observacion: texto(entrada.observacion, 2000) || null, estado_cotizacion: 'borrador', detalle_cotizacion: { create: detallesConvertidos }, detalles_servicio:{create:contrato?.servicios??[]},
         ...(contrato ? { segmento_comercial:contrato.segmento, nombre_proyecto:texto(entrada.nombre_proyecto,200)||null, referencia_comercial:texto(entrada.referencia_comercial,200)||null, alcance_comercial:texto(entrada.alcance_comercial,30)||null, requiere_instalacion:contrato.instalacion.requiere, direccion_instalacion:texto(entrada.direccion_instalacion,500)||null, region_instalacion:texto(entrada.region_instalacion,120)||null, ciudad_instalacion:texto(entrada.ciudad_instalacion,120)||null, comuna_instalacion:texto(entrada.comuna_instalacion,120)||null, estado_cobertura_instalacion:contrato.instalacion.estado, id_tarifa_instalacion_comercial:contrato.instalacion.idTarifa, precio_instalacion_aplicado:contrato.instalacion.precio, id_condicion_comercial_version:contrato.idCondicion, responsable_comercial:actorId, id_obra_contexto:idObraContexto } : {}),
       } });
       await guardarTipoCambioCotizacion(transaccion,cotizacion.id_cotizacion,tipoCambio);
@@ -1401,7 +1388,12 @@ export class M2Controller {
         fecha_emision: new Date(`${fechaNegocio()}T00:00:00Z`), monto_neto: montos.neto, monto_impuesto: montos.impuesto,
         monto_total: montos.total, tipo_cambio_usado: tipoCambio, monto_convertido: tipoCambio ? montos.total.mul(tipoCambio).toDecimalPlaces(2) : null,
         descuento_aplicado: montos.descuento, exento_iva: entrada.exento_iva,
-        estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto, observacion: JSON.stringify({ detalleComercial: detalle, montoBaseCalculado: base.toFixed(2), persistencia: 'auxiliar_hasta_detalle_nv_estructurado' }),
+        estado_nota_venta: 'emitida', estado_pago: 'pendiente', id_proyecto_contexto: proyectoContexto,
+        observacion: [
+          'Venta directa',
+          ...detalle.map((linea, indice) => `${indice + 1}. ${linea.tipo}: ${linea.descripcion} · ${linea.cantidad} × ${codigoMoneda} ${linea.valor.toLocaleString('es-CL')}`),
+          `Monto base: ${codigoMoneda} ${base.toNumber().toLocaleString('es-CL')}`,
+        ].join('\n'),
       } });
     });
   }

@@ -5,6 +5,8 @@ const {randomUUID,createHash}=require('node:crypto');
 const habilitada=process.env.C43_E2E_AISLADO==='1';
 const probarFallo=process.env.C43_FALLO_STORAGE==='1'||process.env.C43_FALLO_ANTIVIRUS==='1';
 const requiereDb=habilitada||probarFallo;
+const {validarDestinoDemo}=requiereDb?require('../dist/administracion/demo/seguridad'):{validarDestinoDemo:null};
+if(requiereDb)validarDestinoDemo(process.env);
 const {prisma}=requiereDb?require('../dist/db'):{prisma:null};
 const {M2Controller}=requiereDb?require('../dist/controladores/M2Controller'):{M2Controller:null};
 const {ServicioDocumentosComerciales}=requiereDb?require('../dist/comercial/documentos/ServicioDocumentosComerciales'):{ServicioDocumentosComerciales:null};
@@ -17,6 +19,8 @@ let moneda,material,precioB2B,precioB2C,condiciones={},medioPago,categoriaPago;
 const codigo=etiqueta=>`C43-${etiqueta}-${randomUUID().slice(0,8).toUpperCase()}`;
 
 async function prepararBase(){
+ const version=await prisma.$queryRawUnsafe('SHOW server_version_num');
+ if(!String(version[0]?.server_version_num||'').startsWith('18'))throw new Error('C4.3 sólo permite PostgreSQL 18 aislado');
  moneda=await prisma.moneda.update({where:{id_moneda:910001},data:{codigo_moneda:'CLP',nombre_moneda:'Peso chileno sintético',simbolo_moneda:'$CLP',estado_moneda:'activo'}});
  await prisma.material.upsert({where:{material_sku:'C43-MAT'},update:{material_estado:'activo'},create:{material_sku:'C43-MAT',material_nombre_material:'Material sintético C4.3',material_estado:'activo'}});
  material=await prisma.historial_precio_material.findFirst({where:{material_sku:'C43-MAT',id_moneda:moneda.id_moneda,estado_precio:'vigente'}})||await prisma.historial_precio_material.create({data:{material_sku:'C43-MAT',id_moneda:moneda.id_moneda,precio_unitario:10000,fecha_vigencia_inicio:new Date('2020-01-01T00:00:00Z'),estado_precio:'vigente'}});
@@ -34,7 +38,7 @@ async function prepararBase(){
 }
 
 const producto=(precio,cantidad=1)=>({tipo_producto:'Puerta sintética',id_item_comercial:910001,id_producto_comercial:910001,id_producto_comercial_version:910001,id_precio_producto_comercial:precio.id_precio_producto_comercial.toString(),cantidad,medidas:'200x90x5',observaciones:'Fixture C4.3',opcionales:[],materiales:[{id_historial_precio_material:material.id_historial_precio_material,cantidad:2}]});
-const base=(segmento,precio,ficha,cantidad=1)=>({segmento_comercial:segmento,id_ficha_cliente:ficha,fecha_vigencia:'2026-12-31',margen_esperado:30,id_moneda:moneda.id_moneda,exento_iva:false,descuento_valor:0,requiere_instalacion:'NO',permitir_borrador_incompleto:false,id_condicion_comercial_version:condiciones[segmento].versiones[0].id_condicion_comercial_version.toString(),productos:[producto(precio,cantidad)]});
+const base=(segmento,precio,ficha,cantidad=1)=>({segmento_comercial:segmento,id_ficha_cliente:ficha,fecha_vigencia:'2026-12-31',margen_esperado:30,id_moneda:moneda.id_moneda,exento_iva:false,descuento_valor:0,observacion:'Primera línea CU18\nSegunda línea con wrapping seguro',requiere_instalacion:'NO',permitir_borrador_incompleto:false,id_condicion_comercial_version:condiciones[segmento].versiones[0].id_condicion_comercial_version.toString(),productos:[producto(precio,cantidad)]});
 
 test('C4.3 publica plantillas/carta y emite B2B/B2C con PDF real recuperable e idempotente',{skip:!habilitada,timeout:120000},async()=>{
  await prepararBase();const servicio=new ServicioDocumentosComerciales();
@@ -69,6 +73,7 @@ test('C4.3 publica plantillas/carta y emite B2B/B2C con PDF real recuperable e i
  const planB2B=await m2.obtenerPlanificacionAprobacionCotizacion(b2b.id_cotizacion);assert.equal(planB2B.totalOt,2);
  const aprobadaB2B=await m2.aprobarCotizacionB2B(b2b.id_cotizacion,{folioOrdenCompra:`OC-${randomUUID()}`,respaldoOrdenCompra:'Respaldo sintético C3.4',planificaciones:planB2B.planificaciones},actor.id);
  assert.equal(aprobadaB2B.ordenesTrabajo.length,2);assert.equal(await prisma.nota_venta.count({where:{id_cotizacion:b2b.id_cotizacion}}),1);assert.equal(await prisma.unidad_fisica_orden_trabajo.count({where:{id_cotizacion:b2b.id_cotizacion}}),2);
+ assert.equal((await prisma.nota_venta.findFirstOrThrow({where:{id_cotizacion:b2b.id_cotizacion}})).observacion,'Primera línea CU18\nSegunda línea con wrapping seguro');
  await assert.rejects(()=>m2.aprobarCotizacionB2B(b2b.id_cotizacion,{folioOrdenCompra:`OC-REINTENTO-${randomUUID()}`,respaldoOrdenCompra:'No debe duplicar',planificaciones:planB2B.planificaciones},actor.id),error=>error.estado===409);
  assert.equal(await prisma.unidad_fisica_orden_trabajo.count({where:{id_cotizacion:b2b.id_cotizacion}}),2);
 
@@ -90,6 +95,7 @@ test('C4.3 publica plantillas/carta y emite B2B/B2C con PDF real recuperable e i
  const planB2C=await m2.obtenerPlanificacionAprobacionCotizacion(b2c.id_cotizacion);assert.equal(planB2C.totalOt,3);
  const ventaB2C=await http('POST',`/cotizaciones/${b2c.id_cotizacion}/consolidar-b2c`,{monto:Number(seleccionada.monto_total),idMedio:medioPago.id_medio_pago,idCategoria:categoriaPago.id_categoria_pago,respaldo:'Pago sintético C3.4',antecedentesMedio:'Prueba aislada',tipoCambio:1,planificaciones:planB2C.planificaciones});
  assert.equal(ventaB2C.ordenesTrabajo.length,3);assert.equal(await prisma.nota_venta.count({where:{id_cotizacion:b2c.id_cotizacion}}),1);assert.equal(await prisma.unidad_fisica_orden_trabajo.count({where:{id_cotizacion:b2c.id_cotizacion}}),3);
+ assert.equal((await prisma.nota_venta.findFirstOrThrow({where:{id_cotizacion:b2c.id_cotizacion}})).observacion,'Primera línea CU18\nSegunda línea con wrapping seguro');
  await assert.rejects(()=>m2.consolidarB2C(b2c.id_cotizacion,{monto:Number(seleccionada.monto_total),idMedio:medioPago.id_medio_pago,idCategoria:categoriaPago.id_categoria_pago,respaldo:'Reintento',antecedentesMedio:'No duplicar',tipoCambio:1,planificaciones:planB2C.planificaciones},actor.id),error=>error.estado===409);
  assert.equal(await prisma.unidad_fisica_orden_trabajo.count({where:{id_cotizacion:b2c.id_cotizacion}}),3);
  const historicoB2CDespues=await servicio.recuperarDocumentoCotizacion(b2c.id_cotizacion,emitidaB2C.id_cotizacion_version);assert.equal(historicoB2CDespues.sha256,historicoB2C.sha256);

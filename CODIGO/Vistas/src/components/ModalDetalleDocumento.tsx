@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { X, DollarSign } from 'lucide-react';
 import TrazabilidadDocumentalM11 from './TrazabilidadDocumentalM11';
 import { leerPdfOperacional } from '../utilidades/pdfOperacional';
+import { presentarObservacion } from '../utilidades/observacion';
 
 interface ModalDetalleDocumentoProps {
   activeModal: { tipo: 'cotizacion' | 'nota_venta'; data: any } | null;
@@ -48,6 +49,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
   }, [activeModal]);
   if (!activeModal) return null;
   const guias = guiasLocales;
+  const observacionVisible = presentarObservacion(activeModal.data.observacion);
   const guiaEditable = (guia: GuiaDetalle) => !['cerrada', 'finalizada', 'anulada'].includes(String(guia.estado || 'emitida').toLowerCase());
 
   const guardarGuia = async () => {
@@ -107,8 +109,8 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur flex justify-center items-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center p-6 border-b border-gray-100">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-x-hidden overflow-y-auto rounded-xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-100 p-4 sm:p-6">
           <div>
             <h3 className="text-xl font-bold text-gray-900">{activeModal.tipo === 'cotizacion' ? `COT-${activeModal.data.id_cotizacion}` : `NV-${activeModal.data.id_nota_venta || activeModal.data.numero_nota_venta}`}</h3>
             <p className="text-sm text-gray-500 mt-0.5">
@@ -122,9 +124,9 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="space-y-5 p-4 sm:p-6">
           {/* Info general */}
-          <div className="grid grid-cols-3 gap-3 text-sm bg-gray-50 p-4 rounded-lg">
+          <div className="grid grid-cols-1 gap-3 rounded-lg bg-gray-50 p-4 text-sm sm:grid-cols-3">
             <div>
               <span className="text-gray-500 block text-xs">Fecha Emisión</span>
               <span className="font-medium">{new Date(activeModal.data.fecha_emision).toLocaleDateString('es-CL', { timeZone: 'UTC' })}</span>
@@ -144,10 +146,10 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
               <span className="text-gray-500 block text-xs">Tipo Producto</span>
               <span className="font-medium">{activeModal.data.detalle_cotizacion?.[0]?.item_comercial?.nombre_item || '—'}</span>
             </div>
-            {activeModal.data.observacion && activeModal.data.observacion !== 'PENDIENTE_APROBACION' && (
-              <div className="col-span-3">
+            {observacionVisible && observacionVisible !== 'PENDIENTE_APROBACION' && (
+              <div className="min-w-0 sm:col-span-3">
                 <span className="text-gray-500 block text-xs">Observación</span>
-                <span>{activeModal.data.observacion}</span>
+                <p className="mt-1 max-w-full whitespace-pre-wrap break-words leading-relaxed text-gray-800 [overflow-wrap:anywhere]">{observacionVisible}</p>
               </div>
             )}
           </div>

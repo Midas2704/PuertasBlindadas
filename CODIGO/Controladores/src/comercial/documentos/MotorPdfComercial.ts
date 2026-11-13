@@ -26,8 +26,35 @@ export interface SnapshotDocumentoComercial {
 type Pagina = string[];
 type Logo = { bytes: Buffer; ancho: number; alto: number };
 const NARANJA = '0.996 0.561 0.004', GRIS = '0.404 0.404 0.404', GRIS_CLARO = '0.94 0.94 0.94', NEGRO = '0 0 0', BLANCO = '1 1 1';
-const limpiar = (valor: unknown) => String(valor ?? '').replace(/[\u2013\u2014]/g, '-').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\x20-\x7E\xA0-\xFF]/g, '?').replace(/([\\()])/g, '\\$1');
-const partir = (valor: unknown, maximo = 88) => { const palabras = String(valor ?? '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean); if (!palabras.length) return ['-']; const lineas: string[] = []; let actual = ''; for (const palabra of palabras) { const candidato = `${actual} ${palabra}`.trim(); if (candidato.length <= maximo) actual = candidato; else { if (actual) lineas.push(actual); actual = palabra; } } if (actual) lineas.push(actual); return lineas; };
+const textoPlano = (valor: unknown) => String(valor ?? '')
+  .replace(/<\s*(?:script|style)\b[^>]*>[\s\S]*?<\s*\/\s*(?:script|style)\s*>/gi, '')
+  .replace(/<\s*br\s*\/?>/gi, '\n')
+  .replace(/<\s*\/\s*(?:p|div|li|tr|h[1-6])\s*>/gi, '\n')
+  .replace(/<[^>]*>/g, '')
+  .replace(/&nbsp;/gi, ' ')
+  .replace(/&amp;/gi, '&')
+  .replace(/&lt;/gi, '<')
+  .replace(/&gt;/gi, '>')
+  .replace(/&quot;/gi, '"')
+  .replace(/&#39;|&apos;/gi, "'")
+  .replace(/\r\n?/g, '\n');
+const limpiar = (valor: unknown) => textoPlano(valor).replace(/[\u2013\u2014]/g, '-').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\x20-\x7E\xA0-\xFF]/g, '?').replace(/([\\()])/g, '\\$1');
+const partir = (valor: unknown, maximo = 88) => {
+  const lineas: string[] = [];
+  for (const parrafo of textoPlano(valor).split('\n')) {
+    const palabras = parrafo.trim().split(/\s+/).filter(Boolean).flatMap(palabra => palabra.length > maximo ? palabra.match(new RegExp(`.{1,${maximo}}`, 'g')) ?? [] : [palabra]);
+    if (!palabras.length) { if (lineas.length && lineas[lineas.length - 1] !== '') lineas.push(''); continue; }
+    let actual = '';
+    for (const palabra of palabras) {
+      const candidato = `${actual} ${palabra}`.trim();
+      if (candidato.length <= maximo) actual = candidato;
+      else { if (actual) lineas.push(actual); actual = palabra; }
+    }
+    if (actual) lineas.push(actual);
+  }
+  while (lineas[lineas.length - 1] === '') lineas.pop();
+  return lineas.length ? lineas : ['-'];
+};
 const moneda = (valor: number | null | undefined, codigo: string) => { if (valor === null || valor === undefined || !Number.isFinite(valor)) return 'Precio por definir'; const decimales = codigo === 'CLP' ? 0 : 2; return `${codigo} ${valor.toLocaleString('es-CL', { minimumFractionDigits: decimales, maximumFractionDigits: decimales })}`; };
 const texto = (x: number, y: number, valor: unknown, tamano = 9, negrita = false, color = NEGRO) => `BT /${negrita ? 'F2' : 'F1'} ${tamano} Tf ${color} rg ${x} ${y} Td (${limpiar(valor)}) Tj ET`;
 const rectangulo = (x: number, y: number, ancho: number, alto: number, relleno: string, borde?: string) => `${relleno} rg${borde ? ` ${borde} RG 0.7 w` : ''} ${x} ${y} ${ancho} ${alto} re ${borde ? 'B' : 'f'}`;
@@ -83,6 +110,7 @@ function crearB2C(snapshot: SnapshotDocumentoComercial, logo: Logo | null) {
     if (yc < 200) nuevaPaginaValores('Resumen y condiciones'); [['NETO', moneda(snapshot.neto, snapshot.moneda)], ['IVA', moneda(snapshot.impuesto, snapshot.moneda)], ['TOTAL', moneda(snapshot.total, snapshot.moneda)]].forEach(([etiqueta, valor], indice) => { cierre.push(rectangulo(36, yc - 24, 540, 32, indice === 2 ? NARANJA : GRIS_CLARO, indice === 2 ? NARANJA : '0.82 0.82 0.82')); cierre.push(texto(50, yc - 13, etiqueta, 9, true, indice === 2 ? BLANCO : GRIS)); cierre.push(texto(438, yc - 13, valor, 10, true, indice === 2 ? BLANCO : NEGRO)); yc -= 42; });
   }
   if (yc < 180) nuevaPaginaValores('Condiciones comerciales'); cierre.push(texto(36, yc - 8, 'CONDICIONES COMERCIALES', 10, true, NARANJA)); yc -= 31; (snapshot.condiciones?.length ? snapshot.condiciones : ['Las condiciones vigentes se confirmarán en la propuesta definitiva.']).forEach(condicion => { partir(condicion, 78).forEach(linea => { cierre.push(texto(46, yc, `- ${linea}`, 9)); yc -= 14; }); yc -= 4; });
+  if (snapshot.observaciones?.length) { if (yc < 150) nuevaPaginaValores('Observaciones'); cierre.push(texto(36, yc - 8, 'OBSERVACIONES', 10, true, NARANJA)); yc -= 31; snapshot.observaciones.forEach((observacion, indice) => { for (const linea of partir(observacion, 78)) { if (yc < 80) nuevaPaginaValores('Observaciones · continuación'); cierre.push(texto(46, yc, `${indice + 1}. ${linea}`, 9)); yc -= 14; } yc -= 5; }); }
   if (snapshot.tipo === 'CARTA_B2C') { cierre.push(rectangulo(36, Math.max(100, yc - 62), 540, 56, GRIS_CLARO)); cierre.push(texto(50, Math.max(132, yc - 31), 'Los precios base no incluyen instalación.', 10, true, GRIS)); cierre.push(texto(50, Math.max(115, yc - 48), 'Precio y disponibilidad dependen de región, comuna y cobertura autorizada.', 8, false, GRIS)); }
   else { const cierreY = Math.max(72, yc - 58); cierre.push(texto(36, cierreY + 25, 'Gracias por considerar a Puertas Blindadas para su proyecto.', 10, true, GRIS)); cierre.push(texto(36, cierreY + 8, 'La identificación comercial y firma se incorporan sólo cuando están configuradas en la plantilla publicada.', 7, false, GRIS)); }
   return paginas;
@@ -99,7 +127,8 @@ function crearB2B(snapshot: SnapshotDocumentoComercial, logo: Logo | null) {
   if (snapshot.cliente) { bloqueTitulo('Cliente empresa'); fila('Razón social', snapshot.cliente.nombre); if (snapshot.cliente.rut) fila('RUT', snapshot.cliente.rut); if (snapshot.cliente.correo) fila('Correo', snapshot.cliente.correo); if (snapshot.cliente.telefono) fila('Teléfono', snapshot.cliente.telefono); }
   if (snapshot.contactos?.length) { bloqueTitulo('Contactos de la operación'); snapshot.contactos.forEach(contacto => fila(contacto.principal ? 'Contacto principal' : 'Contacto', `${contacto.nombre}${contacto.cargo ? ` · ${contacto.cargo}` : ''}${contacto.correo ? ` · ${contacto.correo}` : ''}${contacto.telefono ? ` · ${contacto.telefono}` : ''}`)); }
   if (snapshot.proyecto) { bloqueTitulo('Proyecto y alcance'); if (snapshot.proyecto.nombre) fila('Proyecto', snapshot.proyecto.nombre); if (snapshot.proyecto.referencia) fila('Referencia', snapshot.proyecto.referencia); if (snapshot.proyecto.ubicacion) fila('Ubicación', snapshot.proyecto.ubicacion); if (snapshot.proyecto.alcance) fila('Alcance', snapshot.proyecto.alcance); }
-  tabla('Partidas de productos', snapshot.productos); tabla('Servicios cotizados', snapshot.servicios ?? []); bloqueTitulo('Resumen económico'); fila('Neto', moneda(snapshot.neto, snapshot.moneda)); fila('IVA', moneda(snapshot.impuesto, snapshot.moneda)); fila('Total', moneda(snapshot.total, snapshot.moneda)); if (snapshot.condiciones?.length) { bloqueTitulo('Condiciones comerciales'); snapshot.condiciones.forEach((condicion, i) => fila(`Condición ${i + 1}`, condicion)); } if (snapshot.observaciones?.length) { bloqueTitulo('Observaciones'); snapshot.observaciones.forEach((observacion, i) => fila(`Observación ${i + 1}`, observacion)); }
+  const listaTexto = (titulo: string, items: string[]) => { if (!items.length) return; bloqueTitulo(titulo); items.forEach((item, indice) => { asegurar(24); pagina.push(texto(44, y, `${indice + 1}.`, 8, true, GRIS)); y -= 14; for (const linea of partir(item, 82)) { asegurar(18); pagina.push(texto(58, y, linea || ' ', 9)); y -= 13; } y -= 5; }); };
+  tabla('Partidas de productos', snapshot.productos); tabla('Servicios cotizados', snapshot.servicios ?? []); bloqueTitulo('Resumen económico'); fila('Neto', moneda(snapshot.neto, snapshot.moneda)); fila('IVA', moneda(snapshot.impuesto, snapshot.moneda)); fila('Total', moneda(snapshot.total, snapshot.moneda)); listaTexto('Condiciones comerciales', snapshot.condiciones ?? []); listaTexto('Observaciones', snapshot.observaciones ?? []);
   return paginas;
 }
 
