@@ -10,14 +10,18 @@ const {
   validarDefinicionCatalogoMinimo,
 } = require('../dist/administracion/seedMinimaOperativa.js');
 
-test('la definición mínima es acotada, identificable y no contiene normativa inventada', () => {
+test('la definición mínima es identificable y separa demostración de normativa oficial vigente', () => {
   assert.equal(validarDefinicionCatalogoMinimo(), true);
-  assert.equal(CATALOGO_MINIMO.productos.length, 4);
-  assert.equal(CATALOGO_MINIMO.opcionales.length, 3);
-  assert.equal(CATALOGO_MINIMO.servicios.length, 2);
+  assert.equal(CATALOGO_MINIMO.productos.length, 5);
+  assert.equal(CATALOGO_MINIMO.opcionales.length, 6);
+  assert.equal(CATALOGO_MINIMO.servicios.length, 6);
   const serializado = JSON.stringify(CATALOGO_MINIMO);
   assert.match(serializado, /DEMO-CAT-/);
-  assert.doesNotMatch(serializado, /UF|UTM|AFP_COTIZACION|RETENCION_HONORARIOS|TRAMO_IMPUESTO/);
+  assert.equal(CATALOGO_MINIMO.remuneraciones.tramosNoviembre2026.length, 8);
+  assert.equal(CATALOGO_MINIMO.remuneraciones.ufNoviembre2026, '41439.89');
+  assert.equal(CATALOGO_MINIMO.remuneraciones.retencionHonorarios2026, '0.1525');
+  assert.deepEqual(CATALOGO_MINIMO.monedas.map(x => x.codigo), ['CLP', 'USD']);
+  assert.equal(CATALOGO_MINIMO.mediosPago.length, 5);
   for (const producto of CATALOGO_MINIMO.productos) {
     assert.ok(producto.codigo.startsWith(PREFIJO_SEED_MINIMA));
     assert.ok(Number(producto.precioB2b) > 0);
@@ -48,7 +52,7 @@ test('la auditoría real prioriza lo vacío y conserva historia ya disponible', 
   });
   assert.equal(prioridades.find(x => x.catalogo.startsWith('Productos')).estado, 'COMPLETAR');
   assert.equal(prioridades.find(x => x.catalogo === 'Honorarios').estado, 'CONSERVAR');
-  assert.equal(prioridades.find(x => x.catalogo.startsWith('Remuneraciones')).estado, 'CONSERVAR_SIN_MODIFICAR_NORMATIVA');
+  assert.equal(prioridades.find(x => x.catalogo.startsWith('Remuneraciones')).estado, 'COMPLETAR_CON_FUENTE_OFICIAL');
   assert.equal(prioridades.find(x => x.catalogo === 'Unidades y categorías').estado, 'COMPLETAR');
 });
 
@@ -58,9 +62,9 @@ test('la segunda evaluación de un catálogo ya completo no propone recrearlo', 
     'finanzas.compatibilidad_opcional_producto','finanzas.servicio_comercial','finanzas.precio_servicio_comercial',
     'finanzas.condicion_comercial','finanzas.tarifa_instalacion_comercial','finanzas.categoria_pago',
     'finanzas.proveedor','finanzas.prestador_honorarios','finanzas.boleta_honorarios','finanzas.esquema_remuneracional',
-    'finanzas.parametro_remuneracional','inventario.material','inventario.bodega','inventario.material_unidad_medida',
+    'finanzas.parametro_remuneracional','finanzas.tramo_impuesto_renta','inventario.material','inventario.bodega','inventario.material_unidad_medida',
     'inventario.material_categoria_general',
-  ].map(nombre => [nombre, { total_registros: nombre === 'finanzas.categoria_pago' ? 3 : 1 }]));
+  ].map(nombre => [nombre, { total_registros: nombre === 'finanzas.categoria_pago' ? 3 : nombre === 'finanzas.tramo_impuesto_renta' ? 8 : 1 }]));
   const prioridades = prioridadesDesdeAuditoria(completos);
   assert.equal(prioridades.filter(x => x.estado === 'COMPLETAR').length, 0);
 });
