@@ -127,15 +127,28 @@ async function conteosProtegidos(cliente: Cliente): Promise<ConteosProtegidos> {
 }
 
 async function estadoMigraciones(cliente: Cliente) {
-  const filas = await cliente.$queryRaw<Array<{ aplicadas: bigint; fallidas: bigint; ultima: string | null }>>(Prisma.sql`
+  const ubicaciones = await cliente.$queryRaw<Array<{ esquema: string }>>(Prisma.sql`
+    SELECT n.nspname AS esquema
+    FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = '_prisma_migrations'
+      AND c.relkind IN ('r', 'p')
+    ORDER BY CASE n.nspname WHEN 'public' THEN 0 WHEN 'comun' THEN 1 WHEN 'finanzas' THEN 2 ELSE 3 END
+  `);
+  const esquema = ubicaciones[0]?.esquema;
+  if (!esquema || !/^[a-z_][a-z0-9_]*$/i.test(esquema)) {
+    throw new Error('No fue posible localizar de forma segura la tabla _prisma_migrations');
+  }
+  const tablaMigraciones = `"${esquema}"."_prisma_migrations"`;
+  const filas = await cliente.$queryRawUnsafe<Array<{ aplicadas: bigint; fallidas: bigint; ultima: string | null }>>(`
     SELECT
       count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS aplicadas,
       count(*) FILTER (WHERE finished_at IS NULL AND rolled_back_at IS NULL) AS fallidas,
       max(migration_name) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS ultima
-    FROM finanzas._prisma_migrations
+    FROM ${tablaMigraciones}
   `);
   const fila = filas[0];
-  return { aplicadas: Number(fila?.aplicadas ?? 0), fallidas: Number(fila?.fallidas ?? 0), ultima: fila?.ultima ?? null };
+  return { esquema, aplicadas: Number(fila?.aplicadas ?? 0), fallidas: Number(fila?.fallidas ?? 0), ultima: fila?.ultima ?? null };
 }
 
 async function exigirDestinoSeguro(cliente: Cliente, entorno: NodeJS.ProcessEnv) {

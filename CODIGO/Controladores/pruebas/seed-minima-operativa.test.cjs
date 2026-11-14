@@ -72,6 +72,8 @@ test('la implementación no contiene escrituras sobre historia, usuarios o permi
   assert.doesNotMatch(fuente, /TRUNCATE|migrate reset|force-reset/i);
   assert.match(fuente, /conteosProtegidos/);
   assert.match(fuente, /TransactionIsolationLevel\.Serializable/);
+  assert.doesNotMatch(fuente, /FROM finanzas\._prisma_migrations/);
+  assert.match(fuente, /pg_catalog\.pg_namespace/);
 });
 
 test('la integración real queda disponible sólo para una copia PostgreSQL explícita', { skip: !process.env.SEED_MINIMA_TEST_DATABASE_URL }, () => {
