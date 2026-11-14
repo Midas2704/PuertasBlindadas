@@ -303,7 +303,10 @@ export async function aplicarSeedMinima(cliente: PrismaClient, entorno: NodeJS.P
   const seguridad = await exigirDestinoSeguro(cliente, entorno);
   const antes = await conteosProtegidos(cliente);
   const resultado = await cliente.$transaction(async tx => {
-    await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(2704, 20261115)`);
+    await tx.$queryRaw<Array<{ adquirido: boolean }>>(Prisma.sql`
+      SELECT true AS adquirido
+      FROM (SELECT pg_advisory_xact_lock(2704, 20261115) AS bloqueo) AS candado
+    `);
     const actor = await tx.usuario.findFirstOrThrow({ where: { administrador_original: true }, select: { usuario_id_usuario: true } });
     const cambios = await aplicarCatalogos(tx, actor.usuario_id_usuario);
     const durante = await conteosProtegidos(tx);

@@ -72,6 +72,7 @@ test('la implementación no contiene escrituras sobre historia, usuarios o permi
   assert.doesNotMatch(fuente, /TRUNCATE|migrate reset|force-reset/i);
   assert.match(fuente, /conteosProtegidos/);
   assert.match(fuente, /TransactionIsolationLevel\.Serializable/);
+  assert.match(fuente, /SELECT true AS adquirido/);
   assert.doesNotMatch(fuente, /FROM finanzas\._prisma_migrations/);
   assert.match(fuente, /pg_catalog\.pg_namespace/);
 });
