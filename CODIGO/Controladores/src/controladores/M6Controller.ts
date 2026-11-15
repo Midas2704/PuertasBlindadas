@@ -9,6 +9,7 @@ import { archivoCalculoPreliminarM6, archivoComprobanteAnticipoM6, archivoLiquid
 import { CorreoDesarrollo, CorreoDocumental } from '../utilidades/correo';
 import { AuditoriaDocumental, AuditoriaDocumentalLegacyPrisma, CondicionDocumento } from '../servicios/AuditoriaDocumental';
 import { calcularPrevisionLegal } from '../m6/calculoPrevisional';
+import { conciliarHistoricosDemoEnCalculo } from '../m6/conciliacionHistoricaDemo';
 import { archivoCsvAdministrativo } from '../utilidades/csv';
 import { resumirIncidenciasTerreno, resumirOperacionTerreno, type OtDashboard, type TareaDashboard } from '../m6/dashboardTerreno';
 import { respaldoOperacional } from '../utilidades/pdfOperacional';
@@ -1548,6 +1549,10 @@ export class M6Controller {
     const legal = await calcularPrevisionLegal(tx, { idEmpleado: remuneracion.id_empleado, fechaInicio: remuneracion.periodo.fecha_inicio, fechaFin: remuneracion.periodo.fecha_fin, baseImponible, afp: remuneracion.empleado.afp?.nombre_afp || null, salud: remuneracion.empleado.prevision_salud ? { nombre: remuneracion.empleado.prevision_salud.nombre_prevision_salud, tipo: remuneracion.empleado.prevision_salud.tipo_prevision_salud } : null, seguroCesantia: remuneracion.empleado.seguro_cesantia, fundamentoExclusionCesantia: remuneracion.empleado.seguro_cesantia_fundamento_exclusion });
     const componentesLegales: Prisma.componente_remuneracionCreateManyInput[] = legal.componentes.map(item => ({ id_remuneracion: idRemuneracion, creado_por: idUsuario, tipo: item.tipo, descripcion: item.descripcion, monto: item.monto, fuente_tipo: 'AUTOMATICA', clave_negocio: item.claveNegocio, referencia_origen: item.referenciaOrigen, version_origen: item.versionOrigen, estado_revision: 'aprobado', revisado_por: idUsuario, fecha_revision: new Date() }));
     await this.sincronizarAutomaticos(tx, idRemuneracion, componentesLegales, ['DEDUCCION_PREVISIONAL', 'IMPUESTO_RENTA', 'APORTE_EMPLEADOR_AUTOMATICO']);
+    // Solo en el escenario DEMO-UI identificado; no toca otras fuentes.
+    if (remuneracion.componentes.some(c => c.clave_negocio?.startsWith('DEMO-UI:'))) {
+      await conciliarHistoricosDemoEnCalculo(tx, idRemuneracion);
+    }
     const todos = await tx.componente_remuneracion.findMany({ where: { id_remuneracion: idRemuneracion } });
     let haberes = new Prisma.Decimal(0), deducciones = new Prisma.Decimal(0), aportes = new Prisma.Decimal(0);
     for (const item of todos.filter(x => x.estado_revision === 'aprobado' && x.monto !== null)) {
