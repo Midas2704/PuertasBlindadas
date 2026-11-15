@@ -1,0 +1,11 @@
+services:
+  backend:
+    environment:
+      DOCUMENTAL_PERSONAL_MODE: "true"
+      DOCUMENTAL_LOCAL_STORAGE_DIR: /app/data/documentos
+      DOCUMENTAL_LOCAL_CONTAINER: documentos-locales
+    volumes:
+      - pblindadas_documentos_locales:/app/data/documentos
+
+volumes:
+  pblindadas_documentos_locales:

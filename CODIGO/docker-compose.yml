@@ -1,0 +1,76 @@
+services:
+
+  postgres:
+    image: postgres:18
+    container_name: pblindadas-postgres
+    restart: unless-stopped
+
+    env_file:
+      - ./Controladores/.env
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+    volumes:
+      - pblindadas_postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+    networks:
+      - pblindadas_internal
+
+  backend:
+    build:
+      context: ./Controladores
+      dockerfile: Dockerfile
+
+    container_name: pblindadas-api
+    restart: unless-stopped
+
+    env_file:
+      - ./Controladores/.env
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    ports:
+      - "127.0.0.1:3001:3000"
+
+    networks:
+      - pblindadas_internal
+
+
+  frontend:
+    build:
+      context: ./Vistas
+      dockerfile: Dockerfile
+
+    container_name: pblindadas-frontend
+    restart: unless-stopped
+
+    depends_on:
+      - backend
+
+    ports:
+      - "127.0.0.1:8081:80"
+
+    networks:
+      - pblindadas_internal
+      - web_proxy
+
+volumes:
+  pblindadas_postgres_data:
+
+
+networks:
+  pblindadas_internal:
+    driver: bridge
+  web_proxy:
+    external: true
