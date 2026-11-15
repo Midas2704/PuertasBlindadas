@@ -23,6 +23,15 @@ interface Cliente {
   saldosPorMoneda: { moneda: string; saldoPendiente: number }[];
 }
 
+const formularioInicial = () => ({
+  tipo: 'B2B',
+  rut: '',
+  nombre: '',
+  contacto: '',
+  correo: '',
+  telefono: ''
+});
+
 const CatalogoClientes: React.FC = () => {
   const {sesion}=usarSesion();
   const [clientes, fijarClientes] = useState<Cliente[]>([]);
@@ -36,36 +45,65 @@ const CatalogoClientes: React.FC = () => {
   const [cargando, fijarCargando] = useState(true);
   const [error, fijarError] = useState('');
   const [nuevo, fijarNuevo] = useState(false);
-  const [formulario, fijarFormulario] = useState({ tipo:'B2B', rut:'', nombre:'', contacto:'', correo:'', telefono:'' });
+  const [formulario, fijarFormulario] = useState(formularioInicial());
   const [guardando, fijarGuardando] = useState(false);
   const [mensaje, fijarMensaje] = useState('');
   const rutInvalido = Boolean(formulario.rut.trim()) && !esRutValido(formulario.rut);
+  const telefonoB2CFaltante =
+    formulario.tipo === 'B2C' && !formulario.telefono.trim();
+    useEffect(() => {
+      const cancelacion = new AbortController();
+      fijarCargando(true);
+      fijarError('');
+      const parametros = new URLSearchParams({ busqueda, estado, ordenar, direccion });
+      if (situacion !== 'todas') parametros.set('situacion', situacion);
+      if (fechaDesde) parametros.set('fechaDesde', fechaDesde);
+      if (fechaHasta) parametros.set('fechaHasta', fechaHasta);
+      solicitarFinanzas(`/clientes?${parametros}`, { signal: cancelacion.signal })
+        .then(async respuesta => {
+          const resultado = await respuesta.json();
+          if (!respuesta.ok) throw new Error(resultado.error || 'No fue posible cargar clientes');
+          return resultado;
+        })
+        .then(resultado => { if (!cancelacion.signal.aborted) fijarClientes(resultado); })
+        .catch(causa => { if (!cancelacion.signal.aborted) fijarError(causa.message); })
+        .finally(() => { if (!cancelacion.signal.aborted) fijarCargando(false); });
+      return () => cancelacion.abort();
+    }, [busqueda, estado, situacion, fechaDesde, fechaHasta, ordenar, direccion]);
 
-  useEffect(() => {
-    const cancelacion = new AbortController();
-    fijarCargando(true);
-    fijarError('');
-    const parametros = new URLSearchParams({ busqueda, estado, ordenar, direccion });
-    if (situacion !== 'todas') parametros.set('situacion', situacion);
-    if (fechaDesde) parametros.set('fechaDesde', fechaDesde);
-    if (fechaHasta) parametros.set('fechaHasta', fechaHasta);
-    solicitarFinanzas(`/clientes?${parametros}`, { signal: cancelacion.signal })
-      .then(async respuesta => {
-        const resultado = await respuesta.json();
-        if (!respuesta.ok) throw new Error(resultado.error || 'No fue posible cargar clientes');
-        return resultado;
-      })
-      .then(resultado => { if (!cancelacion.signal.aborted) fijarClientes(resultado); })
-      .catch(causa => { if (!cancelacion.signal.aborted) fijarError(causa.message); })
-      .finally(() => { if (!cancelacion.signal.aborted) fijarCargando(false); });
-    return () => cancelacion.abort();
-  }, [busqueda, estado, situacion, fechaDesde, fechaHasta, ordenar, direccion]);
+    const enviar = async (ruta: string, metodo: string, cuerpo: Record<string, unknown>) => {
+      const respuesta = await solicitarFinanzas(ruta, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+      const resultado = await respuesta.json(); if (!respuesta.ok) throw new Error(resultado.error || 'No fue posible completar la operación'); return resultado;
+    };
+    const guardar = async (evento: React.FormEvent) => {
+    evento.preventDefault();
 
-  const enviar = async (ruta: string, metodo: string, cuerpo: Record<string, unknown>) => {
-    const respuesta = await solicitarFinanzas(ruta, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
-    const resultado = await respuesta.json(); if (!respuesta.ok) throw new Error(resultado.error || 'No fue posible completar la operación'); return resultado;
+    if (telefonoB2CFaltante) {
+      fijarMensaje('El teléfono es obligatorio para clientes B2C.');
+      return;
+    }
+
+    fijarGuardando(true);
+    fijarMensaje('');
+
+    try {
+      await enviar('/clientes', 'POST', formulario);
+
+      fijarFormulario(formularioInicial());
+      fijarMensaje('Cliente registrado');
+      fijarNuevo(false);
+      window.location.reload();
+
+    } catch (error) {
+      fijarMensaje(
+        error instanceof Error
+          ? error.message
+          : 'No fue posible registrar el cliente.'
+      );
+    } finally {
+      fijarGuardando(false);
+    }
   };
-  const guardar = async (evento: React.FormEvent) => { evento.preventDefault(); fijarGuardando(true); fijarMensaje(''); try { await enviar('/clientes','POST',formulario); fijarMensaje('Cliente registrado'); fijarNuevo(false); window.location.reload(); } catch (e) { fijarMensaje((e as Error).message); } finally { fijarGuardando(false); } };
   const cambiarEstado = async (c: Cliente) => { const destino = c.estado === 'activo' ? 'desactivar' : 'reactivar'; if (!await confirmarAccion(`¿${destino === 'desactivar' ? 'Desactivar' : 'Reactivar'} a ${c.razonSocial}?`)) return; try { await enviar(`/clientes/${c.id_cliente_financiero}/${destino}`,'POST',{confirmado:true}); window.location.reload(); } catch (e) { fijarError((e as Error).message); } };
   const editar = async (c: Cliente) => { const nombre = await solicitarTexto('Nombre o Razón Social', c.razonSocial); if (nombre === null) return; const correo = await solicitarTexto('Correo', c.correo || '') ?? ''; const telefono = await solicitarTexto('Teléfono', c.telefono || '') ?? ''; try { await enviar(`/clientes/${c.id_cliente_financiero}`,'PUT',{nombre,correo,telefono}); window.location.reload(); } catch (e) { fijarError((e as Error).message); } };
 
@@ -76,7 +114,11 @@ const CatalogoClientes: React.FC = () => {
           <h1 className="break-words text-2xl font-bold text-gray-900 sm:text-3xl">Catálogo de Clientes</h1>
           <p className="text-sm text-gray-500 mt-1">Gestión de clientes financieros y saldos</p>
         </div>
-        {sesion?.permisos.includes('CU01') && <button onClick={() => fijarNuevo(true)} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 font-semibold text-white sm:w-auto"><Plus className="h-4 w-4"/>Crear cliente</button>}
+        {sesion?.permisos.includes('CU01') && <button onClick={() => {
+          fijarFormulario(formularioInicial());
+          fijarMensaje('');
+          fijarNuevo(true);
+        }} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 font-semibold text-white sm:w-auto"><Plus className="h-4 w-4"/>Crear cliente</button>}
       </div>
 
       {nuevo && <form onSubmit={guardar} className="mb-8 grid grid-cols-1 gap-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6 md:grid-cols-3">
@@ -85,8 +127,27 @@ const CatalogoClientes: React.FC = () => {
         <input required className="px-3 py-2 border rounded-lg" placeholder="Nombre o Razón Social" value={formulario.nombre} onChange={e=>fijarFormulario({...formulario,nombre:e.target.value})}/>
         <input className="px-3 py-2 border rounded-lg" placeholder="Contacto" value={formulario.contacto} onChange={e=>fijarFormulario({...formulario,contacto:e.target.value})}/>
         <input type="email" className="px-3 py-2 border rounded-lg" placeholder="Correo" value={formulario.correo} onChange={e=>fijarFormulario({...formulario,correo:e.target.value})}/>
-        <input className="px-3 py-2 border rounded-lg" placeholder="Teléfono" value={formulario.telefono} onChange={e=>fijarFormulario({...formulario,telefono:e.target.value})}/>
-        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center md:col-span-3"><button disabled={guardando || rutInvalido || (formulario.tipo==='B2B'&&!formulario.rut.trim())} className="rounded-lg bg-primary-600 px-4 py-2 text-white disabled:opacity-50">{guardando?'Guardando…':'Guardar cliente'}</button><button type="button" onClick={()=>fijarNuevo(false)} className="rounded-lg border px-4 py-2">Cancelar</button>{mensaje&&<span className="text-sm text-orange-700">{mensaje}</span>}</div>
+        <input
+          type="tel"
+          required={formulario.tipo === 'B2C'}
+          className="px-3 py-2 border rounded-lg"
+          placeholder={formulario.tipo === 'B2C' ? 'Teléfono (obligatorio)' : 'Teléfono'}
+          value={formulario.telefono}
+          onChange={e => fijarFormulario({
+            ...formulario,
+            telefono: e.target.value
+          })}
+        />
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center md:col-span-3"><button disabled={
+          guardando ||
+          rutInvalido ||
+          (formulario.tipo === 'B2B' && !formulario.rut.trim()) ||
+          telefonoB2CFaltante
+        } className="rounded-lg bg-primary-600 px-4 py-2 text-white disabled:opacity-50">{guardando?'Guardando…':'Guardar cliente'}</button><button type="button" onClick={() => {
+        fijarNuevo(false);
+        fijarFormulario(formularioInicial());
+        fijarMensaje('');
+        }}className="rounded-lg border px-4 py-2">Cancelar</button>{mensaje&&<span className="text-sm text-orange-700">{mensaje}</span>}</div>
       </form>}
 
       <div className="mb-8 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { confirmarAccion, solicitarTexto } from '../../components/DialogosSistema';
+import { confirmarAccion, solicitarTexto, notificarUsuario } from '../../components/DialogosSistema';
+import { esRutValido, formatearRutValido } from '../../utilidades/rut';
 import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, User, Phone, Mail, CreditCard, FileText, Activity, Briefcase, TrendingUp, DollarSign, AlertCircle } from 'lucide-react';
@@ -21,6 +22,7 @@ interface FichaCompleta {
     nombre_razon_social_referencia: string;
     telefono_financiero: string;
     correo_financiero: string;
+    contacto_financiero?: string | null;
     nombre_tipo_cliente_financiero: string;
     estado_ficha: string;
     fecha_creacion: string;
@@ -177,7 +179,89 @@ const VerFicha: React.FC = () => {
     }catch(error){setModalMsg({text:(error as Error).message,type:'error'});}finally{setProcesandoPago(false);}
   };
   const verDetallePago = async (id:number) => { const respuesta = await solicitarFinanzas(`/pagos/${id}`); const datos = await respuesta.json(); if (respuesta.ok) setPagoDetalle(datos); else setModalMsg({text:datos.error,type:'error'}); };
-  const formalizar = async () => { const rut=await solicitarTexto('RUT del cliente'); if(!rut)return; try { const r=await solicitarFinanzas('/clientes/formalizar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idCliente:resumen.id_cliente_financiero,rut})}); const d=await r.json(); if(!r.ok)throw new Error(d.error); window.location.reload(); } catch(e){setModalMsg({text:(e as Error).message,type:'error'});} };
+
+  const formalizar = async () => {
+    const rutIngresado = await solicitarTexto('RUT del cliente');
+    if (rutIngresado === null) return;
+
+    const rut = rutIngresado.trim();
+
+    if (!esRutValido(rut)) {
+      await notificarUsuario('Ingresa un RUT chileno válido.');
+      return;
+    }
+
+    const nombreIngresado = await solicitarTexto(
+      'Nombre o razón social',
+      resumen.nombre_razon_social_referencia ?? ''
+    );
+
+    if (nombreIngresado === null) return;
+
+    const nombre = nombreIngresado.trim();
+
+    if (!nombre) {
+      await notificarUsuario('El nombre es obligatorio.');
+      return;
+    }
+
+    const telefonoIngresado = await solicitarTexto(
+      'Teléfono del cliente',
+      resumen.telefono_financiero ?? ''
+    );
+
+    if (telefonoIngresado === null) return;
+
+    const telefono = telefonoIngresado.trim();
+
+    if (!telefono) {
+      await notificarUsuario('El teléfono es obligatorio.');
+      return;
+    }
+
+    const rutFormateado = formatearRutValido(rut);
+
+    const confirmado = await confirmarAccion(
+      `¿Formalizar a ${nombre} con RUT ${rutFormateado}?`
+    );
+
+    if (!confirmado) return;
+
+    try {
+      const respuesta = await solicitarFinanzas('/clientes/formalizar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          idCliente: resumen.id_cliente_financiero,
+          rut: rutFormateado,
+          nombre,
+          telefono,
+          correo: resumen.correo_financiero ?? undefined,
+          contacto: resumen.contacto_financiero ?? undefined
+        })
+      });
+
+      const resultado = await respuesta.json();
+
+      if (!respuesta.ok) {
+        throw new Error(
+          resultado.error || 'No fue posible formalizar el cliente.'
+        );
+      }
+
+      window.location.reload();
+
+    } catch (error) {
+      await notificarUsuario(
+        error instanceof Error
+          ? error.message
+          : 'Ocurrió un error al formalizar el cliente.'
+      );
+    }
+  };
+
   const configurarCobro = async () => { if(!activeModal)return; const fecha=await solicitarTexto('Fecha final de vencimiento AAAA-MM-DD'); if(!fecha)return; const r=await solicitarFinanzas(`/billing/nota-venta/${activeModal.data.id_nota_venta}/condiciones-cobro`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({fechaVencimiento:fecha})}); const d=await r.json(); setModalMsg({text:r.ok?'Condiciones actualizadas':d.error,type:r.ok?'success':'error'}); };
   const registrarGuia = async () => { if(!activeModal)return; const folio=await solicitarTexto('Folio de Guía de Despacho'); if(!folio)return; const r=await solicitarFinanzas('/billing/documents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id_nota_venta:activeModal.data.id_nota_venta,tipo_documento:'guia_despacho',folio})}); const d=await r.json(); setModalMsg({text:r.ok?'Guía registrada':d.error,type:r.ok?'success':'error'}); };
   const aplicarSaldo = async () => { if(!saldoSeleccionado||!notaAplicacion||!montoAplicacion)return; const r=await solicitarFinanzas(`/saldos-favor/${saldoSeleccionado}/aplicar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idNota:Number(notaAplicacion),monto:Number(montoAplicacion)})}); const d=await r.json(); setModalMsg({text:r.ok?'Saldo a favor aplicado':d.error,type:r.ok?'success':'error'}); if(r.ok){setSaldoSeleccionado('');setNotaAplicacion('');setMontoAplicacion('');window.location.reload();} };
@@ -225,7 +309,10 @@ const VerFicha: React.FC = () => {
         </div>
       </div>
 
-      {resumen.id_ficha_cliente && <CreditoCliente idFicha={resumen.id_ficha_cliente} />}
+      {resumen.nombre_tipo_cliente_financiero?.trim().toUpperCase() === 'B2B' &&
+      Boolean(resumen.id_ficha_cliente) && (
+      <CreditoCliente idFicha={resumen.id_ficha_cliente} />
+      )}
 
       {/* Resumen por moneda */}
       <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
