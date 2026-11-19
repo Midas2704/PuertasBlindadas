@@ -3,6 +3,7 @@ import cors from 'cors';
 import { C_Finanzas } from './controladores/C_Finanzas';
 import { crearRutasFinanzas } from './rutas/finanzas';
 import { ErrorAplicacion } from './utilidades/ErrorAplicacion';
+import { contextoDemostracion, crearRutasDemostracion } from './demostracion/ServicioDemostracion';
 
 export function crearAplicacion(fachada = new C_Finanzas()) {
   const aplicacion = express();
@@ -10,6 +11,7 @@ export function crearAplicacion(fachada = new C_Finanzas()) {
   aplicacion.set('json replacer', (_clave: string, valor: unknown) => typeof valor === 'bigint' ? valor.toString() : valor);
   aplicacion.use(cors({ origin: /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/ }));
   aplicacion.use(express.json({ limit: '6mb' }));
+  aplicacion.use(contextoDemostracion.middleware());
   // Cookies HttpOnly/SameSite y origen estricto para operaciones de escritura.
   // importante: acá termina la magia y empieza el contrato HTTP
   aplicacion.use((solicitud,respuesta,siguiente)=>{
@@ -20,6 +22,7 @@ export function crearAplicacion(fachada = new C_Finanzas()) {
     siguiente();
   });
   aplicacion.use('/api/finanzas' , crearRutasFinanzas(fachada));
+  aplicacion.use('/api/demostracion', crearRutasDemostracion());
   aplicacion.use((_solicitud, respuesta) => { respuesta.status(404).json({ error: 'Ruta no encontrada' }); });
   const manejarError: ErrorRequestHandler = (error, _solicitud, respuesta, _siguiente) => {
     if (error instanceof ErrorAplicacion) { respuesta.status(error.estado).json({ error: error.message, codigo: error.codigo }); return; }

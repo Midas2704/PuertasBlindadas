@@ -1,0 +1,159 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MInventarioController = void 0;
+const db_1 = require("../db");
+const ErrorAplicacion_1 = require("../utilidades/ErrorAplicacion");
+const client_1 = require("@prisma/client");
+const contratosInventario_1 = require("../inventario/contratosInventario");
+const entero = (valor, defecto, minimo, maximo) => {
+    const numero = Number(valor);
+    return Number.isInteger(numero) ? Math.min(maximo, Math.max(minimo, numero)) : defecto;
+};
+const texto = (valor) => typeof valor === 'string' ? valor.trim() : '';
+const decimal = (valor) => new client_1.Prisma.Decimal(valor?.toString() || 0);
+const decimalTexto = (valor) => decimal(valor).toFixed(4).replace(/\.?0+$/, '');
+const id = (valor) => valor === null || valor === undefined ? null : valor.toString();
+const agruparExistencias = (filas) => {
+    const grupos = new Map();
+    for (const fila of filas) {
+        const unidadId = id(fila.material.material_unidad_medida_id_medida);
+        // Sin unidad acreditada no se suman materiales distintos bajo una unidad ficticia.
+        const clave = unidadId === null ? `SIN_UNIDAD:${fila.material_sku}` : `UNIDAD:${unidadId}`;
+        const grupo = grupos.get(clave) ?? {
+            unidadId,
+            unidad: fila.material.material_unidad_medida?.material_unidad_medida_nombre ?? null,
+            materialSinUnidad: unidadId === null ? fila.material_sku : null,
+            materiales: new Set(),
+            fisico: new client_1.Prisma.Decimal(0),
+            reservado: new client_1.Prisma.Decimal(0),
+        };
+        grupo.materiales.add(fila.material_sku);
+        grupo.fisico = grupo.fisico.plus(decimal(fila.inventario_bodega_cantidad_fisica));
+        grupo.reservado = grupo.reservado.plus(decimal(fila.inventario_bodega_cantidad_reservada));
+        grupos.set(clave, grupo);
+    }
+    return [...grupos.values()].map(grupo => ({
+        unidadId: grupo.unidadId,
+        unidad: grupo.unidad,
+        materialSinUnidad: grupo.materialSinUnidad,
+        materiales: grupo.materiales.size,
+        stockFisico: decimalTexto(grupo.fisico),
+        stockReservado: decimalTexto(grupo.reservado),
+        stockDisponible: decimalTexto(grupo.fisico.minus(grupo.reservado)),
+    }));
+};
+/** Consultas del módulo Inventario. Las escrituras permanecen cerradas hasta contar con CU aprobados. */
+class MInventarioController {
+    constructor(db = db_1.prisma) {
+        this.db = db;
+    }
+    async consultarResumen() {
+        const [materiales, bodegas, existencias, movimientos, reservasActivas, alertasActivas] = await Promise.all([
+            this.db.material.count(),
+            this.db.bodega.count(),
+            this.db.inventario_bodega.findMany({ select: {
+                    material_sku: true,
+                    inventario_bodega_cantidad_fisica: true,
+                    inventario_bodega_cantidad_reservada: true,
+                    material: { select: { material_unidad_medida_id_medida: true, material_unidad_medida: { select: { material_unidad_medida_nombre: true } } } },
+                } }),
+            this.db.movimiento_inventario.count(),
+            this.db.reserva_inventario.count({ where: (0, contratosInventario_1.filtroReservaInventarioActiva)() }),
+            this.db.alerta_inventario.count({ where: { historial_alerta_id_historial: null } }),
+        ]);
+        return { materiales, bodegas, movimientos, reservasActivas, alertasActivas, existenciasPorUnidad: agruparExistencias(existencias) };
+    }
+    async listarMateriales(consulta = {}) {
+        const pagina = entero(consulta.pagina, 1, 1, 100000);
+        const tamano = entero(consulta.tamano, 25, 1, 100);
+        const busqueda = texto(consulta.busqueda);
+        const estado = texto(consulta.estado);
+        const where = {
+            ...(estado ? { material_estado: estado } : {}),
+            ...(busqueda ? { OR: [
+                    { material_sku: { contains: busqueda, mode: 'insensitive' } },
+                    { material_nombre_material: { contains: busqueda, mode: 'insensitive' } },
+                    { material_descripcion: { contains: busqueda, mode: 'insensitive' } },
+                ] } : {}),
+        };
+        const [total, filas] = await Promise.all([
+            this.db.material.count({ where }),
+            this.db.material.findMany({
+                where, skip: (pagina - 1) * tamano, take: tamano,
+                orderBy: [{ material_nombre_material: 'asc' }, { material_sku: 'asc' }],
+                include: { material_categoria_general: true, material_unidad_medida: true, inventario_bodega: { select: { inventario_bodega_cantidad_fisica: true, inventario_bodega_cantidad_reservada: true } } },
+            }),
+        ]);
+        return { pagina, tamano, total, items: filas.map(fila => {
+                const stock = fila.inventario_bodega.reduce((a, existencia) => ({ fisico: a.fisico.plus(decimal(existencia.inventario_bodega_cantidad_fisica)), reservado: a.reservado.plus(decimal(existencia.inventario_bodega_cantidad_reservada)) }), { fisico: new client_1.Prisma.Decimal(0), reservado: new client_1.Prisma.Decimal(0) });
+                return { sku: fila.material_sku, nombre: fila.material_nombre_material, descripcion: fila.material_descripcion, estado: fila.material_estado, critico: fila.material_material_critico === true, stockMinimo: decimalTexto(fila.material_stock_minimo), stockMaximo: decimalTexto(fila.material_sotck_maximo), unidad: fila.material_unidad_medida?.material_unidad_medida_nombre ?? null, categoria: fila.material_categoria_general?.material_categoria_general_nombre ?? null, stockFisico: decimalTexto(stock.fisico), stockReservado: decimalTexto(stock.reservado), stockDisponible: decimalTexto(stock.fisico.minus(stock.reservado)) };
+            }) };
+    }
+    async obtenerMaterial(sku) {
+        const fila = await this.db.material.findUnique({
+            where: { material_sku: sku },
+            include: {
+                material_categoria_general: true, material_categoria_funcional: true, material_unidad_medida: true,
+                inventario_bodega: { include: { bodega: true, lote: true } }, material_codigo_barras: true,
+            },
+        });
+        if (!fila)
+            throw new ErrorAplicacion_1.ErrorAplicacion(404, 'Material no encontrado');
+        return {
+            sku: fila.material_sku, nombre: fila.material_nombre_material, descripcion: fila.material_descripcion, presentacion: fila.material_presentacion,
+            estado: fila.material_estado, critico: fila.material_material_critico === true, stockCritico: decimalTexto(fila.material_stock_critico), stockMinimo: decimalTexto(fila.material_stock_minimo), stockMaximo: decimalTexto(fila.material_sotck_maximo),
+            unidad: fila.material_unidad_medida?.material_unidad_medida_nombre ?? null, categoria: fila.material_categoria_general?.material_categoria_general_nombre ?? null, categoriaFuncional: fila.material_categoria_funcional?.material_categoria_funcional_nombre ?? null,
+            codigosBarras: fila.material_codigo_barras.map(codigo => codigo.material_codigo_barras),
+            existencias: fila.inventario_bodega.map(existencia => ({ bodegaId: id(existencia.bodega_id_bodega), bodega: existencia.bodega.bodega_nombre_bodega, loteId: id(existencia.lote_id_lote), lote: existencia.lote.lote_numero_lote, fisico: decimalTexto(existencia.inventario_bodega_cantidad_fisica), reservado: decimalTexto(existencia.inventario_bodega_cantidad_reservada), disponible: decimalTexto(decimal(existencia.inventario_bodega_cantidad_fisica).minus(decimal(existencia.inventario_bodega_cantidad_reservada))) })),
+        };
+    }
+    async listarBodegas() {
+        const filas = await this.db.bodega.findMany({ orderBy: { bodega_nombre_bodega: 'asc' }, include: { inventario_bodega: { select: { inventario_bodega_cantidad_fisica: true, inventario_bodega_cantidad_reservada: true, material_sku: true, material: { select: { material_unidad_medida_id_medida: true, material_unidad_medida: { select: { material_unidad_medida_nombre: true } } } } } }, _count: { select: { anaquel: true } } } });
+        return filas.map(fila => ({ id: id(fila.bodega_id_bodega), nombre: fila.bodega_nombre_bodega, direccion: fila.bodega_direccion, estado: fila.bodega_estado, anaqueles: fila._count.anaquel, materiales: new Set(fila.inventario_bodega.map(e => e.material_sku)).size, existenciasPorUnidad: agruparExistencias(fila.inventario_bodega) }));
+    }
+    async catalogosOperacion() {
+        const [materiales, bodegas, lotes, tiposMovimiento, motivosMovimiento] = await Promise.all([
+            this.db.material.findMany({
+                where: { material_estado: { in: ['activo', 'activa', 'ACTIVO', 'ACTIVA'] } },
+                orderBy: [{ material_nombre_material: 'asc' }, { material_sku: 'asc' }],
+                select: { material_sku: true, material_nombre_material: true, material_unidad_medida: { select: { material_unidad_medida_nombre: true } } },
+            }),
+            this.db.bodega.findMany({
+                where: { bodega_estado: { in: ['activo', 'activa', 'ACTIVO', 'ACTIVA'] } },
+                orderBy: { bodega_nombre_bodega: 'asc' },
+                select: { bodega_id_bodega: true, bodega_nombre_bodega: true, bodega_direccion: true },
+            }),
+            this.db.lote.findMany({
+                where: { lote_estado: { in: ['activo', 'activa', 'ACTIVO', 'ACTIVA'] } },
+                orderBy: [{ lote_numero_lote: 'asc' }, { lote_id_lote: 'asc' }],
+                select: { lote_id_lote: true, lote_numero_lote: true, lote_fecha_vencimiento: true, inventario_bodega: { select: { material_sku: true, bodega_id_bodega: true } } },
+            }),
+            this.db.movimiento_inventario_tipo_movimiento.findMany({ orderBy: { movimiento_inventario_tipo_movimiento_nombre: 'asc' } }),
+            this.db.movimiento_inventario_motivo_movimiento.findMany({ orderBy: { movimiento_inventario_motivo_movimiento_nombre: 'asc' } }),
+        ]);
+        return {
+            materiales: materiales.map(f => ({ sku: f.material_sku, nombre: f.material_nombre_material, unidad: f.material_unidad_medida?.material_unidad_medida_nombre ?? null })),
+            bodegas: bodegas.map(f => ({ id: id(f.bodega_id_bodega), nombre: f.bodega_nombre_bodega, direccion: f.bodega_direccion })),
+            lotes: lotes.map(f => ({ id: id(f.lote_id_lote), numero: f.lote_numero_lote, vence: f.lote_fecha_vencimiento?.toISOString().slice(0, 10) ?? null, ubicaciones: f.inventario_bodega.map(e => ({ sku: e.material_sku, bodegaId: id(e.bodega_id_bodega) })) })),
+            tiposMovimiento: tiposMovimiento.map(f => ({ id: id(f.movimiento_inventario_tipo_movimiento_id_tipo_movimiento), nombre: f.movimiento_inventario_tipo_movimiento_nombre })),
+            motivosMovimiento: motivosMovimiento.map(f => ({ id: id(f.movimiento_inventario_motivo_movimiento_id_motivo_movimiento), nombre: f.movimiento_inventario_motivo_movimiento_nombre })),
+        };
+    }
+    async listarMovimientos(consulta = {}) {
+        const pagina = entero(consulta.pagina, 1, 1, 100000), tamano = entero(consulta.tamano, 25, 1, 100);
+        const [total, filas] = await Promise.all([this.db.movimiento_inventario.count(), this.db.movimiento_inventario.findMany({ skip: (pagina - 1) * tamano, take: tamano, orderBy: { movimiento_inventario_fecha_hora: 'desc' }, include: { material: true, bodega: true, movimiento_inventario_tipo_movimiento: true, movimiento_inventario_motivo_movimiento: true } })]);
+        return { pagina, tamano, total, items: filas.map(f => ({ id: id(f.movimiento_inventario_id_movimiento), fecha: f.movimiento_inventario_fecha_hora?.toISOString() ?? null, cantidad: decimalTexto(f.movimiento_inventario_cantidad), estado: f.movimiento_inventario_estado, sku: f.material_sku, material: f.material?.material_nombre_material ?? null, bodega: f.bodega?.bodega_nombre_bodega ?? null, tipo: f.movimiento_inventario_tipo_movimiento?.movimiento_inventario_tipo_movimiento_nombre ?? null, motivo: f.movimiento_inventario_motivo_movimiento?.movimiento_inventario_motivo_movimiento_nombre ?? null })) };
+    }
+    async listarReservas(consulta = {}) {
+        const pagina = entero(consulta.pagina, 1, 1, 100000), tamano = entero(consulta.tamano, 25, 1, 100);
+        const [total, filas] = await Promise.all([this.db.reserva_inventario.count(), this.db.reserva_inventario.findMany({ skip: (pagina - 1) * tamano, take: tamano, orderBy: { reserva_inventario_fecha_reserva: 'desc' }, include: { material: true, proyecto: true, orden_trabajo: true } })]);
+        return { pagina, tamano, total, items: filas.map(f => ({ id: id(f.reserva_inventario_id_reserva), fecha: f.reserva_inventario_fecha_reserva?.toISOString() ?? null, liberadaEn: f.reserva_inventario_fecha_liberacion?.toISOString() ?? null, cantidad: decimalTexto(f.reserva_inventario_cantidad_reservada), estado: f.reserva_inventario_estado_reserva, sku: f.material_sku, material: f.material?.material_nombre_material ?? null, proyectoId: id(f.proyecto_id_proyecto), ordenTrabajoId: id(f.orden_trabajo_id_orden), bodegaId: id(f.bodega_id_bodega), loteId: id(f.lote_id_lote), ubicacionAcreditada: f.bodega_id_bodega !== null && f.lote_id_lote !== null })) };
+    }
+    async listarAlertas(consulta = {}) {
+        const pagina = entero(consulta.pagina, 1, 1, 100000), tamano = entero(consulta.tamano, 25, 1, 100);
+        const [total, filas] = await Promise.all([this.db.alerta_inventario.count(), this.db.alerta_inventario.findMany({ skip: (pagina - 1) * tamano, take: tamano, orderBy: { alerta_inventario_fecha_generacion: 'desc' }, include: { material: true, alerta_inventario_tipo_alerta: { include: { alerta_inventario_nivel_prioridad: true } }, historial_alerta: true } })]);
+        return { pagina, tamano, total, items: filas.map(f => ({ id: id(f.alerta_inventario_id_alerta), fecha: f.alerta_inventario_fecha_generacion?.toISOString() ?? null, agotamientoEstimado: f.alerta_inventario_fecha_est_agotamiento?.toISOString() ?? null, mensaje: f.alerta_inventario_mensaje, estado: f.alerta_inventario_estado, resuelta: f.historial_alerta_id_historial !== null, resueltaEn: f.historial_alerta?.historial_alerta_fecha_hora_resolucion?.toISOString() ?? null, sku: f.material_sku, material: f.material?.material_nombre_material ?? null, tipo: f.alerta_inventario_tipo_alerta?.alerta_inventario_tipo_alerta_nombre ?? null, prioridad: f.alerta_inventario_tipo_alerta?.alerta_inventario_nivel_prioridad?.alerta_inventario_prioridad_nombre ?? null })) };
+    }
+}
+exports.MInventarioController = MInventarioController;
+//# sourceMappingURL=MInventarioController.js.map

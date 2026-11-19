@@ -3,6 +3,7 @@ import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import type { M9Controller } from '../controladores/M9Controller';
 import type { ActorAutenticado } from '../controladores/M4Controller';
 import type { EventoEntradaM9, JsonM9, ResultadoM9 } from './tipos';
+import { medirEtapa } from '../demostracion/ServicioDemostracion';
 
 export const VERSION_CONTRATO_M9 = '1.0';
 export const VERSIONES_COMPATIBLES_M9 = [VERSION_CONTRATO_M9] as const;
@@ -211,12 +212,14 @@ export class ProductorAuditoriaM9 {
   private async enviar(entrada: EventoEntradaM9): Promise<AcuseM9> {
     if (!PRODUCTORES_AUTORIZADOS_M9.includes(entrada.productor as ProductorM9) || entrada.productor === 'M9') return { estado:'NACK', identidadLogica:entrada.identidadLogica, codigo:'M9_PRODUCTOR_NO_AUTORIZADO' };
     try {
+      return await medirEtapa('AUDITORIA_M9', 'Auditoría M9: integridad y persistencia', async () => {
       const recepcion = await Promise.race([
         this.receptor.recibir(entrada),
         new Promise<never>((_, rechazar) => setTimeout(() => rechazar(new ErrorAplicacion(504, 'Timeout M9', 'M9_TIMEOUT')), this.timeoutMs)),
       ]);
       if (recepcion.estado === 'PERSISTIDO' && recepcion.evento) return { estado:'ACK', identidadLogica:entrada.identidadLogica, eventoId:recepcion.evento.id };
       return { estado:'PENDIENTE', identidadLogica:entrada.identidadLogica };
+      }, {detalle:`${entrada.modulo} · ${entrada.operacion}`});
     } catch (error) {
       return { estado:'NACK', identidadLogica:entrada.identidadLogica, codigo:error instanceof ErrorAplicacion ? error.codigo : 'M9_ERROR' };
     }

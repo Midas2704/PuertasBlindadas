@@ -1,0 +1,15 @@
+FROM node:25-alpine
+
+WORKDIR /app
+
+COPY package*.json prisma.config.ts ./
+COPY prisma ./prisma
+COPY dist ./dist
+
+RUN npm ci --cache /tmp/npm-cache \
+    && DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build?schema=public" npx prisma generate \
+    && npm prune --omit=dev \
+    && rm -rf /tmp/npm-cache node_modules/.cache
+
+EXPOSE 3000
+CMD ["npm", "start"]

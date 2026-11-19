@@ -1,0 +1,83 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MIME_DOCUMENTALES_SOPORTADOS = void 0;
+exports.validarIntegridadContenido = validarIntegridadContenido;
+const node_crypto_1 = require("node:crypto");
+exports.MIME_DOCUMENTALES_SOPORTADOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+const empiezaCon = (valor, firma) => firma.every((byte, indice) => valor[indice] === byte);
+function detectarMime(prefijo, sufijo, tamano, jpegTieneSof) {
+    if (empiezaCon(prefijo, [0xff, 0xd8, 0xff]) && jpegTieneSof && sufijo.length >= 2 && sufijo[sufijo.length - 2] === 0xff && sufijo[sufijo.length - 1] === 0xd9)
+        return 'image/jpeg';
+    const pngCabecera = empiezaCon(prefijo, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) && prefijo.length >= 24 && prefijo.readUInt32BE(8) === 13 && prefijo.subarray(12, 16).toString('ascii') === 'IHDR';
+    const pngFinal = sufijo.length >= 12 && sufijo.readUInt32BE(sufijo.length - 12) === 0 && sufijo.subarray(sufijo.length - 8, sufijo.length - 4).toString('ascii') === 'IEND';
+    if (pngCabecera && pngFinal)
+        return 'image/png';
+    if (prefijo.subarray(0, 4).toString('ascii') === 'RIFF' && prefijo.subarray(8, 12).toString('ascii') === 'WEBP') {
+        const declarado = prefijo.length >= 8 ? BigInt(prefijo.readUInt32LE(4)) + 8n : -1n;
+        const tipoChunk = prefijo.subarray(12, 16).toString('ascii');
+        if (declarado === tamano && ['VP8 ', 'VP8L', 'VP8X'].includes(tipoChunk))
+            return 'image/webp';
+    }
+    const finalPdf = sufijo.toString('latin1');
+    if (/^%PDF-1\.[0-7]/.test(prefijo.toString('latin1')) && /startxref\s+\d+\s+%%EOF\s*$/.test(finalPdf))
+        return 'application/pdf';
+    return null;
+}
+/** Lee el contenido por streaming. Sólo conserva prefijo/sufijo acotados; nunca el archivo completo. */
+async function validarIntegridadContenido(entrada) {
+    const hash = (0, node_crypto_1.createHash)('sha256');
+    let tamano = 0n;
+    let prefijo = Buffer.alloc(0);
+    let sufijo = Buffer.alloc(0);
+    let inspeccionTexto = '';
+    let ultimoByte;
+    let jpegTieneSof = false;
+    const codigos = [];
+    for await (const fragmento of entrada.contenido) {
+        const bloque = Buffer.isBuffer(fragmento) ? fragmento : Buffer.from(fragmento);
+        tamano += BigInt(bloque.length);
+        if (tamano > entrada.politica.maximoBytes) {
+            entrada.contenido.destroy();
+            codigos.push('TAMANO_SUPERA_LIMITE');
+            break;
+        }
+        hash.update(bloque);
+        const inspeccionBinaria = ultimoByte === undefined ? bloque : Buffer.concat([Buffer.from([ultimoByte]), bloque]);
+        for (let indice = 0; indice < inspeccionBinaria.length - 1; indice += 1) {
+            const marcador = inspeccionBinaria[indice + 1];
+            if (inspeccionBinaria[indice] === 0xff && marcador !== undefined && marcador >= 0xc0 && marcador <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marcador))
+                jpegTieneSof = true;
+        }
+        ultimoByte = bloque[bloque.length - 1];
+        if (prefijo.length < 64)
+            prefijo = Buffer.concat([prefijo, bloque]).subarray(0, 64);
+        sufijo = Buffer.concat([sufijo, bloque]).subarray(-2048);
+        const texto = (inspeccionTexto + bloque.toString('latin1')).toLowerCase();
+        inspeccionTexto = texto.slice(-256);
+        if (texto.includes('/javascript') || texto.includes('/launch') || texto.includes('/embeddedfile') || texto.includes('/openaction')) {
+            if (!codigos.includes('PDF_CONTENIDO_ACTIVO'))
+                codigos.push('PDF_CONTENIDO_ACTIVO');
+        }
+        if (texto.includes('<script') || texto.includes('<html') || texto.includes('<?php')) {
+            if (!codigos.includes('CONTENIDO_EMBEBIDO_SOSPECHOSO'))
+                codigos.push('CONTENIDO_EMBEBIDO_SOSPECHOSO');
+        }
+    }
+    const sha256 = hash.digest('hex');
+    const mimeDetectado = detectarMime(prefijo, sufijo, tamano, jpegTieneSof);
+    if (tamano < entrada.politica.minimoBytes)
+        codigos.push('TAMANO_INFERIOR_MINIMO');
+    if (tamano !== entrada.tamanoEsperado)
+        codigos.push('TAMANO_NO_COINCIDE');
+    if (entrada.sha256Esperado && sha256 !== entrada.sha256Esperado.toLowerCase())
+        codigos.push('SHA256_NO_COINCIDE');
+    if (!mimeDetectado)
+        codigos.push('MIME_NO_SOPORTADO');
+    if (mimeDetectado && !entrada.politica.mimesPermitidos.includes(mimeDetectado))
+        codigos.push('MIME_NO_PERMITIDO');
+    const mimeDeclaradoCoincide = mimeDetectado === entrada.mimeDeclarado.toLowerCase();
+    if (!mimeDeclaradoCoincide)
+        codigos.push('MIME_DECLARADO_NO_COINCIDE');
+    return { valido: codigos.length === 0, tamanoBytes: tamano, sha256, mimeDetectado, mimeDeclaradoCoincide, codigos };
+}
+//# sourceMappingURL=IntegridadContenido.js.map

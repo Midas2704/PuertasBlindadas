@@ -1,0 +1,1 @@
+{"version":3,"file":"guiaDespacho.d.ts","sourceRoot":"","sources":["../../src/m2/guiaDespacho.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,MAAM,EAAE,MAAM,gBAAgB,CAAC;AAIxC,KAAK,eAAe,GAAG;IAAE,MAAM,EAAE,MAAM,CAAA;CAAE,CAAC;AAE1C,wBAAgB,wBAAwB,CAAC,IAAI,EAAE,eAAe,EAAE,OAAO,EAAE,MAAM,CAAC,MAAM,EAAE,OAAO,CAAC;;;;;kBAQf,MAAM,CAAC,eAAe;EAEtG"}

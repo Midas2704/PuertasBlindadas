@@ -1,26 +1,42 @@
 import { Router, RequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
 import { C_Finanzas, Operacion } from '../controladores/C_Finanzas';
+import { contextoDemostracion, emitirEtapa, medirEtapa } from '../demostracion/ServicioDemostracion';
 
 export function crearRutasFinanzas(fachada: C_Finanzas) {
   const rutas = Router();
   const derivar = (operacion: Operacion): RequestHandler => async (solicitud, respuesta, siguiente) => {
+    contextoDemostracion.prepararOperacion(operacion);
+    emitirEtapa('INTERACCION', 'CORRECTO', 'Interacción del usuario', {detalle:`${solicitud.method} ${solicitud.path}`});
+    emitirEtapa('VISTA_REACT', 'CORRECTO', 'Vista React', {detalle:solicitud.get('x-demo-view') || 'Vista activa'});
+    emitirEtapa('CLIENTE_API', 'CORRECTO', 'Cliente API', {detalle:'solicitarFinanzas(...)'});
     try {
-      const resultado = await fachada.ejecutar(operacion, {
+      const resultado = await medirEtapa('RUTA_BACKEND', `Ruta ${solicitud.method} ${solicitud.route?.path || solicitud.path}`, () => fachada.ejecutar(operacion, {
         consulta: solicitud.query, parametros: solicitud.params, cuerpo: solicitud.body,
         contexto: { direccion: solicitud.socket.remoteAddress, agente: solicitud.get('user-agent'), secretoSesion: solicitud.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('finanzas_sesion='))?.slice('finanzas_sesion='.length) },
         idSolicitud: typeof solicitud.get('x-request-id') === 'string' && solicitud.get('x-request-id')!.trim() ? solicitud.get('x-request-id')!.trim().slice(0,160) : randomUUID(),
         ocurridoEn: typeof solicitud.get('x-request-occurred-at') === 'string' && solicitud.get('x-request-occurred-at')!.trim() ? solicitud.get('x-request-occurred-at')!.trim().slice(0,60) : new Date().toISOString(),
-      });
+      }));
       respuesta.set('Cache-Control','no-store');
+      respuesta.set('X-Request-Id', typeof solicitud.get('x-request-id') === 'string' ? solicitud.get('x-request-id')! : '');
       if (operacion === 'iniciarSesion') {
         const inicio = resultado as {token:string;usuario:unknown};
         respuesta.cookie('finanzas_sesion',inicio.token,{httpOnly:true,sameSite:'strict',secure:process.env.NODE_ENV==='production',path:'/api/finanzas'});
-        respuesta.json(inicio.usuario); return;
+        respuesta.json(inicio.usuario);
+        emitirEtapa('RESPUESTA', 'CORRECTO', 'Respuesta HTTP', {resultado:'200 OK'});
+        emitirEtapa('ACTUALIZACION_VISTA', 'CORRECTO', 'Actualización de la vista', {detalle:'React recibe la respuesta real'});
+        return;
       }
       if (['cerrarSesion','cambiarClave','recuperarClave'].includes(operacion)) respuesta.clearCookie('finanzas_sesion',{path:'/api/finanzas'});
       respuesta.json(resultado);
-    } catch (error) { siguiente(error); }
+      emitirEtapa('RESPUESTA', 'CORRECTO', 'Respuesta HTTP', {resultado:'200 OK'});
+      emitirEtapa('ACTUALIZACION_VISTA', 'CORRECTO', 'Actualización de la vista', {detalle:'React recibe la respuesta real'});
+    } catch (error) {
+      const estado = typeof error === 'object' && error && 'estado' in error ? Number((error as {estado:number}).estado) : 500;
+      emitirEtapa('RESPUESTA', estado < 500 ? 'RECHAZADO' : 'ERROR', 'Respuesta HTTP', {resultado:`${estado} ${error instanceof Error ? error.message : 'Error'}`});
+      if (!['GET','HEAD'].includes(solicitud.method)) emitirEtapa('POSTGRESQL', 'ROLLBACK', 'Rollback de la operación', {detalle:'La operación no se confirmó'});
+      siguiente(error);
+    }
   };
   // Alias antiguos conservados como contratos HTTP; ninguno accede a módulos o BD.
   // los dejamos juntos para que nadie los confunda con rutas nuevas

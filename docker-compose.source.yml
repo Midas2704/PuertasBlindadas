@@ -10,3 +10,5 @@ services:
     build:
       context: ./CODIGO/Vistas
       dockerfile: Dockerfile
+      args:
+        VITE_MODO_DEMOSTRACION: ${VITE_MODO_DEMOSTRACION:-false}

@@ -1,0 +1,1 @@
+{"version":3,"file":"validarAceptacionB2B.d.ts","sourceRoot":"","sources":["../../src/comercial/validarAceptacionB2B.ts"],"names":[],"mappings":"AAAA,6FAA6F;AAC7F,KAAK,qBAAqB,GAAG;IAC3B,kBAAkB,EAAE,OAAO,CAAC;IAC5B,WAAW,EAAE,OAAO,CAAC;IACrB,aAAa,EAAE,OAAO,CAAC;IACvB,WAAW,EAAE,OAAO,CAAC;CACtB,CAAC;AAEF,wBAAgB,mBAAmB,CAAC,CAAC,EAAE,qBAAqB,GAAG,OAAO,CAKrE"}

@@ -24,6 +24,7 @@ import { RepositorioDocumentalPrisma } from '../documental/repositorios/Reposito
 import { ServicioDocumentosProducto } from '../documental/productos/ServicioDocumentosProducto';
 import { AutorizadorDocumental } from '../documental/seguridad/AutorizacionDocumental';
 import { ErrorDocumental } from '../documental/tipos';
+import { emitirEtapa, medirEtapa } from '../demostracion/ServicioDemostracion';
 
 const normalizarFiltrosHttpM9 = (consulta?: Record<string, unknown>): FiltrosM9 => {
   const filtros = { ...(consulta || {}) };
@@ -199,7 +200,9 @@ export class C_Finanzas {
       if(solicitud.consulta?.estadoPago && String(solicitud.consulta.estadoPago).toLowerCase()!=='todos') adicionales.push('CU108');
       if(solicitud.consulta?.proveedor || solicitud.consulta?.busqueda || solicitud.consulta?.ordenar || solicitud.consulta?.direccion) adicionales.push('CU109');
     }
-    const actor = (this.autorizacion ? await this.autorizacion.autorizar(operacion, solicitud.contexto) : await this.m4.autorizar(operacion, solicitud.contexto,adicionales)) as ActorAutenticado;
+    const actor = await medirEtapa('SEGURIDAD_M4', 'Evaluación de sesión, CU y alcance', async () =>
+      (this.autorizacion ? this.autorizacion.autorizar(operacion, solicitud.contexto) : this.m4.autorizar(operacion, solicitud.contexto,adicionales)) as Promise<ActorAutenticado>,
+      {detalle:adicionales.length ? `Permisos adicionales: ${adicionales.join(', ')}` : 'M4 aplica la matriz vigente'});
     // Sólo inyección explícita en pruebas. La ejecución normal siempre usa M4.
     // TODO: dejar documentado el adaptador de pruebas cuando cerremos la integración
 
@@ -761,8 +764,22 @@ export class C_Finanzas {
       case 'consultarResumenAuditoriaM9': return this.m9.resumenAnalitico(scopeM9DesdeActor(actor));
       default: return this.m2.operacionPendiente(operacion);
     }};
+    const ejecutarInstrumentado = () => medirEtapa('CONTROLADOR', `${actor ? 'Controlador' : 'Fachada'} ${operacion}`, async () => {
+      emitirEtapa('REGLAS_NEGOCIO', 'EN_EJECUCION', 'Reglas de negocio');
+      const inicio = performance.now();
+      try {
+        const salida = await ejecutarOwner();
+        emitirEtapa('REGLAS_NEGOCIO', 'CORRECTO', 'Reglas de negocio', {duracionMs:performance.now() - inicio});
+        return salida;
+      } catch (error) {
+        emitirEtapa('REGLAS_NEGOCIO', 'ERROR', 'Reglas de negocio', {duracionMs:performance.now() - inicio, resultado:error instanceof Error ? error.message : 'Error'});
+        throw error;
+      }
+    });
     const auditoriaInterna=new Set<Operacion>(['registrarEntradaInventario','registrarSalidaInventario','crearReservaInventario','liberarReservaInventario','ajustarExistenciaInventario']);
-    if(auditoriaInterna.has(operacion)) return ejecutarOwner();
-    return this.productorM9.ejecutar(operacion, actor, { parametros:solicitud.parametros, cuerpo:solicitud.cuerpo, idSolicitud:solicitud.idSolicitud, ocurridoEn:solicitud.ocurridoEn }, ejecutarOwner);
+    if(auditoriaInterna.has(operacion)) return ejecutarInstrumentado();
+    const resultado = await this.productorM9.ejecutar(operacion, actor, { parametros:solicitud.parametros, cuerpo:solicitud.cuerpo, idSolicitud:solicitud.idSolicitud, ocurridoEn:solicitud.ocurridoEn }, ejecutarInstrumentado);
+    emitirEtapa('AUDITORIA_M9', 'CORRECTO', 'Auditoría M9', {detalle:'Productor M9 evaluado; persiste sólo cuando corresponde'});
+    return resultado;
   }
 }
