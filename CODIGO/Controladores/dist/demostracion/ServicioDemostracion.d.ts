@@ -20,6 +20,8 @@ export interface EventoDemostracion {
     permiso?: string;
     codigo?: string;
     resultado?: string;
+    tabla?: string;
+    accionDatos?: string;
 }
 interface ContextoTraza {
     solicitudId: string;
@@ -40,7 +42,7 @@ export declare const contextoDemostracion: {
 };
 export declare function emitirEtapa(capa: CapaDemostracion, estado: EstadoDemostracion, titulo: string, opciones?: Partial<EventoDemostracion>): void;
 export declare function medirEtapa<T>(capa: CapaDemostracion, titulo: string, accion: () => Promise<T>, opciones?: Partial<EventoDemostracion>): Promise<T>;
-export declare function crearRutasDemostracion(): any;
+export declare function crearRutasDemostracion(): import("express-serve-static-core").Router;
 export declare const pruebasDemostracion: {
     limpiar: () => void;
     eventos: () => {
@@ -62,6 +64,8 @@ export declare const pruebasDemostracion: {
         permiso?: string;
         codigo?: string;
         resultado?: string;
+        tabla?: string;
+        accionDatos?: string;
     }[];
     ejecutarEnContexto: <T>(entrada: Partial<ContextoTraza>, accion: () => T) => T;
     textoSeguro: (valor: unknown, maximo?: number) => string;

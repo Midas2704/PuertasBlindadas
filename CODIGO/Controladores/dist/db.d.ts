@@ -1,11 +1,12 @@
 import 'dotenv/config';
+import { Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-export declare const prisma: import("@prisma/client/runtime/client").DynamicClientExtensionThis<import("@prisma/client").Prisma.TypeMap<import("@prisma/client/runtime/client").InternalArgs & {
+export declare const prisma: import("@prisma/client/runtime/client").DynamicClientExtensionThis<Prisma.TypeMap<import("@prisma/client/runtime/client").InternalArgs & {
     result: {};
     model: {};
     query: {};
     client: {};
-}, {}>, import("@prisma/client").Prisma.TypeMapCb<{
+}, {}>, Prisma.TypeMapCb<{
     adapter: PrismaPg;
 }>, {
     result: {};

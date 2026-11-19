@@ -14,7 +14,9 @@ exports.prisma = clienteBase.$extends({
     query: {
         $allModels: {
             async $allOperations({ model, operation, args, query }) {
-                return (0, ServicioDemostracion_1.medirEtapa)('PRISMA', `Prisma ${model}.${operation}`, () => (0, ServicioDemostracion_1.medirEtapa)('POSTGRESQL', 'PostgreSQL confirma la operación', () => query(args), { detalle: `${model}.${operation}` }), { detalle: `${model}.${operation}` });
+                const modelo = client_1.Prisma.dmmf.datamodel.models.find(candidato => candidato.name === model);
+                const tabla = modelo?.dbName || model;
+                return (0, ServicioDemostracion_1.medirEtapa)('PRISMA', `Prisma ${model}.${operation}`, () => (0, ServicioDemostracion_1.medirEtapa)('POSTGRESQL', `Tabla ${tabla}`, () => query(args), { detalle: `${operation} sobre ${tabla}`, tabla, accionDatos: operation }), { detalle: `${model}.${operation}`, tabla, accionDatos: operation });
             },
         },
     },

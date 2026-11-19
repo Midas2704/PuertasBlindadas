@@ -46,6 +46,13 @@ $contenidoCompose = $contenidoCompose.Replace('pblindadas-recovery-backend:f54c8
 $contenidoCompose = $contenidoCompose.Replace('pblindadas-source-backend:local', 'pblindadas-demo-backend:local')
 $contenidoCompose = $contenidoCompose.Replace('pblindadas-recovery-frontend:0ecacbd1', 'pblindadas-demo-frontend:local')
 $contenidoCompose = $contenidoCompose.Replace('pblindadas-source-frontend:local', 'pblindadas-demo-frontend:local')
+if ($contenidoCompose -notmatch '(?m)^\s+MODO_DEMOSTRACION:') {
+  $ancla = '      BANCO_CENTRAL_API_URL: ""'
+  if (-not $contenidoCompose.Contains($ancla)) {
+    throw 'No se encontro la seccion de entorno del backend en docker-compose.local.yml.'
+  }
+  $contenidoCompose = $contenidoCompose.Replace($ancla, $ancla + "`r`n" + '      MODO_DEMOSTRACION: "true"')
+}
 [IO.File]::WriteAllText($compose, $contenidoCompose, (New-Object Text.UTF8Encoding($false)))
 
 if (-not (Test-Path -LiteralPath $archivoEnv)) {

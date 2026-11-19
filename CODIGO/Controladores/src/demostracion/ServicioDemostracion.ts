@@ -26,6 +26,8 @@ export interface EventoDemostracion {
   permiso?: string;
   codigo?: string;
   resultado?: string;
+  tabla?: string;
+  accionDatos?: string;
 }
 
 interface ContextoTraza {
@@ -132,6 +134,8 @@ export function emitirEtapa(capa: CapaDemostracion, estado: EstadoDemostracion, 
     metodo:contexto.metodo, ruta:contexto.ruta, vista:contexto.vista, controlador:contexto.controlador,
     permiso:contexto.permiso || undefined, codigo:codigo ? textoSeguro(codigo, 180) : undefined,
     resultado:opciones.resultado ? textoSeguro(opciones.resultado) : undefined,
+    tabla:opciones.tabla ? textoSeguro(opciones.tabla, 100) : undefined,
+    accionDatos:opciones.accionDatos ? textoSeguro(opciones.accionDatos, 80) : undefined,
   });
 }
 

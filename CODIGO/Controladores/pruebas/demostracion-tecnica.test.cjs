@@ -36,6 +36,15 @@ test('sanitiza secretos, RUT y correo antes de publicar', () => {
   assert.match(limpio, /PROTEGIDO/);
 });
 
+test('expone tabla y acción de datos para reconstruir el recorrido real', () => {
+  demo.pruebasDemostracion.ejecutarEnContexto({solicitudId:'tabla-1'}, () =>
+    demo.emitirEtapa('POSTGRESQL','CORRECTO','Tabla cotizaciones',{tabla:'cotizaciones',accionDatos:'findMany'})
+  );
+  const evento = demo.pruebasDemostracion.eventos().at(-1);
+  assert.equal(evento.tabla, 'cotizaciones');
+  assert.equal(evento.accionDatos, 'findMany');
+});
+
 test('dos solicitudes simultáneas no mezclan identificadores', async () => {
   await Promise.all(['A','B'].map(id => demo.pruebasDemostracion.ejecutarEnContexto({solicitudId:id}, async () => {
     await new Promise(resolve => setTimeout(resolve, id === 'A' ? 8 : 1));

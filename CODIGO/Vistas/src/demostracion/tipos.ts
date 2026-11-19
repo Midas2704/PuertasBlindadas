@@ -3,7 +3,7 @@ export type CapaDemostracion = 'INTERACCION' | 'VISTA_REACT' | 'CLIENTE_API' | '
 export interface EventoDemostracion {
   id:string; secuencia:number; solicitudId:string; ocurridoEn:string; capa:CapaDemostracion; estado:EstadoDemostracion;
   modulo:string; operacion:string; titulo:string; detalle?:string; duracionMs?:number; metodo?:string; ruta?:string;
-  vista?:string; controlador?:string; permiso?:string; codigo?:string; resultado?:string;
+  vista?:string; controlador?:string; permiso?:string; codigo?:string; resultado?:string; tabla?:string; accionDatos?:string;
 }
 
 export const CAPAS: Array<{id:CapaDemostracion; etiqueta:string}> = [
