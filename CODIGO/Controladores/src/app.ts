@@ -10,7 +10,8 @@ export function crearAplicacion(fachada = new C_Finanzas()) {
   aplicacion.disable('x-powered-by');
   aplicacion.set('json replacer', (_clave: string, valor: unknown) => typeof valor === 'bigint' ? valor.toString() : valor);
   aplicacion.use(cors({ origin: /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/ }));
-  aplicacion.use(express.json({ limit: '6mb' }));
+  // Un archivo de 5 MB crece cerca de un 33 % al viajar codificado en base64.
+  aplicacion.use(express.json({ limit: '8mb' }));
   aplicacion.use(contextoDemostracion.middleware());
   // Cookies HttpOnly/SameSite y origen estricto para operaciones de escritura.
   // importante: acá termina la magia y empieza el contrato HTTP
@@ -27,6 +28,7 @@ export function crearAplicacion(fachada = new C_Finanzas()) {
   const manejarError: ErrorRequestHandler = (error, _solicitud, respuesta, _siguiente) => {
     if (error instanceof ErrorAplicacion) { respuesta.status(error.estado).json({ error: error.message, codigo: error.codigo }); return; }
     if (error?.type === 'entity.parse.failed') { respuesta.status(400).json({ error: 'JSON inválido' }); return; }
+    if (error?.type === 'entity.too.large') { respuesta.status(413).json({ error: 'El archivo supera el tamaño permitido' }); return; }
     if (error?.code === 'P2002') { respuesta.status(409).json({ error: 'El registro ya existe', codigo: 'REGISTRO_DUPLICADO' }); return; }
     console.error('Error interno de Finanzas:', error instanceof Error ? error.name : 'Error');
     respuesta.status(500).json({ error: 'No fue posible completar la operación', codigo: 'ERROR_INTERNO' });

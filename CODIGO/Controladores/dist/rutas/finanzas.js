@@ -45,6 +45,18 @@ function crearRutasFinanzas(fachada) {
     // Alias antiguos conservados como contratos HTTP; ninguno accede a módulos o BD.
     // los dejamos juntos para que nadie los confunda con rutas nuevas
     rutas.get('/salud', derivar('salud'));
+    rutas.get('/importaciones/clientes/plantilla', derivar('plantillaImportacionClientes'));
+    rutas.post('/importaciones/clientes', derivar('importarClientes'));
+    rutas.get('/importaciones/empleados/plantilla', derivar('plantillaImportacionEmpleados'));
+    rutas.post('/importaciones/empleados', derivar('importarEmpleados'));
+    rutas.get('/importaciones/proveedores/plantilla', derivar('plantillaImportacionProveedores'));
+    rutas.post('/importaciones/proveedores', derivar('importarProveedores'));
+    rutas.get('/importaciones/areas-trabajo/plantilla', derivar('plantillaImportacionAreasTrabajo'));
+    rutas.post('/importaciones/areas-trabajo', derivar('importarAreasTrabajo'));
+    rutas.get('/importaciones/tareas-fabricacion/plantilla', derivar('plantillaImportacionTareasFabricacion'));
+    rutas.post('/importaciones/tareas-fabricacion', derivar('importarTareasFabricacion'));
+    rutas.get('/importaciones/categorias-egreso/plantilla', derivar('plantillaImportacionCategoriasEgreso'));
+    rutas.post('/importaciones/categorias-egreso', derivar('importarCategoriasEgreso'));
     rutas.get('/inventario/resumen', derivar('consultarResumenInventario'));
     rutas.get('/inventario/materiales', derivar('listarMaterialesInventario'));
     rutas.get('/inventario/materiales/:sku', derivar('obtenerMaterialInventario'));

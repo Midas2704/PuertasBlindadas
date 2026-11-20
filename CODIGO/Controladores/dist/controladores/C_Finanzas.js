@@ -26,6 +26,7 @@ const ServicioDocumentosProducto_1 = require("../documental/productos/ServicioDo
 const AutorizacionDocumental_1 = require("../documental/seguridad/AutorizacionDocumental");
 const tipos_1 = require("../documental/tipos");
 const ServicioDemostracion_1 = require("../demostracion/ServicioDemostracion");
+const ServicioImportacionExcel_1 = require("../importaciones/ServicioImportacionExcel");
 const normalizarFiltrosHttpM9 = (consulta) => {
     const filtros = { ...(consulta || {}) };
     for (const campo of ['pagina', 'tamano']) {
@@ -60,6 +61,70 @@ class C_Finanzas {
         if (typeof this.m7.conectarCreditoM8 === 'function') {
             this.m7.conectarCreditoM8(new AdaptadorCreditoM8ParaM7_1.AdaptadorCreditoM8ParaM7(this.m8));
         }
+    }
+    async procesarImportacion(tipo, cuerpo, actor) {
+        const analisis = await (0, ServicioImportacionExcel_1.analizarArchivoImportacion)(tipo, cuerpo.contenidoBase64);
+        const base = { tipo: analisis.tipo, titulo: analisis.titulo, totalFilas: analisis.totalFilas, filasMuestra: analisis.filasMuestra };
+        if (cuerpo.soloValidar === true || analisis.errores.length) {
+            return { ...base, valido: analisis.errores.length === 0, importadas: 0, errores: analisis.errores };
+        }
+        let importadas = 0;
+        const errores = [];
+        for (const fila of analisis.filas) {
+            try {
+                switch (tipo) {
+                    case 'clientes':
+                        await this.m1.crearCliente(fila.datos);
+                        break;
+                    case 'empleados':
+                        await this.m6.crearEmpleado(fila.datos);
+                        break;
+                    case 'proveedores':
+                        await this.m5.crearProveedor(fila.datos);
+                        break;
+                    case 'areas-trabajo':
+                        await this.m6.crearAreaTrabajo(fila.datos);
+                        break;
+                    case 'tareas-fabricacion':
+                        await this.m2.crearTareaFabricacion(fila.datos, actor.id);
+                        break;
+                    case 'categorias-egreso':
+                        await this.m5.crearCategoriaEgreso(fila.datos, actor.id);
+                        break;
+                }
+                importadas++;
+            }
+            catch (error) {
+                errores.push({ fila: fila.numero, errores: [error instanceof Error ? error.message : 'No fue posible importar la fila'] });
+            }
+        }
+        return { ...base, valido: errores.length === 0, importadas, errores };
+    }
+    async plantillaImportacion(tipo) {
+        if (tipo === 'proveedores') {
+            const catalogos = await this.m5.catalogosProveedores();
+            return (0, ServicioImportacionExcel_1.generarPlantillaImportacion)(tipo, [
+                {
+                    nombre: 'Referencia países',
+                    columnas: [{ clave: 'id', cabecera: 'ID país' }, { clave: 'nombre', cabecera: 'País' }],
+                    filas: catalogos.paises.map(item => ({ id: item.id_pais, nombre: item.nombre_pais })),
+                },
+                {
+                    nombre: 'Referencia identificaciones',
+                    columnas: [{ clave: 'id', cabecera: 'ID tipo identificación' }, { clave: 'nombre', cabecera: 'Tipo de identificación' }],
+                    filas: catalogos.tiposIdentificador.map(item => ({ id: item.id_tipo_identificador, nombre: item.nombre_tipo_identificador })),
+                },
+            ]);
+        }
+        if (tipo === 'tareas-fabricacion') {
+            const areas = await this.m6.listarAreasTrabajo(false);
+            return (0, ServicioImportacionExcel_1.generarPlantillaImportacion)(tipo, [{
+                    nombre: 'Referencia áreas',
+                    columnas: [{ clave: 'id', cabecera: 'ID área' }, { clave: 'nombre', cabecera: 'Área de trabajo' }],
+                    filas: areas.map(area => ({ id: area.id, nombre: area.nombre })),
+                }]);
+        }
+        return (0, ServicioImportacionExcel_1.generarPlantillaImportacion)(tipo);
     }
     async ejecutar(operacion, solicitud) {
         // CU68/CU70 no exigen sesión previa. Cada comando protegido representa una confirmación de CU.
@@ -134,6 +199,18 @@ class C_Finanzas {
         const ejecutarOwner = async () => {
             switch (operacion) {
                 case 'miSesion': return { ...actor, id: actor.id.toString(), sesion: undefined };
+                case 'plantillaImportacionClientes': return this.plantillaImportacion('clientes');
+                case 'importarClientes': return this.procesarImportacion('clientes', cuerpo, actor);
+                case 'plantillaImportacionEmpleados': return this.plantillaImportacion('empleados');
+                case 'importarEmpleados': return this.procesarImportacion('empleados', cuerpo, actor);
+                case 'plantillaImportacionProveedores': return this.plantillaImportacion('proveedores');
+                case 'importarProveedores': return this.procesarImportacion('proveedores', cuerpo, actor);
+                case 'plantillaImportacionAreasTrabajo': return this.plantillaImportacion('areas-trabajo');
+                case 'importarAreasTrabajo': return this.procesarImportacion('areas-trabajo', cuerpo, actor);
+                case 'plantillaImportacionTareasFabricacion': return this.plantillaImportacion('tareas-fabricacion');
+                case 'importarTareasFabricacion': return this.procesarImportacion('tareas-fabricacion', cuerpo, actor);
+                case 'plantillaImportacionCategoriasEgreso': return this.plantillaImportacion('categorias-egreso');
+                case 'importarCategoriasEgreso': return this.procesarImportacion('categorias-egreso', cuerpo, actor);
                 case 'crearCliente': return this.m1.crearCliente(cuerpo);
                 case 'actualizarCliente': return this.m1.actualizarCliente((0, solicitudes_1.identificador)(parametros.id), cuerpo);
                 case 'desactivarCliente': return this.m1.cambiarEstadoCliente((0, solicitudes_1.identificador)(parametros.id), 'inactivo', cuerpo.confirmado === true);
@@ -761,6 +838,8 @@ class C_Finanzas {
         });
         const auditoriaInterna = new Set(['registrarEntradaInventario', 'registrarSalidaInventario', 'crearReservaInventario', 'liberarReservaInventario', 'ajustarExistenciaInventario']);
         if (auditoriaInterna.has(operacion))
+            return ejecutarInstrumentado();
+        if (operacion.startsWith('importar') && solicitud.cuerpo?.soloValidar === true)
             return ejecutarInstrumentado();
         const resultado = await this.productorM9.ejecutar(operacion, actor, { parametros: solicitud.parametros, cuerpo: solicitud.cuerpo, idSolicitud: solicitud.idSolicitud, ocurridoEn: solicitud.ocurridoEn }, ejecutarInstrumentado);
         (0, ServicioDemostracion_1.emitirEtapa)('AUDITORIA_M9', 'CORRECTO', 'Auditoría M9', { detalle: 'Productor M9 evaluado; persiste sólo cuando corresponde' });

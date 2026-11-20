@@ -15,7 +15,8 @@ function crearAplicacion(fachada = new C_Finanzas_1.C_Finanzas()) {
     aplicacion.disable('x-powered-by');
     aplicacion.set('json replacer', (_clave, valor) => typeof valor === 'bigint' ? valor.toString() : valor);
     aplicacion.use((0, cors_1.default)({ origin: /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/ }));
-    aplicacion.use(express_1.default.json({ limit: '6mb' }));
+    // Un archivo de 5 MB crece cerca de un 33 % al viajar codificado en base64.
+    aplicacion.use(express_1.default.json({ limit: '8mb' }));
     aplicacion.use(ServicioDemostracion_1.contextoDemostracion.middleware());
     // Cookies HttpOnly/SameSite y origen estricto para operaciones de escritura.
     // importante: acá termina la magia y empieza el contrato HTTP
@@ -42,6 +43,10 @@ function crearAplicacion(fachada = new C_Finanzas_1.C_Finanzas()) {
         }
         if (error?.type === 'entity.parse.failed') {
             respuesta.status(400).json({ error: 'JSON inválido' });
+            return;
+        }
+        if (error?.type === 'entity.too.large') {
+            respuesta.status(413).json({ error: 'El archivo supera el tamaño permitido' });
             return;
         }
         if (error?.code === 'P2002') {

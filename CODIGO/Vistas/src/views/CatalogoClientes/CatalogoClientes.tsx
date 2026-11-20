@@ -4,6 +4,7 @@ import { solicitarFinanzas } from '../../api/finanzas';
 import React, { useState, useEffect } from 'react';
 import { Search, Eye, Plus, Power, Edit3 } from 'lucide-react';
 import { esRutValido, formatearRutValido } from '../../utilidades/rut';
+import ImportacionMasivaExcel from '../../components/ImportacionMasivaExcel';
 
 interface Cliente {
   // TODO: ordenar este filtro cuando dejemos de sumar estados nuevos
@@ -48,6 +49,7 @@ const CatalogoClientes: React.FC = () => {
   const [formulario, fijarFormulario] = useState(formularioInicial());
   const [guardando, fijarGuardando] = useState(false);
   const [mensaje, fijarMensaje] = useState('');
+  const [version, fijarVersion] = useState(0);
   const rutInvalido = Boolean(formulario.rut.trim()) && !esRutValido(formulario.rut);
   const telefonoB2CFaltante =
     formulario.tipo === 'B2C' && !formulario.telefono.trim();
@@ -69,7 +71,7 @@ const CatalogoClientes: React.FC = () => {
         .catch(causa => { if (!cancelacion.signal.aborted) fijarError(causa.message); })
         .finally(() => { if (!cancelacion.signal.aborted) fijarCargando(false); });
       return () => cancelacion.abort();
-    }, [busqueda, estado, situacion, fechaDesde, fechaHasta, ordenar, direccion]);
+    }, [busqueda, estado, situacion, fechaDesde, fechaHasta, ordenar, direccion, version]);
 
     const enviar = async (ruta: string, metodo: string, cuerpo: Record<string, unknown>) => {
       const respuesta = await solicitarFinanzas(ruta, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
@@ -114,11 +116,11 @@ const CatalogoClientes: React.FC = () => {
           <h1 className="break-words text-2xl font-bold text-gray-900 sm:text-3xl">Catálogo de Clientes</h1>
           <p className="text-sm text-gray-500 mt-1">Gestión de clientes financieros y saldos</p>
         </div>
-        {sesion?.permisos.includes('CU01') && <button onClick={() => {
+        {sesion?.permisos.includes('CU01') && <div className="flex flex-col gap-2 sm:flex-row"><ImportacionMasivaExcel tipo="clientes" titulo="clientes" onCompletado={()=>fijarVersion(valor=>valor+1)}/><button onClick={() => {
           fijarFormulario(formularioInicial());
           fijarMensaje('');
           fijarNuevo(true);
-        }} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 font-semibold text-white sm:w-auto"><Plus className="h-4 w-4"/>Crear cliente</button>}
+        }} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 font-semibold text-white sm:w-auto"><Plus className="h-4 w-4"/>Crear cliente</button></div>}
       </div>
 
       {nuevo && <form onSubmit={guardar} className="mb-8 grid grid-cols-1 gap-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6 md:grid-cols-3">

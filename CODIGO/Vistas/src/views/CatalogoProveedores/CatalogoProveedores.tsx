@@ -5,6 +5,7 @@ import { ArrowUpDown, Building2, Edit3, Eye, Plus, Power, RefreshCcw, Search, Sh
 import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
 import { esRutValido, formatearRutValido } from '../../utilidades/rut';
+import ImportacionMasivaExcel from '../../components/ImportacionMasivaExcel';
 
 interface Proveedor {
   idProveedor: number;
@@ -118,7 +119,7 @@ export default function CatalogoProveedores() {
     <div className="mx-auto max-w-7xl">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div><p className="text-sm font-semibold text-primary-600">Proveedores y egresos</p><h1 className="text-2xl font-bold text-gray-900">Catálogo de proveedores</h1></div>
-        {puede('CU75') && <button onClick={() => void abrir('nuevo')} className="flex items-center gap-2 rounded-md bg-primary-600 px-4 py-2.5 font-semibold text-white hover:bg-primary-700"><Plus className="h-4 w-4"/>Nuevo proveedor</button>}
+        {puede('CU75') && <div className="flex flex-wrap gap-2"><ImportacionMasivaExcel tipo="proveedores" titulo="proveedores" onCompletado={()=>setVersion(valor=>valor+1)}/><button onClick={() => void abrir('nuevo')} className="flex items-center gap-2 rounded-md bg-primary-600 px-4 py-2.5 font-semibold text-white hover:bg-primary-700"><Plus className="h-4 w-4"/>Nuevo proveedor</button></div>}
       </header>
       {(error || mensaje) && <div className={`mb-4 rounded-md border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>{error || mensaje}</div>}
       <section className={`mb-5 grid gap-3 border-y border-gray-200 bg-white px-4 py-4 ${puedeOrdenar ? 'md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_minmax(190px,auto)_minmax(180px,auto)_minmax(180px,auto)_minmax(150px,auto)]' : 'md:grid-cols-[minmax(260px,1fr)_minmax(190px,auto)_minmax(190px,auto)]'}`}>

@@ -5,6 +5,12 @@ exports.codigosContador = exports.codigosSecretaria = exports.codigosGerencia = 
 // Midas dijo que este catálogo no se toca a la ligera
 exports.operacionesPermiso = {
     buscarClientes: 'CU06', filtrarEstado: 'CU07', filtrarFinanzas: 'CU08', listarClientes: 'CU05', abrirFicha: 'CU09', dashboard: 'CU05', crearCliente: 'CU01', actualizarCliente: 'CU02', desactivarCliente: 'CU03', reactivarCliente: 'CU04', inventario: 'CU15', productos: 'CU14', monedas: 'CU28',
+    plantillaImportacionClientes: 'CU01', importarClientes: 'CU01',
+    plantillaImportacionEmpleados: 'CU156', importarEmpleados: 'CU156',
+    plantillaImportacionProveedores: 'CU75', importarProveedores: 'CU75',
+    plantillaImportacionAreasTrabajo: 'CU157', importarAreasTrabajo: 'CU157',
+    plantillaImportacionTareasFabricacion: 'CU361', importarTareasFabricacion: 'CU361',
+    plantillaImportacionCategoriasEgreso: 'CU134', importarCategoriasEgreso: 'CU134',
     consultarResumenInventario: 'CU15', listarMaterialesInventario: 'CU14', obtenerMaterialInventario: 'CU14', listarBodegasInventario: 'CU15', listarMovimientosInventario: 'CU15', listarReservasInventario: 'CU15', listarAlertasInventario: 'CU15',
     catalogosOperacionInventario: 'CU15', registrarEntradaInventario: 'CU466', registrarSalidaInventario: 'CU467', crearReservaInventario: 'CU468', liberarReservaInventario: 'CU469', ajustarExistenciaInventario: 'CU470',
     listarFamiliasProductoComercial: 'CU360', listarProductosComerciales: 'CU360', obtenerProductoComercial: 'CU360', catalogosVinculacionProductoComercial: 'CU360', obtenerPlanificacionAprobacionCotizacion: 'CU24', consultarTrazabilidadComercialM11: 'CU20',

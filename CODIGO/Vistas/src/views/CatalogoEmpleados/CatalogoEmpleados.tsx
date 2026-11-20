@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
 import { esRutValido, formatearRutValido } from '../../utilidades/rut';
+import ImportacionMasivaExcel from '../../components/ImportacionMasivaExcel';
 
 type Empleado = {
   id: number;
@@ -85,7 +86,7 @@ export default function CatalogoEmpleados() {
     <div className="mx-auto max-w-7xl">
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div><p className="text-sm font-semibold text-primary-600">Remuneraciones</p><h1 className="text-2xl font-bold text-gray-900">Catálogo de empleados</h1></div>
-        {sesion?.permisos.includes('CU156') && <button onClick={() => { setError(''); setMensaje(''); setModalAbierto(true); }} className="flex items-center gap-2 rounded-md bg-primary-600 px-4 py-2.5 font-semibold text-white hover:bg-primary-700"><Plus className="h-4 w-4" />Nuevo empleado</button>}
+        {sesion?.permisos.includes('CU156') && <div className="flex flex-wrap gap-2"><ImportacionMasivaExcel tipo="empleados" titulo="empleados" onCompletado={()=>setVersion(valor=>valor+1)}/><button onClick={() => { setError(''); setMensaje(''); setModalAbierto(true); }} className="flex items-center gap-2 rounded-md bg-primary-600 px-4 py-2.5 font-semibold text-white hover:bg-primary-700"><Plus className="h-4 w-4" />Nuevo empleado</button></div>}
       </header>
 
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
