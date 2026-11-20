@@ -1,0 +1,25 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const {clienteAceptableB2B}=require('../dist/comercial/validarAceptacionB2B.js');
+const bueno=()=>({segmentoCotizacion:'B2B',tipoCliente:'B2B',estadoCliente:'activo',estadoFicha:'activa'});
+test('EF15 B2B: cotización y cliente B2B activos se aceptan',()=>assert.equal(clienteAceptableB2B(bueno()),true));
+test('EF15 B2B: cliente real B2C se rechaza aunque la cotización diga B2B',()=>assert.equal(clienteAceptableB2B({...bueno(),tipoCliente:'B2C'}),false));
+test('EF15 B2B: segmento B2C se rechaza aunque el cliente sea B2B',()=>assert.equal(clienteAceptableB2B({...bueno(),segmentoCotizacion:'B2C'}),false));
+test('EF15 B2B: segmento faltante no autoriza una aceptación ambigüa',()=>assert.equal(clienteAceptableB2B({...bueno(),segmentoCotizacion:null}),false));
+test('EF15 B2B: cliente inactivo se rechaza',()=>assert.equal(clienteAceptableB2B({...bueno(),estadoCliente:'inactivo'}),false));
+test('EF15 B2B: ficha inactiva se rechaza',()=>assert.equal(clienteAceptableB2B({...bueno(),estadoFicha:'inactiva'}),false));
+test('EF15 B2B: mayúsculas y espacios no alteran el resultado',()=>assert.equal(clienteAceptableB2B({...bueno(),tipoCliente:' b2b ',estadoFicha:' ACTIVA '}),true));
+test('EF18 B2B: el controlador valida al cliente y conserva OT sin requerir OC',()=>{
+ const fuente=fs.readFileSync(path.resolve(__dirname,'../src/controladores/M2Controller.ts'),'utf8');
+ const inicio=fuente.indexOf('  async aprobarCotizacionB2B('),fin=fuente.indexOf('  async consultarTrazabilidadComercialM11(',inicio);
+ assert.ok(inicio>=0&&fin>inicio);
+ const bloque=fuente.slice(inicio,fin);
+ assert.match(bloque,/clienteAceptableB2B\(/);
+ assert.match(bloque,/tipo_cliente_financiero: true/);
+ assert.doesNotMatch(bloque,/tx\.orden_compra_b2b\.create/);
+ assert.match(bloque,/validarCondicionesEconomicasOfertaM11\(/);
+ assert.match(bloque,/modalidadAceptacion:'B2B_SIN_OC'/);
+ assert.match(bloque,/crearOrdenesTrabajoCotizacion\(/);
+});

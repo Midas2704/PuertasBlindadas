@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { formalizarProyectoCotizacion, validarCoherenciaContextualM12 } from '../comercial/ServicioObraProyectoComercial';
 import { prisma } from '../db';
+import { clienteAceptableB2B } from '../comercial/validarAceptacionB2B';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, consolidarNotasClp, estadoVisibleNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas, totalLineasComerciales } from '../utilidades/finanzas';
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
@@ -10,7 +11,7 @@ import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 import { registrarCompromisoCredito, validarCreditoParaFormalizacion } from '../utilidades/creditoM8';
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
 import { normalizarUbicacion, resolverCoberturaDesdeTarifas, type SegmentoComercial, type TarifaResoluble } from '../comercial/contratosCatalogoComercial';
-import { exigirCotejoAcreditadoM11, prepararCorrespondenciasTecnicasM11, prepararTrazabilidadOrdenCompraM11, validarCondicionesEconomicasOfertaM11 } from '../comercial/ServicioTrazabilidadComercialM11';
+import { validarCondicionesEconomicasOfertaM11 } from '../comercial/ServicioTrazabilidadComercialM11';
 import { ServicioDocumentalM11 } from '../comercial/ServicioDocumentalM11';
 import { prepararModificacionGuia } from '../m2/guiaDespacho';
 import { cantidadPendienteCompraAbierta, decimalInventario } from '../inventario/contratosInventario';
@@ -615,28 +616,43 @@ export class M2Controller {
       const pago=await tx.pago_cliente.create({data:prepararPago(nota,datosPago,catalogo,idDocumento,responsable.toString())});
       const actual=await tx.nota_venta.findUniqueOrThrow({where:{id_nota_venta:nota.id_nota_venta},include:incluirNota});
       await tx.nota_venta.update({where:{id_nota_venta:nota.id_nota_venta},data:{estado_pago:calcularNota(actual).estadoPago}});
-      const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,responsable,proyecto.proyecto_proyecto_id);
+      const ordenesTrabajo: [] = []; // La venta B2C no crea OT durante la consolidación.
       await tx.cotizacion.update({where:{id_cotizacion:idCotizacion},data:{estado_cotizacion:'aprobada'}});
-      return auditableM9({mensaje:'Venta B2C consolidada con su primer pago y OT pendientes de rectificación',idNota:nota.id_nota_venta,idPago:pago.id_pago_cliente,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cotizacion.id_obra_contexto?.toString()??null,ordenesTrabajo},undefined,{idCotizacion,idNota:nota.id_nota_venta,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cotizacion.id_obra_contexto?.toString()??null,ordenesTrabajo});
+      return auditableM9({mensaje:'Venta B2C consolidada con su primer pago, sin generación automática de OT',idNota:nota.id_nota_venta,idPago:pago.id_pago_cliente,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cotizacion.id_obra_contexto?.toString()??null,ordenesTrabajo},undefined,{idCotizacion,idNota:nota.id_nota_venta,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cotizacion.id_obra_contexto?.toString()??null,ordenesTrabajo});
     });
   }
 
   async aprobarCotizacionB2B(idCotizacion: number, entrada: Entrada, usuario: bigint) {
     return this.enTransaccion(async tx => {
-      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true, moneda: true, detalle_cotizacion:{select:{id_detalle_cotizacion:true,id_cotizacion:true}} } });
+      const cot = await tx.cotizacion.findUnique({ where: { id_cotizacion: idCotizacion }, include: { nota_venta: true, orden_compra_b2b: true, moneda: true, ficha_cliente: { include: { cliente_financiero: { include: { tipo_cliente_financiero: true } } } }, detalle_cotizacion:{select:{id_detalle_cotizacion:true,id_cotizacion:true}} } });
       if (!cot || cot.estado_cotizacion !== 'emitida' || cot.nota_venta) throw new ErrorAplicacion(409, 'La Cotización no está disponible para aceptación');
       if (cot.segmento_comercial && cot.segmento_comercial !== 'B2B') throw new ErrorAplicacion(409, 'La Cotización no pertenece al segmento B2B');
+      // EF15: el segmento declarado no basta; corroborar también el tipo y estado real del cliente.
+      if (!clienteAceptableB2B({
+        segmentoCotizacion: cot.segmento_comercial,
+        tipoCliente: cot.ficha_cliente?.cliente_financiero?.tipo_cliente_financiero?.nombre_tipo_cliente_financiero,
+        estadoCliente: cot.ficha_cliente?.cliente_financiero?.estado_financiero,
+        estadoFicha: cot.ficha_cliente?.estado_ficha,
+      })) throw new ErrorAplicacion(409, 'La aceptación B2B exige cotización B2B y cliente B2B activo con ficha activa');
       if (!cot.fecha_vigencia || cot.fecha_vigencia.toISOString().slice(0, 10) < fechaNegocio()) throw new ErrorAplicacion(409, 'La Cotización está vencida; no se puede aceptar');
-      const folio = texto(entrada.folioOrdenCompra, 100); const respaldo = respaldoOperacional(entrada.respaldoOrdenCompra, 'Respaldo de la Orden de Compra');
-      if (!folio) throw new ErrorAplicacion(400, 'El folio de la Orden de Compra es obligatorio');
-      if(entrada.idVersionOfertaAceptada === undefined || entrada.idVersionOfertaAceptada === null || entrada.idVersionOfertaAceptada === '') throw new ErrorAplicacion(400,'Debes identificar la versión documental de la oferta aceptada');
+      // EF18: aceptación B2B sin Orden de Compra ni documento PDF de OC.
+      // Sí se conserva la versión de oferta emitida, con su comprobación económica.
+      if (entrada.idVersionOfertaAceptada === undefined || entrada.idVersionOfertaAceptada === null || entrada.idVersionOfertaAceptada === '') {
+        throw new ErrorAplicacion(400, 'Debes seleccionar la versión emitida de la oferta aceptada');
+      }
       const idVersionOferta = identificador(entrada.idVersionOfertaAceptada);
-      const ofertaAceptada = await tx.cotizacion_version.findFirst({where:{id_cotizacion_version:idVersionOferta,id_cotizacion:idCotizacion,numero_version_comercial:{not:null},tipo_version:'EMISION',estado_documental:'DISPONIBLE',id_documento_logico:{not:null}}});
-      if(!ofertaAceptada)throw new ErrorAplicacion(400,'La oferta aceptada no pertenece a esta negociación o no posee documento confirmado');
-      const cotejo=prepararTrazabilidadOrdenCompraM11(entrada.lineasOrdenCompra,idCotizacion,cot.detalle_cotizacion,ofertaAceptada?.snapshot_comercial,cot.id_moneda);
-      const economia=validarCondicionesEconomicasOfertaM11(ofertaAceptada.snapshot_comercial,{moneda:cot.moneda.codigo_moneda,neto:cot.monto_neto,impuesto:cot.monto_impuesto,total:cot.monto_total_estimado});
-      exigirCotejoAcreditadoM11(cotejo,economia);
-      const oc = await tx.orden_compra_b2b.create({ data: { id_cotizacion: idCotizacion, id_version_oferta_aceptada:idVersionOferta, folio, respaldo, fecha: new Date(`${fechaNegocio()}T00:00:00Z`),estado_cotejo:cotejo.estado,resultado_cotejo:cotejo.resumen as Prisma.InputJsonValue,lineas:{create:cotejo.lineas.map(linea=>({numero_linea:linea.numeroLinea,id_detalle_cotizacion:linea.idDetalleCotizacion,referencia_comercial:linea.referenciaComercial,concepto:linea.concepto,especificaciones:linea.especificaciones??undefined,cantidad:linea.cantidad,id_moneda:linea.idMoneda,precio_unitario:linea.precioUnitario,subtotal:linea.subtotal,estado_cotejo:linea.estadoCotejo,resultado_cotejo:linea.resultadoCotejo}))} },include:{lineas:true,version_oferta_aceptada:{select:{id_cotizacion_version:true,numero_version_comercial:true,fecha:true,estado_documental:true}}} });
+      const ofertaAceptada = await tx.cotizacion_version.findFirst({ where: {
+        id_cotizacion_version:idVersionOferta, id_cotizacion:idCotizacion,
+        numero_version_comercial:{not:null}, tipo_version:'EMISION',
+        estado_documental:'DISPONIBLE', id_documento_logico:{not:null}
+      }});
+      if (!ofertaAceptada) throw new ErrorAplicacion(400, 'La oferta aceptada no corresponde a una versión emitida y confirmada de esta cotización');
+      const economia = validarCondicionesEconomicasOfertaM11(ofertaAceptada.snapshot_comercial, {
+        moneda:cot.moneda.codigo_moneda, neto:cot.monto_neto,
+        impuesto:cot.monto_impuesto, total:cot.monto_total_estimado
+      });
+      if (economia.estado !== 'COINCIDE') throw new ErrorAplicacion(409,
+        'Las condiciones económicas de la oferta no están acreditadas: no se formalizó la venta', 'EF18_OFERTA_NO_ACREDITADA');
       let tipoCambio:Prisma.Decimal|null;
       try{tipoCambio=await obtenerTipoCambioCotizacion(tx,idCotizacion,cot.moneda.codigo_moneda,entrada.tipoCambio);}catch(error){
         if(!(error instanceof ErrorAplicacion)||cot.moneda.codigo_moneda!=='USD')throw error;
@@ -655,11 +671,21 @@ export class M2Controller {
       await tx.proyecto_financiero.create({data:{id_ficha_cliente:cot.id_ficha_cliente,id_nota_venta:nota.id_nota_venta,id_proyecto_terreno:proyecto.proyecto_proyecto_id,id_moneda:cot.id_moneda,codigo_proyecto_financiero:`COT-${idCotizacion}`,fecha_inicio_financiera:new Date(`${fechaNegocio()}T00:00:00Z`),estado_financiero_proyecto:'activo',monto_venta_estimado:cot.monto_neto,monto_costo_estimado:cot.subtotal_costos_estimados}});
       if (montoFinanciado) await registrarCompromisoCredito(tx, { idFicha: cot.id_ficha_cliente, idNota: nota.id_nota_venta, montoFinanciado, idSolicitudExcepcion: autorizacionCredito?.idSolicitudExcepcion });
       const ordenesTrabajo=await this.crearOrdenesTrabajoCotizacion(tx,idCotizacion,entrada.planificaciones,usuario,proyecto.proyecto_proyecto_id);
-      const candidatasCorrespondencia=prepararCorrespondenciasTecnicasM11(cotejo.lineas,ordenesTrabajo);
-      const correspondencias=candidatasCorrespondencia.flatMap(candidata=>{const linea=oc.lineas.find(item=>item.numero_linea===candidata.numeroLinea);return linea?[{id_linea_orden_compra_b2b:linea.id_linea_orden_compra_b2b,id_unidad_fisica_ot:BigInt(candidata.idUnidad),estado:'ACREDITADA',evidencia:{fuente:'COBERTURA_EXACTA_OC_OFERTA_UNIDAD',idCotizacion,idDetalleCotizacion:candidata.idDetalleCotizacion,numeroLinea:candidata.numeroLinea,idOrdenTrabajo:candidata.idOrdenTrabajo} as Prisma.InputJsonValue}]:[];});
-      if(correspondencias.length)await tx.correspondencia_linea_oc_item_tecnico.createMany({data:correspondencias,skipDuplicates:true});
+      // EF18: Sin líneas de OC no se inventan correspondencias técnicas M11.
       await tx.cotizacion.update({ where: { id_cotizacion: idCotizacion }, data: { estado_cotizacion: 'aprobada' } });
-      return auditableM9({ mensaje: 'Orden de Compra, Nota de Venta y OT generadas', idNota: nota.id_nota_venta, idProyecto:proyecto.proyecto_proyecto_id.toString(), idObra:cot.id_obra_contexto?.toString()??null, ordenCompra: oc, cotejo:{estado:cotejo.estado,...cotejo.resumen},correspondenciasTecnicas:correspondencias.length, ordenesTrabajo },undefined,{idCotizacion,idNota:nota.id_nota_venta,idProyecto:proyecto.proyecto_proyecto_id.toString(),idObra:cot.id_obra_contexto?.toString()??null,idVersionOfertaAceptada:idVersionOferta,cotejo:cotejo.estado,lineasOrdenCompra:cotejo.lineas.length,correspondenciasTecnicas:correspondencias.length,ordenesTrabajo});
+      return auditableM9({
+        mensaje: 'Cotización B2B aprobada sin OC; Nota de Venta y OT generadas',
+        idNota: nota.id_nota_venta, idProyecto:proyecto.proyecto_proyecto_id.toString(),
+        idObra:cot.id_obra_contexto?.toString()??null,
+        ordenCompra: null, cotejo: { estado: 'NO_APLICA_SIN_OC' },
+        correspondenciasTecnicas: 0, ordenesTrabajo
+      }, undefined, {
+        idCotizacion, idNota:nota.id_nota_venta,
+        idProyecto:proyecto.proyecto_proyecto_id.toString(),
+        idObra:cot.id_obra_contexto?.toString()??null,
+        idVersionOfertaAceptada:idVersionOferta,
+        modalidadAceptacion:'B2B_SIN_OC', ordenesTrabajo
+      });
     });
   }
 

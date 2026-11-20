@@ -1,0 +1,11 @@
+export declare const textoRequerido: (valor: unknown, campo: string, maximo: number) => string;
+export declare const validarNombreArchivo: (valor: unknown, campo?: string) => string;
+export declare const validarMime: (valor: unknown) => string;
+export declare const validarTamano: (valor: bigint | number) => bigint;
+export declare const validarSha256: (valor: string | null | undefined, obligatorio?: boolean) => string | null;
+export declare const validarClaveTemporal: (valor: unknown) => string;
+export declare const validarClaveObjeto: (valor: unknown) => string;
+export declare const validarContenedor: (valor: unknown) => string;
+export declare const nuevaClaveTemporal: () => string;
+export declare const nuevaClaveObjeto: (cuarentena?: boolean) => string;
+//# sourceMappingURL=validaciones.d.ts.map

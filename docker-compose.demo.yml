@@ -1,0 +1,8 @@
+services:
+  backend:
+    image: pblindadas-demo-backend:local
+    environment:
+      MODO_DEMOSTRACION: "true"
+
+  frontend:
+    image: pblindadas-demo-frontend:local

@@ -1,0 +1,216 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.M3Controller = void 0;
+const client_1 = require("@prisma/client");
+const pago_1 = require("../utilidades/pago");
+const solicitudes_1 = require("../validaciones/solicitudes");
+const db_1 = require("../db");
+const ErrorAplicacion_1 = require("../utilidades/ErrorAplicacion");
+const finanzas_1 = require("../utilidades/finanzas");
+const C_BancoCentral_1 = require("../utilidades/C_BancoCentral");
+const comprobantePagoPdf_1 = require("../m3/comprobantePagoPdf");
+const creditoM8_1 = require("../utilidades/creditoM8");
+const pdfOperacional_1 = require("../utilidades/pdfOperacional");
+/** M3 CU42–CU58: pagos, reversas, saldos a favor y conciliación. */
+class M3Controller {
+    constructor(bancoCentral = new C_BancoCentral_1.C_BancoCentral()) {
+        this.bancoCentral = bancoCentral;
+    }
+    async registrarPago(entrada, responsable) {
+        const idNota = (0, solicitudes_1.identificador)(entrada.idNota);
+        const notaPrevia = await db_1.prisma.nota_venta.findUnique({ where: { id_nota_venta: idNota }, include: { moneda: true } });
+        let datosEntrada = { ...entrada, respaldo: (0, pdfOperacional_1.respaldoOperacional)(entrada.respaldo, 'Respaldo del pago') };
+        if (notaPrevia?.moneda.codigo_moneda === 'USD') {
+            try {
+                const externo = await this.bancoCentral.obtenerTipoCambio('USD');
+                datosEntrada = { ...datosEntrada, tipoCambio: externo, tipoCambioOrigen: 'C_BancoCentral' };
+            }
+            catch (error) {
+                if (!entrada.tipoCambio || entrada.tipoCambioManual !== true)
+                    throw error;
+                datosEntrada = { ...datosEntrada, tipoCambioOrigen: 'manual-fallback' };
+            }
+        }
+        try {
+            return await db_1.prisma.$transaction(async (tx) => {
+                await tx.$queryRaw(client_1.Prisma.sql `SELECT id_nota_venta FROM finanzas.nota_venta WHERE id_nota_venta = ${idNota} FOR UPDATE`);
+                const nota = await tx.nota_venta.findUnique({ where: { id_nota_venta: idNota }, include: { ...finanzas_1.incluirNota, ficha_cliente: { include: { cliente_financiero: true } } } });
+                if (!nota || nota.ficha_cliente.cliente_financiero.estado_financiero !== 'activo')
+                    throw new ErrorAplicacion_1.ErrorAplicacion(409, 'Selecciona una NV de un cliente activo');
+                const idDocumento = entrada.idDocumento ? (0, solicitudes_1.identificador)(entrada.idDocumento) : null;
+                const documento = idDocumento ? await tx.documento_tributario.findUnique({ where: { id_documento_tributario: idDocumento } }) : null;
+                if (idDocumento && (!documento || documento.id_ficha_cliente !== nota.id_ficha_cliente))
+                    throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El documento tributario debe existir y pertenecer al mismo cliente');
+                if (idDocumento && !await tx.documento_tributario_nota_venta.findUnique({ where: { id_documento_tributario_id_nota_venta: { id_documento_tributario: idDocumento, id_nota_venta: idNota } } }))
+                    throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El documento tributario no está relacionado con la Nota de Venta');
+                const catalogo = { medios: await tx.medio_pago.findMany({ where: { estado_medio_pago: 'activo' } }), categorias: await tx.categoria_pago.findMany({ where: { activo: true } }), cuotas: await tx.config_cuotas_tarjeta.findMany({ where: { activo: true } }) };
+                const pago = await tx.pago_cliente.create({ data: (0, pago_1.prepararPago)(nota, datosEntrada, catalogo, idDocumento, responsable) });
+                await (0, creditoM8_1.reducirCompromisoPorPago)(tx, pago.id_pago_cliente, idNota, pago.monto_pago);
+                const calculo = await this.recalcularSaldo(tx, idNota);
+                return { mensaje: 'Pago registrado', idPago: pago.id_pago_cliente, ...calculo };
+            }, { isolationLevel: client_1.Prisma.TransactionIsolationLevel.Serializable });
+        }
+        catch (error) {
+            if (error instanceof client_1.Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
+                throw new ErrorAplicacion_1.ErrorAplicacion(409, 'El saldo de la Nota de Venta cambió concurrentemente; vuelve a revisar el pago');
+            throw error;
+        }
+    }
+    async recalcularSaldo(tx, idNota) {
+        const nota = await tx.nota_venta.findUniqueOrThrow({ where: { id_nota_venta: idNota }, include: finanzas_1.incluirNota });
+        // MIDAS: una reversa cambia el pago, no el estado comercial acordado para la venta.
+        return (0, finanzas_1.sincronizarEstadoPago)(tx, nota);
+    }
+    async procesarExcedente(tx, idNota, idReversion, entrada) {
+        const calculo = await this.recalcularSaldo(tx, idNota);
+        const registrados = await tx.saldo_favor_cliente.aggregate({ where: { id_nota_venta: idNota }, _sum: { monto_original: true } });
+        const disponible = client_1.Prisma.Decimal.max(0, new client_1.Prisma.Decimal(calculo.excedente).minus(registrados._sum.monto_original || 0));
+        if (disponible.gt(0)) {
+            const destino = (0, solicitudes_1.texto)(entrada.destino);
+            if (!['devolucion', 'saldo_favor'].includes(destino))
+                throw new ErrorAplicacion_1.ErrorAplicacion(409, 'Existe excedente; elige devolución o saldo a favor antes de confirmar');
+            await tx.reversion_nota_venta.update({ where: { id_reversion_nota_venta: idReversion }, data: { destino_excedente: destino } });
+            if (destino === 'saldo_favor') {
+                const nota = await tx.nota_venta.findUniqueOrThrow({ where: { id_nota_venta: idNota }, include: { ficha_cliente: true } });
+                await tx.saldo_favor_cliente.create({ data: { id_cliente_financiero: nota.ficha_cliente.id_cliente_financiero, id_nota_venta: idNota, id_reversion_nota_venta: idReversion, monto_original: disponible, monto_disponible: disponible } });
+            }
+            return { ...calculo, excedenteGestionado: disponible.toNumber(), destino, mensaje: destino === 'devolucion' ? 'Reversión registrada; devolución financiera pendiente de ejecutar' : 'Reversión registrada; saldo a favor disponible' };
+        }
+        return { ...calculo, mensaje: 'Reversión registrada sin nuevo excedente' };
+    }
+    async consultarPago(idPago) {
+        const pago = await db_1.prisma.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: {
+                ...finanzas_1.incluirPago, conciliacion: true, asignacion_pago_cliente: { include: { documento_tributario: { include: { tipo_documento: true } }, nota_venta: { include: { moneda: true } } } },
+                ficha_cliente: { include: { cliente_financiero: true } },
+            } });
+        if (!pago)
+            throw new ErrorAplicacion_1.ErrorAplicacion(404, 'Pago no encontrado');
+        return { ...pago, montoEfectivo: (0, finanzas_1.efectoPago)(pago).toNumber() };
+    }
+    async consultarSaldo(idNota) {
+        const nota = await db_1.prisma.nota_venta.findUnique({ where: { id_nota_venta: idNota }, include: finanzas_1.incluirNota });
+        if (!nota)
+            throw new ErrorAplicacion_1.ErrorAplicacion(404, 'Nota de Venta no encontrada');
+        return { idNota, moneda: nota.moneda.codigo_moneda, ...(0, finanzas_1.calcularNota)(nota) };
+    }
+    async consultarCatalogos(idFicha) {
+        const [medios, categorias, cuotas] = await Promise.all([
+            db_1.prisma.medio_pago.findMany({ where: { estado_medio_pago: 'activo' } }),
+            db_1.prisma.categoria_pago.findMany({ where: { activo: true } }),
+            db_1.prisma.config_cuotas_tarjeta.findMany({ where: { activo: true }, orderBy: { cantidad: 'asc' } }),
+        ]);
+        const documentos = idFicha ? await db_1.prisma.documento_tributario.findMany({ where: { id_ficha_cliente: idFicha }, select: { id_documento_tributario: true, folio_documento: true, tipo_documento: { select: { nombre_tipo_documento: true } }, documento_tributario_nota_venta: { select: { id_nota_venta: true } } } }) : [];
+        return { medios, categorias, cuotas, documentos };
+    }
+    async consultarTipoCambio(moneda) { return { moneda: moneda.toUpperCase(), valor: await this.bancoCentral.obtenerTipoCambio(moneda) }; }
+    async contextoPago(idFicha) {
+        const catalogos = await this.consultarCatalogos(idFicha);
+        return db_1.prisma.$transaction(async (tx) => {
+            const notas = await tx.nota_venta.findMany({ where: { id_ficha_cliente: idFicha, estado_nota_venta: { notIn: ['anulada', 'revertida_total', 'cerrada'] } }, include: finanzas_1.incluirNota, orderBy: { fecha_emision: 'desc' } });
+            const pagos = await tx.pago_cliente.findMany({ where: { id_ficha_cliente: idFicha }, include: finanzas_1.incluirPago, orderBy: { fecha_pago: 'desc' } });
+            const notasConEstado = await Promise.all(notas.map(async (nota) => ({ ...nota, ...await (0, finanzas_1.sincronizarEstadoPago)(tx, nota) })));
+            return { ...catalogos, notas: notasConEstado.filter(nota => nota.saldoPendiente > 0), pagos: pagos.map(pago => ({ ...pago, montoEfectivo: (0, finanzas_1.efectoPago)(pago).toNumber() })) };
+        }, { isolationLevel: client_1.Prisma.TransactionIsolationLevel.RepeatableRead });
+    }
+    async anularPago(idPago, entrada, responsable) {
+        const motivo = (0, solicitudes_1.texto)(entrada.motivo, 2000);
+        const respaldo = (0, pdfOperacional_1.respaldoOperacional)(entrada.respaldo, 'Respaldo de la anulación');
+        if (!motivo || !respaldo)
+            throw new ErrorAplicacion_1.ErrorAplicacion(400, 'Motivo y respaldo son obligatorios');
+        return db_1.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw(client_1.Prisma.sql `SELECT id_pago_cliente FROM finanzas.pago_cliente WHERE id_pago_cliente = ${idPago} FOR UPDATE`);
+            const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { anulacion_pago: true, reversion_pago: true, asignacion_pago_cliente: true } });
+            if (!pago)
+                throw new ErrorAplicacion_1.ErrorAplicacion(404, 'Pago no encontrado');
+            if (pago.anulacion_pago)
+                throw new ErrorAplicacion_1.ErrorAplicacion(409, 'El pago ya está anulado');
+            if (pago.reversion_pago.length)
+                throw new ErrorAplicacion_1.ErrorAplicacion(409, 'El pago tiene una reversión previa y no puede anularse');
+            await tx.anulacion_pago.create({ data: { id_pago_cliente: idPago, motivo, respaldo, responsable } });
+            const calculo = pago.asignacion_pago_cliente ? await this.recalcularSaldo(tx, pago.asignacion_pago_cliente.id_nota_venta) : undefined;
+            return { mensaje: 'Pago anulado; el registro original se conserva', ...calculo };
+        }, { isolationLevel: client_1.Prisma.TransactionIsolationLevel.Serializable });
+    }
+    async revertirPago(idPago, entrada, responsable) {
+        const montoEntrada = Number(entrada.monto);
+        const motivo = (0, solicitudes_1.texto)(entrada.motivo, 2000);
+        const respaldo = (0, pdfOperacional_1.respaldoOperacional)(entrada.respaldo, 'Respaldo de la reversión');
+        if (!Number.isFinite(montoEntrada) || montoEntrada <= 0 || !motivo || !respaldo)
+            throw new ErrorAplicacion_1.ErrorAplicacion(400, 'Monto, motivo y respaldo son obligatorios');
+        const monto = new client_1.Prisma.Decimal(montoEntrada);
+        return db_1.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw(client_1.Prisma.sql `SELECT id_pago_cliente FROM finanzas.pago_cliente WHERE id_pago_cliente = ${idPago} FOR UPDATE`);
+            const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { reversion_pago: true, anulacion_pago: true, asignacion_pago_cliente: true } });
+            if (!pago || pago.anulacion_pago)
+                throw new ErrorAplicacion_1.ErrorAplicacion(409, 'El pago no está disponible para reversión');
+            const ya = pago.reversion_pago.reduce((s, r) => s.plus(r.monto), new client_1.Prisma.Decimal(0));
+            const efectivo = pago.monto_pago;
+            if (monto.gt(efectivo.minus(ya)))
+                throw new ErrorAplicacion_1.ErrorAplicacion(400, 'La reversión supera el monto aún disponible');
+            await tx.reversion_pago.create({ data: { id_pago_cliente: idPago, monto, motivo, respaldo, responsable } });
+            const calculo = pago.asignacion_pago_cliente ? await this.recalcularSaldo(tx, pago.asignacion_pago_cliente.id_nota_venta) : undefined;
+            return { mensaje: 'Reversión de pago registrada', ...calculo };
+        }, { isolationLevel: client_1.Prisma.TransactionIsolationLevel.Serializable });
+    }
+    async aplicarSaldoFavor(idSaldo, entrada, responsable) {
+        const idNota = (0, solicitudes_1.identificador)(entrada.idNota);
+        const monto = new client_1.Prisma.Decimal(Number(entrada.monto));
+        if (monto.lte(0))
+            throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El monto debe ser positivo');
+        return db_1.prisma.$transaction(async (tx) => {
+            const saldo = await tx.saldo_favor_cliente.findUnique({ where: { id_saldo_favor_cliente: idSaldo } });
+            const nota = await tx.nota_venta.findUnique({ where: { id_nota_venta: idNota }, include: finanzas_1.incluirNota });
+            const ficha = nota ? await tx.ficha_cliente.findUnique({ where: { id_ficha_cliente: nota.id_ficha_cliente } }) : null;
+            const calculo = nota ? (0, finanzas_1.calcularNota)(nota) : null;
+            if (!saldo || !nota || !ficha || saldo.monto_disponible.lt(monto) || saldo.id_cliente_financiero !== ficha.id_cliente_financiero || ['anulada', 'cerrada', 'revertida_total'].includes(nota.estado_nota_venta) || !calculo || monto.gt(calculo.saldoPendiente))
+                throw new ErrorAplicacion_1.ErrorAplicacion(409, 'Saldo a favor o Nota de Venta no elegible para la aplicación');
+            await tx.aplicacion_saldo_favor.create({ data: { id_saldo_favor_cliente: idSaldo, id_nota_venta: idNota, monto, responsable } });
+            await tx.saldo_favor_cliente.update({ where: { id_saldo_favor_cliente: idSaldo }, data: { monto_disponible: { decrement: monto } } });
+            await this.recalcularSaldo(tx, idNota);
+            return { mensaje: 'Saldo a favor aplicado' };
+        });
+    }
+    async consultarMorosidad(idNota) {
+        const nota = await db_1.prisma.nota_venta.findUnique({ where: { id_nota_venta: idNota }, include: finanzas_1.incluirNota });
+        if (!nota)
+            throw new ErrorAplicacion_1.ErrorAplicacion(404, 'Nota de Venta no encontrada');
+        const calculo = (0, finanzas_1.calcularNota)(nota, (0, finanzas_1.fechaNegocio)());
+        const vencida = calculo.esMorosa && !['anulada', 'revertida_total', 'provisional'].includes(nota.estado_nota_venta);
+        return { idNota, moroso: vencida, fechaVencimiento: nota.fecha_vencimiento, saldoPendiente: calculo.saldoPendiente, situacion: vencida ? 'Morosa' : calculo.saldoPendiente > 0 ? 'Deuda vigente' : 'Al día' };
+    }
+    async generarComprobante(idPago) {
+        const pago = await this.consultarPago(idPago);
+        const cliente = pago.ficha_cliente.cliente_financiero;
+        const rut = cliente.rut_cliente?.trim();
+        const nombre = cliente.nombre_razon_social_referencia?.trim();
+        const medio = pago.medio_pago.nombre_medio_pago?.trim();
+        const moneda = pago.moneda.codigo_moneda?.trim();
+        const faltantes = [
+            !rut && 'RUT del cliente', !nombre && 'nombre o razón social', !pago.fecha_pago && 'fecha del pago',
+            !medio && 'medio de pago', !moneda && 'moneda', !pago.monto_pago.gt(0) && 'monto válido',
+        ].filter((dato) => typeof dato === 'string');
+        if (faltantes.length)
+            throw new ErrorAplicacion_1.ErrorAplicacion(409, `No se puede generar el comprobante: falta ${faltantes.join(', ')}`);
+        return (0, comprobantePagoPdf_1.archivoComprobantePagoM3)(pago);
+    }
+    async conciliarPago(idPago, entrada, responsable) {
+        const monto = new client_1.Prisma.Decimal(Number(entrada.monto));
+        if (monto.lte(0) || !monto.isFinite())
+            throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El monto conciliado debe ser positivo');
+        return db_1.prisma.$transaction(async (tx) => {
+            const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { anulacion_pago: true, conciliacion: true } });
+            if (!pago)
+                throw new ErrorAplicacion_1.ErrorAplicacion(404, 'Pago no encontrado');
+            if (pago.anulacion_pago || pago.estado_conciliacion === 'conciliado' || pago.conciliacion.some(c => c.estado_conciliacion === 'conciliado'))
+                throw new ErrorAplicacion_1.ErrorAplicacion(409, 'El pago no está disponible para conciliación');
+            const evidencia = (0, pdfOperacional_1.respaldoOperacional)(entrada.evidencia, 'Evidencia de conciliación');
+            if (monto.gt(pago.monto_pago))
+                throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El monto conciliado no puede superar el pago');
+            const conciliacion = await tx.conciliacion.create({ data: { id_pago_cliente: idPago, monto_conciliado: monto, diferencia_conciliacion: monto.minus(pago.monto_pago), evidencia, estado_conciliacion: monto.eq(pago.monto_pago) ? 'conciliado' : 'con_diferencia', responsable_conciliacion: responsable } });
+            await tx.pago_cliente.update({ where: { id_pago_cliente: idPago }, data: { estado_conciliacion: conciliacion.estado_conciliacion } });
+            return { mensaje: 'Pago conciliado', conciliacion };
+        });
+    }
+}
+exports.M3Controller = M3Controller;
+//# sourceMappingURL=M3Controller.js.map

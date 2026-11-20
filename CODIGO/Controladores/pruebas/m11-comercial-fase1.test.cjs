@@ -89,22 +89,36 @@ test('M11 Comercial Fase 1 · CUT452-CUT455', async t => {
     assert.doesNotMatch(permisos, /CUT45[2-5]/);
   });
 
-  await t.test('10 claves y reintentos impiden duplicaciones injustificadas', () => {
+  await t.test('10 claves heredadas de OC se conservan y aceptar B2B sin OC evita duplicar ventas', () => {
+    // Los datos históricos M11 siguen protegidos; la nueva aceptación EF18 no crea OC.
     assert.throws(() => prepararTrazabilidadOrdenCompraM11([linea(), linea()], 7, detalles, oferta, 1), /duplicada/);
     const migration = leer('prisma/migrations/073_m11_trazabilidad_comercial_b2b/migration.sql');
-    const controlador = leer('src/controladores/M2Controller.ts');
     assert.match(migration, /UNIQUE \("id_orden_compra_b2b", "numero_linea"\)/);
-    assert.match(controlador, /createMany\(\{data:correspondencias,skipDuplicates:true\}\)/);
     assert.match(leer('prisma/schema.prisma'), /id_cotizacion\s+Int\s+@unique/);
-  });
-
-  await t.test('11 aceptación sin versión acreditada se rechaza antes de crear OC, NV, Proyecto u OT', () => {
     const controlador = leer('src/controladores/M2Controller.ts');
     const bloque = controlador.slice(controlador.indexOf('async aprobarCotizacionB2B'), controlador.indexOf('async consultarTrazabilidadComercialM11'));
-    assert.match(bloque, /Debes identificar la versión documental de la oferta aceptada/);
-    const validacion = bloque.indexOf('exigirCotejoAcreditadoM11');
-    assert.ok(validacion > 0);
-    for (const mutacion of ['orden_compra_b2b.create', 'formalizarProyectoCotizacion', 'nota_venta.create', 'crearOrdenesTrabajoCotizacion']) assert.ok(validacion < bloque.indexOf(mutacion), `${mutacion} debe ocurrir después del bloqueo`);
+    assert.match(bloque, /cot\.estado_cotizacion !== 'emitida' \|\| cot\.nota_venta/);
+    assert.doesNotMatch(bloque, /orden_compra_b2b\.create/);
+  });
+
+  await t.test('11 sin versión acreditada o concordancia económica no se formaliza B2B', () => {
+    const controlador = leer('src/controladores/M2Controller.ts');
+    const inicio = controlador.indexOf('async aprobarCotizacionB2B');
+    const fin = controlador.indexOf('async consultarTrazabilidadComercialM11', inicio);
+    assert.ok(inicio >= 0 && fin > inicio, 'No se encontró el bloque completo de aprobación B2B');
+    const bloque = controlador.slice(inicio, fin);
+    const validarVersion = bloque.indexOf('Debes seleccionar la versión emitida de la oferta aceptada');
+    const verificarVersion = bloque.indexOf('const ofertaAceptada = await tx.cotizacion_version.findFirst');
+    const validarEconomia = bloque.indexOf("if (economia.estado !== 'COINCIDE')");
+    assert.ok(validarVersion >= 0 && verificarVersion > validarVersion && validarEconomia > verificarVersion,
+      'La aprobación debe verificar versión emitida y concordancia económica antes de formalizar');
+    assert.match(bloque, /clienteAceptableB2B\(/);
+    assert.match(bloque, /cot\.fecha_vigencia/);
+    assert.doesNotMatch(bloque, /folioOrdenCompra|respaldoOrdenCompra|lineasOrdenCompra|orden_compra_b2b\.create/);
+    for (const mutacion of ['formalizarProyectoCotizacion(tx,idCotizacion)', 'tx.nota_venta.create', 'this.crearOrdenesTrabajoCotizacion(']) {
+      const posicion = bloque.indexOf(mutacion);
+      assert.ok(posicion > validarEconomia, `${mutacion} debe ocurrir después de acreditar la oferta`);
+    }
   });
 
   await t.test('12 oferta de tres líneas y OC de una sola línea no coincide', () => {

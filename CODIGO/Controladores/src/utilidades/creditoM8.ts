@@ -27,7 +27,7 @@ export async function exposicionCredito(tx: ClientePrisma, idFicha?: number) {
 
 export async function limiteCreditoVigente(tx: ClientePrisma, referencia = hoy()) {
   const limites = await tx.limite_global_credito_m8.findMany({
-    where: { vigencia_desde: { lte: referencia }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: referencia } }] },
+    where: { sustituido_en: null, vigencia_desde: { lte: referencia }, OR: [{ vigencia_hasta: null }, { vigencia_hasta: { gte: referencia } }] },
     orderBy: { vigencia_desde: 'desc' },
     take: 2,
   });

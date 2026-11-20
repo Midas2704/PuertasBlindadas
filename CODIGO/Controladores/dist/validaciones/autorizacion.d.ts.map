@@ -1,0 +1,1 @@
+{"version":3,"file":"autorizacion.d.ts","sourceRoot":"","sources":["../../src/validaciones/autorizacion.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,cAAc,EAAE,gBAAgB,EAAE,MAAM,+BAA+B,CAAC;AACtF,MAAM,MAAM,oBAAoB,GAAG,cAAc,CAAC;AAGlD,MAAM,WAAW,YAAY;IAAG,SAAS,CAAC,SAAS,EAAE,MAAM,EAAE,QAAQ,EAAE,oBAAoB,GAAG,OAAO,CAAC,gBAAgB,GAAG,IAAI,CAAC,CAAC;CAAE"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"tipos.js","sourceRoot":"","sources":["../../src/m9/tipos.ts"],"names":[],"mappings":";;;AA+Fa,QAAA,gBAAgB,GAAoB;IAC/C,mBAAmB,EAAE,CAAC,KAAK,CAAC;IAC5B,mBAAmB,EAAE,CAAC,eAAe,EAAE,WAAW,EAAE,eAAe,EAAE,SAAS,CAAC;IAC/E,YAAY,EAAE,GAAG;IACjB,WAAW,EAAE,IAAI;IACjB,YAAY,EAAE,MAAM,CAAC,OAAO,CAAC,GAAG,CAAC,iBAAiB,IAAI,KAAK,CAAC;CAC7D,CAAC"}

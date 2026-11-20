@@ -3,6 +3,7 @@ import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import type { M9Controller } from '../controladores/M9Controller';
 import type { ActorAutenticado } from '../controladores/M4Controller';
 import type { EventoEntradaM9, JsonM9, ResultadoM9 } from './tipos';
+import { medirEtapa } from '../demostracion/ServicioDemostracion';
 
 export const VERSION_CONTRATO_M9 = '1.0';
 export const VERSIONES_COMPATIBLES_M9 = [VERSION_CONTRATO_M9] as const;
@@ -31,6 +32,7 @@ export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> 
   liberarReservaInventario: { modulo:'INVENTARIO', operacion:'RESERVA_INVENTARIO_LIBERADA', entidad:'RESERVA_INVENTARIO', critico:true, motivoRequerido:true },
   ajustarExistenciaInventario: { modulo:'INVENTARIO', operacion:'EXISTENCIA_INVENTARIO_AJUSTADA', entidad:'MOVIMIENTO_INVENTARIO', critico:true, motivoRequerido:true },
   crearCliente: { modulo:'M1', operacion:'CLIENTE_CREADO', entidad:'CLIENTE', critico:false },
+  importarClientes: { modulo:'M1', operacion:'LOTE_CLIENTES_IMPORTADO', entidad:'LOTE_IMPORTACION', critico:false },
   actualizarCliente: { modulo:'M1', operacion:'CLIENTE_ACTUALIZADO', entidad:'CLIENTE', critico:false },
   desactivarCliente: { modulo:'M1', operacion:'CLIENTE_DESACTIVADO', entidad:'CLIENTE', critico:false },
   guardarCotizacion: { modulo:'M2', operacion:'COTIZACION_BORRADOR_CREADA', entidad:'COTIZACION', critico:false },
@@ -59,6 +61,7 @@ export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> 
   resolverHallazgoDocumentalM11: { modulo:'M2', operacion:'DECISION_HALLAZGO_DOCUMENTAL_REGISTRADA', entidad:'HALLAZGO_DOCUMENTAL', critico:true, motivoRequerido:true },
   consolidarB2C: { modulo:'M2', operacion:'COTIZACION_B2C_APROBADA_OT_GENERADAS', entidad:'COTIZACION', critico:true },
   crearTareaFabricacion: { modulo:'M2', operacion:'TAREA_FABRICACION_CREADA', entidad:'TAREA_FABRICACION', critico:false },
+  importarTareasFabricacion: { modulo:'M2', operacion:'LOTE_TAREAS_FABRICACION_IMPORTADO', entidad:'LOTE_IMPORTACION', critico:false },
   actualizarTareaFabricacion: { modulo:'M2', operacion:'TAREA_FABRICACION_ACTUALIZADA', entidad:'TAREA_FABRICACION', critico:false },
   desactivarTareaFabricacion: { modulo:'M2', operacion:'TAREA_FABRICACION_DESACTIVADA', entidad:'TAREA_FABRICACION', critico:false },
   reactivarTareaFabricacion: { modulo:'M2', operacion:'TAREA_FABRICACION_REACTIVADA', entidad:'TAREA_FABRICACION', critico:false },
@@ -105,9 +108,13 @@ export const CATALOGO_PRODUCTORES_M9: Record<string, EspecificacionAuditableM9> 
   sincronizarPermisosMidas: { modulo:'M4', operacion:'SINCRONIZAR_PERMISOS_MIDAS', entidad:'USUARIO', critico:true },
   cerrarSesionAdministrativa: { modulo:'M4', operacion:'SESION_CERRADA', entidad:'SESION', critico:false },
   crearProveedor: { modulo:'M5', operacion:'PROVEEDOR_CREADO', entidad:'PROVEEDOR', critico:false },
+  importarProveedores: { modulo:'M5', operacion:'LOTE_PROVEEDORES_IMPORTADO', entidad:'LOTE_IMPORTACION', critico:false },
+  importarCategoriasEgreso: { modulo:'M5', operacion:'LOTE_CATEGORIAS_EGRESO_IMPORTADO', entidad:'LOTE_IMPORTACION', critico:false },
   confirmarOperacionPago: { modulo:'M5', operacion:'PAGO_PROVEEDOR_CONFIRMADO', entidad:'PAGO_PROVEEDOR', critico:false },
   aprobarGastoCajaChica: { modulo:'M5', operacion:'GASTO_CAJA_APROBADO', entidad:'GASTO_CAJA_CHICA', critico:false },
   confirmarPagoFinal: { modulo:'M6', operacion:'PAGO_REMUNERACION_CONFIRMADO', entidad:'PAGO_REMUNERACION', critico:false },
+  importarEmpleados: { modulo:'M6', operacion:'LOTE_EMPLEADOS_IMPORTADO', entidad:'LOTE_IMPORTACION', critico:false },
+  importarAreasTrabajo: { modulo:'M6', operacion:'LOTE_AREAS_TRABAJO_IMPORTADO', entidad:'LOTE_IMPORTACION', critico:false },
   actualizarPagoAnticipo: { modulo:'M6', operacion:'PAGO_PREPARADO_MODIFICADO', entidad:'PAGO_REMUNERACION', critico:false },
   actualizarPagoFinal: { modulo:'M6', operacion:'PAGO_PREPARADO_MODIFICADO', entidad:'PAGO_REMUNERACION', critico:false },
   actualizarPagoHonorarios: { modulo:'M6', operacion:'PAGO_PREPARADO_MODIFICADO', entidad:'PAGO_REMUNERACION', critico:false },
@@ -211,12 +218,14 @@ export class ProductorAuditoriaM9 {
   private async enviar(entrada: EventoEntradaM9): Promise<AcuseM9> {
     if (!PRODUCTORES_AUTORIZADOS_M9.includes(entrada.productor as ProductorM9) || entrada.productor === 'M9') return { estado:'NACK', identidadLogica:entrada.identidadLogica, codigo:'M9_PRODUCTOR_NO_AUTORIZADO' };
     try {
+      return await medirEtapa('AUDITORIA_M9', 'Auditoría M9: integridad y persistencia', async () => {
       const recepcion = await Promise.race([
         this.receptor.recibir(entrada),
         new Promise<never>((_, rechazar) => setTimeout(() => rechazar(new ErrorAplicacion(504, 'Timeout M9', 'M9_TIMEOUT')), this.timeoutMs)),
       ]);
       if (recepcion.estado === 'PERSISTIDO' && recepcion.evento) return { estado:'ACK', identidadLogica:entrada.identidadLogica, eventoId:recepcion.evento.id };
       return { estado:'PENDIENTE', identidadLogica:entrada.identidadLogica };
+      }, {detalle:`${entrada.modulo} · ${entrada.operacion}`});
     } catch (error) {
       return { estado:'NACK', identidadLogica:entrada.identidadLogica, codigo:error instanceof ErrorAplicacion ? error.codigo : 'M9_ERROR' };
     }

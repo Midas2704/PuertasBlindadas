@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { PostgresDocumentosComercialesStorage } from '../../documental/adaptadores/PostgresDocumentosComercialesStorage';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { prisma } from '../../db';
@@ -97,13 +98,15 @@ export class ServicioDocumentosComerciales {
     this.ahora = dependencias.ahora ?? (() => new Date());
   }
 
-  private storage() { return this.dependencias.storage ?? crearStorageAdapterDesdeEntorno(this.entorno); }
+  private modoPostgres() { return this.entorno.DOCUMENTAL_POSTGRES_PDF_MODE?.trim().toLowerCase() === 'true'; }
+  private storage() { return this.dependencias.storage ?? (this.modoPostgres() ? new PostgresDocumentosComercialesStorage(this.cliente) : crearStorageAdapterDesdeEntorno(this.entorno)); }
   private antivirus() { return this.dependencias.antivirus ?? crearAntivirusAdapterDesdeEntorno(this.entorno); }
-  private modoPersonal() { return modoServidorPersonalHabilitado(this.entorno); }
-  private contenedorStorage() { return this.modoPersonal() ? cargarConfiguracionStorageLocalPrivado(this.entorno).contenedor : cargarConfiguracionStorage(this.entorno).bucket; }
+  private modoPersonal() { return this.modoPostgres() || modoServidorPersonalHabilitado(this.entorno); }
+  private contenedorStorage() { return this.modoPostgres() ? 'documentos-postgres' : (this.modoPersonal() ? cargarConfiguracionStorageLocalPrivado(this.entorno).contenedor : cargarConfiguracionStorage(this.entorno).bucket); }
   async estadoInfraestructura() {
     let almacenamientoPrivado = 'NO_CONFIGURADO';
-    if (this.modoPersonal()) {
+    if (this.modoPostgres()) { almacenamientoPrivado = 'POSTGRES'; }
+    else if (this.modoPersonal()) {
       try { cargarConfiguracionStorageLocalPrivado(this.entorno); almacenamientoPrivado = 'LOCAL_PRIVADO'; }
       catch { almacenamientoPrivado = 'CONFIGURACION_INVALIDA'; }
     } else if (this.entorno.STORAGE_PROVIDER || this.entorno.STORAGE_BUCKET) {
@@ -111,7 +114,8 @@ export class ServicioDocumentosComerciales {
       catch { almacenamientoPrivado = 'CONFIGURACION_INVALIDA'; }
     }
     let antivirus = 'NO_CONFIGURADO';
-    if (this.modoPersonal()) {
+    if (this.modoPostgres()) { antivirus = 'NO_REQUERIDO_FASE_ACADEMICA'; }
+    else if (this.modoPersonal()) {
       antivirus = 'OMITIDO_MODO_PERSONAL';
     } else try {
       const adaptador = this.antivirus();
@@ -120,8 +124,8 @@ export class ServicioDocumentosComerciales {
         : { disponible: false, codigo: 'DIAGNOSTICO_NO_SOPORTADO' };
       antivirus = disponibilidad.disponible ? 'CLAMAV_VALIDADO' : disponibilidad.codigo ?? 'NO_DISPONIBLE';
     } catch { antivirus = 'CONFIGURACION_INVALIDA'; }
-    const storageValidado = ['CONFIGURADO', 'LOCAL_PRIVADO'].includes(almacenamientoPrivado);
-    const antivirusValidado = ['CLAMAV_VALIDADO', 'OMITIDO_MODO_PERSONAL'].includes(antivirus);
+    const storageValidado = ['CONFIGURADO', 'LOCAL_PRIVADO', 'POSTGRES'].includes(almacenamientoPrivado);
+    const antivirusValidado = ['CLAMAV_VALIDADO', 'OMITIDO_MODO_PERSONAL', 'NO_REQUERIDO_FASE_ACADEMICA'].includes(antivirus);
     const plantillas = await this.cliente.plantilla_documental_comercial.findMany({
       where: { tipo_documento: 'COTIZACION', segmento: { in: ['B2B', 'B2C'] }, estado: 'ACTIVA' },
       select: { segmento: true, versiones: { where: { estado: 'PUBLICADA' }, select: { id_plantilla_documental_version: true }, take: 1 } },
@@ -135,9 +139,11 @@ export class ServicioDocumentosComerciales {
       almacenamientoPrivado,
       antivirus,
       plantillasPublicadas,
-      modo: this.modoPersonal() ? 'SERVIDOR_PERSONAL' : 'PRODUCCION_ENDURECIDA',
+      modo: this.modoPostgres() ? 'ACADEMICO_POSTGRES' : (this.modoPersonal() ? 'SERVIDOR_PERSONAL' : 'PRODUCCION_ENDURECIDA'),
       emisionDefinitiva: storageValidado && antivirusValidado ? 'HABILITADA_CON_CONFIRMACION_BACKEND' : 'BLOQUEADA',
-      motivo: this.modoPersonal() && storageValidado
+      motivo: this.modoPostgres() && storageValidado
+        ? 'Modo académico: PDFs persistidos en PostgreSQL y protegidos por SHA-256; antivirus y storage externo pospuestos.'
+        : this.modoPersonal() && storageValidado
         ? 'Modo servidor personal: almacenamiento local privado y SHA-256 activos; antivirus externo temporalmente omitido.'
         : storageValidado && antivirusValidado
           ? 'Cada publicación valida antivirus, almacenamiento, recuperación y SHA-256 antes de confirmar.'
@@ -297,7 +303,7 @@ export class ServicioDocumentosComerciales {
   private async almacenarPdf(pdf: Buffer, clave: string, idempotencia: string) {
     if (pdf.length > 20 * 1024 * 1024 || pdf.subarray(0, 5).toString('ascii') !== '%PDF-') throw new ErrorAplicacion(400, 'El archivo generado no es un PDF válido');
     const esperado = createHash('sha256').update(pdf).digest('hex');
-    let validacionAntivirus = 'OMITIDO_MODO_PERSONAL';
+    let validacionAntivirus = this.modoPostgres() ? 'NO_REQUERIDO_FASE_ACADEMICA' : 'OMITIDO_MODO_PERSONAL';
     if (!this.modoPersonal()) {
       const escaneo = await escanearConIntegridad(this.antivirus(), Readable.from(pdf));
       exigirResultadoLimpio(escaneo.resultado);

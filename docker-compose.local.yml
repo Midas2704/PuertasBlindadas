@@ -1,0 +1,81 @@
+name: puertasblindadas-local
+
+services:
+  postgres:
+    image: postgres:18
+    container_name: pblindadas-local-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${LOCAL_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${LOCAL_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${LOCAL_POSTGRES_DB}
+    volumes:
+      - pblindadas_local_postgres_data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${LOCAL_POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LOCAL_POSTGRES_USER} -d ${LOCAL_POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - pblindadas_local
+      - pblindadas_access
+
+  backend:
+    image: pblindadas-recovery-backend:f54c8c78
+    container_name: pblindadas-local-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${LOCAL_POSTGRES_USER}:${LOCAL_POSTGRES_PASSWORD}@postgres:5432/${LOCAL_POSTGRES_DB}?schema=public
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3000
+      M4_CORREO: desarrollo
+      M4_URL_VISTA: http://127.0.0.1:${LOCAL_FRONTEND_PORT:-8081}
+      M4_ORIGENES: http://127.0.0.1:${LOCAL_FRONTEND_PORT:-8081},http://localhost:${LOCAL_FRONTEND_PORT:-8081}
+      M4_LONGITUD_MINIMA: 12
+      M4_HISTORIAL: 5
+      M4_VIGENCIA_DIAS: 90
+      M4_TEMPORAL_MINUTOS: 60
+      M4_SESION_MINUTOS: 60
+      M4_INACTIVIDAD_MINUTOS: 10
+      M4_RECUPERACION_MINUTOS: 20
+      M4_INTENTOS: 3
+      M4_BLOQUEO_MINUTOS: 10
+      M4_BLOQUEOS: 3
+      DOCUMENTAL_POSTGRES_PDF_MODE: "true"
+      DOCUMENTAL_PERSONAL_MODE: "false"
+      STORAGE_PROVIDER: ""
+      STORAGE_BUCKET: ""
+      BANCO_CENTRAL_API_URL: ""
+      MODO_DEMOSTRACION: ${MODO_DEMOSTRACION:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LOCAL_BACKEND_PORT:-3001}:3000"
+    networks:
+      - pblindadas_local
+      - pblindadas_access
+
+  frontend:
+    image: pblindadas-recovery-frontend:0ecacbd1
+    container_name: pblindadas-local-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "127.0.0.1:${LOCAL_FRONTEND_PORT:-8081}:80"
+    networks:
+      - pblindadas_access
+
+volumes:
+  pblindadas_local_postgres_data:
+
+networks:
+  pblindadas_local:
+    driver: bridge
+    internal: true
+  pblindadas_access:
+    driver: bridge

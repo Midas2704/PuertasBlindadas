@@ -7,5 +7,12 @@ build/
 .revision/
 *.log
 *.dump
+!database/demo/puertasblindadas-demo.dump
 *.zip
+*.tar.gz
+*.enc
+*.key
+*.pem
 *.tsbuildinfo
+recovery/
+backups/

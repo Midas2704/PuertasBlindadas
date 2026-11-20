@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus, Trash2, X } from 'lucide-react';
 import { solicitarFinanzas } from '../api/finanzas';
 import { confirmarAccion } from './DialogosSistema';
-import { leerPdfOperacional } from '../utilidades/pdfOperacional';
 
 type Empleado = { id: number; nombre: string; rut: string };
 type Tarea = {
@@ -42,15 +41,6 @@ type Oferta = {
   motivo: string;
   estadoDocumental: string;
 };
-type LineaOc = {
-  id: string;
-  numeroLinea: number;
-  idDetalleCotizacion: string;
-  referenciaComercial: string;
-  concepto: string;
-  cantidad: string;
-  precioUnitario: string;
-};
 type ResultadoAprobacion = { mensaje?: string; [campo: string]: unknown };
 type Respuesta = {
   cotizacion: {
@@ -80,12 +70,9 @@ export default function ModalPlanificacionOrdenes({ cotizacionId, modo, datosCom
   const [error, setError] = useState('');
   const [inicial, setInicial] = useState('');
   const [comercial, setComercial] = useState({
-    folioOrdenCompra: '',
-    respaldoOrdenCompra: '',
     plazo_pago: '30',
     idVersionOfertaAceptada: '',
   });
-  const [lineasOc, setLineasOc] = useState<LineaOc[]>([]);
   useEffect(() => {
     let activo = true;
     solicitarFinanzas(`/billing/quotes/${cotizacionId}/work-order-planning`)
@@ -105,7 +92,7 @@ export default function ModalPlanificacionOrdenes({ cotizacionId, modo, datosCom
       activo = false;
     };
   }, [cotizacionId]);
-  const sucio = useMemo(() => Boolean(datos) && (JSON.stringify(unidades) !== inicial || Boolean(comercial.folioOrdenCompra || comercial.respaldoOrdenCompra || comercial.idVersionOfertaAceptada || lineasOc.length)), [datos, unidades, inicial, comercial, lineasOc]);
+  const sucio = useMemo(() => Boolean(datos) && (JSON.stringify(unidades) !== inicial || Boolean(comercial.idVersionOfertaAceptada)), [datos, unidades, inicial, comercial]);
   const salir = async () => {
     if (sucio && !(await confirmarAccion('Hay cambios de planificación sin confirmar. ¿Deseas descartarlos?'))) return;
     cerrar();
@@ -148,43 +135,15 @@ export default function ModalPlanificacionOrdenes({ cotizacionId, modo, datosCom
     actualizarEtapa(iu, ie, {
       tareas: unidades[iu].etapas[ie].tareas.map((t, i) => (i === it ? { ...t, ...cambio } : t)),
     });
-  const agregarLineaOc = () =>
-    setLineasOc((actual) => [
-      ...actual,
-      {
-        id: id(),
-        numeroLinea: actual.length + 1,
-        idDetalleCotizacion: '',
-        referenciaComercial: '',
-        concepto: '',
-        cantidad: '',
-        precioUnitario: '',
-      },
-    ]);
-  const actualizarLineaOc = (indice: number, cambio: Partial<LineaOc>) => setLineasOc((actual) => actual.map((linea, i) => (i === indice ? { ...linea, ...cambio } : linea)));
-  const quitarLineaOc = (indice: number) => setLineasOc((actual) => actual.filter((_, i) => i !== indice).map((linea, i) => ({ ...linea, numeroLinea: i + 1 })));
   const confirmar = async () => {
-    if (modo === 'B2B' && (!comercial.folioOrdenCompra.trim() || !comercial.respaldoOrdenCompra.trim() || !comercial.idVersionOfertaAceptada)) {
-      setError('Completa folio, respaldo y selecciona explícitamente la oferta aceptada');
-      return;
-    }
-    if (modo === 'B2B' && !lineasOc.length) {
-      setError('Registra al menos una línea individual de la Orden de Compra');
+    if (modo === 'B2B' && !comercial.idVersionOfertaAceptada) {
+      setError('Debes seleccionar la versión emitida de la oferta aceptada');
       return;
     }
     setOcupado(true);
     setError('');
     try {
       const ruta = modo === 'B2B' ? `/billing/quotes/${cotizacionId}/accept-b2b` : `/cotizaciones/${cotizacionId}/consolidar-b2c`;
-      const lineasOrdenCompra = lineasOc.map((linea) => ({
-        numeroLinea: linea.numeroLinea,
-        idDetalleCotizacion: linea.idDetalleCotizacion ? Number(linea.idDetalleCotizacion) : null,
-        referenciaComercial: linea.referenciaComercial || null,
-        concepto: linea.concepto || null,
-        cantidad: linea.cantidad || null,
-        precioUnitario: linea.precioUnitario || null,
-        idMoneda: datos?.cotizacion.idMoneda ?? null,
-      }));
       const cuerpo = {
         ...datosComerciales,
         ...(modo === 'B2B'
@@ -192,7 +151,6 @@ export default function ModalPlanificacionOrdenes({ cotizacionId, modo, datosCom
               ...comercial,
               idVersionOfertaAceptada: Number(comercial.idVersionOfertaAceptada),
               plazo_pago: Number(comercial.plazo_pago),
-              lineasOrdenCompra,
             }
           : {}),
         planificaciones: unidades,
@@ -239,51 +197,12 @@ export default function ModalPlanificacionOrdenes({ cotizacionId, modo, datosCom
               <div className="space-y-5">
                 {modo === 'B2B' && (
                   <section className="space-y-4 rounded-xl bg-white p-4 shadow-sm">
-                    <div className="grid gap-3 md:grid-cols-4">
-                      <label className="text-xs font-bold uppercase text-[#676767]">
-                        Folio OC
-                        <input
-                          className={`mt-1 ${input}`}
-                          value={comercial.folioOrdenCompra}
-                          onChange={(e) =>
-                            setComercial({
-                              ...comercial,
-                              folioOrdenCompra: e.target.value,
-                            })
-                          }
-                        />
-                      </label>
-                      <label className="text-xs font-bold uppercase text-[#676767]">
-                        Respaldo OC
-                        <input
-                          type="file"
-                          accept="application/pdf,.pdf"
-                          className={`mt-1 ${input}`}
-                          onChange={async (e) => {
-                            const archivo = e.target.files?.[0];
-                            if (!archivo) return;
-                            try {
-                              setComercial({ ...comercial, respaldoOrdenCompra: await leerPdfOperacional(archivo) });
-                            } catch (causa) {
-                              setError((causa as Error).message);
-                              e.target.value = '';
-                            }
-                          }}
-                        />
-                        {comercial.respaldoOrdenCompra && <span className="mt-1 block normal-case text-green-700">PDF cargado</span>}
-                      </label>
+                    <p className="text-sm text-[#676767]">Aceptación B2B con oferta emitida. No se requiere Orden de Compra ni respaldo OC.</p>
+                    <div className="grid gap-3 md:grid-cols-2">
                       <label className="text-xs font-bold uppercase text-[#676767]">
                         Oferta aceptada
-                        <select
-                          className={`mt-1 ${input}`}
-                          value={comercial.idVersionOfertaAceptada}
-                          onChange={(e) =>
-                            setComercial({
-                              ...comercial,
-                              idVersionOfertaAceptada: e.target.value,
-                            })
-                          }
-                        >
+                        <select className={`mt-1 ${input}`} value={comercial.idVersionOfertaAceptada}
+                          onChange={(e) => setComercial({...comercial, idVersionOfertaAceptada:e.target.value})}>
                           <option value="">Seleccionar versión acreditada</option>
                           {datos.ofertas.map((oferta) => (
                             <option key={oferta.id} value={oferta.id}>
@@ -294,125 +213,13 @@ export default function ModalPlanificacionOrdenes({ cotizacionId, modo, datosCom
                       </label>
                       <label className="text-xs font-bold uppercase text-[#676767]">
                         Plazo de pago
-                        <select
-                          className={`mt-1 ${input}`}
-                          value={comercial.plazo_pago}
-                          onChange={(e) =>
-                            setComercial({
-                              ...comercial,
-                              plazo_pago: e.target.value,
-                            })
-                          }
-                        >
+                        <select className={`mt-1 ${input}`} value={comercial.plazo_pago}
+                          onChange={(e) => setComercial({...comercial, plazo_pago:e.target.value})}>
                           <option value="30">30 días</option>
                           <option value="60">60 días</option>
                           <option value="90">90 días</option>
                         </select>
                       </label>
-                    </div>
-                    <div className="border-t pt-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div>
-                          <h3 className="font-black">Líneas individuales de la OC</h3>
-                          <p className="text-xs text-[#676767]">La asociación técnica sólo se acreditará al elegir un detalle exacto; no se buscan coincidencias por texto o monto.</p>
-                        </div>
-                        <button type="button" className={`${boton} border bg-white`} onClick={agregarLineaOc}>
-                          <Plus className="h-4 w-4" />
-                          Agregar línea
-                        </button>
-                      </div>
-                      {!lineasOc.length ? (
-                        <p className="rounded-lg bg-gray-50 p-3 text-sm text-[#676767]">Aún no hay líneas registradas.</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {lineasOc.map((linea, indice) => (
-                            <div key={linea.id} className="grid gap-2 rounded-lg border bg-gray-50 p-3 md:grid-cols-[70px_1.2fr_1fr_1.4fr_120px_140px_auto]">
-                              <input
-                                aria-label="Número de línea OC"
-                                className={input}
-                                type="number"
-                                min="1"
-                                value={linea.numeroLinea}
-                                onChange={(e) =>
-                                  actualizarLineaOc(indice, {
-                                    numeroLinea: Number(e.target.value),
-                                  })
-                                }
-                              />
-                              <select
-                                aria-label="Detalle comercial acreditado"
-                                className={input}
-                                value={linea.idDetalleCotizacion}
-                                onChange={(e) =>
-                                  actualizarLineaOc(indice, {
-                                    idDetalleCotizacion: e.target.value,
-                                  })
-                                }
-                              >
-                                <option value="">Identidad no acreditada</option>
-                                {Array.from(new Map(unidades.map((unidad) => [unidad.idDetalleCotizacion, unidad])).values()).map((unidad) => (
-                                  <option key={unidad.idDetalleCotizacion} value={unidad.idDetalleCotizacion}>
-                                    {unidad.producto} · detalle {unidad.idDetalleCotizacion}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                aria-label="Referencia comercial OC"
-                                className={input}
-                                placeholder="Referencia OC"
-                                value={linea.referenciaComercial}
-                                onChange={(e) =>
-                                  actualizarLineaOc(indice, {
-                                    referenciaComercial: e.target.value,
-                                  })
-                                }
-                              />
-                              <input
-                                aria-label="Concepto OC"
-                                className={input}
-                                placeholder="Concepto / especificación"
-                                value={linea.concepto}
-                                onChange={(e) =>
-                                  actualizarLineaOc(indice, {
-                                    concepto: e.target.value,
-                                  })
-                                }
-                              />
-                              <input
-                                aria-label="Cantidad OC"
-                                className={input}
-                                type="number"
-                                min="0.01"
-                                step="0.01"
-                                placeholder="Cantidad"
-                                value={linea.cantidad}
-                                onChange={(e) =>
-                                  actualizarLineaOc(indice, {
-                                    cantidad: e.target.value,
-                                  })
-                                }
-                              />
-                              <input
-                                aria-label="Precio unitario OC"
-                                className={input}
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                placeholder={`Precio ${datos.cotizacion.moneda}`}
-                                value={linea.precioUnitario}
-                                onChange={(e) =>
-                                  actualizarLineaOc(indice, {
-                                    precioUnitario: e.target.value,
-                                  })
-                                }
-                              />
-                              <button type="button" title="Retirar línea" className="p-2 text-red-700" onClick={() => quitarLineaOc(indice)}>
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </section>
                 )}

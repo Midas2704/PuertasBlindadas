@@ -2,3 +2,10 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .demo-btn { @apply inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-xs font-black transition hover:border-[#FE8F01] hover:text-[#FE8F01]; }
+  .demo-btn svg, .demo-btn-light svg { @apply h-4 w-4; }
+  .demo-btn-light { @apply inline-flex min-h-10 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-black transition hover:border-[#FE8F01]; }
+  .demo-select { @apply min-h-10 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold focus:border-[#FE8F01] focus:outline-none focus:ring-2 focus:ring-orange-200; }
+}

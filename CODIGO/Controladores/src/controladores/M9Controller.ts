@@ -5,6 +5,7 @@ import { archivoAuditoriaM9Csv } from '../m9/exportacionAuditoriaCsv';
 import { ObservabilidadM9 } from '../m9/observabilidad';
 import { DiagnosticosM9, DiagnosticosMemoriaM9, FuentePendientesM9, FuenteRetryM9, PendientesMemoriaM9, RelojM9, RelojSistemaM9, RetryMemoriaM9, SenalesM9, SenalesMemoriaM9 } from '../m9/puertos';
 import { RepositorioAuditoriaM9, RepositorioAuditoriaM9Prisma } from '../m9/RepositorioAuditoriaM9';
+import { limitesFiltroChile } from '../m9/fechasFiltroChile';
 import { RepositorioRetryM9Prisma } from '../m9/RepositorioRetryM9';
 import { MotorPoliticasM9, RepositorioPoliticasPrismaM9 } from '../m9/politicas';
 import { deltaMinimo, enmascarar, fechaConZona, hashM9, normalizarResultado, textoSeguro, validarSinSecretos } from '../m9/seguridad';
@@ -180,7 +181,7 @@ export class M9Controller {
   private normalizarFiltros(filtros: FiltrosM9) {
     const pagina = filtros.pagina ?? 1, tamano = filtros.tamano ?? 50;
     if (!Number.isSafeInteger(pagina) || pagina < 1 || !Number.isSafeInteger(tamano) || tamano < 1 || tamano > this.configuracion.maximoPagina) throw new ErrorAplicacion(400, 'Paginación inválida', 'M9_FILTRO_INVALIDO');
-    for (const fecha of [filtros.desde, filtros.hasta]) if (fecha && Number.isNaN(new Date(fecha).getTime())) throw new ErrorAplicacion(400, 'Rango de fecha inválido', 'M9_FILTRO_INVALIDO');
+    try { limitesFiltroChile(filtros); } catch { throw new ErrorAplicacion(400, 'Rango de fecha inválido', 'M9_FILTRO_INVALIDO'); }
     return { ...filtros, pagina, tamano };
   }
 

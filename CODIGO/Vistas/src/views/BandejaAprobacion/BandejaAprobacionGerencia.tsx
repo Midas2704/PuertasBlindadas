@@ -5,8 +5,11 @@ import { Check, X, AlertTriangle, Edit2 } from 'lucide-react';
 import ModalDetalleDocumento from '../../components/ModalDetalleDocumento';
 import ModalPlanificacionOrdenes from '../../components/ModalPlanificacionOrdenes';
 import DocumentosHistoricosCotizacion from '../../components/documental/DocumentosHistoricosCotizacion';
+import { usarSesion } from '../../seguridad/Sesion';
 
 const BandejaAprobacionGerencia: React.FC = () => {
+  const { sesion } = usarSesion();
+  const [recargaCadenaM11, setRecargaCadenaM11] = useState(0);
   const [cotizaciones, setCotizaciones] = useState<any[]>([]);
   const [notasVenta, setNotasVenta] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -433,8 +436,30 @@ const BandejaAprobacionGerencia: React.FC = () => {
       )}
 
       {/* Modal Desglose (Universal) */}
-      <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)} />
-      {cotizacionPlanificacion&&<ModalPlanificacionOrdenes cotizacionId={cotizacionPlanificacion.id} modo={cotizacionPlanificacion.modo} cerrar={()=>setCotizacionPlanificacion(null)} completado={()=>{setCotizacionPlanificacion(null);setMensaje({text:'Cotización aprobada y órdenes de trabajo generadas',type:'success'});fetchPendientes();fetchHistory();}}/>}
+      <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)}
+        recargaCadenaM11={recargaCadenaM11}
+        onRegistrarOcB2B={sesion?.permisos.includes('CU24') ? (id) => {
+          // La navegación no evita ni reemplaza las verificaciones reales del backend.
+          const cot = activeModal?.tipo === 'cotizacion' ? activeModal.data : null;
+          const categoria = String(cot?.ficha_cliente?.cliente_financiero?.tipo_cliente_financiero?.nombre_tipo_cliente_financiero || '').trim().toUpperCase();
+          if (!cot || Number(cot.id_cotizacion) !== id || String(cot.segmento_comercial || '').trim().toUpperCase() !== 'B2B'
+              || categoria !== 'B2B' || cot.estado_cotizacion !== 'emitida') {
+            setMensaje({ text: 'La cotización ya no cumple las condiciones para aceptación B2B.', type: 'error' });
+            return;
+          }
+          setCotizacionPlanificacion({ id, modo: 'B2B' });
+        } : undefined}
+      />
+      {cotizacionPlanificacion&&<ModalPlanificacionOrdenes cotizacionId={cotizacionPlanificacion.id} modo={cotizacionPlanificacion.modo} cerrar={()=>setCotizacionPlanificacion(null)} completado={()=>{
+        const idAceptado = cotizacionPlanificacion.id;
+        setCotizacionPlanificacion(null);
+        // El detalle sigue abierto y M11 vuelve a consultar la OC ya persistida.
+        setActiveModal(actual => actual?.tipo === 'cotizacion' && Number(actual.data.id_cotizacion) === idAceptado
+          ? { ...actual, data: { ...actual.data, estado_cotizacion: 'aprobada' } } : actual);
+        setRecargaCadenaM11(n => n + 1);
+        setMensaje({text:'Cotización B2B aprobada: OC, Nota de Venta y órdenes de trabajo registradas',type:'success'});
+        fetchPendientes(); fetchHistory();
+      }}/>}
 
       {/* Modal Editar Cotizacion */}
       {editingQuote && (

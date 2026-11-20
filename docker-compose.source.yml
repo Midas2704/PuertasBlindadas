@@ -1,0 +1,14 @@
+services:
+  backend:
+    image: pblindadas-source-backend:local
+    build:
+      context: ./CODIGO/Controladores
+      dockerfile: Dockerfile
+
+  frontend:
+    image: pblindadas-source-frontend:local
+    build:
+      context: ./CODIGO/Vistas
+      dockerfile: Dockerfile
+      args:
+        VITE_MODO_DEMOSTRACION: ${VITE_MODO_DEMOSTRACION:-false}

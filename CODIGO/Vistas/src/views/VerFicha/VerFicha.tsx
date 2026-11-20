@@ -504,7 +504,7 @@ const VerFicha: React.FC = () => {
         </div>
       </ModalFormulario>}
       {/* Detalle compartido por cotizaciones y notas */}
-      <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)} onViewPago={verDetallePago}>
+      <ModalDetalleDocumento activeModal={activeModal} onClose={() => setActiveModal(null)} onViewPago={verDetallePago} categoriaClienteContexto={resumen.nombre_tipo_cliente_financiero}>
         {/* Administración del Documento (Solo NV no anulada) */}
         {activeModal && activeModal.tipo === 'nota_venta' && activeModal.data.estado_nota_venta !== 'anulada' && (
           <div className="mt-6 pt-6 border-t border-gray-200">

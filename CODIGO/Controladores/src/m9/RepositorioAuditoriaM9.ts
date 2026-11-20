@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { EventoNormalizadoM9, EventoPersistidoM9, FiltrosM9 } from './tipos';
+import { limitesFiltroChile } from './fechasFiltroChile';
 
 export interface RepositorioAuditoriaM9 {
   crear(evento: EventoNormalizadoM9): Promise<EventoPersistidoM9>;
@@ -87,6 +88,7 @@ export class RepositorioAuditoriaM9Prisma implements RepositorioAuditoriaM9 {
   }
   async listar(filtros: FiltrosM9, modulos?: string[], productores?: string[]) {
     const pagina = Math.max(1, filtros.pagina ?? 1), tamano = Math.max(1, filtros.tamano ?? 50);
+    const rangoChile = limitesFiltroChile(filtros);
     const where: Prisma.evento_auditoria_m9WhereInput = {
       ...(modulos ? { modulo_origen: { in: modulos } } : {}),
       ...(productores ? { productor: { in: productores } } : {}),
@@ -98,7 +100,7 @@ export class RepositorioAuditoriaM9Prisma implements RepositorioAuditoriaM9 {
       ...(filtros.entidadTipo ? { entidad_tipo: filtros.entidadTipo } : {}),
       ...(filtros.entidadReferencia ? { entidad_referencia: filtros.entidadReferencia } : {}),
       ...(filtros.identidadLogica ? { identidad_logica: filtros.identidadLogica } : {}),
-      ...(filtros.desde || filtros.hasta ? { fecha_ocurrencia: { ...(filtros.desde ? { gte: new Date(filtros.desde) } : {}), ...(filtros.hasta ? { lte: new Date(filtros.hasta) } : {}) } } : {}),
+      ...(filtros.desde || filtros.hasta ? { fecha_ocurrencia: rangoChile } : {}),
       ...(filtros.buscar ? { OR: [{ identidad_logica: { contains: filtros.buscar, mode: 'insensitive' } }, { entidad_referencia: { contains: filtros.buscar, mode: 'insensitive' } }] } : {}),
     };
     const [total, filas] = await Promise.all([
@@ -143,7 +145,8 @@ export class RepositorioAuditoriaM9Memoria implements RepositorioAuditoriaM9 {
   async porId(id: number) { return this.eventos.find(evento => evento.id === id) ?? null; }
   async ultimaSecuencia(productor: string, entidadTipo: string | null, entidadReferencia: string | null) { return this.eventos.filter(e => e.productor === productor && e.entidadTipo === entidadTipo && e.entidadReferencia === entidadReferencia && e.secuencia !== null).reduce<number | null>((maximo, e) => maximo === null || e.secuencia! > maximo ? e.secuencia! : maximo, null); }
   async listar(f: FiltrosM9, modulos?: string[], productores?: string[]) {
-    let eventos = this.eventos.filter(e => (!modulos || modulos.includes(e.modulo)) && (!productores || productores.includes(e.productor)) && (!f.modulo || e.modulo === f.modulo) && (!f.productor || e.productor === f.productor) && (!f.operacion || e.operacion === f.operacion) && (!f.resultado || e.resultado === f.resultado) && (!f.ejecutor || e.ejecutorReferencia === f.ejecutor) && (!f.entidadTipo || e.entidadTipo === f.entidadTipo) && (!f.entidadReferencia || e.entidadReferencia === f.entidadReferencia) && (!f.identidadLogica || e.identidadLogica === f.identidadLogica) && (!f.buscar || e.identidadLogica.includes(f.buscar) || e.entidadReferencia?.includes(f.buscar)));
+    const rangoChile = limitesFiltroChile(f);
+    let eventos = this.eventos.filter(e => (!rangoChile.gte || e.fechaOcurrencia >= rangoChile.gte) && (!rangoChile.lt || e.fechaOcurrencia < rangoChile.lt) && (!rangoChile.lte || e.fechaOcurrencia <= rangoChile.lte) && (!modulos || modulos.includes(e.modulo)) && (!productores || productores.includes(e.productor)) && (!f.modulo || e.modulo === f.modulo) && (!f.productor || e.productor === f.productor) && (!f.operacion || e.operacion === f.operacion) && (!f.resultado || e.resultado === f.resultado) && (!f.ejecutor || e.ejecutorReferencia === f.ejecutor) && (!f.entidadTipo || e.entidadTipo === f.entidadTipo) && (!f.entidadReferencia || e.entidadReferencia === f.entidadReferencia) && (!f.identidadLogica || e.identidadLogica === f.identidadLogica) && (!f.buscar || e.identidadLogica.includes(f.buscar) || e.entidadReferencia?.includes(f.buscar)));
     eventos = eventos.sort((a, b) => (a.fechaOcurrencia.getTime() - b.fechaOcurrencia.getTime()) * (f.orden === 'asc' ? 1 : -1));
     const total = eventos.length, pagina = f.pagina ?? 1, tamano = f.tamano ?? 50;
     return { total, eventos: eventos.slice((pagina - 1) * tamano, pagina * tamano).map(e => ({ ...e })) };

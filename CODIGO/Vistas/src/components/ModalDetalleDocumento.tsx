@@ -3,7 +3,6 @@ import OperacionesFinancieras from './OperacionesFinancieras';
 import { solicitarFinanzas } from '../api/finanzas';
 import React, { useEffect, useState } from 'react';
 import { X, DollarSign } from 'lucide-react';
-import TrazabilidadDocumentalM11 from './TrazabilidadDocumentalM11';
 import { leerPdfOperacional } from '../utilidades/pdfOperacional';
 import { presentarObservacion } from '../utilidades/observacion';
 
@@ -12,6 +11,9 @@ interface ModalDetalleDocumentoProps {
   onClose: () => void;
   children?: React.ReactNode;
   onViewPago?: (id: number) => void;
+  categoriaClienteContexto?: string;
+  onRegistrarOcB2B?: (idCotizacion: number) => void;
+  recargaCadenaM11?: number;
 }
 type GuiaDetalle = {
   id_guia_despacho: number;
@@ -51,7 +53,6 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
   const guias = guiasLocales;
   const observacionVisible = presentarObservacion(activeModal.data.observacion);
   const guiaEditable = (guia: GuiaDetalle) => !['cerrada', 'finalizada', 'anulada'].includes(String(guia.estado || 'emitida').toLowerCase());
-
   const guardarGuia = async () => {
     if (!guiaEnEdicion) return;
     let antecedentes: Record<string, unknown>;
@@ -678,7 +679,7 @@ const ModalDetalleDocumento: React.FC<ModalDetalleDocumentoProps> = ({ activeMod
           )}
 
           {children}
-          {(activeModal.tipo === 'cotizacion' || activeModal.data.id_cotizacion) && <TrazabilidadDocumentalM11 idCotizacion={Number(activeModal.data.id_cotizacion)} />}
+          
           <OperacionesFinancieras key={`${activeModal.tipo}-${activeModal.data.id_nota_venta || activeModal.data.id_cotizacion}`} tipo={activeModal.tipo} documento={activeModal.data} />
         </div>
 

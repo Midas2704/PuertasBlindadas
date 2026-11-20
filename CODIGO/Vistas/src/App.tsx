@@ -5,6 +5,8 @@ import Sesiones from './views/Seguridad/Sesiones';
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { DialogosSistema } from './components/DialogosSistema';
+import MonitorDemostracion from './demostracion/MonitorDemostracion';
+import { Link } from 'react-router-dom';
 
 // Layout; acá se decide la carcasa y el resto sólo pinta su vista
 import DashboardWrapper from './views/DashboardWrapper/DashboardWrapper';
@@ -83,13 +85,19 @@ import InstalacionesTerreno from './views/Terreno/InstalacionesTerreno';
 import { permisosTerreno } from './seguridad/accesosSistemas';
 
 const App: React.FC = () => {
+  const modoDemostracion = import.meta.env.VITE_MODO_DEMOSTRACION === 'true';
   return (
     <BrowserRouter>
       <DialogosSistema />
+      {modoDemostracion&&<Link to="/demostracion-tecnica" target="_blank" className="fixed bottom-4 right-4 z-50 rounded-full bg-[#FE8F01] px-5 py-3 text-sm font-black text-black shadow-xl transition hover:bg-black hover:text-white">Monitor técnico</Link>}
       <ProveedorSesion><Routes>
         <Route path="/login" element={<Acceso modo="login"/>}/>
         <Route path="/recuperar" element={<Acceso modo="recuperar"/>}/>
         <Route path="/" element={<PortalPrincipal/>}/>
+        {modoDemostracion&&<Route
+          path="/demostracion-tecnica"
+          element={<Protegido><MonitorDemostracion/></Protegido>}
+        />}
         <Route path="/inventario" element={<Protegido permiso={['CU14','CU15','CU466','CU467','CU468','CU469','CU470','CU471','CU472']}><InventarioWrapper/></Protegido>}>
           <Route index element={<EntradaInventario/>}/>
           <Route path="materiales" element={<Protegido permiso="CU14"><MaterialesInventario/></Protegido>}/>

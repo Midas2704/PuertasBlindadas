@@ -3767,6 +3767,7 @@ model limite_global_credito_m8 {
   motivo           String
   id_responsable   BigInt
   creado_en        DateTime  @default(now()) @db.Timestamp(6)
+  sustituido_en     DateTime? @db.Timestamp(6)
 
   @@index([vigencia_desde, vigencia_hasta], map: "idx_limite_global_credito_m8_vigencia")
   @@schema("finanzas")

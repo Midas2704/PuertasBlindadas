@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { solicitarFinanzas } from '../api/finanzas';
 import { leerPdfOperacional } from '../utilidades/pdfOperacional';
 import { RespaldoPdfOperacional } from './RespaldoPdfOperacional';
@@ -43,7 +43,12 @@ const estilo: Record<string, string> = {
 };
 const EstadoM11 = ({ valor }: { valor: Estado }) => <span className={`rounded px-2 py-1 text-xs font-bold ${estilo[valor] || 'bg-gray-100 text-gray-700'}`}>{valor.replaceAll('_', ' ')}</span>;
 
-export default function TrazabilidadDocumentalM11({ idCotizacion }: { idCotizacion: number }) {
+export default function TrazabilidadDocumentalM11({ idCotizacion, onRegistrarOcB2B, puedeRegistrarOcB2B = false, recarga = 0 }: {
+  idCotizacion: number;
+  onRegistrarOcB2B?: () => void;
+  puedeRegistrarOcB2B?: boolean;
+  recarga?: number;
+}) {
   const [datos, setDatos] = useState<RespuestaCadena | null>(null);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
@@ -52,15 +57,25 @@ export default function TrazabilidadDocumentalM11({ idCotizacion }: { idCotizaci
   const [motivo, setMotivo] = useState('');
   const [respaldo, setRespaldo] = useState('');
   const [resultado, setResultado] = useState('');
+  const [ocAusente, setOcAusente] = useState(false);
   const consultar = async () => {
     setCargando(true);
     setError('');
+    setOcAusente(false);
     try {
       const respuesta = await solicitarFinanzas(`/billing/quotes/${idCotizacion}/document-reconciliation`);
       const cuerpo = (await respuesta.json()) as RespuestaCadena & {
         error?: string;
       };
-      if (!respuesta.ok) throw new Error(cuerpo.error || 'No fue posible consultar la cadena documental');
+      if (!respuesta.ok) {
+        // No convertir otros 404, 403 ni fallos de red en una invitación a aprobar.
+        if (respuesta.status === 404 && String(cuerpo.error || '').includes('no posee una Orden de Compra B2B registrada')) {
+          setOcAusente(true);
+          setDatos(null);
+        }
+        throw new Error(cuerpo.error || 'No fue posible consultar la cadena documental');
+      }
+      setOcAusente(false);
       setDatos(cuerpo);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No fue posible consultar la cadena documental');
@@ -68,6 +83,8 @@ export default function TrazabilidadDocumentalM11({ idCotizacion }: { idCotizaci
       setCargando(false);
     }
   };
+  // Lectura inicial para ofrecer la acción si no existe OC; recarga después de la aceptación.
+  useEffect(() => { void consultar(); }, [idCotizacion, recarga]);
   const registrarDecision = async () => {
     if (!hallazgoActivo || !decision.trim() || !motivo.trim() || !respaldo.trim() || !resultado.trim()) {
       setError('Decisión, motivo, respaldo y resultado son obligatorios');
@@ -120,6 +137,12 @@ export default function TrazabilidadDocumentalM11({ idCotizacion }: { idCotizaci
         <p role="alert" className="mt-3 rounded bg-red-50 p-3 text-sm text-red-700">
           {error}
         </p>
+      )}
+      {ocAusente && puedeRegistrarOcB2B && onRegistrarOcB2B && (
+        <button type="button" onClick={onRegistrarOcB2B} disabled={cargando}
+          className="mt-3 rounded bg-[#FE8F01] px-3 py-2 text-sm font-semibold text-black disabled:opacity-50">
+          Registrar OC B2B y aceptar cotización
+        </button>
       )}
       {datos && (
         <div className="mt-4 space-y-3 text-sm">

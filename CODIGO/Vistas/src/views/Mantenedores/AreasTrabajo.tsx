@@ -3,6 +3,7 @@ import { ArrowLeft, BriefcaseBusiness, Pencil, Plus, Power, Users, X } from 'luc
 import { useNavigate } from 'react-router-dom';
 import { solicitarFinanzas } from '../../api/finanzas';
 import { usarSesion } from '../../seguridad/Sesion';
+import ImportacionMasivaExcel from '../../components/ImportacionMasivaExcel';
 
 type Area = { id: string; nombre: string; descripcion: string; activa: boolean; empleadosActivos: number };
 type Empleado = { id: number; rut: string; nombreCompleto: string; cargoActual: string | null };
@@ -64,7 +65,7 @@ export default function AreasTrabajo() {
     <header className="border-t-4 border-[#FE8F01] bg-white p-5 shadow-sm sm:p-7">
       <button onClick={() => navegar('/mantenedores')} className="mb-4 inline-flex items-center gap-2 text-sm font-bold text-[#676767] hover:text-black"><ArrowLeft className="h-4 w-4" />Volver a mantenedores</button>
       <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-wide text-[#676767]">Operación y producción</p><h1 className="mt-1 text-2xl font-black text-black sm:text-3xl">Áreas de trabajo</h1><p className="mt-2 text-sm text-gray-600">Catálogo compartido por producción, órdenes e incidencias.</p></div>
-      {puedeEditar && <button onClick={() => abrir()} className="inline-flex items-center gap-2 rounded-md bg-[#FE8F01] px-4 py-2.5 font-bold text-black hover:bg-orange-400"><Plus className="h-4 w-4" />Nueva área</button>}</div>
+      {puedeEditar && <div className="flex flex-wrap gap-2"><ImportacionMasivaExcel tipo="areas-trabajo" titulo="áreas de trabajo" onCompletado={cargar}/><button onClick={() => abrir()} className="inline-flex items-center gap-2 rounded-md bg-[#FE8F01] px-4 py-2.5 font-bold text-black hover:bg-orange-400"><Plus className="h-4 w-4" />Nueva área</button></div>}</div>
     </header>
     {error && <div className="mt-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
     <section className="mt-6 overflow-hidden border border-gray-200 bg-white shadow-sm"><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-gray-50 text-[#676767]"><tr><th className="px-4 py-3">Área</th><th className="px-4 py-3">Descripción</th><th className="px-4 py-3">Empleados activos</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3 text-right">Acciones</th></tr></thead><tbody>

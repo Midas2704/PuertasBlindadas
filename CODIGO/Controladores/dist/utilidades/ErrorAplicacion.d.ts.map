@@ -1,0 +1,1 @@
+{"version":3,"file":"ErrorAplicacion.d.ts","sourceRoot":"","sources":["../../src/utilidades/ErrorAplicacion.ts"],"names":[],"mappings":"AAAA,qBAAa,eAAgB,SAAQ,KAAK;IACrB,MAAM,EAAE,MAAM;IAA0B,MAAM;gBAA9C,MAAM,EAAE,MAAM,EAAE,OAAO,EAAE,MAAM,EAAS,MAAM,SAAuB;CAGzF"}

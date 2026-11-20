@@ -1,5 +1,8 @@
 FROM node:25-bookworm-slim AS build
 
+ARG VITE_MODO_DEMOSTRACION=false
+ENV VITE_MODO_DEMOSTRACION=${VITE_MODO_DEMOSTRACION}
+
 WORKDIR /app
 
 COPY package*.json ./

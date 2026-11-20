@@ -1,0 +1,319 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.crearPdfComercial = crearPdfComercial;
+const node_crypto_1 = require("node:crypto");
+const node_fs_1 = require("node:fs");
+const node_path_1 = require("node:path");
+const NARANJA = '0.996 0.561 0.004', GRIS = '0.404 0.404 0.404', GRIS_CLARO = '0.94 0.94 0.94', NEGRO = '0 0 0', BLANCO = '1 1 1';
+const textoPlano = (valor) => String(valor ?? '')
+    .replace(/<\s*(?:script|style)\b[^>]*>[\s\S]*?<\s*\/\s*(?:script|style)\s*>/gi, '')
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/\s*(?:p|div|li|tr|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\r\n?/g, '\n');
+const limpiar = (valor) => textoPlano(valor).replace(/[\u2013\u2014]/g, '-').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^\x20-\x7E\xA0-\xFF]/g, '?').replace(/([\\()])/g, '\\$1');
+const partir = (valor, maximo = 88) => {
+    const lineas = [];
+    for (const parrafo of textoPlano(valor).split('\n')) {
+        const palabras = parrafo.trim().split(/\s+/).filter(Boolean).flatMap(palabra => palabra.length > maximo ? palabra.match(new RegExp(`.{1,${maximo}}`, 'g')) ?? [] : [palabra]);
+        if (!palabras.length) {
+            if (lineas.length && lineas[lineas.length - 1] !== '')
+                lineas.push('');
+            continue;
+        }
+        let actual = '';
+        for (const palabra of palabras) {
+            const candidato = `${actual} ${palabra}`.trim();
+            if (candidato.length <= maximo)
+                actual = candidato;
+            else {
+                if (actual)
+                    lineas.push(actual);
+                actual = palabra;
+            }
+        }
+        if (actual)
+            lineas.push(actual);
+    }
+    while (lineas[lineas.length - 1] === '')
+        lineas.pop();
+    return lineas.length ? lineas : ['-'];
+};
+const moneda = (valor, codigo) => { if (valor === null || valor === undefined || !Number.isFinite(valor))
+    return 'Precio por definir'; const decimales = codigo === 'CLP' ? 0 : 2; return `${codigo} ${valor.toLocaleString('es-CL', { minimumFractionDigits: decimales, maximumFractionDigits: decimales })}`; };
+const texto = (x, y, valor, tamano = 9, negrita = false, color = NEGRO) => `BT /${negrita ? 'F2' : 'F1'} ${tamano} Tf ${color} rg ${x} ${y} Td (${limpiar(valor)}) Tj ET`;
+const rectangulo = (x, y, ancho, alto, relleno, borde) => `${relleno} rg${borde ? ` ${borde} RG 0.7 w` : ''} ${x} ${y} ${ancho} ${alto} re ${borde ? 'B' : 'f'}`;
+const lineaHorizontal = (x, y, ancho, color = GRIS) => `${color} RG 0.7 w ${x} ${y} m ${x + ancho} ${y} l S`;
+const dibujarLogo = (x, y, ancho, alto) => `q ${ancho} 0 0 ${alto} ${x} ${y} cm /LOGO Do Q`;
+const dimensionesJpeg = (bytes) => { let i = 2; while (i < bytes.length - 9) {
+    if (bytes[i] !== 0xff) {
+        i += 1;
+        continue;
+    }
+    const marcador = bytes[i + 1], largo = bytes.readUInt16BE(i + 2);
+    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marcador))
+        return { alto: bytes.readUInt16BE(i + 5), ancho: bytes.readUInt16BE(i + 7) };
+    i += 2 + largo;
+} throw new Error('El logotipo institucional no es un JPEG válido'); };
+const cargarLogo = () => { const candidatos = [(0, node_path_1.join)(__dirname, 'assets', 'logo-puertas-blindadas.jpg'), (0, node_path_1.resolve)(__dirname, '../../../src/comercial/documentos/assets/logo-puertas-blindadas.jpg')], ruta = candidatos.find(node_fs_1.existsSync); if (!ruta)
+    return null; const bytes = (0, node_fs_1.readFileSync)(ruta); return { bytes, ...dimensionesJpeg(bytes) }; };
+const ensamblar = (paginas, logo) => {
+    const objetos = ['', '<< /Type /Catalog /Pages 2 0 R >>', ''];
+    let logoId = 0;
+    if (logo) {
+        logoId = objetos.length;
+        objetos.push(Buffer.concat([Buffer.from(`<< /Type /XObject /Subtype /Image /Width ${logo.ancho} /Height ${logo.alto} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logo.bytes.length} >>\nstream\n`, 'latin1'), logo.bytes, Buffer.from('\nendstream', 'latin1')]));
+    }
+    const regular = objetos.length;
+    objetos.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+    const bold = objetos.length;
+    objetos.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+    const ids = [];
+    for (const instrucciones of paginas) {
+        const id = objetos.length, streamId = id + 1, stream = instrucciones.join('\n');
+        ids.push(id);
+        objetos.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${regular} 0 R /F2 ${bold} 0 R >>${logoId ? ` /XObject << /LOGO ${logoId} 0 R >>` : ''} >> /Contents ${streamId} 0 R >>`);
+        objetos.push(`<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream`);
+    }
+    objetos[2] = `<< /Type /Pages /Kids [${ids.map(id => `${id} 0 R`).join(' ')}] /Count ${ids.length} >>`;
+    const partes = [Buffer.from('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n', 'latin1')], posiciones = [0];
+    let posicion = partes[0].length;
+    for (let i = 1; i < objetos.length; i += 1) {
+        posiciones[i] = posicion;
+        const cuerpo = Buffer.isBuffer(objetos[i]) ? objetos[i] : Buffer.from(objetos[i], 'latin1'), bloque = Buffer.concat([Buffer.from(`${i} 0 obj\n`, 'latin1'), cuerpo, Buffer.from('\nendobj\n', 'latin1')]);
+        partes.push(bloque);
+        posicion += bloque.length;
+    }
+    const xref = posicion;
+    partes.push(Buffer.from(`xref\n0 ${objetos.length}\n0000000000 65535 f \n${posiciones.slice(1).map(pos => `${String(pos).padStart(10, '0')} 00000 n `).join('\n')}\ntrailer\n<< /Size ${objetos.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, 'latin1'));
+    return Buffer.concat(partes);
+};
+function pie(pagina, snapshot, indice, total) { pagina.push(lineaHorizontal(36, 34, 540, '0.82 0.82 0.82')); pagina.push(texto(36, 19, snapshot.borrador ? 'BORRADOR - NO EMITIDO' : 'Documento comercial versionado', 7, true, snapshot.borrador ? NARANJA : GRIS)); pagina.push(texto(520, 19, `${indice + 1} / ${total}`, 7, true, GRIS)); }
+function encabezado(pagina, snapshot, logo, etiqueta) { if (logo)
+    pagina.push(dibujarLogo(36, 718, 160, 52));
+else
+    pagina.push(texto(36, 744, 'PUERTAS BLINDADAS', 15, true)); pagina.push(texto(430, 748, etiqueta, 9, true, snapshot.tipo === 'B2B' ? NARANJA : GRIS)); pagina.push(lineaHorizontal(36, 708, 540, snapshot.tipo === 'B2B' ? NARANJA : GRIS)); }
+function crearB2C(snapshot, logo) {
+    const paginas = [], portada = [];
+    paginas.push(portada);
+    portada.push(rectangulo(420, 0, 192, 792, GRIS));
+    if (logo)
+        portada.push(dibujarLogo(38, 685, 215, 67));
+    else
+        portada.push(texto(38, 720, 'PUERTAS BLINDADAS', 18, true));
+    portada.push(rectangulo(38, 560, 500, 84, GRIS_CLARO));
+    portada.push(texto(58, 608, snapshot.tipo === 'CARTA_B2C' ? 'CARTA COMERCIAL' : 'COTIZACION', 22, true, GRIS));
+    portada.push(texto(58, 579, snapshot.tipo === 'CARTA_B2C' ? 'Modelos de seguridad' : `Sr./Sra. ${snapshot.cliente?.nombre || 'Cliente'}`, 13, true));
+    if (snapshot.tipo !== 'CARTA_B2C')
+        portada.push(texto(58, 562, snapshot.numero ? `N° ${snapshot.numero}` : 'Número asignado al emitir', 8, true, NARANJA));
+    let y = 520;
+    for (const linea of partir(snapshot.introduccion || 'Soluciones de seguridad diseñadas para acompañar cada proyecto con calidad, claridad comercial y respaldo.', 54).slice(0, 8)) {
+        portada.push(texto(58, y, linea, 11, false, '0.18 0.18 0.18'));
+        y -= 17;
+    }
+    portada.push(rectangulo(442, 335, 148, 170, '0.33 0.33 0.33', '0.72 0.72 0.72'));
+    portada.push(texto(459, 425, 'IMAGEN COMERCIAL', 9, true, BLANCO));
+    portada.push(texto(476, 408, 'PENDIENTE', 9, true, NARANJA));
+    portada.push(texto(442, 128, snapshot.numero || (snapshot.borrador ? 'Borrador sin número definitivo' : 'Sin número'), 9, true, BLANCO));
+    portada.push(texto(442, 108, `Fecha: ${snapshot.fecha}`, 8, false, BLANCO));
+    if (snapshot.vigencia)
+        portada.push(texto(442, 91, `Vigencia: ${snapshot.vigencia}`, 8, false, BLANCO));
+    if (snapshot.borrador) {
+        portada.push(rectangulo(38, 58, 330, 30, NARANJA));
+        portada.push(texto(55, 68, 'BORRADOR - NO EMITIDO', 11, true, BLANCO));
+    }
+    snapshot.productos.forEach((producto, indice) => {
+        const pagina = [];
+        paginas.push(pagina);
+        encabezado(pagina, snapshot, logo, `MODELO ${String(indice + 1).padStart(2, '0')}`);
+        pagina.push(texto(36, 670, producto.nombre, 20, true, GRIS));
+        if (producto.codigo)
+            pagina.push(texto(36, 646, producto.codigo, 9, true, NARANJA));
+        pagina.push(rectangulo(340, 430, 236, 226, GRIS_CLARO, '0.82 0.82 0.82'));
+        pagina.push(texto(381, 548, 'IMAGEN COMERCIAL PENDIENTE', 9, true, GRIS));
+        let yp = 620;
+        for (const linea of partir(producto.descripcion || 'Descripción comercial no informada.', 48).slice(0, 8)) {
+            pagina.push(texto(36, yp, linea, 10));
+            yp -= 15;
+        }
+        if (producto.dimensiones) {
+            pagina.push(texto(36, yp - 8, 'DIMENSIONES', 7, true, GRIS));
+            pagina.push(texto(36, yp - 23, producto.dimensiones, 9, true));
+            yp -= 48;
+        }
+        if (producto.caracteristicas?.length) {
+            pagina.push(texto(36, yp - 6, 'CARACTERISTICAS', 9, true, NARANJA));
+            yp -= 24;
+            producto.caracteristicas.slice(0, 10).forEach(item => { partir(item, 45).forEach(linea => { pagina.push(texto(44, yp, `- ${linea}`, 9)); yp -= 13; }); });
+        }
+        const precioY = 300;
+        pagina.push(rectangulo(36, precioY, 540, 34, NARANJA));
+        pagina.push(texto(50, precioY + 12, 'VALOR COMERCIAL', 10, true, BLANCO));
+        pagina.push(texto(412, precioY + 12, moneda(producto.subtotal ?? producto.precioUnitario, snapshot.moneda), 11, true, BLANCO));
+        pagina.push(rectangulo(36, precioY - 56, 540, 56, '0.98 0.98 0.98', '0.86 0.86 0.86'));
+        pagina.push(texto(50, precioY - 22, `Cantidad: ${producto.cantidad.toLocaleString('es-CL')} ${producto.unidad || 'unidad(es)'}`, 9, true));
+        pagina.push(texto(50, precioY - 41, producto.opcionales?.length ? `Opcionales: ${producto.opcionales.join(' · ')}` : 'Opcionales: no incorporados', 8, false, GRIS));
+    });
+    if (snapshot.alternativas?.length) {
+        let pagina = [];
+        paginas.push(pagina);
+        encabezado(pagina, snapshot, logo, 'COMPARACION DE ALTERNATIVAS');
+        pagina.push(texto(36, 680, 'Alternativas comerciales', 19, true, GRIS));
+        pagina.push(texto(36, 657, 'Se presentan por separado. No se suman entre sí y su emisión no constituye aceptación.', 9, false, GRIS));
+        let ya = 615;
+        snapshot.alternativas.forEach((alternativa, indice) => { if (ya < 180) {
+            pagina = [];
+            paginas.push(pagina);
+            encabezado(pagina, snapshot, logo, 'ALTERNATIVAS');
+            ya = 675;
+        } pagina.push(rectangulo(36, ya - 128, 540, 138, indice % 2 ? '0.97 0.97 0.97' : BLANCO, '0.78 0.78 0.78')); pagina.push(rectangulo(36, ya - 12, 540, 22, GRIS)); pagina.push(texto(49, ya - 4, `${alternativa.etiqueta} · ${alternativa.producto}`, 10, true, BLANCO)); pagina.push(texto(49, ya - 32, alternativa.fotografiaDisponible ? 'Fotografía comercial autorizada asociada' : 'Imagen comercial pendiente', 8, true, NARANJA)); if (alternativa.descripcion)
+            pagina.push(texto(49, ya - 50, partir(alternativa.descripcion, 66)[0], 8)); pagina.push(texto(49, ya - 74, `Neto ${moneda(alternativa.neto, alternativa.moneda)}`, 9)); pagina.push(texto(242, ya - 74, `IVA ${moneda(alternativa.impuesto, alternativa.moneda)}`, 9)); pagina.push(texto(424, ya - 74, `TOTAL ${moneda(alternativa.total, alternativa.moneda)}`, 9, true, NARANJA)); pagina.push(texto(49, ya - 99, alternativa.opcionales?.length ? `Opcionales: ${alternativa.opcionales.join(' · ')}` : 'Sin opcionales incorporados', 8, false, GRIS)); pagina.push(texto(49, ya - 116, `Referencia de alternativa: ${alternativa.identificador}`, 7, false, GRIS)); ya -= 158; });
+    }
+    let cierre = [];
+    paginas.push(cierre);
+    encabezado(cierre, snapshot, logo, 'RESUMEN COMERCIAL');
+    cierre.push(texto(36, 670, snapshot.tipo === 'CARTA_B2C' ? 'Valores y condiciones' : 'Valores de la propuesta', 19, true, GRIS));
+    let yc = 625;
+    const nuevaPaginaValores = (titulo) => { cierre = []; paginas.push(cierre); encabezado(cierre, snapshot, logo, 'VALORES Y CONDICIONES'); cierre.push(texto(36, 670, titulo, 19, true, GRIS)); yc = 625; };
+    const cabeceraValores = () => { cierre.push(rectangulo(36, yc - 24, 540, 32, NARANJA)); cierre.push(texto(48, yc - 13, 'MODELO / PRODUCTO', 8, true, BLANCO)); cierre.push(texto(293, yc - 13, 'CANTIDAD', 8, true, BLANCO)); cierre.push(texto(380, yc - 13, 'PRECIO UNITARIO', 8, true, BLANCO)); cierre.push(texto(510, yc - 13, 'NETO', 8, true, BLANCO)); yc -= 38; };
+    if (snapshot.tipo !== 'CARTA_B2C') {
+        cabeceraValores();
+        snapshot.productos.forEach((producto, indice) => { if (yc < 205) {
+            nuevaPaginaValores('Continuación de valores');
+            cabeceraValores();
+        } cierre.push(rectangulo(36, yc - 26, 540, 32, indice % 2 ? '0.97 0.97 0.97' : BLANCO, '0.85 0.85 0.85')); cierre.push(texto(48, yc - 15, producto.nombre, 8, true)); cierre.push(texto(306, yc - 15, producto.cantidad.toLocaleString('es-CL'), 8)); cierre.push(texto(386, yc - 15, moneda(producto.precioUnitario, snapshot.moneda), 8)); cierre.push(texto(505, yc - 15, moneda(producto.subtotal, snapshot.moneda), 8, true)); yc -= 38; });
+        yc -= 10;
+        const opcionales = snapshot.productos.flatMap(producto => (producto.opcionales ?? []).map(opcional => `${producto.nombre}: ${opcional}`));
+        if (opcionales.length) {
+            if (yc < 170)
+                nuevaPaginaValores('Opcionales');
+            cierre.push(rectangulo(36, yc - 24, 540, 32, NARANJA));
+            cierre.push(texto(48, yc - 13, 'OPCIONALES INCLUIDOS', 9, true, BLANCO));
+            yc -= 40;
+            opcionales.forEach(opcional => { if (yc < 100)
+                nuevaPaginaValores('Opcionales · continuación'); cierre.push(texto(48, yc, `- ${opcional}`, 8)); yc -= 16; });
+            yc -= 8;
+        }
+        if (snapshot.servicios?.length) {
+            if (yc < 180)
+                nuevaPaginaValores('Instalación y servicios');
+            cierre.push(rectangulo(36, yc - 24, 540, 32, GRIS));
+            cierre.push(texto(48, yc - 13, 'INSTALACION Y SERVICIOS COTIZADOS', 9, true, BLANCO));
+            yc -= 40;
+            snapshot.servicios.forEach(servicio => { cierre.push(texto(48, yc, servicio.nombre, 8, true)); cierre.push(texto(438, yc, moneda(servicio.subtotal, snapshot.moneda), 8, true, NARANJA)); yc -= 18; });
+            yc -= 8;
+        }
+        if (yc < 200)
+            nuevaPaginaValores('Resumen y condiciones');
+        [['NETO', moneda(snapshot.neto, snapshot.moneda)], ['IVA', moneda(snapshot.impuesto, snapshot.moneda)], ['TOTAL', moneda(snapshot.total, snapshot.moneda)]].forEach(([etiqueta, valor], indice) => { cierre.push(rectangulo(36, yc - 24, 540, 32, indice === 2 ? NARANJA : GRIS_CLARO, indice === 2 ? NARANJA : '0.82 0.82 0.82')); cierre.push(texto(50, yc - 13, etiqueta, 9, true, indice === 2 ? BLANCO : GRIS)); cierre.push(texto(438, yc - 13, valor, 10, true, indice === 2 ? BLANCO : NEGRO)); yc -= 42; });
+    }
+    if (yc < 180)
+        nuevaPaginaValores('Condiciones comerciales');
+    cierre.push(texto(36, yc - 8, 'CONDICIONES COMERCIALES', 10, true, NARANJA));
+    yc -= 31;
+    (snapshot.condiciones?.length ? snapshot.condiciones : ['Las condiciones vigentes se confirmarán en la propuesta definitiva.']).forEach(condicion => { partir(condicion, 78).forEach(linea => { cierre.push(texto(46, yc, `- ${linea}`, 9)); yc -= 14; }); yc -= 4; });
+    if (snapshot.observaciones?.length) {
+        if (yc < 150)
+            nuevaPaginaValores('Observaciones');
+        cierre.push(texto(36, yc - 8, 'OBSERVACIONES', 10, true, NARANJA));
+        yc -= 31;
+        snapshot.observaciones.forEach((observacion, indice) => { for (const linea of partir(observacion, 78)) {
+            if (yc < 80)
+                nuevaPaginaValores('Observaciones · continuación');
+            cierre.push(texto(46, yc, `${indice + 1}. ${linea}`, 9));
+            yc -= 14;
+        } yc -= 5; });
+    }
+    if (snapshot.tipo === 'CARTA_B2C') {
+        cierre.push(rectangulo(36, Math.max(100, yc - 62), 540, 56, GRIS_CLARO));
+        cierre.push(texto(50, Math.max(132, yc - 31), 'Los precios base no incluyen instalación.', 10, true, GRIS));
+        cierre.push(texto(50, Math.max(115, yc - 48), 'Precio y disponibilidad dependen de región, comuna y cobertura autorizada.', 8, false, GRIS));
+    }
+    else {
+        const cierreY = Math.max(72, yc - 58);
+        cierre.push(texto(36, cierreY + 25, 'Gracias por considerar a Puertas Blindadas para su proyecto.', 10, true, GRIS));
+        cierre.push(texto(36, cierreY + 8, 'La identificación comercial y firma se incorporan sólo cuando están configuradas en la plantilla publicada.', 7, false, GRIS));
+    }
+    return paginas;
+}
+function crearB2B(snapshot, logo) {
+    const paginas = [];
+    let pagina = [], y = 0;
+    const nuevaPagina = (etiqueta = 'PROPUESTA COMERCIAL B2B') => { pagina = []; paginas.push(pagina); encabezado(pagina, snapshot, logo, etiqueta); y = 680; }, asegurar = (alto) => { if (y - alto < 62)
+        nuevaPagina('DETALLE DE PROPUESTA'); };
+    const bloqueTitulo = (valor) => { asegurar(38); pagina.push(rectangulo(36, y - 21, 540, 28, NARANJA)); pagina.push(texto(49, y - 11, valor.toUpperCase(), 10, true, BLANCO)); y -= 42; };
+    const fila = (etiqueta, valor) => { asegurar(32); pagina.push(texto(44, y, etiqueta.toUpperCase(), 7, true, GRIS)); partir(String(valor ?? '').trim() || 'No informado', 68).slice(0, 2).forEach((v, i) => pagina.push(texto(176, y - i * 11, v, 9, i === 0))); y -= 24; };
+    const tabla = (titulo, filas) => { if (!filas.length)
+        return; const altoPrimera = 88 + (filas[0].descripcion ? Math.min(2, partir(filas[0].descripcion, 75).length) * 11 : 0) + (filas[0].opcionales?.length ? 18 : 0); asegurar(38 + altoPrimera); bloqueTitulo(titulo); filas.forEach((item, indice) => { const alto = 88 + (item.descripcion ? Math.min(2, partir(item.descripcion, 75).length) * 11 : 0) + (item.opcionales?.length ? 18 : 0); asegurar(alto); pagina.push(rectangulo(36, y - alto + 12, 540, alto, indice % 2 ? '0.97 0.97 0.97' : BLANCO, '0.82 0.82 0.82')); pagina.push(texto(48, y - 8, `${item.codigo ? `${item.codigo} · ` : ''}${item.nombre}`, 10, true)); let yi = y - 26; if (item.descripcion)
+        partir(item.descripcion, 75).slice(0, 2).forEach(linea => { pagina.push(texto(48, yi, linea, 8, false, GRIS)); yi -= 11; }); pagina.push(texto(48, yi - 4, `Cantidad: ${item.cantidad.toLocaleString('es-CL')} ${item.unidad || 'unidad(es)'}`, 8, true)); pagina.push(texto(218, yi - 4, item.dimensiones ? `Medidas: ${item.dimensiones}` : 'Medidas: según especificación', 8)); pagina.push(texto(412, yi - 4, moneda(item.subtotal, snapshot.moneda), 9, true, NARANJA)); if (item.opcionales?.length)
+        pagina.push(texto(48, yi - 23, `Opcionales: ${item.opcionales.join(' · ')}`, 8, false, GRIS)); y -= alto + 8; }); };
+    nuevaPagina();
+    pagina.push(texto(36, 675, snapshot.titulo, 21, true));
+    pagina.push(texto(36, 650, snapshot.numero || (snapshot.borrador ? 'Borrador sin número definitivo' : 'Número no informado'), 10, true, NARANJA));
+    if (snapshot.borrador) {
+        pagina.push(rectangulo(390, 637, 186, 28, NARANJA));
+        pagina.push(texto(410, 647, 'BORRADOR - NO EMITIDO', 9, true, BLANCO));
+    }
+    y = 610;
+    bloqueTitulo('Antecedentes de la propuesta');
+    fila('Fecha', snapshot.fecha);
+    if (snapshot.vigencia)
+        fila('Vigencia', snapshot.vigencia);
+    fila('Versión', snapshot.version ?? 'Borrador');
+    if (snapshot.cliente) {
+        bloqueTitulo('Cliente empresa');
+        fila('Razón social', snapshot.cliente.nombre);
+        if (snapshot.cliente.rut)
+            fila('RUT', snapshot.cliente.rut);
+        if (snapshot.cliente.correo)
+            fila('Correo', snapshot.cliente.correo);
+        if (snapshot.cliente.telefono)
+            fila('Teléfono', snapshot.cliente.telefono);
+    }
+    if (snapshot.contactos?.length) {
+        bloqueTitulo('Contactos de la operación');
+        snapshot.contactos.forEach(contacto => fila(contacto.principal ? 'Contacto principal' : 'Contacto', `${contacto.nombre}${contacto.cargo ? ` · ${contacto.cargo}` : ''}${contacto.correo ? ` · ${contacto.correo}` : ''}${contacto.telefono ? ` · ${contacto.telefono}` : ''}`));
+    }
+    if (snapshot.proyecto) {
+        bloqueTitulo('Proyecto y alcance');
+        if (snapshot.proyecto.nombre)
+            fila('Proyecto', snapshot.proyecto.nombre);
+        if (snapshot.proyecto.referencia)
+            fila('Referencia', snapshot.proyecto.referencia);
+        if (snapshot.proyecto.ubicacion)
+            fila('Ubicación', snapshot.proyecto.ubicacion);
+        if (snapshot.proyecto.alcance)
+            fila('Alcance', snapshot.proyecto.alcance);
+    }
+    const listaTexto = (titulo, items) => { if (!items.length)
+        return; bloqueTitulo(titulo); items.forEach((item, indice) => { asegurar(24); pagina.push(texto(44, y, `${indice + 1}.`, 8, true, GRIS)); y -= 14; for (const linea of partir(item, 82)) {
+        asegurar(18);
+        pagina.push(texto(58, y, linea || ' ', 9));
+        y -= 13;
+    } y -= 5; }); };
+    tabla('Partidas de productos', snapshot.productos);
+    tabla('Servicios cotizados', snapshot.servicios ?? []);
+    bloqueTitulo('Resumen económico');
+    fila('Neto', moneda(snapshot.neto, snapshot.moneda));
+    fila('IVA', moneda(snapshot.impuesto, snapshot.moneda));
+    fila('Total', moneda(snapshot.total, snapshot.moneda));
+    listaTexto('Condiciones comerciales', snapshot.condiciones ?? []);
+    listaTexto('Observaciones', snapshot.observaciones ?? []);
+    return paginas;
+}
+/** Renderer único para vista previa y emisión. Consume exclusivamente el snapshot comercial validado por M2. */
+function crearPdfComercial(snapshot) {
+    const logo = cargarLogo(), paginas = snapshot.tipo === 'B2B' ? crearB2B(snapshot, logo) : crearB2C(snapshot, logo);
+    if (snapshot.camposPendientes?.length)
+        paginas[0].push(texto(38, 43, `Pendiente: ${snapshot.camposPendientes.join(', ')}`, 7, true, NARANJA));
+    paginas.forEach((pagina, indice) => pie(pagina, snapshot, indice, paginas.length));
+    const pdf = ensamblar(paginas, logo);
+    return { pdf, sha256: (0, node_crypto_1.createHash)('sha256').update(pdf).digest('hex'), paginas: paginas.length };
+}
+//# sourceMappingURL=MotorPdfComercial.js.map
