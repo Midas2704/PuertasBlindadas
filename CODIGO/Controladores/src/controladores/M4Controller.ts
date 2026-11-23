@@ -26,7 +26,10 @@ export const esAdministradorEfectivo = (cuenta: Pick<Cuenta,'administrador_origi
 export const configuracionEfectiva = (cuenta: Pick<Cuenta,'administrador_original'|'perfil'> & Partial<Pick<Cuenta,'acceso_m4'>>) =>
  esAdministradorRaiz(cuenta) ? 'gerencia' : (cuenta.perfil?.codigo_m4 || '');
 export const permisosEfectivos = (cuenta: Cuenta, catalogoRaiz?: string[]) => {
- if(esAdministradorRaiz(cuenta)) return [...new Set((catalogoRaiz || codigosImplementados).filter(codigo=>codigo!=='CU377'))];
+ if(esAdministradorRaiz(cuenta)) return [...new Set([
+  ...codigosAdministrador,
+  ...(catalogoRaiz || codigosImplementados),
+ ].filter(codigo=>codigo!=='CU377'))];
  if(cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia') return codigosAdministrador;
  const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
  return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || esAdministradorRaiz(cuenta))).map(p => p.codigo_m4!);

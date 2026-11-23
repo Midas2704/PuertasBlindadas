@@ -59,7 +59,10 @@ const configuracionEfectiva = (cuenta) => (0, exports.esAdministradorRaiz)(cuent
 exports.configuracionEfectiva = configuracionEfectiva;
 const permisosEfectivos = (cuenta, catalogoRaiz) => {
     if ((0, exports.esAdministradorRaiz)(cuenta))
-        return [...new Set((catalogoRaiz || permisos_1.codigosImplementados).filter(codigo => codigo !== 'CU377'))];
+        return [...new Set([
+                ...permisos_1.codigosAdministrador,
+                ...(catalogoRaiz || permisos_1.codigosImplementados),
+            ].filter(codigo => codigo !== 'CU377'))];
     if (cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia')
         return permisos_1.codigosAdministrador;
     const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);

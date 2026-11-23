@@ -81,7 +81,7 @@ test('regresión: Midas Gerencia conserva todos los CU activos aprobados y manti
   assert.deepEqual(segunda.asignados,[]);
   assert.equal(await auditoria.repositorio.cantidad(),1);
   assert.equal(cuenta.configuracion_particular,false);
-  assert.deepEqual(new Set(efectivos),new Set(activos));
+  for(const codigo of activos) assert.ok(efectivos.includes(codigo),codigo);
   for(const codigo of ['CU65','CU66','CU74','CU378','CU379','CU380','CU381']) assert.ok(efectivos.includes(codigo),codigo);
   for(const codigo of ['CU377','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(!efectivos.includes(codigo),codigo);
 });
@@ -98,6 +98,15 @@ test('la autorización raíz no depende de sincronizar asignaciones particulares
   for(const operacion of ['guardarCotizacion','emitirCotizacion','estadoDocumentalComercial','anularPago','revertirPago','generarComprobante','listarVisitasTerreno','listarMaterialesInventario']) assert.equal(permiteOperacion(operacion,efectivos),true,operacion);
   assert.equal(permiteOperacion('operacionInexistente',efectivos),false);
   assert.equal(esAdministradorRaiz({administrador_original:false,usuario_es_administrador:true}),false);
+});
+
+test('MIDAS une el catálogo de PostgreSQL con toda la matriz administrativa usada por el menú',()=>{
+  const cuenta={administrador_original:true,usuario_es_administrador:true,configuracion_particular:false,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares:[]};
+  const efectivos=permisosEfectivos(cuenta,['CU01','CU74','CU275','CU377']);
+  for(const codigo of ['CU01','CU74','CU275','CU355','CU359','CU360','CU381','CU446','CU447','CU449','CU451','CU458','CU459','CU461']) {
+    assert.ok(efectivos.includes(codigo),codigo);
+  }
+  assert.equal(efectivos.includes('CU377'),false);
 });
 
 test('Midas conserva semántica de Administrador y Gerencia aunque esos campos estén desalineados',()=>{
