@@ -565,6 +565,11 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   for(const [ruta,operacion] of Object.entries(acciones)) rutas.post(`/usuarios/${ruta}`,derivar(operacion));
   rutas.get('/sesiones',derivar('consultarSesiones'));
   rutas.post('/sesiones/cerrar',derivar('cerrarSesionAdministrativa'));
+  rutas.get('/administracion/integraciones',derivar('consultarIntegraciones'));
+  rutas.post('/administracion/integraciones/banco-central',derivar('guardarBancoCentral'));
+  rutas.post('/administracion/integraciones/banco-central/probar',derivar('probarBancoCentral'));
+  rutas.post('/administracion/integraciones/correo',derivar('guardarCorreoRecuperacion'));
+  rutas.post('/administracion/integraciones/correo/probar',derivar('probarCorreoRecuperacion'));
   rutas.post('/cotizaciones/:id/consolidar-b2c',derivar('consolidarB2C'));
   rutas.post('/notas-venta/:id/etapas-cobro',derivar('configurarEtapasCobro'));
   rutas.post('/clientes/formalizar',derivar('formalizarClienteB2C'));

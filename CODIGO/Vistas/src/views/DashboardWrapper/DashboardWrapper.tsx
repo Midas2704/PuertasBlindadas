@@ -118,7 +118,7 @@ const menuGroups: MenuGroupDefinition[] = [
     items: [
       { path: '/empleados', label: 'Empleados', icon: BriefcaseBusiness, permission: 'CU155' },
       { path: '/esquemas-remuneracionales', label: 'Esquemas y Haberes', icon: WalletCards, permissions: ['CU162', 'CU163', 'CU164', 'CU165', 'CU166'] },
-      { path: '/parametros-remuneraciones', label: 'Mantenedor de Parámetros', icon: Settings, permissions: ['CU167', 'CU168', 'CU169', 'CU170', 'CU171', 'CU246'] },
+      { path: '/parametros-remuneraciones', label: 'Valores y reglas', icon: Settings, permissions: ['CU167', 'CU168', 'CU169', 'CU170', 'CU171', 'CU246'] },
       { path: '/periodos-remuneracion', label: 'Períodos de Remuneración', icon: CalendarRange, permissions: ['CU178', 'CU181'] },
       { path: '/detalle-remuneracion', label: 'Detalle de Remuneración', icon: SearchCheck, permissions: ['CU172', 'CU173', 'CU174', 'CU175', 'CU176', 'CU177', 'CU179', 'CU180', 'CU182', 'CU183', 'CU184'] },
       { path: '/pagos-remuneraciones', label: 'Pagos de Remuneración', icon: Banknote, permissions: ['CU185', 'CU186', 'CU187', 'CU188', 'CU189', 'CU190'] },
@@ -128,10 +128,10 @@ const menuGroups: MenuGroupDefinition[] = [
   },
   {
     id: 'mantenedores',
-    label: 'Mantenedores',
+    label: 'Configuración',
     icon: Settings,
     items: [
-      { path: '/mantenedores', label: 'Panel de Mantenedores', icon: Settings, permissions: [...permisosAccesoMantenedores] },
+      { path: '/mantenedores', label: 'Opciones del sistema', icon: Settings, permissions: [...permisosAccesoMantenedores] },
     ],
   },
   {
@@ -142,6 +142,7 @@ const menuGroups: MenuGroupDefinition[] = [
       { path: '/auditoria', label: 'Auditoría', icon: ScrollText, permission: 'CU355' },
       { path: '/usuarios', label: 'Usuarios y Accesos', icon: UserCog, permission: 'CU67' },
       { path: '/sesiones', label: 'Sesiones', icon: ShieldCheck, permission: 'CU73' },
+      { path: '/administracion/integraciones', label: 'Conexiones externas', icon: Settings, permission: 'CU74' },
       { path: '/cuenta/clave', label: 'Mi contraseña', icon: ShieldCheck },
     ],
   },

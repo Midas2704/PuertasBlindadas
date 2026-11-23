@@ -510,6 +510,11 @@ class C_Finanzas {
                 case 'registrarUsuario': return this.m4.registrarUsuario(actor, cuerpo);
                 case 'consultarSesiones': return this.m4.consultarSesiones(actor);
                 case 'cerrarSesionAdministrativa': return this.m4.cerrarSesionAdministrativa(actor, cuerpo);
+                case 'consultarIntegraciones': return this.m4.consultarIntegraciones();
+                case 'guardarBancoCentral': return this.m4.guardarBancoCentral(actor, cuerpo);
+                case 'guardarCorreoRecuperacion': return this.m4.guardarCorreoRecuperacion(actor, cuerpo);
+                case 'probarBancoCentral': return this.m4.probarBancoCentral();
+                case 'probarCorreoRecuperacion': return this.m4.probarCorreoRecuperacion();
                 case 'desactivarUsuario':
                 case 'reactivarUsuario':
                 case 'cambiarConfiguracion':
@@ -847,4 +852,3 @@ class C_Finanzas {
     }
 }
 exports.C_Finanzas = C_Finanzas;
-//# sourceMappingURL=C_Finanzas.js.map

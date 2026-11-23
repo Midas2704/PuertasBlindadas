@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.M4Controller = exports.perfilPermitePersonalizacion = exports.requiereSincronizacionMidas = exports.permisosEfectivos = exports.configuracionEfectiva = exports.esAdministradorEfectivo = exports.esAdministradorRaiz = void 0;
 const client_1 = require("@prisma/client");
@@ -6,6 +39,7 @@ const db_1 = require("../db");
 const ErrorAplicacion_1 = require("../utilidades/ErrorAplicacion");
 const seguridad_1 = require("../utilidades/seguridad");
 const correo_1 = require("../utilidades/correo");
+const integracionesExternas_1 = require("../utilidades/integracionesExternas");
 const permisos_1 = require("../validaciones/permisos");
 const solicitudes_1 = require("../validaciones/solicitudes");
 const rut_1 = require("../utilidades/rut");
@@ -46,8 +80,9 @@ exports.perfilPermitePersonalizacion = perfilPermitePersonalizacion;
 /** Único controlador funcional M4 (CU59–CU74). Ningún otro módulo lo invoca. */
 // En seguridad vamos despacio; Midas tiene la última palabra acá.
 class M4Controller {
-    constructor(correo = new correo_1.CorreoDesarrollo()) {
+    constructor(correo = new correo_1.CorreoAplicacion()) {
         this.correo = correo;
+        this.integraciones = new integracionesExternas_1.ServicioIntegracionesExternas();
     }
     async transaccion(accion) {
         for (let intento = 0;; intento++) {
@@ -381,7 +416,6 @@ class M4Controller {
             await tx.token_recuperacion.create({ data: { id_usuario: cuenta.usuario_id_usuario, secreto_hash: (0, seguridad_1.huella)(token), vence: (0, seguridad_1.futuro)(seguridad_1.politica.recuperacionMinutos) } });
             envio = { correo: cuenta.usuario_correo, token };
         });
-        // TODO: revisar este enlace cuando dejemos de usar el buzón local
         if (envio)
             try {
                 await this.correo.enviar(envio.correo, `${process.env.M4_URL_VISTA || 'http://127.0.0.1:5174'}/recuperar#${envio.token}`);
@@ -391,6 +425,11 @@ class M4Controller {
             }
         return { mensaje: 'Si la cuenta está habilitada, recibirás las instrucciones en su correo asociado.' };
     }
+    async consultarIntegraciones() { return this.integraciones.consultar(); }
+    async guardarBancoCentral(actor, entrada) { return this.integraciones.guardarBancoCentral(entrada, actor.id); }
+    async guardarCorreoRecuperacion(actor, entrada) { return this.integraciones.guardarCorreo(entrada, actor.id); }
+    async probarBancoCentral() { const { C_BancoCentral } = await Promise.resolve().then(() => __importStar(require('../utilidades/C_BancoCentral'))); const valor = await new C_BancoCentral().obtenerTipoCambio('USD'); return { mensaje: 'Conexión con Banco Central verificada', valor }; }
+    async probarCorreoRecuperacion() { return this.integraciones.probarCorreo(); }
     async validarRecuperacion(entrada) {
         const recuperacion = await db_1.prisma.token_recuperacion.findUnique({ where: { secreto_hash: (0, seguridad_1.huella)((0, solicitudes_1.texto)(entrada.token, 200)) }, include: { usuario: { include: { seguridad: true } } } });
         if (!recuperacion || recuperacion.utilizado || recuperacion.vence <= new Date() || recuperacion.usuario.usuario_estado_cuenta !== 'activo' || (recuperacion.usuario.seguridad?.bloqueo_persistente && !recuperacion.usuario.administrador_original))
@@ -432,4 +471,3 @@ class M4Controller {
     }
 }
 exports.M4Controller = M4Controller;
-//# sourceMappingURL=M4Controller.js.map

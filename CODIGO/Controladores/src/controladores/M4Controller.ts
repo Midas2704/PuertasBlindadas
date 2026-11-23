@@ -2,7 +2,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { comprobarClave, hashClave, validarClave, secreto, huella, futuro, politica } from '../utilidades/seguridad';
-import { CorreoRecuperacion, CorreoDesarrollo } from '../utilidades/correo';
+import { CorreoRecuperacion, CorreoAplicacion } from '../utilidades/correo';
+import { ServicioIntegracionesExternas } from '../utilidades/integracionesExternas';
 import { codigosAdministrador, codigosImplementados, operacionesPermiso, operacionesQueRequierenAdministrador, permiteOperacion } from '../validaciones/permisos';
 import { texto } from '../validaciones/solicitudes';
 import { validarYNormalizarRut, variantesRut } from '../utilidades/rut';
@@ -44,7 +45,8 @@ export const perfilPermitePersonalizacion = (perfil: { activo_m4: boolean } | nu
 /** Único controlador funcional M4 (CU59–CU74). Ningún otro módulo lo invoca. */
 // En seguridad vamos despacio; Midas tiene la última palabra acá.
 export class M4Controller {
- constructor(private readonly correo: CorreoRecuperacion = new CorreoDesarrollo()) {}
+ private readonly integraciones = new ServicioIntegracionesExternas();
+ constructor(private readonly correo: CorreoRecuperacion = new CorreoAplicacion()) {}
  private async transaccion<T>(accion: (tx: Transaccion)=>Promise<T>): Promise<T> {
   for(let intento=0;;intento++) {
    try { return await prisma.$transaction(accion, {isolationLevel:Prisma.TransactionIsolationLevel.Serializable, timeout:30000}); }
@@ -279,10 +281,14 @@ export class M4Controller {
    const token=secreto();await tx.token_recuperacion.create({data:{id_usuario:cuenta.usuario_id_usuario,secreto_hash:huella(token),vence:futuro(politica.recuperacionMinutos)}});
    envio={correo:cuenta.usuario_correo,token};
   });
-  // TODO: revisar este enlace cuando dejemos de usar el buzón local
   if(envio) try { await this.correo.enviar(envio.correo,`${process.env.M4_URL_VISTA || 'http://127.0.0.1:5174'}/recuperar#${envio.token}`); } catch { console.error('M4: entrega de recuperación pendiente de proveedor/configuración'); }
   return {mensaje:'Si la cuenta está habilitada, recibirás las instrucciones en su correo asociado.'};
  }
+ async consultarIntegraciones() { return this.integraciones.consultar(); }
+ async guardarBancoCentral(actor:ActorAutenticado, entrada:Entrada) { return this.integraciones.guardarBancoCentral(entrada, actor.id); }
+ async guardarCorreoRecuperacion(actor:ActorAutenticado, entrada:Entrada) { return this.integraciones.guardarCorreo(entrada, actor.id); }
+ async probarBancoCentral() { const { C_BancoCentral } = await import('../utilidades/C_BancoCentral'); const valor = await new C_BancoCentral().obtenerTipoCambio('USD'); return {mensaje:'Conexión con Banco Central verificada',valor}; }
+ async probarCorreoRecuperacion() { return this.integraciones.probarCorreo(); }
  async validarRecuperacion(entrada:Entrada) {
   const recuperacion=await prisma.token_recuperacion.findUnique({where:{secreto_hash:huella(texto(entrada.token,200))},include:{usuario:{include:{seguridad:true}}}});
   if(!recuperacion || recuperacion.utilizado || recuperacion.vence<=new Date() || recuperacion.usuario.usuario_estado_cuenta!=='activo' || (recuperacion.usuario.seguridad?.bloqueo_persistente && !recuperacion.usuario.administrador_original)) return error(400,'Enlace de recuperación no válido');

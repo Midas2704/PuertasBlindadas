@@ -44,6 +44,7 @@ exports.operacionesPermiso = {
     usuarios: 'CU67', catalogosUsuarios: 'CU59', registrarUsuario: 'CU59', desactivarUsuario: 'CU60', reactivarUsuario: 'CU61',
     cambiarConfiguracion: 'CU62', asignarPermisos: 'CU63', guardarPermisosUsuario: 'CU63', retirarPermisos: 'CU64', asignarAdministrador: 'CU65', retirarAdministrador: 'CU66',
     restablecerClave: 'CU71', desbloquearUsuario: 'CU72', consultarSesiones: 'CU73', cerrarSesionAdministrativa: 'CU74',
+    consultarIntegraciones: 'CU74', guardarBancoCentral: 'CU74', guardarCorreoRecuperacion: 'CU74', probarBancoCentral: 'CU74', probarCorreoRecuperacion: 'CU74',
     crearProveedor: 'CU75', actualizarProveedor: 'CU76', corregirIdentidadProveedor: 'CU77', desactivarProveedor: 'CU78', reactivarProveedor: 'CU79',
     listarProveedores: 'CU80', abrirFichaProveedor: 'CU84', catalogosProveedores: 'CU80',
     actualizarCondicionPagoProveedor: 'CU87', listarOrdenesCompraServicios: 'CU88', obtenerOrdenCompraServicio: 'CU88', listarClientesB2BContextoOcs: 'CU89', crearOrdenCompraServicio: 'CU89', modificarOrdenCompraServicio: 'CU90',
@@ -321,4 +322,3 @@ const codigosDe = (perfil) => exports.codigosTodosLosCU.filter(codigo => !operac
 exports.codigosGerencia = [...codigosDe('gerencia'), 'CU355', 'CU359'];
 exports.codigosSecretaria = [...codigosDe('secretaria'), 'CU355'];
 exports.codigosContador = [...codigosDe('contador'), 'CU355', 'CU359'];
-//# sourceMappingURL=permisos.js.map

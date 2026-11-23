@@ -46,6 +46,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'iniciarSesion' | 'solicitarRecuperacion' | 'recuperarClave' | 'validarRecuperacion' | 'miSesion' | 'cambiarClave' | 'cerrarSesion'
   | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
   | 'asignarPermisos' | 'retirarPermisos' | 'guardarPermisosUsuario' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
+  | 'consultarIntegraciones' | 'guardarBancoCentral' | 'guardarCorreoRecuperacion' | 'probarBancoCentral' | 'probarCorreoRecuperacion'
   | 'crearProveedor' | 'actualizarProveedor' | 'corregirIdentidadProveedor' | 'desactivarProveedor' | 'reactivarProveedor' | 'listarProveedores' | 'abrirFichaProveedor' | 'catalogosProveedores'
   | 'actualizarCondicionPagoProveedor' | 'listarOrdenesCompraServicios' | 'obtenerOrdenCompraServicio' | 'listarClientesB2BContextoOcs' | 'crearOrdenCompraServicio' | 'modificarOrdenCompraServicio'
   | 'prepararAjusteOrdenCompraServicio' | 'confirmarAjusteOrdenCompraServicio' | 'anularOrdenCompraServicio' | 'cerrarOrdenCompraServicio' | 'reabrirOrdenCompraServicio'
@@ -582,6 +583,11 @@ export class C_Finanzas {
       case 'registrarUsuario': return this.m4.registrarUsuario(actor,cuerpo);
       case 'consultarSesiones': return this.m4.consultarSesiones(actor);
       case 'cerrarSesionAdministrativa': return this.m4.cerrarSesionAdministrativa(actor,cuerpo);
+      case 'consultarIntegraciones': return this.m4.consultarIntegraciones();
+      case 'guardarBancoCentral': return this.m4.guardarBancoCentral(actor,cuerpo);
+      case 'guardarCorreoRecuperacion': return this.m4.guardarCorreoRecuperacion(actor,cuerpo);
+      case 'probarBancoCentral': return this.m4.probarBancoCentral();
+      case 'probarCorreoRecuperacion': return this.m4.probarCorreoRecuperacion();
       case 'desactivarUsuario': case 'reactivarUsuario': case 'cambiarConfiguracion': case 'asignarPermisos': case 'retirarPermisos': case 'guardarPermisosUsuario':
       case 'asignarAdministrador': case 'retirarAdministrador': case 'restablecerClave': case 'desbloquearUsuario':
         return this.m4.modificarUsuario(operacion,actor,cuerpo);

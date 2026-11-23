@@ -83,6 +83,7 @@ import AgendaTerreno from './views/Terreno/AgendaTerreno';
 import InstalacionesTerreno from './views/Terreno/InstalacionesTerreno';
 import { permisosTerreno } from './seguridad/accesosSistemas';
 import EstadoSinConexion from './offline/EstadoSinConexion';
+import Integraciones from './views/Seguridad/Integraciones';
 
 const App: React.FC = () => {
   const modoDemostracion = import.meta.env.VITE_MODO_DEMOSTRACION === 'true';
@@ -111,6 +112,7 @@ const App: React.FC = () => {
         <Route element={<Protegido><DashboardWrapper /></Protegido>}>
           <Route path="usuarios" element={<Protegido permiso="CU67"><Usuarios/></Protegido>}/>
           <Route path="sesiones" element={<Protegido permiso="CU73"><Sesiones/></Protegido>}/>
+          <Route path="administracion/integraciones" element={<Protegido permiso="CU74"><Integraciones/></Protegido>}/>
           <Route path="cuenta/clave" element={<Acceso modo="clave"/>}/>
           <Route path="finanzas" element={<Protegido permiso="CU05"><DashboardPrincipal /></Protegido>} />
           <Route path="clientes" element={<Protegido permiso="CU05"><CatalogoClientes /></Protegido>} />

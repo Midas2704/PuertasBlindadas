@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { ServicioIntegracionesExternas } from './integracionesExternas';
 export interface CorreoRecuperacion { enviar(destinatario: string, enlace: string): Promise<void> }
 export interface CorreoDocumental {
  enviarDocumento(destinatario: string, asunto: string, archivo: { nombre: string; mime: string; contenido: string }): Promise<void>
@@ -19,5 +20,14 @@ export class CorreoDesarrollo implements CorreoRecuperacion, CorreoDocumental {
   const carpeta = resolve(__dirname, '../../../.revision/correo-desarrollo');
   await mkdir(carpeta, { recursive: true });
   await writeFile(resolve(carpeta, `${randomUUID()}.json`), JSON.stringify({ destinatario, asunto, archivo: { nombre: archivo.nombre, mime: archivo.mime }, creado: new Date().toISOString(), advertencia: 'Buzón documental de desarrollo; no fue enviado externamente' }, null, 2), { mode: 0o600 });
+ }
+}
+
+export class CorreoAplicacion implements CorreoRecuperacion {
+ private readonly integraciones = new ServicioIntegracionesExternas();
+ async enviar(destinatario: string, enlace: string) {
+  const token = enlace.includes('#') ? decodeURIComponent(enlace.slice(enlace.indexOf('#') + 1)) : '';
+  const enlaceConfigurado = token ? await this.integraciones.enlaceRecuperacion(token) : enlace;
+  await this.integraciones.enviarRecuperacion(destinatario, enlaceConfigurado);
  }
 }

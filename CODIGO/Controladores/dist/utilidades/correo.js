@@ -1,9 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CorreoDesarrollo = void 0;
+exports.CorreoAplicacion = exports.CorreoDesarrollo = void 0;
 const promises_1 = require("node:fs/promises");
 const node_path_1 = require("node:path");
 const node_crypto_1 = require("node:crypto");
+const integracionesExternas_1 = require("./integracionesExternas");
 /** Sustituible por el proveedor pendiente. El buzón local no es una ruta HTTP. */
 // Castaña approved: guardar el correo acá nos ayuda a probar sin enviar nada
 class CorreoDesarrollo {
@@ -23,4 +24,14 @@ class CorreoDesarrollo {
     }
 }
 exports.CorreoDesarrollo = CorreoDesarrollo;
-//# sourceMappingURL=correo.js.map
+class CorreoAplicacion {
+    constructor() {
+        this.integraciones = new integracionesExternas_1.ServicioIntegracionesExternas();
+    }
+    async enviar(destinatario, enlace) {
+        const token = enlace.includes('#') ? decodeURIComponent(enlace.slice(enlace.indexOf('#') + 1)) : '';
+        const enlaceConfigurado = token ? await this.integraciones.enlaceRecuperacion(token) : enlace;
+        await this.integraciones.enviarRecuperacion(destinatario, enlaceConfigurado);
+    }
+}
+exports.CorreoAplicacion = CorreoAplicacion;

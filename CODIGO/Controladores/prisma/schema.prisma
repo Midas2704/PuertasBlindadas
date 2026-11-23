@@ -5471,6 +5471,16 @@ model token_recuperacion {
   @@schema("comun")
 }
 
+/// Datos operativos de conexiones externas administrados desde el sistema.
+model configuracion_integracion_externa {
+  clave            String   @id @db.VarChar(40)
+  configuracion    Json
+  actualizado_en   DateTime @default(now()) @db.Timestamptz(6)
+  actualizado_por  BigInt?
+
+  @@schema("comun")
+}
+
 /// Evidencia técnica M9. La migración 044 impide UPDATE y DELETE ordinarios.
 model evento_auditoria_m9 {
   id_evento_m9         Int                   @id @default(autoincrement())
