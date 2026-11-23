@@ -115,9 +115,13 @@ export declare class M4Controller {
             apellido_paterno: string;
         }[];
         configuraciones: {
-            codigo_m4: string | null;
+            codigo_m4: string;
+            perfil_nombre_perfil: string;
+            perfil_descripcion: string | null;
             admite_particulares: boolean;
-            perfil_nombre_perfil: string | null;
+            permisos: string[];
+            usuariosAsignados: number;
+            editable: boolean;
         }[];
         permisos: import("../seguridad/catalogoPermisosFuncional").PermisoFuncionalM4[];
         dependencias: {
@@ -126,6 +130,13 @@ export declare class M4Controller {
         }[];
     }>;
     private validarPermisos;
+    guardarPerfilAcceso(actor: ActorAutenticado, entrada: Entrada): Promise<{
+        mensaje: string;
+        perfil: {
+            codigo: string | null;
+            nombre: string;
+        };
+    }>;
     registrarUsuario(actor: ActorAutenticado, entrada: Entrada): Promise<{
         mensaje: string;
         id: string;

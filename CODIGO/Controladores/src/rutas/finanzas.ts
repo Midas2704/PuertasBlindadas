@@ -560,6 +560,7 @@ export function crearRutasFinanzas(fachada: C_Finanzas) {
   rutas.post('/seguridad/clave',derivar('cambiarClave'));
   rutas.get('/usuarios',derivar('usuarios'));
   rutas.get('/usuarios/catalogos',derivar('catalogosUsuarios'));
+  rutas.post('/usuarios/perfiles',derivar('guardarPerfilAcceso'));
   rutas.post('/usuarios',derivar('registrarUsuario'));
   const acciones = {desactivar:'desactivarUsuario',reactivar:'reactivarUsuario',configuracion:'cambiarConfiguracion',asignar:'asignarPermisos',retirar:'retirarPermisos',permisos:'guardarPermisosUsuario',administrador:'asignarAdministrador','retirar-administrador':'retirarAdministrador',restablecer:'restablecerClave',desbloquear:'desbloquearUsuario'} as const;
   for(const [ruta,operacion] of Object.entries(acciones)) rutas.post(`/usuarios/${ruta}`,derivar(operacion));

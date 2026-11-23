@@ -44,7 +44,7 @@ export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' 
   | 'consultarPago' | 'consultarSaldo' | 'catalogosPago'
   | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'obtenerPlanificacionAprobacionCotizacion' | 'consultarTrazabilidadComercialM11' | 'consultarCadenaDocumentalM11' | 'consultarConciliacionDocumentalM11' | 'gestionarCorreccionDocumentalM11' | 'consultarHistorialCorreccionM11' | 'resolverHallazgoDocumentalM11' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'seleccionarAlternativaB2C' | 'aceptarAlternativaB2C' | 'rechazarAlternativaB2C' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
   | 'iniciarSesion' | 'solicitarRecuperacion' | 'recuperarClave' | 'validarRecuperacion' | 'miSesion' | 'cambiarClave' | 'cerrarSesion'
-  | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
+  | 'usuarios' | 'catalogosUsuarios' | 'registrarUsuario' | 'guardarPerfilAcceso' | 'desactivarUsuario' | 'reactivarUsuario' | 'cambiarConfiguracion'
   | 'asignarPermisos' | 'retirarPermisos' | 'guardarPermisosUsuario' | 'asignarAdministrador' | 'retirarAdministrador' | 'restablecerClave' | 'desbloquearUsuario' | 'consultarSesiones' | 'cerrarSesionAdministrativa'
   | 'consultarIntegraciones' | 'guardarBancoCentral' | 'guardarCorreoRecuperacion' | 'probarBancoCentral' | 'probarCorreoRecuperacion'
   | 'crearProveedor' | 'actualizarProveedor' | 'corregirIdentidadProveedor' | 'desactivarProveedor' | 'reactivarProveedor' | 'listarProveedores' | 'abrirFichaProveedor' | 'catalogosProveedores'
@@ -581,6 +581,7 @@ export class C_Finanzas {
       case 'usuarios': return this.m4.usuarios();
       case 'catalogosUsuarios': return this.m4.catalogosUsuarios();
       case 'registrarUsuario': return this.m4.registrarUsuario(actor,cuerpo);
+      case 'guardarPerfilAcceso': return this.m4.guardarPerfilAcceso(actor,cuerpo);
       case 'consultarSesiones': return this.m4.consultarSesiones(actor);
       case 'cerrarSesionAdministrativa': return this.m4.cerrarSesionAdministrativa(actor,cuerpo);
       case 'consultarIntegraciones': return this.m4.consultarIntegraciones();

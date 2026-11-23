@@ -19,6 +19,10 @@ export interface ActorAutenticado { id: bigint; sesion: string; permisos: string
 const error = (estado: number, mensaje: string): never => { throw new ErrorAplicacion(estado,mensaje); };
 const idCuenta = (valor: unknown) => { if (!/^\d+$/.test(String(valor))) return error(400,'Usuario inválido'); return BigInt(String(valor)); };
 const confirmar = (entrada: Entrada) => { if (entrada.confirmado !== true) error(400,'Debes confirmar la operación'); };
+const perfilesBase = new Set(['gerencia','contador','secretaria']);
+const permisosInventarioAsignables = ['CU466','CU467','CU468','CU469','CU470','CU471','CU472'];
+const permisoAsignable = (permiso:{codigo_m4:string|null;activo_m4:boolean}) => !!permiso.codigo_m4 && permiso.codigo_m4!=='CU377' && (permiso.activo_m4 || permisosInventarioAsignables.includes(permiso.codigo_m4));
+const codigoPerfil = (nombre:string) => nombre.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,60);
 type IdentidadRaiz = Pick<Cuenta,'administrador_original'> & Partial<Pick<Cuenta,'acceso_m4'>>;
 export const esAdministradorRaiz = (cuenta: IdentidadRaiz) => cuenta.administrador_original === true || cuenta.acceso_m4?.replace(/\./g,'').toLowerCase() === ACCESO_CUENTA_RAIZ;
 export const esAdministradorEfectivo = (cuenta: Pick<Cuenta,'administrador_original'|'usuario_es_administrador'> & Partial<Pick<Cuenta,'acceso_m4'>>) =>
@@ -32,7 +36,7 @@ export const permisosEfectivos = (cuenta: Cuenta, catalogoRaiz?: string[]) => {
  ].filter(codigo=>codigo!=='CU377'))];
  if(cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia') return codigosAdministrador;
  const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
- return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || esAdministradorRaiz(cuenta))).map(p => p.codigo_m4!);
+ return permisos.filter(p => permisoAsignable(p) && (!p.requiere_administrador || cuenta.usuario_es_administrador || esAdministradorRaiz(cuenta))).map(p => p.codigo_m4!);
 };
 /** La autorización raíz no depende de materializar asignaciones particulares. */
 export const requiereSincronizacionMidas = () => false;
@@ -174,17 +178,45 @@ export class M4Controller {
  async catalogosUsuarios() {
   const [empleados,configuraciones,permisos,dependencias]=await Promise.all([
    prisma.empleado.findMany({where:{estado_laboral:'activo',cuenta_m4:null,usuario:{none:{}}},select:{rut_empleado:true,nombres:true,apellido_paterno:true}}),
-   prisma.perfil.findMany({where:{activo_m4:true},select:{codigo_m4:true,perfil_nombre_perfil:true,admite_particulares:true}}),
-   prisma.permiso.findMany({where:{activo_m4:true,codigo_m4:{not:null,notIn:['CU377']}},select:{codigo_m4:true,permiso_descripcion:true,requiere_administrador:true,activo_m4:true},orderBy:{codigo_m4:'asc'}}),
+   prisma.perfil.findMany({where:{activo_m4:true,codigo_m4:{not:null}},select:{codigo_m4:true,perfil_nombre_perfil:true,perfil_descripcion:true,admite_particulares:true,perfil_permiso:{where:{perfil_permiso_activo:true},select:{permiso:{select:{codigo_m4:true,activo_m4:true}}}},_count:{select:{usuario:true}}},orderBy:{perfil_nombre_perfil:'asc'}}),
+   prisma.permiso.findMany({where:{codigo_m4:{not:null,notIn:['CU377']},OR:[{activo_m4:true},{codigo_m4:{in:permisosInventarioAsignables}}]},select:{codigo_m4:true,permiso_descripcion:true,requiere_administrador:true,activo_m4:true},orderBy:{codigo_m4:'asc'}}),
    prisma.permiso_dependencia.findMany({include:{permiso:{select:{codigo_m4:true}},requerido:{select:{codigo_m4:true}}}})]);
-  return {empleados,configuraciones,permisos:permisos.map(p=>clasificarPermisoM4({codigo:p.codigo_m4!,descripcion:p.permiso_descripcion,activo:p.activo_m4,requiereAdministrador:p.requiere_administrador})),dependencias:dependencias.filter(d=>d.permiso.codigo_m4!=='CU377'&&d.requerido.codigo_m4!=='CU377').map(d=>({permiso:d.permiso.codigo_m4!,requiere:d.requerido.codigo_m4!}))};
+  return {empleados,configuraciones:configuraciones.map(p=>({codigo_m4:p.codigo_m4!,perfil_nombre_perfil:p.perfil_nombre_perfil||p.codigo_m4!,perfil_descripcion:p.perfil_descripcion,admite_particulares:p.admite_particulares,permisos:p.perfil_permiso.map(v=>v.permiso).filter(permisoAsignable).map(v=>v.codigo_m4!),usuariosAsignados:p._count.usuario,editable:!perfilesBase.has(p.codigo_m4!)})),permisos:permisos.map(p=>{const numero=Number(p.codigo_m4?.slice(2));return clasificarPermisoM4({codigo:p.codigo_m4!,descripcion:p.permiso_descripcion,activo:permisoAsignable(p),requiereAdministrador:p.requiere_administrador||numero>=59&&numero<=74})}),dependencias:dependencias.filter(d=>d.permiso.codigo_m4!=='CU377'&&d.requerido.codigo_m4!=='CU377').map(d=>({permiso:d.permiso.codigo_m4!,requiere:d.requerido.codigo_m4!}))};
  }
  private async validarPermisos(tx:Transaccion,codigos:string[],administrador=false) {
   if(codigos.includes('CU377')) error(400,'CU377 no está aprobado para asignación');
-  const seleccion=await tx.permiso.findMany({where:{codigo_m4:{in:codigos},activo_m4:true},include:{dependencias:{include:{requerido:true}}}});
-  if(seleccion.length!==new Set(codigos).size || seleccion.some(p=>{const numero=Number(p.codigo_m4?.slice(2));return (p.requiere_administrador || numero>=59&&numero<=74)&&!administrador;})) error(400,'Permiso no asignable');
+  const seleccion=await tx.permiso.findMany({where:{codigo_m4:{in:codigos}},include:{dependencias:{include:{requerido:true}}}});
+  if(seleccion.length!==new Set(codigos).size || seleccion.some(p=>!permisoAsignable(p) || ((p.requiere_administrador || Number(p.codigo_m4?.slice(2))>=59&&Number(p.codigo_m4?.slice(2))<=74)&&!administrador))) error(400,'Permiso no asignable');
   if(seleccion.some(p=>p.dependencias.some(d=>!codigos.includes(d.requerido.codigo_m4!)))) error(409,'No se puede mantener un permiso sin sus dependencias');
   return seleccion;
+ }
+ async guardarPerfilAcceso(actor:ActorAutenticado,entrada:Entrada) {
+  confirmar(entrada);
+  const nombre=texto(entrada.nombre,150);const descripcion=texto(entrada.descripcion,1000)||null;
+  if(!nombre) error(400,'El nombre del perfil es obligatorio');
+  if(!Array.isArray(entrada.permisos) || !entrada.permisos.length) error(400,'Selecciona al menos un permiso para el perfil');
+  const codigos=[...new Set((entrada.permisos as unknown[]).map(p=>texto(p)))];
+  return this.transaccion(async tx=>{
+   const codigoExistente=texto(entrada.codigo,80);
+   const existente=codigoExistente?await tx.perfil.findUnique({where:{codigo_m4:codigoExistente},include:{perfil_permiso:{where:{perfil_permiso_activo:true},include:{permiso:true}}}}):null;
+   if(codigoExistente&&!existente) error(404,'Perfil no encontrado');
+   if(existente&&perfilesBase.has(existente.codigo_m4||'')) error(409,'Los perfiles base del sistema están protegidos');
+   const actuales=existente?.perfil_permiso.map(v=>v.permiso.codigo_m4).filter((v):v is string=>!!v)||[];
+   const agregados=codigos.filter(c=>!actuales.includes(c));const retirados=actuales.filter(c=>!codigos.includes(c));
+   if(agregados.length&&!actor.permisos.includes('CU63')) error(403,'Asignar permisos al perfil requiere autorización administrativa');
+   if(retirados.length&&!actor.permisos.includes('CU64')) error(403,'Retirar permisos del perfil requiere autorización administrativa');
+   const permisos=await this.validarPermisos(tx,codigos,actor.administrador);
+   let perfil=existente;
+   if(perfil) perfil=await tx.perfil.update({where:{perfil_id_perfil:perfil.perfil_id_perfil},data:{perfil_nombre_perfil:nombre,perfil_descripcion:descripcion,admite_particulares:entrada.admiteParticulares===true}}) as typeof existente;
+   else {
+    const base=codigoPerfil(nombre);if(!base) error(400,'El nombre no permite generar un identificador de perfil');
+    let codigo=base;for(let sufijo=2;await tx.perfil.findUnique({where:{codigo_m4:codigo}});sufijo++)codigo=`${base.slice(0,55)}_${sufijo}`;
+    perfil=await tx.perfil.create({data:{codigo_m4:codigo,activo_m4:true,perfil_nombre_perfil:nombre,perfil_descripcion:descripcion,admite_particulares:entrada.admiteParticulares===true}}) as typeof existente;
+   }
+   await tx.perfil_permiso.deleteMany({where:{perfil_id_perfil:perfil!.perfil_id_perfil}});
+   await tx.perfil_permiso.createMany({data:permisos.map(p=>({perfil_id_perfil:perfil!.perfil_id_perfil,permiso_id_permiso:p.permiso_id_permiso,perfil_permiso_activo:true}))});
+   return {mensaje:existente?'Perfil actualizado':'Perfil creado',perfil:{codigo:perfil!.codigo_m4,nombre}};
+  });
  }
  async registrarUsuario(actor:ActorAutenticado,entrada:Entrada) {
   confirmar(entrada);

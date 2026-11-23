@@ -14,7 +14,10 @@ const permisos=[
  {codigo:'CU63',area:'Usuarios y Seguridad',accion:'Asignar permisos particulares',descripcion:'Configura accesos',activo:true,requiereAdministrador:true},
  {codigo:'CU378',area:'Documentos Comerciales',accion:'Crear y editar plantillas documentales',descripcion:'Gestiona borradores',activo:true,requiereAdministrador:false},
 ];
-const catalogo={empleados:[],configuraciones:[{codigo_m4:'secretaria',perfil_nombre_perfil:'Secretaría',admite_particulares:true},{codigo_m4:'gerencia',perfil_nombre_perfil:'Gerencia',admite_particulares:false}],permisos,dependencias:[{permiso:'CU02',requiere:'CU05'}]};
+const catalogo={empleados:[],configuraciones:[
+ {codigo_m4:'secretaria',perfil_nombre_perfil:'Secretaría',perfil_descripcion:'Atención y operación',admite_particulares:true,permisos:['CU05'],usuariosAsignados:2,editable:false},
+ {codigo_m4:'gerencia',perfil_nombre_perfil:'Gerencia',perfil_descripcion:'Administración general',admite_particulares:false,permisos:['CU05','CU02'],usuariosAsignados:1,editable:false},
+],permisos,dependencias:[{permiso:'CU02',requiere:'CU05'}]};
 const normal={id:'2',nombre:'Ana Operaciones',acceso:'ana',correo:'ana@example.invalid',estado:'activo',configuracion:'secretaria',configuracionParticular:false,administrador:false,original:false,bloqueada:false,permisos:['CU05'],permisosParticulares:[],permisosPerfil:['CU05']};
 const midas={...normal,id:'1',nombre:'Midas',acceso:'20776101-k',configuracion:'gerencia',configuracionParticular:true,administrador:true,original:true,permisos:['CU05','CU02','CU63','CU378'],permisosParticulares:['CU05','CU02','CU63','CU378'],permisosPerfil:[]};
 const gerencia={...normal,id:'3',nombre:'Gerencia Operativa',acceso:'gerencia',configuracion:'gerencia'};
@@ -61,5 +64,12 @@ describe('Administrador funcional de permisos M4',()=>{
   expect(screen.getByText((_,elemento)=>elemento?.tagName==='P'&&elemento.textContent?.includes('utiliza todos los permisos activos y aprobados')===true)).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'Guardar cambios'})).not.toBeInTheDocument();
   expect(screen.getByLabelText('Asignar permisos particulares')).toBeChecked();expect(screen.getByLabelText('Asignar permisos particulares')).toBeDisabled();
+ });
+ it('crea un perfil reutilizable con permisos de distintas áreas',async()=>{
+  render(<Usuarios/>);await screen.findByRole('heading',{name:'Perfiles de acceso reutilizables'});fireEvent.click(screen.getByRole('button',{name:'Crear perfil'}));
+  fireEvent.change(screen.getByPlaceholderText('Ej. JOP'),{target:{value:'JOP'}});fireEvent.click(screen.getByText('Clientes').closest('details')!);fireEvent.click(screen.getByText('Documentos Comerciales').closest('details')!);
+  fireEvent.click(screen.getByText('Crear y editar plantillas documentales').closest('label')!.querySelector('input')!);fireEvent.click(screen.getByText('Ver y buscar clientes').closest('label')!.querySelector('input')!);
+  fireEvent.click(screen.getByRole('button',{name:'Guardar perfil'}));
+  await waitFor(()=>expect(operar).toHaveBeenCalledWith('/usuarios/perfiles',expect.objectContaining({nombre:'JOP',permisos:expect.arrayContaining(['CU05','CU378']),confirmado:true})));
  });
 });

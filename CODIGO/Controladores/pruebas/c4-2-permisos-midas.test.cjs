@@ -41,7 +41,7 @@ test('sincronización Midas asigna todo CU registrado y la segunda ejecución es
   const evento=(await auditoria.repositorio.listarTodo({}))[0];assert.equal(evento.operacion,'SINCRONIZAR_PERMISOS_MIDAS');assert.notEqual(evento.hashContenido,evento.hashIntegridad);assert.doesNotThrow(()=>auditoria.receptor.verificarIntegridad(evento));
 });
 
-test('regresión: Midas Gerencia conserva todos los CU activos aprobados y mantiene inactivos en reserva',async()=>{
+test('regresión: Midas conserva todo y los permisos operativos de Inventario ya son asignables',async()=>{
   const codigos=[
     ...Array.from({length:72},(_,indice)=>`CU${String(indice+1).padStart(2,'0')}`),
     'CU74','CU355','CU359','CU360','CU377','CU378','CU379','CU380','CU381',
@@ -72,8 +72,8 @@ test('regresión: Midas Gerencia conserva todos los CU activos aprobados y manti
   const primera=await sincronizarPermisosMidas(tx,99n,auditoria.productor);
   const segunda=await sincronizarPermisosMidas(tx,99n,auditoria.productor);
   const particulares=catalogo.map(permiso=>({permiso}));
-  const activos=codigos.filter(codigo=>codigo!=='CU377'&&!['CU466','CU467','CU468','CU469','CU470','CU471','CU472'].includes(codigo));
-  const efectivos=permisosEfectivos({...cuenta,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares},activos);
+  const catalogoEfectivo=codigos.filter(codigo=>codigo!=='CU377');
+  const efectivos=permisosEfectivos({...cuenta,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares},catalogoEfectivo);
 
   assert.equal(originales.size,76);
   for(const id of originales) assert.ok(asignados.has(id));
@@ -81,9 +81,10 @@ test('regresión: Midas Gerencia conserva todos los CU activos aprobados y manti
   assert.deepEqual(segunda.asignados,[]);
   assert.equal(await auditoria.repositorio.cantidad(),1);
   assert.equal(cuenta.configuracion_particular,false);
-  for(const codigo of activos) assert.ok(efectivos.includes(codigo),codigo);
+  for(const codigo of catalogoEfectivo) assert.ok(efectivos.includes(codigo),codigo);
   for(const codigo of ['CU65','CU66','CU74','CU378','CU379','CU380','CU381']) assert.ok(efectivos.includes(codigo),codigo);
-  for(const codigo of ['CU377','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(!efectivos.includes(codigo),codigo);
+  assert.ok(!efectivos.includes('CU377'));
+  for(const codigo of ['CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(efectivos.includes(codigo),codigo);
 });
 
 test('la autorización raíz no depende de sincronizar asignaciones particulares',()=>{

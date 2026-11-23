@@ -508,6 +508,7 @@ class C_Finanzas {
                 case 'usuarios': return this.m4.usuarios();
                 case 'catalogosUsuarios': return this.m4.catalogosUsuarios();
                 case 'registrarUsuario': return this.m4.registrarUsuario(actor, cuerpo);
+                case 'guardarPerfilAcceso': return this.m4.guardarPerfilAcceso(actor, cuerpo);
                 case 'consultarSesiones': return this.m4.consultarSesiones(actor);
                 case 'cerrarSesionAdministrativa': return this.m4.cerrarSesionAdministrativa(actor, cuerpo);
                 case 'consultarIntegraciones': return this.m4.consultarIntegraciones();
@@ -852,3 +853,4 @@ class C_Finanzas {
     }
 }
 exports.C_Finanzas = C_Finanzas;
+//# sourceMappingURL=C_Finanzas.js.map

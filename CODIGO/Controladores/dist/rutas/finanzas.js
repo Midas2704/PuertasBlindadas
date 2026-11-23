@@ -564,6 +564,7 @@ function crearRutasFinanzas(fachada) {
     rutas.post('/seguridad/clave', derivar('cambiarClave'));
     rutas.get('/usuarios', derivar('usuarios'));
     rutas.get('/usuarios/catalogos', derivar('catalogosUsuarios'));
+    rutas.post('/usuarios/perfiles', derivar('guardarPerfilAcceso'));
     rutas.post('/usuarios', derivar('registrarUsuario'));
     const acciones = { desactivar: 'desactivarUsuario', reactivar: 'reactivarUsuario', configuracion: 'cambiarConfiguracion', asignar: 'asignarPermisos', retirar: 'retirarPermisos', permisos: 'guardarPermisosUsuario', administrador: 'asignarAdministrador', 'retirar-administrador': 'retirarAdministrador', restablecer: 'restablecerClave', desbloquear: 'desbloquearUsuario' };
     for (const [ruta, operacion] of Object.entries(acciones))
@@ -582,3 +583,4 @@ function crearRutasFinanzas(fachada) {
     rutas.post('/pagos', derivar('registrarPago'));
     return rutas;
 }
+//# sourceMappingURL=finanzas.js.map

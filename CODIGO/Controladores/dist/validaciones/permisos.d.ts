@@ -1,4 +1,4 @@
-/** Catálogo técnico de operaciones implementadas. Los perfiles no se editan desde la interfaz. */
+/** Catálogo técnico de operaciones implementadas. */
 export declare const operacionesPermiso: Record<string, string>;
 export declare const permisosDeOperacion: (operacion: string) => string[];
 export declare const permiteOperacion: (operacion: string, permisos: string[]) => boolean;

@@ -61,6 +61,8 @@ const nombresExplicitos: Record<string, string> = {
   CU446:'Consultar ventas y comparaciones ampliadas', CU447:'Exportar Excel de ventas y cotizaciones',
   CU449:'Consultar resultados gerenciales ampliados', CU451:'Administrar presupuestos manuales',
   CU458:'Gestionar correcciones documentales', CU459:'Conciliar operación documental', CU461:'Resolver discrepancias documentales',
+  CU466:'Registrar entrada de inventario', CU467:'Registrar salida de inventario', CU468:'Crear reserva de inventario', CU469:'Liberar reserva de inventario',
+  CU470:'Ajustar existencias de inventario', CU471:'Administrar materiales de inventario', CU472:'Administrar bodegas y ubicaciones',
 };
 
 const primeraOperacionPorCodigo = new Map<string,string>();
@@ -93,6 +95,7 @@ export const areaPermisoM4 = (codigo: string): AreaFuncionalM4 => {
   if(numero>=215&&numero<=246)return 'Dashboard y Gestión Financiera';
   if(numero>=247&&numero<=253)return 'Órdenes de Trabajo y Producción';
   if(numero>=254&&numero<=258)return 'Inventario';
+  if(numero>=466&&numero<=472)return 'Inventario';
   if(numero>=259&&numero<=274)return 'Crédito';
   if(numero===355||numero===359)return 'Auditoría';
   if(numero>=368&&numero<=372)return 'Precios y Condiciones Comerciales';
