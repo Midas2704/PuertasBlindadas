@@ -14,8 +14,10 @@ const seguridad_1 = require("../m9/seguridad");
  */
 async function sincronizarPermisosMidas(tx, actorId, productorM9 = new contratoProductor_1.ProductorAuditoriaM9(new M9Controller_1.M9Controller({ repositorio: new RepositorioAuditoriaM9_1.RepositorioAuditoriaM9Prisma(tx) }))) {
     const cuenta = await tx.usuario.findUnique({ where: { acceso_m4: cuentaRaiz_1.ACCESO_CUENTA_RAIZ } });
-    if (!cuenta || !cuenta.administrador_original)
-        throw new Error('La cuenta interna Midas no pudo identificarse inequívocamente');
+    // acceso_m4 es único y constituye la identidad permanente de MIDAS. El
+    // arranque no depende de campos de perfil que puedan quedar desalineados.
+    if (!cuenta)
+        throw new Error('La cuenta interna Midas no pudo identificarse por su acceso permanente');
     const excluidos = [];
     const catalogo = await tx.permiso.findMany({
         where: { codigo_m4: { not: null } },

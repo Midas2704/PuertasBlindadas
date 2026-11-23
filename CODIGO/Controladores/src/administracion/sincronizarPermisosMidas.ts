@@ -26,7 +26,9 @@ export async function sincronizarPermisosMidas(
   productorM9 = new ProductorAuditoriaM9(new M9Controller({ repositorio: new RepositorioAuditoriaM9Prisma(tx) })),
 ): Promise<ResumenSincronizacionMidas> {
   const cuenta = await tx.usuario.findUnique({ where: { acceso_m4: ACCESO_CUENTA_RAIZ } });
-  if (!cuenta || !cuenta.administrador_original) throw new Error('La cuenta interna Midas no pudo identificarse inequívocamente');
+  // acceso_m4 es único y constituye la identidad permanente de MIDAS. El
+  // arranque no depende de campos de perfil que puedan quedar desalineados.
+  if (!cuenta) throw new Error('La cuenta interna Midas no pudo identificarse por su acceso permanente');
 
   const excluidos: string[] = [];
   const catalogo = await tx.permiso.findMany({

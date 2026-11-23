@@ -101,6 +101,13 @@ test('la autorización raíz no depende de sincronizar asignaciones particulares
   assert.equal(esAdministradorRaiz({administrador_original:false,usuario_es_administrador:true}),false);
 });
 
+test('la sincronización de arranque identifica MIDAS por su acceso único y no por su perfil materializado',()=>{
+  const sincronizador=fs.readFileSync('src/administracion/sincronizarPermisosMidas.ts','utf8');
+  assert.match(sincronizador,/findUnique\(\{ where: \{ acceso_m4: ACCESO_CUENTA_RAIZ \} \}\)/);
+  assert.doesNotMatch(sincronizador,/!cuenta\.administrador_original|!cuenta \|\| !cuenta\.administrador_original/);
+  assert.doesNotMatch(sincronizador,/perfil_id_perfil|configuracion_particular\s*:/);
+});
+
 test('MIDAS une el catálogo de PostgreSQL con toda la matriz administrativa usada por el menú',()=>{
   const cuenta={administrador_original:true,usuario_es_administrador:true,configuracion_particular:false,perfil:{codigo_m4:'gerencia',perfil_permiso:[]},particulares:[]};
   const efectivos=permisosEfectivos(cuenta,['CU01','CU74','CU275','CU377']);
