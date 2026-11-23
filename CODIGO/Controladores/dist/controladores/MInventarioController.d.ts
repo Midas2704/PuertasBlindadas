@@ -52,6 +52,9 @@ export declare class MInventarioController {
         unidad: string | null;
         categoria: string | null;
         categoriaFuncional: string | null;
+        stockFisico: string;
+        stockReservado: string;
+        stockDisponible: string;
         codigosBarras: string[];
         existencias: {
             bodegaId: string | null;
@@ -123,6 +126,7 @@ export declare class MInventarioController {
             bodega: string | null;
             tipo: string | null;
             motivo: string | null;
+            motivoCatalogo: string | null;
         }[];
     }>;
     listarReservas(consulta?: Consulta): Promise<{

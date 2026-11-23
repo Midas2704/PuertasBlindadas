@@ -38,8 +38,18 @@ describe('Inventario integrado',()=>{
     }:{total:1,items:[{sku:'MAT-01',nombre:'Acero',descripcion:'Plancha',estado:'activo',critico:false,unidad:'unidad',categoria:'Metales',stockFisico:'10.0004',stockReservado:'2',stockDisponible:'8.0004'}]});
     const usuario=userEvent.setup();render(<MemoryRouter><MaterialesInventario/></MemoryRouter>);
     await usuario.click(await screen.findByRole('button',{name:'Acero'}));
-    expect(await screen.findByRole('dialog',{name:'Detalle de material'})).toHaveTextContent('Central');
+    const dialogo=await screen.findByRole('dialog',{name:'Detalle de material'});
+    expect(dialogo).toHaveTextContent('Central');
+    expect(dialogo).toHaveTextContent('10,0004');
     expect(screen.queryByRole('button',{name:/crear|editar|eliminar/i})).not.toBeInTheDocument();
+  });
+  it('pagina el catálogo y aclara que el total incluye más filas',async()=>{
+    vi.mocked(consultarInventario).mockImplementation(async ruta=>({pagina:String(ruta).includes('pagina=2')?2:1,tamano:25,total:30,items:[]}));
+    const usuario=userEvent.setup();render(<MemoryRouter><MaterialesInventario/></MemoryRouter>);
+    expect(await screen.findByText('Mostrando 1–25 de 30 materiales')).toBeInTheDocument();
+    await usuario.click(screen.getByRole('button',{name:'Página siguiente'}));
+    expect(await screen.findByText('Mostrando 26–30 de 30 materiales')).toBeInTheDocument();
+    expect(consultarInventario).toHaveBeenLastCalledWith('/materiales?busqueda=&pagina=2&tamano=25');
   });
   it('bodegas presenta cada unidad por separado',async()=>{
     vi.mocked(consultarInventario).mockResolvedValue([{id:'1',nombre:'Central',direccion:null,estado:'activa',anaqueles:2,materiales:2,existenciasPorUnidad:[
@@ -58,5 +68,12 @@ describe('Inventario integrado',()=>{
     vi.mocked(consultarInventario).mockRejectedValueOnce(new Error('Consulta rechazada'));
     render(<MemoryRouter><ListadosInventario tipo="reservas"/></MemoryRouter>);
     expect(await screen.findByRole('alert')).toHaveTextContent('Consulta rechazada');
+  });
+  it('no renderiza movimientos con la forma de bodegas al navegar',async()=>{
+    vi.mocked(consultarInventario).mockResolvedValueOnce({items:[{id:'1',fecha:null,tipo:'Entrada',material:'Acero',sku:'MAT-01',bodega:'Central',cantidad:'1',estado:'confirmado',motivo:'Recepción'}]}).mockResolvedValueOnce([{id:'2',nombre:'Norte',direccion:null,estado:'activa',anaqueles:0,materiales:0,existenciasPorUnidad:[]}]);
+    const vista=render(<MemoryRouter><ListadosInventario tipo="movimientos"/></MemoryRouter>);
+    expect(await screen.findByText('Recepción')).toBeInTheDocument();
+    vista.rerender(<MemoryRouter><ListadosInventario tipo="bodegas"/></MemoryRouter>);
+    expect(await screen.findByText('Norte')).toBeInTheDocument();
   });
 });

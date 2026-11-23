@@ -56,6 +56,7 @@ test('detalle conserva existencias por bodega y lote, incluido disponible cero',
   ];
   const salida=await new MInventarioController({material:{findUnique:async()=>fila}}).obtenerMaterial('MAT-01');
   assert.deepEqual(salida.existencias.map(x=>[x.bodega,x.lote,x.disponible]),[['Central','L-1','0'],['Norte','L-2','3.0004']]);
+  assert.deepEqual([salida.stockFisico,salida.stockReservado,salida.stockDisponible],['10.0004','7','3.0004']);
   await assert.rejects(()=>new MInventarioController({material:{findUnique:async()=>null}}).obtenerMaterial('NO-EXISTE'),/Material no encontrado/);
 });
 
@@ -71,18 +72,22 @@ test('bodegas separan existencias por unidad y no crean total engañoso', async 
 
 test('movimientos, reservas y alertas conservan paginación y datos incompletos', async () => {
   const db={
-    movimiento_inventario:{count:async()=>1,findMany:async()=>[{movimiento_inventario_id_movimiento:1n,movimiento_inventario_fecha_hora:null,movimiento_inventario_cantidad:decimal('1.2500'),movimiento_inventario_estado:null,material_sku:'M',material:null,bodega:null,movimiento_inventario_tipo_movimiento:null,movimiento_inventario_motivo_movimiento:null}]},
+    movimiento_inventario:{count:async()=>1,findMany:async()=>[{movimiento_inventario_id_movimiento:1n,movimiento_inventario_fecha_hora:null,movimiento_inventario_cantidad:decimal('1.2500'),movimiento_inventario_estado:null,material_sku:'M',material:null,bodega:null,movimiento_inventario_tipo_movimiento:null,movimiento_inventario_motivo_movimiento:{movimiento_inventario_motivo_movimiento_nombre:'Ingreso'}}]},
+    evento_auditoria_m9:{findMany:async({where})=>{assert.deepEqual(where.entidad_referencia.in,['1']);return[{entidad_referencia:'1',motivo:'Recepción OC 123'}];}},
     reserva_inventario:{count:async()=>1,findMany:async()=>[{reserva_inventario_id_reserva:2n,reserva_inventario_fecha_reserva:null,reserva_inventario_fecha_liberacion:null,reserva_inventario_cantidad_reservada:decimal('0.5000'),reserva_inventario_estado_reserva:null,material_sku:'M',material:null,proyecto_id_proyecto:null,orden_trabajo_id_orden:null}]},
     alerta_inventario:{count:async()=>1,findMany:async()=>[{alerta_inventario_id_alerta:3n,alerta_inventario_fecha_generacion:null,alerta_inventario_fecha_est_agotamiento:null,alerta_inventario_mensaje:null,alerta_inventario_estado:null,historial_alerta_id_historial:null,historial_alerta:null,material_sku:'M',material:null,alerta_inventario_tipo_alerta:null}]},
   };
   const controlador=new MInventarioController(db);
-  assert.equal((await controlador.listarMovimientos()).items[0].cantidad,'1.25');
+  const movimiento=(await controlador.listarMovimientos()).items[0];
+  assert.equal(movimiento.cantidad,'1.25');
+  assert.equal(movimiento.motivo,'Recepción OC 123');
+  assert.equal(movimiento.motivoCatalogo,'Ingreso');
   assert.equal((await controlador.listarReservas()).items[0].cantidad,'0.5');
   assert.equal((await controlador.listarAlertas()).items[0].resuelta,false);
 });
 
 test('listas vacías y errores de base se propagan sin fabricar datos', async () => {
-  const vacio={movimiento_inventario:{count:async()=>0,findMany:async()=>[]}};
+  const vacio={movimiento_inventario:{count:async()=>0,findMany:async()=>[]},evento_auditoria_m9:{findMany:async()=>[]}};
   assert.deepEqual((await new MInventarioController(vacio).listarMovimientos()).items,[]);
   const error=new Error('BD no disponible');
   await assert.rejects(()=>new MInventarioController({movimiento_inventario:{count:async()=>{throw error},findMany:async()=>[]}}).listarMovimientos(),/BD no disponible/);
