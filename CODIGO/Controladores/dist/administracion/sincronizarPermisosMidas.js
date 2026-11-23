@@ -26,24 +26,17 @@ async function sincronizarPermisosMidas(tx, actorId, productorM9 = new contratoP
     });
     const idsActuales = new Set(actuales.map(item => item.id_permiso.toString()));
     const faltantes = catalogo.filter(item => !idsActuales.has(item.permiso_id_permiso.toString()));
-    const activarConfiguracionParticular = !cuenta.configuracion_particular;
     if (faltantes.length) {
         await tx.usuario_permiso_particular.createMany({
             data: faltantes.map(item => ({ id_usuario: cuenta.usuario_id_usuario, id_permiso: item.permiso_id_permiso })),
             skipDuplicates: true,
         });
     }
-    if (faltantes.length || activarConfiguracionParticular) {
-        await tx.usuario.update({
-            where: { usuario_id_usuario: cuenta.usuario_id_usuario },
-            data: { configuracion_particular: true, version_seguridad: { increment: 1 } },
-        });
-    }
     const resumen = { usuarioId: cuenta.usuario_id_usuario.toString(), catalogoAprobado: catalogo.length, existentes: actuales.length, asignados: faltantes.map(p => p.codigo_m4), excluidos };
-    if (faltantes.length || activarConfiguracionParticular) {
-        const nuevo = { actorId: actorId.toString(), permisosAsignados: resumen.asignados, totalCatalogo: catalogo.length, configuracionParticularActivada: activarConfiguracionParticular, alcance: 'TODOS_LOS_CU_REGISTRADOS' };
+    if (faltantes.length) {
+        const nuevo = { actorId: actorId.toString(), permisosAsignados: resumen.asignados, totalCatalogo: catalogo.length, configuracionParticularActivada: false, alcance: 'TODOS_LOS_CU_REGISTRADOS' };
         const actor = { id: actorId, sesion: 'sincronizacion-midas', permisos: [], configuracion: 'gerencia', administrador: true, cambiarClave: false, nombre: 'Sincronización Midas', acceso: 'interno' };
-        const identidad = (0, seguridad_1.hashM9)({ usuarioId: resumen.usuarioId, permisosAsignados: resumen.asignados, totalCatalogo: catalogo.length, configuracionParticularActivada: activarConfiguracionParticular });
+        const identidad = (0, seguridad_1.hashM9)({ usuarioId: resumen.usuarioId, permisosAsignados: resumen.asignados, totalCatalogo: catalogo.length, configuracionParticularActivada: false });
         await productorM9.ejecutar('sincronizarPermisosMidas', actor, {
             parametros: { id: resumen.usuarioId }, cuerpo: { motivo: 'Sincronización de todas las capacidades M4 registradas para la cuenta raíz' }, idSolicitud: `MIDAS-PERMISOS-${identidad}`,
         }, async () => ({ ...resumen, __auditoriaM9: { nuevo } }));

@@ -24,10 +24,10 @@ test('sincronización Midas asigna todo CU registrado y la segunda ejecución es
     ...[378,379,380,381].map(n=>({permiso_id_permiso:BigInt(n),codigo_m4:`CU${n}`,activo_m4:true})),
     {permiso_id_permiso:466n,codigo_m4:'CU466',activo_m4:false},
   ];
-  const asignados=new Set(['378']); const cuenta={usuario_id_usuario:1n,administrador_original:true,configuracion_particular:false};
+  const asignados=new Set(['378']); const cuenta={usuario_id_usuario:1n,administrador_original:true,configuracion_particular:false,version_seguridad:7};
   const auditoria=auditoriaOficial();
   const tx={
-    usuario:{findUnique:async({where})=>where.acceso_m4==='20776101-k'?cuenta:null,update:async({data})=>{cuenta.configuracion_particular=data.configuracion_particular}},
+    usuario:{findUnique:async({where})=>where.acceso_m4==='20776101-k'?cuenta:null,update:async()=>{throw new Error('Sincronizar permisos no debe alterar la cuenta ni invalidar sesiones')}},
     permiso:{findMany:async()=>permisos},
     usuario_permiso_particular:{
       findMany:async()=>permisos.filter(p=>asignados.has(p.permiso_id_permiso.toString())).map(permiso=>({id_permiso:permiso.permiso_id_permiso,permiso})),
@@ -37,6 +37,7 @@ test('sincronización Midas asigna todo CU registrado y la segunda ejecución es
   const primera=await sincronizarPermisosMidas(tx,99n,auditoria.productor); assert.deepEqual(primera.asignados,['CU377','CU379','CU380','CU381','CU466']); assert.equal(await auditoria.repositorio.cantidad(),1);
   const segunda=await sincronizarPermisosMidas(tx,99n,auditoria.productor); assert.deepEqual(segunda.asignados,[]); assert.equal(await auditoria.repositorio.cantidad(),1);
   assert.ok(asignados.has('377'));assert.ok(asignados.has('466'));
+  assert.equal(cuenta.configuracion_particular,false);assert.equal(cuenta.version_seguridad,7);
   const evento=(await auditoria.repositorio.listarTodo({}))[0];assert.equal(evento.operacion,'SINCRONIZAR_PERMISOS_MIDAS');assert.notEqual(evento.hashContenido,evento.hashIntegridad);assert.doesNotThrow(()=>auditoria.receptor.verificarIntegridad(evento));
 });
 
@@ -54,12 +55,11 @@ test('regresión: Midas Gerencia conserva todos los CU activos aprobados y manti
   const asignados=new Set(catalogo.slice(0,76).map(p=>p.permiso_id_permiso.toString()));
   const originales=new Set(asignados);
   const auditoria=auditoriaOficial();
-  let actualizaciones=0;
   const cuenta={usuario_id_usuario:1n,administrador_original:true,usuario_es_administrador:true,configuracion_particular:false};
   const tx={
     usuario:{
       findUnique:async()=>cuenta,
-      update:async({data})=>{actualizaciones++;cuenta.configuracion_particular=data.configuracion_particular},
+      update:async()=>{throw new Error('La sincronización no debe modificar version_seguridad ni configuración')},
     },
     permiso:{findMany:async()=>catalogo},
     usuario_permiso_particular:{
@@ -79,9 +79,8 @@ test('regresión: Midas Gerencia conserva todos los CU activos aprobados y manti
   for(const id of originales) assert.ok(asignados.has(id));
   assert.deepEqual(primera.asignados,['CU377','CU378','CU379','CU380','CU381','CU466','CU467','CU468','CU469','CU470','CU471','CU472']);
   assert.deepEqual(segunda.asignados,[]);
-  assert.equal(actualizaciones,1);
   assert.equal(await auditoria.repositorio.cantidad(),1);
-  assert.equal(cuenta.configuracion_particular,true);
+  assert.equal(cuenta.configuracion_particular,false);
   assert.deepEqual(new Set(efectivos),new Set(activos));
   for(const codigo of ['CU65','CU66','CU74','CU378','CU379','CU380','CU381']) assert.ok(efectivos.includes(codigo),codigo);
   for(const codigo of ['CU377','CU466','CU467','CU468','CU469','CU470','CU471','CU472']) assert.ok(!efectivos.includes(codigo),codigo);
@@ -122,6 +121,15 @@ test('084 restaura MIDAS sin cambiar contraseña ni invalidar sesiones',()=>{
   assert.match(sql,/CROSS JOIN|FROM "comun"\."permiso" permiso/);
   assert.doesNotMatch(sql,/usuario_contrasena|sesion_usuario|version_seguridad/i);
   assert.doesNotMatch(sql,/DELETE\s+FROM|TRUNCATE|DROP\s+/i);
+});
+
+test('el backend sincroniza MIDAS después de cargar el catálogo y antes de escuchar',()=>{
+  const servidor=fs.readFileSync('src/servidor.ts','utf8');
+  const sincronizador=fs.readFileSync('src/administracion/sincronizarPermisosMidas.ts','utf8');
+  assert.ok(servidor.indexOf('sincronizarPermisosMidas')<servidor.indexOf('crearAplicacion().listen'));
+  assert.match(servidor,/MIDAS sincronizado/);
+  assert.doesNotMatch(sincronizador,/version_seguridad\s*:/);
+  assert.doesNotMatch(sincronizador,/configuracion_particular\s*:/);
 });
 
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{
