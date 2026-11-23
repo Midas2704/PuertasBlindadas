@@ -140,6 +140,13 @@ test('cada inicio de sesión MIDAS reconcilia el catálogo antes de crear la ses
   assert.match(controlador,/garantizarCatalogoMidas[\s\S]*createMany[\s\S]*skipDuplicates:true/);
 });
 
+test('MIDAS consulta todo el catálogo y no sólo permisos activos',()=>{
+  const controlador=fs.readFileSync('src/controladores/M4Controller.ts','utf8');
+  const funcion=controlador.slice(controlador.indexOf('const permisosActivosAdministradorRaiz'),controlador.indexOf('/** El perfil propone'));
+  assert.match(funcion,/codigo_m4:\{not:null\}/);
+  assert.doesNotMatch(funcion,/activo_m4:true/);
+});
+
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{
   skip:process.env.C42_PG18_AISLADO!=='1',timeout:30000,
 },async()=>{

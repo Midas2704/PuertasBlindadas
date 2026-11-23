@@ -35,9 +35,9 @@ export const permisosEfectivos = (cuenta: Cuenta, catalogoRaiz?: string[]) => {
 export const requiereSincronizacionMidas = () => false;
 
 const permisosActivosAdministradorRaiz = async (tx: Transaccion | typeof prisma) => {
- const catalogo=await tx.permiso.findMany({where:{activo_m4:true,codigo_m4:{not:null}},select:{codigo_m4:true}});
- // El catálogo M4 activo es la fuente autorizada. Filtrarlo nuevamente por el mapa
- // técnico de rutas dejaba fuera capacidades aprobadas incorporadas con posterioridad.
+ const catalogo=await tx.permiso.findMany({where:{codigo_m4:{not:null}},select:{codigo_m4:true}});
+ // MIDAS recibe todo CU registrado, incluso si está reservado o pendiente. La
+ // existencia del permiso no vuelve operativa una ruta que el backend no implemente.
  return catalogo.map(item=>item.codigo_m4).filter((codigo):codigo is string=>!!codigo&&codigo!=='CU377');
 };
 
