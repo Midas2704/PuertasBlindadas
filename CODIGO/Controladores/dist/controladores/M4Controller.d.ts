@@ -39,9 +39,10 @@ export interface ActorAutenticado {
     acceso: string;
     alcanceEmpleadoId?: number | null;
 }
-export declare const esAdministradorRaiz: (cuenta: Pick<Cuenta, "administrador_original">) => boolean;
-export declare const esAdministradorEfectivo: (cuenta: Pick<Cuenta, "administrador_original" | "usuario_es_administrador">) => boolean;
-export declare const configuracionEfectiva: (cuenta: Pick<Cuenta, "administrador_original" | "perfil">) => string;
+type IdentidadRaiz = Pick<Cuenta, 'administrador_original'> & Partial<Pick<Cuenta, 'acceso_m4'>>;
+export declare const esAdministradorRaiz: (cuenta: IdentidadRaiz) => boolean;
+export declare const esAdministradorEfectivo: (cuenta: Pick<Cuenta, "administrador_original" | "usuario_es_administrador"> & Partial<Pick<Cuenta, "acceso_m4">>) => boolean;
+export declare const configuracionEfectiva: (cuenta: Pick<Cuenta, "administrador_original" | "perfil"> & Partial<Pick<Cuenta, "acceso_m4">>) => string;
 export declare const permisosEfectivos: (cuenta: Cuenta, catalogoRaiz?: string[]) => string[];
 /** La autorización raíz no depende de materializar asignaciones particulares. */
 export declare const requiereSincronizacionMidas: () => boolean;
@@ -52,6 +53,7 @@ export declare const perfilPermitePersonalizacion: (perfil: {
 /** Único controlador funcional M4 (CU59–CU74). Ningún otro módulo lo invoca. */
 export declare class M4Controller {
     private readonly correo;
+    private readonly integraciones;
     constructor(correo?: CorreoRecuperacion);
     private transaccion;
     private cuenta;
@@ -134,6 +136,70 @@ export declare class M4Controller {
         mensaje: string;
     }>;
     solicitarRecuperacion(entrada: Entrada): Promise<{
+        mensaje: string;
+    }>;
+    consultarIntegraciones(): Promise<{
+        bancoCentral: {
+            tokenConfigurado: boolean;
+            endpoint: string;
+            serie: string;
+            actualizadoEn: Date | null;
+        };
+        correo: {
+            configurado: boolean;
+            host: string;
+            port: number;
+            secure: boolean;
+            user: string;
+            from: string;
+            baseUrl: string;
+            passwordConfigurada: boolean;
+            actualizadoEn: Date | null;
+        };
+    }>;
+    guardarBancoCentral(actor: ActorAutenticado, entrada: Entrada): Promise<{
+        bancoCentral: {
+            tokenConfigurado: boolean;
+            endpoint: string;
+            serie: string;
+            actualizadoEn: Date | null;
+        };
+        correo: {
+            configurado: boolean;
+            host: string;
+            port: number;
+            secure: boolean;
+            user: string;
+            from: string;
+            baseUrl: string;
+            passwordConfigurada: boolean;
+            actualizadoEn: Date | null;
+        };
+    }>;
+    guardarCorreoRecuperacion(actor: ActorAutenticado, entrada: Entrada): Promise<{
+        bancoCentral: {
+            tokenConfigurado: boolean;
+            endpoint: string;
+            serie: string;
+            actualizadoEn: Date | null;
+        };
+        correo: {
+            configurado: boolean;
+            host: string;
+            port: number;
+            secure: boolean;
+            user: string;
+            from: string;
+            baseUrl: string;
+            passwordConfigurada: boolean;
+            actualizadoEn: Date | null;
+        };
+    }>;
+    probarBancoCentral(): Promise<{
+        mensaje: string;
+        valor: number;
+    }>;
+    probarCorreoRecuperacion(): Promise<{
         mensaje: string;
     }>;
     validarRecuperacion(entrada: Entrada): Promise<{

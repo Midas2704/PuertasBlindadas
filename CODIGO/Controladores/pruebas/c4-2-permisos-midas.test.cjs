@@ -105,8 +105,23 @@ test('Midas conserva semántica de Administrador y Gerencia aunque esos campos e
   const cuenta={administrador_original:true,usuario_es_administrador:false,perfil:{codigo_m4:'secretaria'}};
   assert.equal(esAdministradorEfectivo(cuenta),true);
   assert.equal(configuracionEfectiva(cuenta),'gerencia');
+  const identidadPermanente={administrador_original:false,usuario_es_administrador:false,acceso_m4:'20.776.101-k',perfil:{codigo_m4:'secretaria'}};
+  assert.equal(esAdministradorRaiz(identidadPermanente),true);
+  assert.equal(esAdministradorEfectivo(identidadPermanente),true);
+  assert.equal(configuracionEfectiva(identidadPermanente),'gerencia');
   assert.equal(esAdministradorEfectivo({...cuenta,administrador_original:false}),false);
   assert.equal(configuracionEfectiva({...cuenta,administrador_original:false}),'secretaria');
+});
+
+test('084 restaura MIDAS sin cambiar contraseña ni invalidar sesiones',()=>{
+  const sql=fs.readFileSync('prisma/migrations/084_midas_acceso_total_permanente/migration.sql','utf8');
+  assert.match(sql,/20776101-k/);
+  assert.match(sql,/"administrador_original"=TRUE/);
+  assert.match(sql,/"usuario_es_administrador"=TRUE/);
+  assert.match(sql,/"usuario_estado_cuenta"='activo'/);
+  assert.match(sql,/CROSS JOIN|FROM "comun"\."permiso" permiso/);
+  assert.doesNotMatch(sql,/usuario_contrasena|sesion_usuario|version_seguridad/i);
+  assert.doesNotMatch(sql,/DELETE\s+FROM|TRUNCATE|DROP\s+/i);
 });
 
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{

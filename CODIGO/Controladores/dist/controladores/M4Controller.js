@@ -44,13 +44,14 @@ const permisos_1 = require("../validaciones/permisos");
 const solicitudes_1 = require("../validaciones/solicitudes");
 const rut_1 = require("../utilidades/rut");
 const catalogoPermisosFuncional_1 = require("../seguridad/catalogoPermisosFuncional");
+const cuentaRaiz_1 = require("../administracion/cuentaRaiz");
 const incluirAccesos = { perfil: { include: { perfil_permiso: { include: { permiso: true } } } }, particulares: { include: { permiso: true } }, seguridad: true, empleado_seguridad: true };
 const error = (estado, mensaje) => { throw new ErrorAplicacion_1.ErrorAplicacion(estado, mensaje); };
 const idCuenta = (valor) => { if (!/^\d+$/.test(String(valor)))
     return error(400, 'Usuario inválido'); return BigInt(String(valor)); };
 const confirmar = (entrada) => { if (entrada.confirmado !== true)
     error(400, 'Debes confirmar la operación'); };
-const esAdministradorRaiz = (cuenta) => cuenta.administrador_original === true;
+const esAdministradorRaiz = (cuenta) => cuenta.administrador_original === true || cuenta.acceso_m4?.replace(/\./g, '').toLowerCase() === cuentaRaiz_1.ACCESO_CUENTA_RAIZ;
 exports.esAdministradorRaiz = esAdministradorRaiz;
 const esAdministradorEfectivo = (cuenta) => (0, exports.esAdministradorRaiz)(cuenta) || cuenta.usuario_es_administrador === true;
 exports.esAdministradorEfectivo = esAdministradorEfectivo;
@@ -62,7 +63,7 @@ const permisosEfectivos = (cuenta, catalogoRaiz) => {
     if (cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia')
         return permisos_1.codigosAdministrador;
     const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
-    return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || cuenta.administrador_original)).map(p => p.codigo_m4);
+    return permisos.filter(p => p.activo_m4 && p.codigo_m4 && p.codigo_m4 !== 'CU377' && (!p.requiere_administrador || cuenta.usuario_es_administrador || (0, exports.esAdministradorRaiz)(cuenta))).map(p => p.codigo_m4);
 };
 exports.permisosEfectivos = permisosEfectivos;
 /** La autorización raíz no depende de materializar asignaciones particulares. */
@@ -276,7 +277,7 @@ class M4Controller {
         });
     }
     async continuidad(tx, cuenta) {
-        if (cuenta.administrador_original)
+        if ((0, exports.esAdministradorRaiz)(cuenta))
             return error(409, 'La cuenta administrativa original está protegida');
         if (!cuenta.usuario_es_administrador || cuenta.usuario_estado_cuenta !== 'activo')
             return;
@@ -289,7 +290,7 @@ class M4Controller {
         confirmar(entrada);
         return this.transaccion(async (tx) => {
             const cuenta = await this.cuenta(tx, id);
-            if (cuenta.administrador_original)
+            if ((0, exports.esAdministradorRaiz)(cuenta))
                 error(409, 'La cuenta raíz Midas no puede modificarse');
             let temporal;
             if (operacion === 'desactivarUsuario') {
@@ -346,7 +347,7 @@ class M4Controller {
                         error(403, 'Retirar permisos requiere autorización administrativa');
                     if (cuenta.configuracion_particular && !agregados.length && !retirados.length)
                         return { mensaje: 'Los permisos particulares ya estaban actualizados' };
-                    const permisos = await this.validarPermisos(tx, finales, cuenta.usuario_es_administrador || cuenta.administrador_original);
+                    const permisos = await this.validarPermisos(tx, finales, cuenta.usuario_es_administrador || (0, exports.esAdministradorRaiz)(cuenta));
                     await tx.usuario_permiso_particular.deleteMany({ where: { id_usuario: id } });
                     if (permisos.length)
                         await tx.usuario_permiso_particular.createMany({ data: permisos.map(p => ({ id_usuario: id, id_permiso: p.permiso_id_permiso })) });
@@ -365,7 +366,7 @@ class M4Controller {
                 const finales = operacion === 'asignarPermisos' ? [...new Set([...actuales, ...elegidos])] : actuales.filter(p => !elegidos.includes(p));
                 if (!finales.length && cuenta.usuario_estado_cuenta === 'activo')
                     error(409, 'Una cuenta Activa particular debe conservar permisos efectivos');
-                const permisos = await this.validarPermisos(tx, finales, cuenta.usuario_es_administrador || cuenta.administrador_original);
+                const permisos = await this.validarPermisos(tx, finales, cuenta.usuario_es_administrador || (0, exports.esAdministradorRaiz)(cuenta));
                 await tx.usuario_permiso_particular.deleteMany({ where: { id_usuario: id } });
                 await tx.usuario_permiso_particular.createMany({ data: permisos.map(p => ({ id_usuario: id, id_permiso: p.permiso_id_permiso })) });
                 await tx.usuario.update({ where: { usuario_id_usuario: id }, data: { configuracion_particular: true } });
@@ -409,7 +410,7 @@ class M4Controller {
         let envio;
         await this.transaccion(async (tx) => {
             const cuenta = await tx.usuario.findUnique({ where: { acceso_m4: acceso }, include: { seguridad: true } });
-            if (!cuenta || cuenta.usuario_estado_cuenta !== 'activo' || !cuenta.usuario_correo || (cuenta.seguridad?.bloqueo_persistente && !cuenta.administrador_original))
+            if (!cuenta || cuenta.usuario_estado_cuenta !== 'activo' || !cuenta.usuario_correo || (cuenta.seguridad?.bloqueo_persistente && !(0, exports.esAdministradorRaiz)(cuenta)))
                 return;
             await tx.token_recuperacion.updateMany({ where: { id_usuario: cuenta.usuario_id_usuario, utilizado: null }, data: { utilizado: new Date() } });
             const token = (0, seguridad_1.secreto)();
@@ -432,7 +433,7 @@ class M4Controller {
     async probarCorreoRecuperacion() { return this.integraciones.probarCorreo(); }
     async validarRecuperacion(entrada) {
         const recuperacion = await db_1.prisma.token_recuperacion.findUnique({ where: { secreto_hash: (0, seguridad_1.huella)((0, solicitudes_1.texto)(entrada.token, 200)) }, include: { usuario: { include: { seguridad: true } } } });
-        if (!recuperacion || recuperacion.utilizado || recuperacion.vence <= new Date() || recuperacion.usuario.usuario_estado_cuenta !== 'activo' || (recuperacion.usuario.seguridad?.bloqueo_persistente && !recuperacion.usuario.administrador_original))
+        if (!recuperacion || recuperacion.utilizado || recuperacion.vence <= new Date() || recuperacion.usuario.usuario_estado_cuenta !== 'activo' || (recuperacion.usuario.seguridad?.bloqueo_persistente && !(0, exports.esAdministradorRaiz)(recuperacion.usuario)))
             return error(400, 'Enlace de recuperación no válido');
         return { valido: true };
     }
@@ -441,7 +442,7 @@ class M4Controller {
         (0, seguridad_1.validarClave)(entrada.claveNueva);
         return this.transaccion(async (tx) => {
             const recuperacion = await tx.token_recuperacion.findUnique({ where: { secreto_hash: (0, seguridad_1.huella)(token) }, include: { usuario: { include: { seguridad: true } } } });
-            if (!recuperacion || recuperacion.utilizado || recuperacion.vence <= new Date() || recuperacion.usuario.usuario_estado_cuenta !== 'activo' || (recuperacion.usuario.seguridad?.bloqueo_persistente && !recuperacion.usuario.administrador_original))
+            if (!recuperacion || recuperacion.utilizado || recuperacion.vence <= new Date() || recuperacion.usuario.usuario_estado_cuenta !== 'activo' || (recuperacion.usuario.seguridad?.bloqueo_persistente && !(0, exports.esAdministradorRaiz)(recuperacion.usuario)))
                 return error(400, 'Enlace de recuperación no válido');
             await this.nuevaClave(tx, recuperacion.id_usuario, entrada.claveNueva);
             await this.reiniciarSeguridad(tx, recuperacion.id_usuario, 'Recuperación autónoma');
@@ -459,15 +460,16 @@ class M4Controller {
             error(403, 'La operación requiere rol Administrador');
         confirmar(entrada);
         const id = (0, solicitudes_1.texto)(entrada.id, 100);
-        const sesion = await db_1.prisma.sesion_usuario.findUnique({ where: { id }, include: { usuario: { select: { administrador_original: true } } } });
+        const sesion = await db_1.prisma.sesion_usuario.findUnique({ where: { id }, include: { usuario: { select: { administrador_original: true, acceso_m4: true } } } });
         if (!sesion)
             return error(409, 'La sesión seleccionada ya no está activa');
         if (sesion.invalidada || sesion.vence <= new Date())
             error(409, 'La sesión seleccionada ya no está activa');
-        if (sesion.usuario.administrador_original)
+        if ((0, exports.esAdministradorRaiz)(sesion.usuario))
             error(409, 'La sesión del administrador original está protegida');
         await db_1.prisma.sesion_usuario.update({ where: { id }, data: { invalidada: new Date(), motivo: `Cierre administrativo por ${actor.id}` } });
         return { mensaje: 'Sesión invalidada; se exige un nuevo inicio de sesión' };
     }
 }
 exports.M4Controller = M4Controller;
+//# sourceMappingURL=M4Controller.js.map
