@@ -1,14 +1,15 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { calcularTotalReferencialDetalle } from '../../utilidades/notaVentaDirecta';
 import NotaDeVentaDirecta from './NotaDeVentaDirecta';
 
-vi.mock('../../api/finanzas',()=>({
-  solicitarFinanzas:vi.fn(()=>Promise.resolve(new Response(JSON.stringify([]),{status:200,headers:{'Content-Type':'application/json'}}))),
-}));
+const solicitarFinanzas=vi.hoisted(()=>vi.fn());
+vi.mock('../../api/finanzas',()=>({solicitarFinanzas}));
+const json=(dato:unknown)=>Promise.resolve(new Response(JSON.stringify(dato),{status:200,headers:{'Content-Type':'application/json'}}));
 
 describe('Nota de Venta directa',()=>{
+  beforeEach(()=>solicitarFinanzas.mockImplementation((ruta:string)=>json(ruta==='/monedas'?[{codigo_moneda:'CLP',estado_moneda:'activo'},{codigo_moneda:'USD',estado_moneda:'activo'}]:[])));
   it('calcula el monto neto desde todas las líneas',()=>{
     expect(calcularTotalReferencialDetalle([
       {tipo:'producto',descripcion:'Puerta',cantidad:2,valor:100},
@@ -40,5 +41,13 @@ describe('Nota de Venta directa',()=>{
     await user.type(valores[1],'150');
     expect(screen.getByLabelText('Monto Base Neto')).toHaveTextContent('$250');
     expect(screen.queryByRole('spinbutton',{name:'Monto Base Neto'})).not.toBeInTheDocument();
+  });
+
+  it('sólo ofrece monedas activas y explica cuando USD está deshabilitado',async()=>{
+    solicitarFinanzas.mockImplementation((ruta:string)=>json(ruta==='/monedas'?[{codigo_moneda:'CLP',estado_moneda:'activo'}]:[]));
+    render(<NotaDeVentaDirecta/>);
+    expect(await screen.findByRole('option',{name:'CLP'})).toBeInTheDocument();
+    expect(screen.queryByRole('option',{name:'USD'})).not.toBeInTheDocument();
+    expect(screen.getByText(/USD no está habilitado en el catálogo/)).toBeInTheDocument();
   });
 });

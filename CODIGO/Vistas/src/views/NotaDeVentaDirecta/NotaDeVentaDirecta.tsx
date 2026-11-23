@@ -13,11 +13,13 @@ interface Cliente {
 interface ClienteApi extends Cliente { nivelFormalizacion: string }
 interface Proyecto { proyecto_proyecto_id:string;proyecto_nombre_referencia?:string;proyecto_codigo_proyecto?:string;proyecto_estado_operacional?:string }
 interface FichaCliente { resumen_dashboard?: { proyectos?: Proyecto[] } }
+interface MonedaHabilitada {codigo_moneda:string;estado_moneda?:string}
 
 const NotaDeVentaDirecta: React.FC = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [items, setItems] = useState<{id_item_comercial:number;nombre_item:string}[]>([]);
   const [proyectos, setProyectos] = useState<Proyecto[]>([]);
+  const [monedasHabilitadas, setMonedasHabilitadas] = useState<string[]>([]);
   
   const [idClienteInput, setIdClienteInput] = useState('');
   const [dropdownClienteOpen, setDropdownClienteOpen] = useState(false);
@@ -43,6 +45,7 @@ const NotaDeVentaDirecta: React.FC = () => {
       .then((data: ClienteApi[]) => setClientes(data.filter(cliente => cliente.rut && cliente.nivelFormalizacion === 'formal')))
       .catch(e => console.error('Error fetching clientes', e));
     solicitarFinanzas('/billing/products').then(res => res.json()).then(setItems).catch(e => console.error('Error fetching items', e));
+    solicitarFinanzas('/monedas').then(async res=>{const data=await res.json();if(!res.ok)throw new Error(data.error);const codigos=(data as MonedaHabilitada[]).filter(item=>item.estado_moneda===undefined||item.estado_moneda==='activo').map(item=>item.codigo_moneda).filter(codigo=>['CLP','USD'].includes(codigo));setMonedasHabilitadas(codigos);setMoneda(actual=>codigos.includes(actual)?actual:(codigos[0]||''));}).catch(()=>{setMonedasHabilitadas([]);setMoneda('');setMensaje({text:'No fue posible consultar las monedas habilitadas.',type:'error'})});
 
     const handleClickOutside = (event: MouseEvent) => {
       if (clienteRef.current && !clienteRef.current.contains(event.target as Node)) {
@@ -91,6 +94,7 @@ const NotaDeVentaDirecta: React.FC = () => {
     const idVal = idClienteInput.split(' - ')[0]; // el selector arma el texto como ID - RUT - razón social
     
     if (!idVal) return setMensaje({ text: 'Seleccione un cliente.', type: 'error' });
+    if (!monedasHabilitadas.includes(moneda)) return setMensaje({ text: 'La moneda seleccionada no está habilitada en Administración.', type: 'error' });
     if (montoBase <= 0) return setMensaje({ text: 'El monto base debe ser mayor a 0.', type: 'error' });
     if (!isDescuentoValido) return setMensaje({ text: 'El descuento excede el límite permitido', type: 'error' });
     const lineas = detalle.filter(linea => linea.descripcion.trim());
@@ -256,12 +260,13 @@ const NotaDeVentaDirecta: React.FC = () => {
                     value={moneda}
                     onChange={e => { setMoneda(e.target.value); setTipoCambio(''); setTipoCambioOrigen(''); }}
                   >
-                    <option value="CLP">CLP</option>
-                    <option value="USD">USD</option>
+                    {!monedasHabilitadas.length&&<option value="">Sin monedas habilitadas</option>}
+                    {monedasHabilitadas.map(codigo=><option key={codigo} value={codigo}>{codigo}</option>)}
                   </select>
                 </div>
                 <div className="text-sm text-gray-500 flex items-center">La venta conserva su moneda y su conversión histórica al momento de emitir.</div>
               </div>
+              {monedasHabilitadas.length>0&&!monedasHabilitadas.includes('USD')&&<p className="col-span-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">USD no está habilitado en el catálogo de monedas. Debe activarse desde Administración antes de emitir ventas en dólares.</p>}
               {moneda === 'USD' && <label className="block text-sm font-medium text-gray-700">Tipo de cambio USD/CLP ({tipoCambioOrigen || 'consultando'})
                 <input required type="number" min="0.0001" step="0.0001" readOnly={tipoCambioOrigen === 'Banco Central'} value={tipoCambio} onChange={e=>setTipoCambio(e.target.value)} className="mt-1 w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg read-only:bg-gray-100" />
               </label>}
