@@ -110,7 +110,8 @@ export class M4Controller {
   const personales=['miSesion','cambiarClave','cerrarSesion'];
   if(cambiarClave && !personales.includes(operacion)) return error(403,'Debes cambiar tu contraseña antes de continuar');
   const raiz=esAdministradorRaiz(cuenta);
-  const permisos=raiz?await permisosActivosAdministradorRaiz(prisma):permisosEfectivos(cuenta);
+  const catalogoRaiz=raiz?await permisosActivosAdministradorRaiz(prisma):undefined;
+  const permisos=permisosEfectivos(cuenta,catalogoRaiz);
   const numeroCU = Number(operacionesPermiso[operacion]?.slice(2));
   if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia' && !raiz) return error(403,'La operación requiere configuración de Gerencia');
   if (operacionesQueRequierenAdministrador.has(operacion) && !cuenta.usuario_es_administrador && !raiz) return error(403,'La operación requiere rol Administrador');

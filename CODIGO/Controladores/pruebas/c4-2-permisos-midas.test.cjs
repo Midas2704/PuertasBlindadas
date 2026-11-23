@@ -156,6 +156,14 @@ test('MIDAS consulta todo el catálogo y no sólo permisos activos',()=>{
   assert.doesNotMatch(funcion,/activo_m4:true/);
 });
 
+test('la consulta de sesión MIDAS combina el catálogo con la matriz administrativa',()=>{
+  const controlador=fs.readFileSync('src/controladores/M4Controller.ts','utf8');
+  const autorizacion=controlador.slice(controlador.indexOf('async autorizar('),controlador.indexOf('async iniciarSesion('));
+  assert.match(autorizacion,/const catalogoRaiz=raiz\?await permisosActivosAdministradorRaiz\(prisma\):undefined/);
+  assert.match(autorizacion,/const permisos=permisosEfectivos\(cuenta,catalogoRaiz\)/);
+  assert.doesNotMatch(autorizacion,/const permisos=raiz\?await permisosActivosAdministradorRaiz/);
+});
+
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{
   skip:process.env.C42_PG18_AISLADO!=='1',timeout:30000,
 },async()=>{

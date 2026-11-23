@@ -163,7 +163,8 @@ class M4Controller {
         if (cambiarClave && !personales.includes(operacion))
             return error(403, 'Debes cambiar tu contraseña antes de continuar');
         const raiz = (0, exports.esAdministradorRaiz)(cuenta);
-        const permisos = raiz ? await permisosActivosAdministradorRaiz(db_1.prisma) : (0, exports.permisosEfectivos)(cuenta);
+        const catalogoRaiz = raiz ? await permisosActivosAdministradorRaiz(db_1.prisma) : undefined;
+        const permisos = (0, exports.permisosEfectivos)(cuenta, catalogoRaiz);
         const numeroCU = Number(permisos_1.operacionesPermiso[operacion]?.slice(2));
         if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia' && !raiz)
             return error(403, 'La operación requiere configuración de Gerencia');
