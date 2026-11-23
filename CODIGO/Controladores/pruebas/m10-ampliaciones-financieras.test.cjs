@@ -121,8 +121,8 @@ test('migración 072 es aditiva, inmutable y protege concurrencia e históricos'
   const servicio=raiz('src/m10/presupuestoManualM10.ts'); assert.match(servicio,/TransactionIsolationLevel\.Serializable/); assert.match(servicio,/revisionEsperada/);
 });
 
-test('frontend integra CU446, CU447, CU449 y CU451 sin segundo Dashboard', () => {
+test('frontend integra CU446, CU447 y CU449 sin exponer CU451', () => {
   const app=raiz('../Vistas/src/App.tsx'); const ventas=raiz('../Vistas/src/views/DashboardM7/AnalisisVentasM7.tsx'); const presupuesto=raiz('../Vistas/src/views/DashboardM7/PresupuestoManualM10.tsx');
-  assert.match(app,/permiso=\{\['CU218','CU219','CU220'\]\}/); assert.match(app,/permiso=\{\['CU238','CU449','CU239'\]\}/); assert.match(app,/permiso="CU451"/);
+  assert.match(app,/permiso=\{\['CU218','CU219','CU220'\]\}/); assert.match(app,/permiso=\{\['CU238','CU449','CU239'\]\}/); assert.doesNotMatch(app,/permiso="CU451"/); assert.doesNotMatch(app,/dashboard-m7\/presupuestos/);
   assert.match(ventas,/CU447/); assert.match(ventas,/Ventas.*Cotizaciones/s); assert.match(presupuesto,/Presupuesto manual versionado/); assert.match(presupuesto,/Comparar versiones elegidas/); assert.match(presupuesto,/sólo lectura/);
 });

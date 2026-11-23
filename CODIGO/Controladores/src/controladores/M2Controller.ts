@@ -461,8 +461,8 @@ export class M2Controller {
       if (!tipoCambio.isFinite() || tipoCambio.lte(0)) throw new ErrorAplicacion(502, 'Banco Central entregó un tipo de cambio inválido');
       return tipoCambio;
     } catch (error) {
-      if (entrada.tipoCambioManual !== true) throw error;
-      const tipoCambio = new Prisma.Decimal(numeroNoNegativo(entrada.tipoCambio, 'Tipo de cambio manual'));
+      if (entrada.tipoCambio === undefined || entrada.tipoCambio === null || entrada.tipoCambio === '') throw error;
+      const tipoCambio = new Prisma.Decimal(numeroNoNegativo(entrada.tipoCambio, 'Tipo de cambio informado'));
       if (!tipoCambio.isFinite() || tipoCambio.lte(0)) throw new ErrorAplicacion(400, 'El tipo de cambio USD/CLP debe ser mayor a cero');
       return tipoCambio;
     }
@@ -1109,7 +1109,7 @@ export class M2Controller {
   private async normalizarPlantillaFabricacion(entrada: Entrada, tx: Prisma.TransactionClient): Promise<{ etapas: EtapaFabricacion[]; medidasObligatorias: string[] }> {
     if (!Array.isArray(entrada.etapas) || entrada.etapas.length > 60) throw new ErrorAplicacion(400, 'La plantilla debe contener una lista de hasta 60 etapas');
     const etapasEntrada = entrada.etapas as Entrada[];
-    const idsArea = [...new Set(etapasEntrada.map(etapa => BigInt(identificador(etapa.idArea)).toString()))];
+    const idsArea = [...new Set(etapasEntrada.map(etapa => BigInt(identificador(etapa.idAreaTrabajo ?? etapa.idArea)).toString()))];
     const areas = idsArea.length ? await tx.area_trabajo.findMany({ where: { area_trabajo_id_area: { in: idsArea.map(BigInt) }, area_trabajo_activo: true } }) : [];
     const mapaAreas = new Map(areas.map(area => [area.area_trabajo_id_area.toString(), area]));
     if (mapaAreas.size !== idsArea.length) throw new ErrorAplicacion(400, 'Todas las etapas deben pertenecer a áreas activas');
@@ -1118,7 +1118,7 @@ export class M2Controller {
     const mapaTareas = new Map(catalogadas.map(tarea => [tarea.id_tarea_fabricacion, tarea]));
     if (mapaTareas.size !== idsCatalogo.length) throw new ErrorAplicacion(400, 'Existe una tarea catalogada inexistente o inactiva');
     const etapas: EtapaFabricacion[] = etapasEntrada.map((etapa, indice) => {
-      const idAreaTrabajo = BigInt(identificador(etapa.idArea)).toString();
+      const idAreaTrabajo = BigInt(identificador(etapa.idAreaTrabajo ?? etapa.idArea)).toString();
       const area = mapaAreas.get(idAreaTrabajo)!;
       const nombre = texto(etapa.nombre, 150);
       if (!nombre) throw new ErrorAplicacion(400, `El nombre de la etapa ${indice + 1} es obligatorio`);
@@ -1389,16 +1389,7 @@ export class M2Controller {
     if (!base.isFinite() || base.lte(0)) throw new ErrorAplicacion(400, 'El monto calculado debe ser mayor a cero');
     const montos = importes(base, entrada.descuento?.tipo, entrada.descuento?.valor, entrada.exento_iva);
     const codigoMoneda = texto(entrada.moneda).toUpperCase() || 'CLP';
-    let tipoCambio: Prisma.Decimal | null = null;
-    if (codigoMoneda === 'USD') {
-      try {
-        tipoCambio = new Prisma.Decimal(await this.bancoCentral.obtenerTipoCambio('USD', fechaNegocio()));
-      } catch (error) {
-        if (entrada.tipoCambioManual !== true) throw error;
-        tipoCambio = new Prisma.Decimal(numeroNoNegativo(entrada.tipoCambio, 'Tipo de cambio manual'));
-      }
-      if (!tipoCambio.isFinite() || tipoCambio.lte(0)) throw new ErrorAplicacion(400, 'El tipo de cambio USD/CLP debe ser mayor a cero');
-    }
+    const tipoCambio = await this.resolverTipoCambioCotizacion(codigoMoneda, entrada);
     return prisma.$transaction(async transaccion => {
       const ficha = await transaccion.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFicha }, include: { cliente_financiero: true } });
       if (!ficha || ficha.cliente_financiero.estado_financiero !== 'activo' || ficha.cliente_financiero.nivel_formalizacion !== 'formal') throw new ErrorAplicacion(400, 'La venta directa requiere cliente activo y formal');

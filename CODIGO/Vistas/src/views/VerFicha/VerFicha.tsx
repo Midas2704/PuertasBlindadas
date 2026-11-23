@@ -171,7 +171,7 @@ const VerFicha: React.FC = () => {
     try{
       const ruta=operacionPago.accion==='conciliar'?`/pagos/${operacionPago.id}/conciliar`:`/pagos/${operacionPago.id}/${operacionPago.accion}`;
       const cuerpo=operacionPago.accion==='conciliar'
-        ?{monto,evidencia:formOperacionPago.respaldo}
+        ?{monto,evidencia:formOperacionPago.respaldo,observacion:formOperacionPago.motivo}
         :{monto:operacionPago.accion==='revertir'?monto:undefined,motivo:formOperacionPago.motivo,respaldo:formOperacionPago.respaldo};
       const respuesta=await solicitarFinanzas(ruta,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cuerpo)}),resultado=await respuesta.json();
       if(!respuesta.ok)throw new Error(resultado.error||'No fue posible completar la operación');

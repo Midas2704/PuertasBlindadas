@@ -478,9 +478,9 @@ class M2Controller {
             return tipoCambio;
         }
         catch (error) {
-            if (entrada.tipoCambioManual !== true)
+            if (entrada.tipoCambio === undefined || entrada.tipoCambio === null || entrada.tipoCambio === '')
                 throw error;
-            const tipoCambio = new client_1.Prisma.Decimal((0, solicitudes_1.numeroNoNegativo)(entrada.tipoCambio, 'Tipo de cambio manual'));
+            const tipoCambio = new client_1.Prisma.Decimal((0, solicitudes_1.numeroNoNegativo)(entrada.tipoCambio, 'Tipo de cambio informado'));
             if (!tipoCambio.isFinite() || tipoCambio.lte(0))
                 throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El tipo de cambio USD/CLP debe ser mayor a cero');
             return tipoCambio;
@@ -1338,7 +1338,7 @@ class M2Controller {
         if (!Array.isArray(entrada.etapas) || entrada.etapas.length > 60)
             throw new ErrorAplicacion_1.ErrorAplicacion(400, 'La plantilla debe contener una lista de hasta 60 etapas');
         const etapasEntrada = entrada.etapas;
-        const idsArea = [...new Set(etapasEntrada.map(etapa => BigInt((0, solicitudes_1.identificador)(etapa.idArea)).toString()))];
+        const idsArea = [...new Set(etapasEntrada.map(etapa => BigInt((0, solicitudes_1.identificador)(etapa.idAreaTrabajo ?? etapa.idArea)).toString()))];
         const areas = idsArea.length ? await tx.area_trabajo.findMany({ where: { area_trabajo_id_area: { in: idsArea.map(BigInt) }, area_trabajo_activo: true } }) : [];
         const mapaAreas = new Map(areas.map(area => [area.area_trabajo_id_area.toString(), area]));
         if (mapaAreas.size !== idsArea.length)
@@ -1349,7 +1349,7 @@ class M2Controller {
         if (mapaTareas.size !== idsCatalogo.length)
             throw new ErrorAplicacion_1.ErrorAplicacion(400, 'Existe una tarea catalogada inexistente o inactiva');
         const etapas = etapasEntrada.map((etapa, indice) => {
-            const idAreaTrabajo = BigInt((0, solicitudes_1.identificador)(etapa.idArea)).toString();
+            const idAreaTrabajo = BigInt((0, solicitudes_1.identificador)(etapa.idAreaTrabajo ?? etapa.idArea)).toString();
             const area = mapaAreas.get(idAreaTrabajo);
             const nombre = (0, solicitudes_1.texto)(etapa.nombre, 150);
             if (!nombre)
@@ -1675,19 +1675,7 @@ class M2Controller {
             throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El monto calculado debe ser mayor a cero');
         const montos = importes(base, entrada.descuento?.tipo, entrada.descuento?.valor, entrada.exento_iva);
         const codigoMoneda = (0, solicitudes_1.texto)(entrada.moneda).toUpperCase() || 'CLP';
-        let tipoCambio = null;
-        if (codigoMoneda === 'USD') {
-            try {
-                tipoCambio = new client_1.Prisma.Decimal(await this.bancoCentral.obtenerTipoCambio('USD', (0, finanzas_1.fechaNegocio)()));
-            }
-            catch (error) {
-                if (entrada.tipoCambioManual !== true)
-                    throw error;
-                tipoCambio = new client_1.Prisma.Decimal((0, solicitudes_1.numeroNoNegativo)(entrada.tipoCambio, 'Tipo de cambio manual'));
-            }
-            if (!tipoCambio.isFinite() || tipoCambio.lte(0))
-                throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El tipo de cambio USD/CLP debe ser mayor a cero');
-        }
+        const tipoCambio = await this.resolverTipoCambioCotizacion(codigoMoneda, entrada);
         return db_1.prisma.$transaction(async (transaccion) => {
             const ficha = await transaccion.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFicha }, include: { cliente_financiero: true } });
             if (!ficha || ficha.cliente_financiero.estado_financiero !== 'activo' || ficha.cliente_financiero.nivel_formalizacion !== 'formal')

@@ -201,12 +201,12 @@ class M3Controller {
             const pago = await tx.pago_cliente.findUnique({ where: { id_pago_cliente: idPago }, include: { anulacion_pago: true, conciliacion: true } });
             if (!pago)
                 throw new ErrorAplicacion_1.ErrorAplicacion(404, 'Pago no encontrado');
-            if (pago.anulacion_pago || pago.estado_conciliacion === 'conciliado' || pago.conciliacion.some(c => c.estado_conciliacion === 'conciliado'))
+            if (pago.anulacion_pago || ['conciliada', 'conciliado'].includes(pago.estado_conciliacion) || pago.conciliacion.some(c => ['conciliada', 'conciliado'].includes(c.estado_conciliacion)))
                 throw new ErrorAplicacion_1.ErrorAplicacion(409, 'El pago no está disponible para conciliación');
             const evidencia = (0, pdfOperacional_1.respaldoOperacional)(entrada.evidencia, 'Evidencia de conciliación');
             if (monto.gt(pago.monto_pago))
                 throw new ErrorAplicacion_1.ErrorAplicacion(400, 'El monto conciliado no puede superar el pago');
-            const conciliacion = await tx.conciliacion.create({ data: { id_pago_cliente: idPago, monto_conciliado: monto, diferencia_conciliacion: monto.minus(pago.monto_pago), evidencia, estado_conciliacion: monto.eq(pago.monto_pago) ? 'conciliado' : 'con_diferencia', responsable_conciliacion: responsable } });
+            const conciliacion = await tx.conciliacion.create({ data: { id_pago_cliente: idPago, monto_conciliado: monto, diferencia_conciliacion: monto.minus(pago.monto_pago), evidencia, observacion: (0, solicitudes_1.texto)(entrada.observacion, 2000) || null, estado_conciliacion: monto.eq(pago.monto_pago) ? 'conciliada' : 'observada', responsable_conciliacion: responsable } });
             await tx.pago_cliente.update({ where: { id_pago_cliente: idPago }, data: { estado_conciliacion: conciliacion.estado_conciliacion } });
             return { mensaje: 'Pago conciliado', conciliacion };
         });

@@ -53,7 +53,7 @@ test('M2 catálogo y plantillas de fabricación', async t => {
   });
   await t.test('05 crea familia y guarda borrador con áreas repetidas, catálogo y tarea particular', async () => {
     familia=await m2.crearFamiliaProductoComercial({codigo:`PF-${sufijo}`,nombre:`Plantilla focal ${sufijo}`},usuario.usuario_id_usuario);
-    const etapa=(nombre,tareas)=>({id:randomUUID(),idArea:areas[0].area_trabajo_id_area.toString(),nombre,tareas});
+    const etapa=(nombre,tareas)=>({id:randomUUID(),idAreaTrabajo:areas[0].area_trabajo_id_area.toString(),nombre,tareas});
     plantilla=await m2.guardarBorradorPlantillaFabricacion(familia.id_familia_producto_comercial,{medidasObligatorias:['marcoAncho','marcoAlto','marcoEspesor'],etapas:[etapa('Preparación',[{id:randomUUID(),idTareaFabricacion:tarea.id_tarea_fabricacion,instrucciones:'Usar plano vigente'}]),etapa('Terminación',[{id:randomUUID(),nombre:'Control particular',tiempoEstimadoMin:10}])]},usuario.usuario_id_usuario);
     const contenido=plantilla.borrador; assert.equal(contenido.etapas.length,2); assert.deepEqual(contenido.medidasObligatorias,['marcoAncho','marcoAlto','marcoEspesor']); assert.equal(contenido.etapas[0].idAreaTrabajo,contenido.etapas[1].idAreaTrabajo); assert.equal(contenido.etapas[1].tareas[0].idTareaFabricacion,null);
   });

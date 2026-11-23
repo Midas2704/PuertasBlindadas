@@ -17,3 +17,10 @@ test('CU51, CU52 y CU57 siguen separados en el contrato de permisos', () => {
   assert.match(fuente, /revertirPago:'CU52'/);
   assert.match(fuente, /generarComprobante:'CU57'/);
 });
+
+test('conciliación usa estados admitidos por la base y conserva la observación', () => {
+  const fuente = readFileSync('src/controladores/M3Controller.ts', 'utf8');
+  assert.match(fuente, /monto\.eq\(pago\.monto_pago\) \? 'conciliada' : 'observada'/);
+  assert.match(fuente, /observacion: texto\(entrada\.observacion, 2000\) \|\| null/);
+  assert.doesNotMatch(fuente, /'con_diferencia'/);
+});

@@ -95,6 +95,18 @@ test('venta directa conserva original, tasa histórica y equivalente CLP', async
   } finally {if(creadas.length)await prisma.nota_venta.deleteMany({where:{id_nota_venta:{in:creadas}}});}
 });
 
+test('venta directa USD reutiliza la tasa ya obtenida por la interfaz si Banco Central no responde', async () => {
+  const m2=new M2Controller({obtenerTipoCambio:async()=>{throw new Error('Banco Central temporalmente no disponible')}});
+  const cliente=await prisma.cliente_financiero.findFirstOrThrow({where:{estado_financiero:'activo',nivel_formalizacion:'formal'},include:{ficha_cliente:true}});
+  let idNota;
+  try {
+    const nota=await m2.crearVentaDirecta({id_cliente:cliente.ficha_cliente.id_ficha_cliente,moneda:'USD',tipoCambio:925,tipoCambioManual:false,exento_iva:true,detalle:[{tipo:'servicio',descripcion:'Prueba tasa confirmada',cantidad:1,valor:100}]});
+    idNota=nota.id_nota_venta;
+    assert.equal(nota.tipo_cambio_usado.toNumber(),925);
+    assert.equal(nota.monto_convertido.toNumber(),92500);
+  } finally { if(idNota)await prisma.nota_venta.delete({where:{id_nota_venta:idNota}}); }
+});
+
 test('aprobar Nota de Venta persiste la transición emitida a confirmada',async()=>{
   const m2=new M2Controller({obtenerTipoCambio:async()=>900});const cliente=await prisma.cliente_financiero.findFirstOrThrow({where:{estado_financiero:'activo',nivel_formalizacion:'formal'},include:{ficha_cliente:true}});const moneda=await prisma.moneda.findUniqueOrThrow({where:{codigo_moneda:'CLP'}});
   const nota=await prisma.nota_venta.create({data:{id_ficha_cliente:cliente.ficha_cliente.id_ficha_cliente,id_moneda:moneda.id_moneda,numero_nota_venta:`TEST-${randomUUID()}`,fecha_emision:new Date(),monto_neto:100,monto_total:100,exento_iva:true,estado_nota_venta:'emitida',estado_pago:'pendiente'}});
