@@ -132,6 +132,14 @@ test('el backend sincroniza MIDAS después de cargar el catálogo y antes de esc
   assert.doesNotMatch(sincronizador,/configuracion_particular\s*:/);
 });
 
+test('cada inicio de sesión MIDAS reconcilia el catálogo antes de crear la sesión',()=>{
+  const controlador=fs.readFileSync('src/controladores/M4Controller.ts','utf8');
+  const sincronizacion=controlador.indexOf('await this.garantizarCatalogoMidas(tx,cuentaSesion.usuario_id_usuario)');
+  const sesion=controlador.indexOf('await tx.sesion_usuario.create',sincronizacion);
+  assert.ok(sincronizacion>=0 && sesion>sincronizacion);
+  assert.match(controlador,/garantizarCatalogoMidas[\s\S]*createMany[\s\S]*skipDuplicates:true/);
+});
+
 test('PostgreSQL aislado sincroniza todos los CU registrados a Midas sintético',{
   skip:process.env.C42_PG18_AISLADO!=='1',timeout:30000,
 },async()=>{

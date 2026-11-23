@@ -55,6 +55,7 @@ export declare class M4Controller {
     private readonly correo;
     private readonly integraciones;
     constructor(correo?: CorreoRecuperacion);
+    private garantizarCatalogoMidas;
     private transaccion;
     private cuenta;
     private invalidar;

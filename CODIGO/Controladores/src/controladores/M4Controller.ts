@@ -49,6 +49,12 @@ export const perfilPermitePersonalizacion = (perfil: { activo_m4: boolean } | nu
 export class M4Controller {
  private readonly integraciones = new ServicioIntegracionesExternas();
  constructor(private readonly correo: CorreoRecuperacion = new CorreoAplicacion()) {}
+ private async garantizarCatalogoMidas(tx:Transaccion,id:bigint) {
+  const catalogo=await tx.permiso.findMany({where:{codigo_m4:{not:null}},select:{permiso_id_permiso:true}});
+  if(catalogo.length) await tx.usuario_permiso_particular.createMany({
+   data:catalogo.map(permiso=>({id_usuario:id,id_permiso:permiso.permiso_id_permiso})),skipDuplicates:true,
+  });
+ }
  private async transaccion<T>(accion: (tx: Transaccion)=>Promise<T>): Promise<T> {
   for(let intento=0;;intento++) {
    try { return await prisma.$transaction(accion, {isolationLevel:Prisma.TransactionIsolationLevel.Serializable, timeout:30000}); }
@@ -134,6 +140,7 @@ export class M4Controller {
    if(cuenta!.seguridad?.bloqueo_persistente || (cuenta!.seguridad?.bloqueo_hasta && cuenta!.seguridad.bloqueo_hasta>new Date())) return {fallo:403,mensaje:'Cuenta bloqueada'};
    if(credencial!.temporal && credencial!.vence && credencial!.vence<=new Date()) return {fallo:403,mensaje:'Credencial temporal vencida; solicita restablecimiento'};
    const cuentaSesion=cuenta!;
+   if(esAdministradorRaiz(cuentaSesion)) await this.garantizarCatalogoMidas(tx,cuentaSesion.usuario_id_usuario);
    await tx.sesion_usuario.updateMany({where:{id_usuario:cuentaSesion.usuario_id_usuario,invalidada:null,vence:{lte:new Date()}},data:{invalidada:new Date(),motivo:'Vencimiento'}});
    const anterior=await tx.sesion_usuario.findFirst({where:{id_usuario:cuentaSesion.usuario_id_usuario,invalidada:null,vence:{gt:new Date()}},orderBy:{inicio:'desc'}});
    if(anterior && entrada.reemplazarSesion!==true) return {fallo:409,mensaje:'Ya existe una sesión activa. Confirma si quieres cerrarla e iniciar una nueva.',codigo:'SESION_ACTIVA_REQUIERE_CONFIRMACION'};

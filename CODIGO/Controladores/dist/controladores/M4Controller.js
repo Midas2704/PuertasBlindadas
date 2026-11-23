@@ -85,6 +85,13 @@ class M4Controller {
         this.correo = correo;
         this.integraciones = new integracionesExternas_1.ServicioIntegracionesExternas();
     }
+    async garantizarCatalogoMidas(tx, id) {
+        const catalogo = await tx.permiso.findMany({ where: { codigo_m4: { not: null } }, select: { permiso_id_permiso: true } });
+        if (catalogo.length)
+            await tx.usuario_permiso_particular.createMany({
+                data: catalogo.map(permiso => ({ id_usuario: id, id_permiso: permiso.permiso_id_permiso })), skipDuplicates: true,
+            });
+    }
     async transaccion(accion) {
         for (let intento = 0;; intento++) {
             try {
@@ -193,6 +200,8 @@ class M4Controller {
             if (credencial.temporal && credencial.vence && credencial.vence <= new Date())
                 return { fallo: 403, mensaje: 'Credencial temporal vencida; solicita restablecimiento' };
             const cuentaSesion = cuenta;
+            if ((0, exports.esAdministradorRaiz)(cuentaSesion))
+                await this.garantizarCatalogoMidas(tx, cuentaSesion.usuario_id_usuario);
             await tx.sesion_usuario.updateMany({ where: { id_usuario: cuentaSesion.usuario_id_usuario, invalidada: null, vence: { lte: new Date() } }, data: { invalidada: new Date(), motivo: 'Vencimiento' } });
             const anterior = await tx.sesion_usuario.findFirst({ where: { id_usuario: cuentaSesion.usuario_id_usuario, invalidada: null, vence: { gt: new Date() } }, orderBy: { inicio: 'desc' } });
             if (anterior && entrada.reemplazarSesion !== true)
