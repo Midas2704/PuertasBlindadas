@@ -1,5 +1,8 @@
 -- CU18 es la capacidad aprobada para emitir cotizaciones mediante el flujo
 -- documental seguro. Reconciliación aditiva e idempotente del catálogo M4.
+-- Las bases históricas pueden no contener CU19 porque ese permiso se cargaba
+-- mediante datos iniciales y no mediante una migración. Se reconcilia aquí
+-- antes de registrar la dependencia CU18 -> CU19.
 DO $$
 DECLARE incompatible RECORD;
 BEGIN
@@ -12,13 +15,50 @@ BEGIN
     RAISE EXCEPTION 'CU18 ya existe asociado a un módulo incompatible';
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM "comun"."permiso"
-    WHERE "codigo_m4"='CU19' AND "activo_m4"=TRUE
-  ) THEN
-    RAISE EXCEPTION 'CU19 activo es requisito para registrar CU18';
+  SELECT p."codigo_m4" INTO incompatible
+  FROM "comun"."permiso" p
+  WHERE p."codigo_m4"='CU19'
+    AND p."permiso_modulo" IS NOT NULL
+    AND p."permiso_modulo" IS DISTINCT FROM 'M2';
+  IF FOUND THEN
+    RAISE EXCEPTION 'CU19 ya existe asociado a un módulo incompatible';
   END IF;
 END $$;
+
+INSERT INTO "comun"."permiso" (
+  "permiso_modulo", "permiso_accion", "permiso_descripcion",
+  "permiso_nombre_del_permiso", "codigo_m4", "activo_m4", "requiere_administrador"
+)
+VALUES (
+  'M2', 'crear y guardar cotización',
+  'Crear una cotización y guardar su información como borrador',
+  'Crear y guardar cotización', 'CU19', TRUE, FALSE
+)
+ON CONFLICT ("codigo_m4") DO UPDATE SET
+  "permiso_modulo"=EXCLUDED."permiso_modulo",
+  "permiso_accion"=EXCLUDED."permiso_accion",
+  "permiso_descripcion"=EXCLUDED."permiso_descripcion",
+  "permiso_nombre_del_permiso"=EXCLUDED."permiso_nombre_del_permiso",
+  "activo_m4"=TRUE,
+  "requiere_administrador"=FALSE;
+
+INSERT INTO "comun"."perfil_permiso" (
+  "perfil_id_perfil", "permiso_id_permiso", "perfil_permiso_activo"
+)
+SELECT perfil."perfil_id_perfil", permiso."permiso_id_permiso", TRUE
+FROM "comun"."perfil" perfil
+JOIN "comun"."permiso" permiso ON permiso."codigo_m4"='CU19'
+WHERE perfil."codigo_m4" IN ('gerencia','secretaria')
+  AND perfil."activo_m4"=TRUE
+ON CONFLICT ("perfil_id_perfil", "permiso_id_permiso") DO UPDATE SET
+  "perfil_permiso_activo"=TRUE;
+
+INSERT INTO "comun"."usuario_permiso_particular" ("id_usuario", "id_permiso")
+SELECT usuario."usuario_id_usuario", permiso."permiso_id_permiso"
+FROM "comun"."usuario" usuario
+JOIN "comun"."permiso" permiso ON permiso."codigo_m4"='CU19'
+WHERE usuario."administrador_original"=TRUE
+ON CONFLICT ("id_usuario", "id_permiso") DO NOTHING;
 
 INSERT INTO "comun"."permiso" (
   "permiso_modulo", "permiso_accion", "permiso_descripcion",

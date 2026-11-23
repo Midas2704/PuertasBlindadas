@@ -142,8 +142,11 @@ test('079 registra CU377 pendiente y asigna todo el catálogo a la cuenta raíz'
 
 test('080 reconcilia CU18 activo sin habilitar capacidades reservadas',()=>{
   const sql=fs.readFileSync('prisma/migrations/080_reconciliacion_cu18_emision_cotizacion/migration.sql','utf8');
+  const altaCu19=sql.indexOf("'Crear y guardar cotización', 'CU19'");
+  const altaCu18=sql.indexOf("'Emitir cotizaciones', 'CU18'");
   assert.match(sql,/['"]CU18['"]/);
   assert.match(sql,/['"]CU19['"]/);
+  assert.ok(altaCu19>=0 && altaCu19<altaCu18,'CU19 debe reconciliarse antes de crear la dependencia de CU18');
   assert.match(sql,/"activo_m4"=TRUE/);
   assert.match(sql,/"perfil_permiso"/);
   assert.match(sql,/\('gerencia','secretaria'\)/);
