@@ -6,6 +6,13 @@ import { prisma } from '../db';
 import { clienteAceptableB2B } from '../comercial/validarAceptacionB2B';
 import { ErrorAplicacion } from '../utilidades/ErrorAplicacion';
 import { calcularNota, consolidarNotasClp, estadoVisibleNota, fechaNegocio, incluirCotizacion, incluirNota, resumirNotas, totalLineasComerciales } from '../utilidades/finanzas';
+
+const codigosMonedaVentaDirecta = () => new Set(
+  (process.env.M2_MONEDAS_VENTA_DIRECTA || 'CLP,USD')
+    .split(',')
+    .map(codigo => codigo.trim().toUpperCase())
+    .filter(codigo => ['CLP', 'USD'].includes(codigo)),
+);
 import { identificador, numeroNoNegativo, texto } from '../validaciones/solicitudes';
 import { BancoCentral, C_BancoCentral } from '../utilidades/C_BancoCentral';
 import { registrarCompromisoCredito, validarCreditoParaFormalizacion } from '../utilidades/creditoM8';
@@ -1182,7 +1189,27 @@ export class M2Controller {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) { if (error instanceof ErrorAplicacion) throw error; if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new ErrorAplicacion(409, 'Otra publicación actualizó la plantilla; vuelve a cargarla'); throw error; }
   }
-  async listarMonedas() { return prisma.moneda.findMany({ where: { estado_moneda: 'activo', codigo_moneda: { in: ['CLP', 'USD'] } } }); }
+  async listarMonedas(idBorrador?: number) {
+    const borrador = idBorrador ? await prisma.cotizacion.findUnique({
+      where: { id_cotizacion: idBorrador },
+      select: { id_moneda: true, estado_cotizacion: true },
+    }) : null;
+    const idMonedaHistorica = borrador?.estado_cotizacion === 'borrador' ? borrador.id_moneda : undefined;
+    return prisma.moneda.findMany({
+      where: {
+        codigo_moneda: { in: ['CLP', 'USD'] },
+        OR: [{ estado_moneda: 'activo' }, ...(idMonedaHistorica ? [{ id_moneda: idMonedaHistorica }] : [])],
+      },
+    });
+  }
+  async listarMonedasVentaDirecta() {
+    const configuradas = [...codigosMonedaVentaDirecta()];
+    return prisma.moneda.findMany({
+      where: { codigo_moneda: { in: configuradas } },
+      select: { id_moneda: true, codigo_moneda: true },
+      orderBy: { codigo_moneda: 'asc' },
+    });
+  }
   async consultarResumen() {
     const [notas, cotizacionesPendientes] = await Promise.all([
       prisma.nota_venta.findMany({ include: incluirNota }),
@@ -1221,6 +1248,16 @@ export class M2Controller {
       return { ...cotizacion, advertenciaStock: materialesRevisar.length ? { etiqueta: 'Revisar stock', materiales: materialesRevisar, bloqueaAprobacion: false } : null };
     });
     return { cotizaciones: cotizacionesConStock, notas_venta: notas.map(nota => { const calculo=calcularNota(nota); return { ...nota, estado_pago: calculo.estadoPago, estadoNotaVentaVisible: estadoVisibleNota(nota,calculo.estadoPago), ...calculo }; }) };
+  }
+
+  async obtenerBorradorCotizacion(idCotizacion: number) {
+    const cotizacion = await prisma.cotizacion.findUnique({
+      where: { id_cotizacion: idCotizacion },
+      include: incluirCotizacion,
+    });
+    if (!cotizacion) throw new ErrorAplicacion(404, 'Cotización no encontrada');
+    if (cotizacion.estado_cotizacion !== 'borrador') throw new ErrorAplicacion(409, 'La Cotización ya no está disponible como borrador');
+    return cotizacion;
   }
 
   async guardarCotizacion(entrada: Entrada, actorId?: bigint) {
@@ -1288,7 +1325,7 @@ export class M2Controller {
       if(!referencia)throw new ErrorAplicacion(404,'Cotización no encontrada');
       const idMonedaObjetivo=entrada.id_moneda?identificador(entrada.id_moneda):referencia.id_moneda;
       const monedaObjetivo=await prisma.moneda.findUnique({where:{id_moneda:idMonedaObjetivo}});
-      if(!monedaObjetivo||monedaObjetivo.estado_moneda!=='activo'||!['CLP','USD'].includes(monedaObjetivo.codigo_moneda))throw new ErrorAplicacion(400,'Moneda no habilitada');
+      if(!monedaObjetivo||!['CLP','USD'].includes(monedaObjetivo.codigo_moneda)||(monedaObjetivo.estado_moneda!=='activo'&&monedaObjetivo.id_moneda!==referencia.id_moneda))throw new ErrorAplicacion(400,'Moneda no habilitada');
       tipoCambioEdicion=await this.resolverTipoCambioCotizacion(monedaObjetivo.codigo_moneda,entrada);
     }
     return prisma.$transaction(async transaccion => {
@@ -1312,7 +1349,7 @@ export class M2Controller {
         }
         const idMoneda = entrada.id_moneda ? identificador(entrada.id_moneda) : cotizacion.id_moneda;
         const moneda = await transaccion.moneda.findUnique({ where: { id_moneda: idMoneda } });
-        if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
+        if (!moneda || !['CLP', 'USD'].includes(moneda.codigo_moneda) || (moneda.estado_moneda !== 'activo' && moneda.id_moneda !== cotizacion.id_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
 
         const monedaLocal=await transaccion.moneda.findUnique({where:{codigo_moneda:'CLP'}});
         if(!monedaLocal||monedaLocal.estado_moneda!=='activo')throw new ErrorAplicacion(409,'La moneda local CLP no está disponible para costear materiales');
@@ -1394,7 +1431,7 @@ export class M2Controller {
       const ficha = await transaccion.ficha_cliente.findUnique({ where: { id_ficha_cliente: idFicha }, include: { cliente_financiero: true } });
       if (!ficha || ficha.cliente_financiero.estado_financiero !== 'activo' || ficha.cliente_financiero.nivel_formalizacion !== 'formal') throw new ErrorAplicacion(400, 'La venta directa requiere cliente activo y formal');
       const moneda = await transaccion.moneda.findUnique({ where: { codigo_moneda: codigoMoneda } });
-      if (!moneda || moneda.estado_moneda !== 'activo' || !['CLP', 'USD'].includes(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada');
+      if (!moneda || !codigosMonedaVentaDirecta().has(moneda.codigo_moneda)) throw new ErrorAplicacion(400, 'Moneda no habilitada para Venta Directa');
       const idsItem = [...new Set(detalle.flatMap(linea => linea.idItemComercial ? [linea.idItemComercial] : []))];
       if (idsItem.length && await transaccion.item_comercial.count({ where: { id_item_comercial: { in: idsItem }, estado_item: 'activo' } }) !== idsItem.length) throw new ErrorAplicacion(400, 'Uno de los ítems comerciales no existe o está inactivo');
       const idsProyecto = [...new Set(detalle.flatMap(linea => linea.idProyecto ? [linea.idProyecto] : []))];

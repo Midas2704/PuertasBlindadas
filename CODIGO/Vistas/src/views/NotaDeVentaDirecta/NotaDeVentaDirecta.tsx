@@ -45,7 +45,7 @@ const NotaDeVentaDirecta: React.FC = () => {
       .then((data: ClienteApi[]) => setClientes(data.filter(cliente => cliente.rut && cliente.nivelFormalizacion === 'formal')))
       .catch(e => console.error('Error fetching clientes', e));
     solicitarFinanzas('/billing/products').then(res => res.json()).then(setItems).catch(e => console.error('Error fetching items', e));
-    solicitarFinanzas('/monedas').then(async res=>{const data=await res.json();if(!res.ok)throw new Error(data.error);const codigos=(data as MonedaHabilitada[]).filter(item=>item.estado_moneda===undefined||item.estado_moneda==='activo').map(item=>item.codigo_moneda).filter(codigo=>['CLP','USD'].includes(codigo));setMonedasHabilitadas(codigos);setMoneda(actual=>codigos.includes(actual)?actual:(codigos[0]||''));}).catch(()=>{setMonedasHabilitadas([]);setMoneda('');setMensaje({text:'No fue posible consultar las monedas habilitadas.',type:'error'})});
+    solicitarFinanzas('/billing/nota-venta/monedas').then(async res=>{const data=await res.json();if(!res.ok)throw new Error(data.error);const codigos=(data as MonedaHabilitada[]).map(item=>item.codigo_moneda).filter(codigo=>['CLP','USD'].includes(codigo));setMonedasHabilitadas(codigos);setMoneda(actual=>codigos.includes(actual)?actual:(codigos[0]||''));}).catch(()=>{setMonedasHabilitadas([]);setMoneda('');setMensaje({text:'No fue posible consultar las monedas habilitadas para Venta Directa.',type:'error'})});
 
     const handleClickOutside = (event: MouseEvent) => {
       if (clienteRef.current && !clienteRef.current.contains(event.target as Node)) {
@@ -266,7 +266,7 @@ const NotaDeVentaDirecta: React.FC = () => {
                 </div>
                 <div className="text-sm text-gray-500 flex items-center">La venta conserva su moneda y su conversión histórica al momento de emitir.</div>
               </div>
-              {monedasHabilitadas.length>0&&!monedasHabilitadas.includes('USD')&&<p className="col-span-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">USD no está habilitado en el catálogo de monedas. Debe activarse desde Administración antes de emitir ventas en dólares.</p>}
+              {monedasHabilitadas.length>0&&!monedasHabilitadas.includes('USD')&&<p className="col-span-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">USD no está habilitado para Venta Directa en la configuración del servidor.</p>}
               {moneda === 'USD' && <label className="block text-sm font-medium text-gray-700">Tipo de cambio USD/CLP ({tipoCambioOrigen || 'consultando'})
                 <input required type="number" min="0.0001" step="0.0001" readOnly={tipoCambioOrigen === 'Banco Central'} value={tipoCambio} onChange={e=>setTipoCambio(e.target.value)} className="mt-1 w-full p-2.5 bg-gray-50 border border-gray-300 rounded-lg read-only:bg-gray-100" />
               </label>}

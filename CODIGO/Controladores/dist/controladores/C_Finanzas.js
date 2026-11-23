@@ -684,8 +684,10 @@ class C_Finanzas {
                 case 'historialPlantillaFabricacionFamilia': return this.m2.obtenerPlantillaFabricacionFamilia((0, solicitudes_1.identificador)(parametros.id), true);
                 case 'guardarBorradorPlantillaFabricacion': return this.m2.guardarBorradorPlantillaFabricacion((0, solicitudes_1.identificador)(parametros.id), cuerpo, actor.id);
                 case 'publicarPlantillaFabricacionFamilia': return this.m2.publicarPlantillaFabricacion((0, solicitudes_1.identificador)(parametros.id), cuerpo, actor.id);
-                case 'monedas': return this.m2.listarMonedas();
+                case 'monedas': return this.m2.listarMonedas(solicitud.consulta?.borrador ? (0, solicitudes_1.identificador)(solicitud.consulta.borrador) : undefined);
+                case 'monedasVentaDirecta': return this.m2.listarMonedasVentaDirecta();
                 case 'bandeja': return this.m2.consultarBandeja();
+                case 'obtenerBorradorCotizacion': return this.m2.obtenerBorradorCotizacion((0, solicitudes_1.identificador)(parametros.id));
                 case 'historial': return this.m2.consultarBandeja(true);
                 case 'consolidarB2C': return this.m2.consolidarB2C((0, solicitudes_1.identificador)(parametros.id), cuerpo, actor.id);
                 case 'obtenerPlanificacionAprobacionCotizacion': return this.m2.obtenerPlanificacionAprobacionCotizacion((0, solicitudes_1.identificador)(parametros.id));

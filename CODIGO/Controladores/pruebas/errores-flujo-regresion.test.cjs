@@ -15,6 +15,28 @@ test('venta directa USD reutiliza el tipo de cambio confirmado si falla la segun
   assert.match(frontend, /tipoCambio: moneda === 'USD' \? Number\(tipoCambio\) : undefined/);
 });
 
+test('venta directa obtiene CLP y USD desde su configuración sin alterar el catálogo maestro', () => {
+  const backend = readFileSync('src/controladores/M2Controller.ts', 'utf8');
+  const rutas = readFileSync('src/rutas/finanzas.ts', 'utf8');
+  const frontend = readFileSync('../Vistas/src/views/NotaDeVentaDirecta/NotaDeVentaDirecta.tsx', 'utf8');
+  assert.match(backend, /M2_MONEDAS_VENTA_DIRECTA \|\| 'CLP,USD'/);
+  assert.match(backend, /codigosMonedaVentaDirecta\(\)\.has\(moneda\.codigo_moneda\)/);
+  assert.match(rutas, /billing\/nota-venta\/monedas/);
+  assert.match(frontend, /billing\/nota-venta\/monedas/);
+});
+
+test('retomar cotización consulta sólo el borrador y conserva su moneda histórica', () => {
+  const backend = readFileSync('src/controladores/M2Controller.ts', 'utf8');
+  const rutas = readFileSync('src/rutas/finanzas.ts', 'utf8');
+  const frontend = readFileSync('../Vistas/src/views/ArmarCotizacion/ArmarCotizacionComercial.tsx', 'utf8');
+  assert.match(backend, /async obtenerBorradorCotizacion/);
+  assert.match(backend, /monedaObjetivo\.id_moneda!==referencia\.id_moneda/);
+  assert.match(rutas, /billing\/quotes\/:id\/draft/);
+  assert.match(frontend, /billing\/quotes\/\$\{borradorId\}\/draft/);
+  assert.match(frontend, /monedas\?borrador=\$\{borradorId\}/);
+  assert.doesNotMatch(frontend, /solicitarFinanzas\('\/billing\/pending-approvals'\)/);
+});
+
 test('CU451 deja de aparecer en el menú y en las rutas sin borrar su implementación', () => {
   const app = readFileSync('../Vistas/src/App.tsx', 'utf8');
   const menu = readFileSync('../Vistas/src/views/DashboardWrapper/DashboardWrapper.tsx', 'utf8');

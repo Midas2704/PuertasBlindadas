@@ -29,7 +29,7 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
     vi.mocked(solicitarFinanzas).mockReset();
     let revision=0;
     vi.mocked(solicitarFinanzas).mockImplementation((ruta,opciones)=>{
-      if(ruta==='/monedas')return json([{id_moneda:1,codigo_moneda:'CLP'}]);
+      if(String(ruta).startsWith('/monedas'))return json(String(ruta).includes('borrador=901')?[{id_moneda:1,codigo_moneda:'CLP'},{id_moneda:2,codigo_moneda:'USD',estado_moneda:'inactivo'}]:[{id_moneda:1,codigo_moneda:'CLP'}]);
       if(String(ruta).startsWith('/clients?'))return json([cliente]);
       if(ruta==='/billing/inventory')return json([material]);
       if(String(ruta).startsWith('/mantenedores/comercial/condiciones?'))return json([]);
@@ -42,7 +42,7 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
       if(ruta==='/billing/quotes'&&opciones?.method==='POST'){revision=1;return json({id_cotizacion:901,revision,contactos_b2b:[],grupos_alternativas_b2c:[]});}
       if(ruta==='/billing/quotes/901'&&opciones?.method==='PUT'){revision+=1;return json({id_cotizacion:901,revision,contactos_b2b:[],grupos_alternativas_b2c:[]});}
       if(ruta==='/billing/quotes/901/preview-pdf'&&opciones?.method==='POST')return json({contenido:'data:application/pdf;base64,JVBERi0xLjQKJSVFT0YK',nombre:'cotizacion-borrador.pdf',paginas:3,sha256:'abc123',estado:'BORRADOR'});
-      if(ruta==='/billing/pending-approvals')return json({cotizaciones:[{id_cotizacion:901,estado_cotizacion:'borrador',segmento_comercial:'B2C',revision,id_ficha_cliente:41,id_moneda:1,fecha_vigencia:'2026-10-31',margen_esperado:30,exento_iva:false,descuento_valor:0,ficha_cliente:{cliente_financiero:{...cliente,nombre_razon_social_referencia:cliente.razonSocial,rut_cliente:cliente.rut,telefono_financiero:cliente.telefono,correo_financiero:cliente.correo}},detalle_cotizacion:[],grupos_alternativas_b2c:[],contactos_b2b:[],detalles_servicio:[]}]});
+      if(ruta==='/billing/quotes/901/draft')return json({id_cotizacion:901,estado_cotizacion:'borrador',segmento_comercial:'B2C',revision,id_ficha_cliente:41,id_moneda:2,moneda:{id_moneda:2,codigo_moneda:'USD',estado_moneda:'inactivo'},fecha_vigencia:'2026-12-31',margen_esperado:30,exento_iva:false,descuento_valor:0,ficha_cliente:{cliente_financiero:{...cliente,nombre_razon_social_referencia:cliente.razonSocial,rut_cliente:cliente.rut,telefono_financiero:cliente.telefono,correo_financiero:cliente.correo}},detalle_cotizacion:[],grupos_alternativas_b2c:[],contactos_b2b:[],detalles_servicio:[]});
       return json({error:'Ruta no contemplada por el fixture C2'},404);
     });
   });
@@ -112,6 +112,14 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
     expect(llamadas.filter(([ruta,opciones])=>ruta==='/billing/quotes'&&opciones?.method==='POST')).toHaveLength(1);
     expect(llamadas.filter(([ruta,opciones])=>ruta==='/billing/quotes/901'&&opciones?.method==='PUT').length).toBeGreaterThanOrEqual(1);
     expect(llamadas.filter(([ruta])=>ruta==='/billing/quotes/901/preview-pdf')).toHaveLength(2);
+  });
+
+  it('retoma una cotización histórica en su moneda original sin cargar toda la bandeja',async()=>{
+    render(<MemoryRouter initialEntries={['/?borrador=901']}><ArmarCotizacion/></MemoryRouter>);
+    expect(await screen.findByText('Retomar Cotización COT-901')).toBeInTheDocument();
+    await waitFor(()=>expect(vi.mocked(solicitarFinanzas).mock.calls.filter(([ruta])=>ruta==='/billing/quotes/901/draft')).toHaveLength(1));
+    expect(vi.mocked(solicitarFinanzas).mock.calls.some(([ruta])=>ruta==='/billing/pending-approvals')).toBe(false);
+    expect(vi.mocked(solicitarFinanzas).mock.calls.some(([ruta])=>ruta==='/monedas?borrador=901')).toBe(true);
   });
 
   it('distingue la dirección libre de la Obra estable y exige selección explícita',async()=>{

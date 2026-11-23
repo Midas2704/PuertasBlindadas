@@ -36,10 +36,10 @@ const normalizarFiltrosHttpM9 = (consulta?: Record<string, unknown>): FiltrosM9 
   return filtros as FiltrosM9;
 };
 
-export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' | 'crearCliente' | 'actualizarCliente' | 'desactivarCliente' | 'reactivarCliente' | 'inventario' | 'productos' | 'monedas'
+export type Operacion = 'salud' | 'listarClientes' | 'abrirFicha' | 'dashboard' | 'crearCliente' | 'actualizarCliente' | 'desactivarCliente' | 'reactivarCliente' | 'inventario' | 'productos' | 'monedas' | 'monedasVentaDirecta'
   | 'consultarResumenInventario' | 'listarMaterialesInventario' | 'obtenerMaterialInventario' | 'listarBodegasInventario' | 'listarMovimientosInventario' | 'listarReservasInventario' | 'listarAlertasInventario'
   | 'catalogosOperacionInventario' | 'registrarEntradaInventario' | 'registrarSalidaInventario' | 'crearReservaInventario' | 'liberarReservaInventario' | 'ajustarExistenciaInventario'
-  | 'bandeja' | 'historial' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
+  | 'bandeja' | 'historial' | 'obtenerBorradorCotizacion' | 'guardarCotizacion' | 'crearVentaDirecta' | 'anularVenta' | 'registrarDocumento'
   | 'descartarBorrador' | 'aprobarCotizacion' | 'aprobarVenta' | 'editarCotizacion' | 'tipoCambio'
   | 'consultarPago' | 'consultarSaldo' | 'catalogosPago'
   | 'consolidarB2C' | 'aprobarCotizacionB2B' | 'obtenerPlanificacionAprobacionCotizacion' | 'consultarTrazabilidadComercialM11' | 'consultarCadenaDocumentalM11' | 'consultarConciliacionDocumentalM11' | 'gestionarCorreccionDocumentalM11' | 'consultarHistorialCorreccionM11' | 'resolverHallazgoDocumentalM11' | 'registrarClienteDesdeCotizacion' | 'emitirCotizacion' | 'seleccionarAlternativaB2C' | 'aceptarAlternativaB2C' | 'rechazarAlternativaB2C' | 'reactivarCotizacion' | 'formalizarClienteB2C' | 'configurarEtapasCobro' | 'revertirVenta' | 'registrarPago' | 'contextoPago' | 'anularPago' | 'revertirPago' | 'aplicarSaldoFavor' | 'consultarMorosidad' | 'generarComprobante' | 'conciliarPago' | 'modificarGuia' | 'definirCondicionesCobro' | 'configurarUmbral' | 'consultarUmbral'
@@ -697,8 +697,10 @@ export class C_Finanzas {
       case 'historialPlantillaFabricacionFamilia': return this.m2.obtenerPlantillaFabricacionFamilia(identificador(parametros.id), true);
       case 'guardarBorradorPlantillaFabricacion': return this.m2.guardarBorradorPlantillaFabricacion(identificador(parametros.id), cuerpo, actor.id);
       case 'publicarPlantillaFabricacionFamilia': return this.m2.publicarPlantillaFabricacion(identificador(parametros.id), cuerpo, actor.id);
-      case 'monedas': return this.m2.listarMonedas();
+      case 'monedas': return this.m2.listarMonedas(solicitud.consulta?.borrador ? identificador(solicitud.consulta.borrador) : undefined);
+      case 'monedasVentaDirecta': return this.m2.listarMonedasVentaDirecta();
       case 'bandeja': return this.m2.consultarBandeja();
+      case 'obtenerBorradorCotizacion': return this.m2.obtenerBorradorCotizacion(identificador(parametros.id));
       case 'historial': return this.m2.consultarBandeja(true);
       case 'consolidarB2C': return this.m2.consolidarB2C(identificador(parametros.id),cuerpo,actor.id);
       case 'obtenerPlanificacionAprobacionCotizacion': return this.m2.obtenerPlanificacionAprobacionCotizacion(identificador(parametros.id));

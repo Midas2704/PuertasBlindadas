@@ -508,8 +508,10 @@ function crearRutasFinanzas(fachada) {
     rutas.get('/billing/inventory', derivar('inventario'));
     rutas.get('/billing/products', derivar('productos'));
     rutas.get('/monedas', derivar('monedas'));
+    rutas.get('/billing/nota-venta/monedas', derivar('monedasVentaDirecta'));
     rutas.get('/billing/pending-approvals', derivar('bandeja'));
     rutas.get('/billing/history', derivar('historial'));
+    rutas.get('/billing/quotes/:id/draft', derivar('obtenerBorradorCotizacion'));
     rutas.post('/billing/quotes', derivar('guardarCotizacion'));
     rutas.put('/billing/quotes/:id', derivar('editarCotizacion'));
     rutas.post('/billing/quotes/cliente', derivar('registrarClienteDesdeCotizacion'));

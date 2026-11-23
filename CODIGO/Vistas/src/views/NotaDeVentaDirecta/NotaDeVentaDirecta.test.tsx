@@ -9,7 +9,7 @@ vi.mock('../../api/finanzas',()=>({solicitarFinanzas}));
 const json=(dato:unknown)=>Promise.resolve(new Response(JSON.stringify(dato),{status:200,headers:{'Content-Type':'application/json'}}));
 
 describe('Nota de Venta directa',()=>{
-  beforeEach(()=>solicitarFinanzas.mockImplementation((ruta:string)=>json(ruta==='/monedas'?[{codigo_moneda:'CLP',estado_moneda:'activo'},{codigo_moneda:'USD',estado_moneda:'activo'}]:[])));
+  beforeEach(()=>solicitarFinanzas.mockImplementation((ruta:string)=>json(ruta==='/billing/nota-venta/monedas'?[{codigo_moneda:'CLP'},{codigo_moneda:'USD'}]:[])));
   it('calcula el monto neto desde todas las líneas',()=>{
     expect(calcularTotalReferencialDetalle([
       {tipo:'producto',descripcion:'Puerta',cantidad:2,valor:100},
@@ -43,11 +43,11 @@ describe('Nota de Venta directa',()=>{
     expect(screen.queryByRole('spinbutton',{name:'Monto Base Neto'})).not.toBeInTheDocument();
   });
 
-  it('sólo ofrece monedas activas y explica cuando USD está deshabilitado',async()=>{
-    solicitarFinanzas.mockImplementation((ruta:string)=>json(ruta==='/monedas'?[{codigo_moneda:'CLP',estado_moneda:'activo'}]:[]));
+  it('usa el catálogo específico de Venta Directa y explica cuando USD no está configurado',async()=>{
+    solicitarFinanzas.mockImplementation((ruta:string)=>json(ruta==='/billing/nota-venta/monedas'?[{codigo_moneda:'CLP'}]:[]));
     render(<NotaDeVentaDirecta/>);
     expect(await screen.findByRole('option',{name:'CLP'})).toBeInTheDocument();
     expect(screen.queryByRole('option',{name:'USD'})).not.toBeInTheDocument();
-    expect(screen.getByText(/USD no está habilitado en el catálogo/)).toBeInTheDocument();
+    expect(screen.getByText(/USD no está habilitado para Venta Directa/)).toBeInTheDocument();
   });
 });
