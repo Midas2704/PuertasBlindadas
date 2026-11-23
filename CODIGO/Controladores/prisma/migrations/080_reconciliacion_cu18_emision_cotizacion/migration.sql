@@ -103,7 +103,6 @@ WHERE usuario."administrador_original"=TRUE
 ON CONFLICT ("id_usuario", "id_permiso") DO NOTHING;
 
 DO $$
-DECLARE perfiles INTEGER;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM "comun"."permiso" p
@@ -125,15 +124,19 @@ BEGIN
     RAISE EXCEPTION 'No fue posible acreditar la dependencia CU18 -> CU19';
   END IF;
 
-  SELECT COUNT(*) INTO perfiles
-  FROM "comun"."perfil_permiso" pp
-  JOIN "comun"."perfil" perfil ON perfil."perfil_id_perfil"=pp."perfil_id_perfil"
-  JOIN "comun"."permiso" permiso ON permiso."permiso_id_permiso"=pp."permiso_id_permiso"
-  WHERE perfil."codigo_m4" IN ('gerencia','secretaria')
-    AND permiso."codigo_m4"='CU18'
-    AND pp."perfil_permiso_activo"=TRUE;
-  IF perfiles <> 2 THEN
-    RAISE EXCEPTION 'CU18 debe quedar activo para Gerencia y Secretaría';
+  IF EXISTS (
+    SELECT 1
+    FROM "comun"."perfil" perfil
+    JOIN "comun"."permiso" permiso ON permiso."codigo_m4"='CU18'
+    LEFT JOIN "comun"."perfil_permiso" pp
+      ON pp."perfil_id_perfil"=perfil."perfil_id_perfil"
+     AND pp."permiso_id_permiso"=permiso."permiso_id_permiso"
+     AND pp."perfil_permiso_activo"=TRUE
+    WHERE perfil."codigo_m4" IN ('gerencia','secretaria')
+      AND perfil."activo_m4"=TRUE
+      AND pp."perfil_id_perfil" IS NULL
+  ) THEN
+    RAISE EXCEPTION 'CU18 debe quedar activo en cada perfil compatible existente';
   END IF;
 END $$;
 

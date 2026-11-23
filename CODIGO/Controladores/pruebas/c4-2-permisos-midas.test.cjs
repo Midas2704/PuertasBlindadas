@@ -150,6 +150,8 @@ test('080 reconcilia CU18 activo sin habilitar capacidades reservadas',()=>{
   assert.match(sql,/"activo_m4"=TRUE/);
   assert.match(sql,/"perfil_permiso"/);
   assert.match(sql,/\('gerencia','secretaria'\)/);
+  assert.doesNotMatch(sql,/perfiles\s*<>\s*2/i);
+  assert.match(sql,/perfil compatible existente/);
   assert.match(sql,/"administrador_original"=TRUE/);
   assert.match(sql,/CU377 y CU466-CU472 permanecen/);
   assert.doesNotMatch(sql,/UPDATE\s+"comun"\."permiso"[\s\S]*CU466/i);
