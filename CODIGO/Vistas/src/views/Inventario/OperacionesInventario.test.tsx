@@ -58,4 +58,15 @@ describe('Operaciones reales de Inventario',()=>{
     expect(await screen.findByRole('alert')).toHaveTextContent('Selecciona material, bodega y lote');
     expect(operarInventario).not.toHaveBeenCalled();
   });
+
+  it('informa cuando una entrada queda guardada para sincronizar',async()=>{
+    vi.mocked(operarInventario).mockResolvedValue({pendienteSincronizacion:true,idCola:'local-1',mensaje:'Se enviará cuando vuelva la conexión.'});
+    const usuario=userEvent.setup();render(<OperacionesInventario/>);await screen.findByRole('heading',{name:'Registrar entrada'});
+    await usuario.selectOptions(screen.getByLabelText('Material'),'MAT-01');await usuario.selectOptions(screen.getByLabelText('Bodega'),'1');
+    await waitFor(()=>expect(screen.getByLabelText('Lote')).toHaveTextContent('L-01'));await usuario.selectOptions(screen.getByLabelText('Lote'),'2');
+    await usuario.type(screen.getByLabelText('Cantidad'),'2');await usuario.selectOptions(screen.getByLabelText('Tipo de movimiento'),'3');await usuario.selectOptions(screen.getByLabelText('Motivo catalogado'),'6');await usuario.type(screen.getByLabelText('Justificación'),'Recepción sin Internet');
+    await usuario.click(screen.getByRole('button',{name:'Revisar y confirmar'}));await usuario.click(screen.getByRole('button',{name:'Confirmar operación'}));
+    expect(await screen.findByRole('status')).toHaveTextContent('Operación guardada en el teléfono');
+    expect(screen.queryByText('Operación confirmada')).not.toBeInTheDocument();
+  });
 });

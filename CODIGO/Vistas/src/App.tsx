@@ -83,12 +83,14 @@ import ReportesTerreno from './views/Terreno/ReportesTerreno';
 import AgendaTerreno from './views/Terreno/AgendaTerreno';
 import InstalacionesTerreno from './views/Terreno/InstalacionesTerreno';
 import { permisosTerreno } from './seguridad/accesosSistemas';
+import EstadoSinConexion from './offline/EstadoSinConexion';
 
 const App: React.FC = () => {
   const modoDemostracion = import.meta.env.VITE_MODO_DEMOSTRACION === 'true';
   return (
     <BrowserRouter>
       <DialogosSistema />
+      <EstadoSinConexion />
       {modoDemostracion&&<Link to="/demostracion-tecnica" target="_blank" className="fixed bottom-4 right-4 z-50 rounded-full bg-[#FE8F01] px-5 py-3 text-sm font-black text-black shadow-xl transition hover:bg-black hover:text-white">Monitor técnico</Link>}
       <ProveedorSesion><Routes>
         <Route path="/login" element={<Acceso modo="login"/>}/>

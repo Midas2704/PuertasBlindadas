@@ -1,0 +1,14 @@
+{
+  "name": "Puertas Blindadas",
+  "short_name": "P. Blindadas",
+  "description": "Gestión operativa de Puertas Blindadas",
+  "lang": "es-CL",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#111111",
+  "icons": [
+    {"src":"/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
