@@ -30,7 +30,7 @@ export function crearAplicacion(fachada = new C_Finanzas()) {
     if (error?.type === 'entity.parse.failed') { respuesta.status(400).json({ error: 'JSON inválido' }); return; }
     if (error?.type === 'entity.too.large') { respuesta.status(413).json({ error: 'El archivo supera el tamaño permitido' }); return; }
     if (error?.code === 'P2002') { respuesta.status(409).json({ error: 'El registro ya existe', codigo: 'REGISTRO_DUPLICADO' }); return; }
-    console.error('Error interno de Finanzas:', error instanceof Error ? error.name : 'Error');
+    console.error('Error interno de Finanzas:', error instanceof Error ? `${error.name}: ${error.message}` : error);
     respuesta.status(500).json({ error: 'No fue posible completar la operación', codigo: 'ERROR_INTERNO' });
   };
   aplicacion.use(manejarError);

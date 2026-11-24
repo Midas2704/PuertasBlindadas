@@ -59,16 +59,14 @@ const esAdministradorRaiz = (cuenta) => cuenta.administrador_original === true |
 exports.esAdministradorRaiz = esAdministradorRaiz;
 const esAdministradorEfectivo = (cuenta) => (0, exports.esAdministradorRaiz)(cuenta) || cuenta.usuario_es_administrador === true;
 exports.esAdministradorEfectivo = esAdministradorEfectivo;
-const configuracionEfectiva = (cuenta) => (0, exports.esAdministradorRaiz)(cuenta) ? 'gerencia' : (cuenta.perfil?.codigo_m4 || '');
+const configuracionEfectiva = (cuenta) => (0, exports.esAdministradorEfectivo)(cuenta) ? 'gerencia' : (cuenta.perfil?.codigo_m4 || '');
 exports.configuracionEfectiva = configuracionEfectiva;
 const permisosEfectivos = (cuenta, catalogoRaiz) => {
-    if ((0, exports.esAdministradorRaiz)(cuenta))
+    if ((0, exports.esAdministradorEfectivo)(cuenta))
         return [...new Set([
                 ...permisos_1.codigosAdministrador,
                 ...(catalogoRaiz || permisos_1.codigosImplementados),
             ].filter(codigo => codigo !== 'CU377'))];
-    if (cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia')
-        return permisos_1.codigosAdministrador;
     const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
     return permisos.filter(p => permisoAsignable(p) && (!p.requiere_administrador || cuenta.usuario_es_administrador || (0, exports.esAdministradorRaiz)(cuenta))).map(p => p.codigo_m4);
 };
@@ -170,7 +168,7 @@ class M4Controller {
         const catalogoRaiz = raiz ? await permisosActivosAdministradorRaiz(db_1.prisma) : undefined;
         const permisos = (0, exports.permisosEfectivos)(cuenta, catalogoRaiz);
         const numeroCU = Number(permisos_1.operacionesPermiso[operacion]?.slice(2));
-        if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia' && !raiz)
+        if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia' && !(0, exports.esAdministradorEfectivo)(cuenta))
             return error(403, 'La operación requiere configuración de Gerencia');
         if (permisos_1.operacionesQueRequierenAdministrador.has(operacion) && !cuenta.usuario_es_administrador && !raiz)
             return error(403, 'La operación requiere rol Administrador');

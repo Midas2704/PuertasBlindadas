@@ -53,7 +53,7 @@ function crearAplicacion(fachada = new C_Finanzas_1.C_Finanzas()) {
             respuesta.status(409).json({ error: 'El registro ya existe', codigo: 'REGISTRO_DUPLICADO' });
             return;
         }
-        console.error('Error interno de Finanzas:', error instanceof Error ? error.name : 'Error');
+        console.error('Error interno de Finanzas:', error instanceof Error ? `${error.name}: ${error.message}` : error);
         respuesta.status(500).json({ error: 'No fue posible completar la operación', codigo: 'ERROR_INTERNO' });
     };
     aplicacion.use(manejarError);

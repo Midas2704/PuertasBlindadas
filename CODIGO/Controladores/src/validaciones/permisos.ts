@@ -193,7 +193,7 @@ export const codigosImplementados = [...new Set([...Object.values(operacionesPer
 /** El perfil Administrador representa acceso integral a la matriz de CU implementados. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
 export const codigosTodosLosCU = Array.from({ length: 274 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
-export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({length:22},(_,i)=>`CU${360+i}`).filter(c=>c!=='CU377'), 'CU446','CU447','CU449','CU451','CU458','CU459','CU461'];
+export const codigosAdministrador = [...codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({length:22},(_,i)=>`CU${360+i}`).filter(c=>c!=='CU377'), 'CU446','CU447','CU449','CU451','CU458','CU459','CU461', ...Array.from({length:7},(_,i)=>`CU${466+i}`)];
 export const moduloPermiso = (codigo: string) => {
  const numero = Number(codigo.slice(2));
  if (numero >= 466 && numero <= 472) return 'INVENTARIO';

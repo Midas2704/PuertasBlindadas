@@ -181,9 +181,9 @@ class C_Finanzas {
             throw new ErrorAplicacion_1.ErrorAplicacion(403, 'Sólo Gerencia puede confirmar un ajuste de OCS');
         if (operacion === 'confirmarImputacionDocumento' && !['gerencia', 'contador'].includes(actor.configuracion) && !actor.administrador)
             throw new ErrorAplicacion_1.ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar la imputación');
-        if (operacion === 'registrarTipoCambioManualPago' && !['gerencia', 'contador'].includes(actor.configuracion))
+        if (operacion === 'registrarTipoCambioManualPago' && !['gerencia', 'contador'].includes(actor.configuracion) && !actor.administrador)
             throw new ErrorAplicacion_1.ErrorAplicacion(403, 'Secretaría no puede ingresar una tasa manual');
-        if (operacion === 'confirmarOperacionPago' && !['gerencia', 'contador'].includes(actor.configuracion))
+        if (operacion === 'confirmarOperacionPago' && !['gerencia', 'contador'].includes(actor.configuracion) && !actor.administrador)
             throw new ErrorAplicacion_1.ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden confirmar pagos a proveedores');
         if (['anularMovimientoPago', 'anularOperacionPago', 'revertirMovimientoPago', 'conciliarMovimientoPago', 'reemplazarRespaldoPago', 'anularAjusteObligacion'].includes(operacion) && !['gerencia', 'contador'].includes(actor.configuracion) && !actor.administrador)
             throw new ErrorAplicacion_1.ErrorAplicacion(403, 'Sólo Gerencia o Contador pueden ejecutar esta operación');

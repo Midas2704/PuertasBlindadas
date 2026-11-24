@@ -191,7 +191,7 @@ exports.codigosImplementados = [...new Set([...Object.values(exports.operaciones
 /** El perfil Administrador representa acceso integral a la matriz de CU implementados. */
 // parece exagerado, pero mantiene la matriz completa en un solo lugar
 exports.codigosTodosLosCU = Array.from({ length: 274 }, (_, indice) => `CU${String(indice + 1).padStart(2, '0')}`);
-exports.codigosAdministrador = [...exports.codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({ length: 22 }, (_, i) => `CU${360 + i}`).filter(c => c !== 'CU377'), 'CU446', 'CU447', 'CU449', 'CU451', 'CU458', 'CU459', 'CU461'];
+exports.codigosAdministrador = [...exports.codigosTodosLosCU, 'CU355', 'CU359', ...Array.from({ length: 22 }, (_, i) => `CU${360 + i}`).filter(c => c !== 'CU377'), 'CU446', 'CU447', 'CU449', 'CU451', 'CU458', 'CU459', 'CU461', ...Array.from({ length: 7 }, (_, i) => `CU${466 + i}`)];
 const moduloPermiso = (codigo) => {
     const numero = Number(codigo.slice(2));
     if (numero >= 466 && numero <= 472)

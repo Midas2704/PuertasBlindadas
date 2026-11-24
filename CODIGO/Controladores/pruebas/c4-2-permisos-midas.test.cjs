@@ -101,6 +101,15 @@ test('la autorización raíz no depende de sincronizar asignaciones particulares
   assert.equal(esAdministradorRaiz({administrador_original:false,usuario_es_administrador:true}),false);
 });
 
+test('cualquier Administrador recibe automáticamente todos los permisos implementados',()=>{
+  const cuenta={administrador_original:false,usuario_es_administrador:true,configuracion_particular:true,perfil:{codigo_m4:'secretaria',perfil_permiso:[]},particulares:[]};
+  const efectivos=permisosEfectivos(cuenta);
+  assert.equal(configuracionEfectiva(cuenta),'gerencia');
+  for(const codigo of ['CU01','CU18','CU59','CU74','CU274','CU355','CU360','CU381','CU446','CU458','CU466','CU472']) assert.ok(efectivos.includes(codigo),codigo);
+  assert.equal(efectivos.includes('CU377'),false);
+  for(const operacion of ['crearCliente','emitirCotizacion','registrarUsuario','consultarAuditoriaM9','registrarEntradaInventario']) assert.equal(permiteOperacion(operacion,efectivos),true,operacion);
+});
+
 test('la sincronización de arranque identifica MIDAS por su acceso único y no por su perfil materializado',()=>{
   const sincronizador=fs.readFileSync('src/administracion/sincronizarPermisosMidas.ts','utf8');
   assert.match(sincronizador,/findUnique\(\{ where: \{ acceso_m4: ACCESO_CUENTA_RAIZ \} \}\)/);

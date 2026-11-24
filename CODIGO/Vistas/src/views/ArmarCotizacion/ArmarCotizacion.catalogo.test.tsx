@@ -122,6 +122,20 @@ describe('Armar Cotización conectado al catálogo comercial C2',()=>{
     expect(vi.mocked(solicitarFinanzas).mock.calls.some(([ruta])=>ruta==='/monedas?borrador=901')).toBe(true);
   });
 
+  it('no permite que una respuesta atrasada del borrador revierta el cambio manual a B2C',async()=>{
+    const implementar=vi.mocked(solicitarFinanzas).getMockImplementation()!;
+    let responder!: (respuesta:Response)=>void;
+    const borradorPendiente=new Promise<Response>(resolver=>{responder=resolver});
+    vi.mocked(solicitarFinanzas).mockImplementation((ruta,opciones)=>ruta==='/billing/quotes/901/draft'?borradorPendiente:implementar(ruta,opciones));
+    const user=userEvent.setup();
+    render(<MemoryRouter initialEntries={['/?borrador=901']}><ArmarCotizacion/></MemoryRouter>);
+    await user.click(screen.getByRole('button',{name:/B2C · PARTICULARES/i}));
+    responder(new Response(JSON.stringify({id_cotizacion:901,estado_cotizacion:'borrador',segmento_comercial:'B2B'}),{status:200,headers:{'Content-Type':'application/json'}}));
+    await waitFor(()=>expect(screen.getByRole('button',{name:/B2C · PARTICULARES/i})).toHaveAttribute('aria-pressed','true'));
+    expect(screen.getByText('A · Datos del cliente')).toBeInTheDocument();
+    expect(screen.queryByText('B · Contactos de esta cotización')).not.toBeInTheDocument();
+  });
+
   it('distingue la dirección libre de la Obra estable y exige selección explícita',async()=>{
     const user=userEvent.setup();
     render(<MemoryRouter><ArmarCotizacion/></MemoryRouter>);

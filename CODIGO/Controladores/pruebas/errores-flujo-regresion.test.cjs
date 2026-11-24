@@ -33,7 +33,7 @@ test('retomar cotización consulta sólo el borrador y conserva su moneda histó
   assert.match(backend, /async obtenerBorradorCotizacion/);
   assert.match(backend, /monedaObjetivo\.id_moneda!==referencia\.id_moneda/);
   assert.match(rutas, /billing\/quotes\/:id\/draft/);
-  assert.match(frontend, /billing\/quotes\/\$\{borradorId\}\/draft/);
+  assert.match(frontend, /billing\/quotes\/\$\{borradorInicial\}\/draft/);
   assert.match(frontend, /monedas\?borrador=\$\{borradorId\}/);
   assert.doesNotMatch(frontend, /solicitarFinanzas\('\/billing\/pending-approvals'\)/);
 });
@@ -51,6 +51,13 @@ test('service worker clona las respuestas antes de entregarlas y renueva la cach
   assert.match(sw, /puertas-blindadas-v2/);
   assert.match(sw, /const copia=respuesta\.clone\(\);/);
   assert.doesNotMatch(sw, /cache\.put\([^\n]+respuesta\.clone\(\)/);
+});
+
+test('el almacenamiento local de PDFs se habilita sin modificar filas existentes', () => {
+  const migracion = readFileSync('prisma/migrations/081_storage_local_servidor_personal/migration.sql', 'utf8');
+  assert.match(migracion, /LOCAL_PRIVADO/);
+  assert.match(migracion, /ALTER TABLE "finanzas"\."version_documento"/);
+  assert.doesNotMatch(migracion, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i);
 });
 
 test('CU451 deja de aparecer en el menú y en las rutas sin borrar su implementación', () => {

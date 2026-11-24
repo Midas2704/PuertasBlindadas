@@ -27,14 +27,13 @@ type IdentidadRaiz = Pick<Cuenta,'administrador_original'> & Partial<Pick<Cuenta
 export const esAdministradorRaiz = (cuenta: IdentidadRaiz) => cuenta.administrador_original === true || cuenta.acceso_m4?.replace(/\./g,'').toLowerCase() === ACCESO_CUENTA_RAIZ;
 export const esAdministradorEfectivo = (cuenta: Pick<Cuenta,'administrador_original'|'usuario_es_administrador'> & Partial<Pick<Cuenta,'acceso_m4'>>) =>
  esAdministradorRaiz(cuenta) || cuenta.usuario_es_administrador === true;
-export const configuracionEfectiva = (cuenta: Pick<Cuenta,'administrador_original'|'perfil'> & Partial<Pick<Cuenta,'acceso_m4'>>) =>
- esAdministradorRaiz(cuenta) ? 'gerencia' : (cuenta.perfil?.codigo_m4 || '');
+export const configuracionEfectiva = (cuenta: Pick<Cuenta,'administrador_original'|'usuario_es_administrador'|'perfil'> & Partial<Pick<Cuenta,'acceso_m4'>>) =>
+ esAdministradorEfectivo(cuenta) ? 'gerencia' : (cuenta.perfil?.codigo_m4 || '');
 export const permisosEfectivos = (cuenta: Cuenta, catalogoRaiz?: string[]) => {
- if(esAdministradorRaiz(cuenta)) return [...new Set([
+ if(esAdministradorEfectivo(cuenta)) return [...new Set([
   ...codigosAdministrador,
   ...(catalogoRaiz || codigosImplementados),
  ].filter(codigo=>codigo!=='CU377'))];
- if(cuenta.usuario_es_administrador && cuenta.perfil?.codigo_m4 === 'gerencia') return codigosAdministrador;
  const permisos = cuenta.configuracion_particular ? cuenta.particulares.map(v => v.permiso) : (cuenta.perfil?.perfil_permiso.filter(v => v.perfil_permiso_activo).map(v => v.permiso) || []);
  return permisos.filter(p => permisoAsignable(p) && (!p.requiere_administrador || cuenta.usuario_es_administrador || esAdministradorRaiz(cuenta))).map(p => p.codigo_m4!);
 };
@@ -117,7 +116,7 @@ export class M4Controller {
   const catalogoRaiz=raiz?await permisosActivosAdministradorRaiz(prisma):undefined;
   const permisos=permisosEfectivos(cuenta,catalogoRaiz);
   const numeroCU = Number(operacionesPermiso[operacion]?.slice(2));
-  if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia' && !raiz) return error(403,'La operación requiere configuración de Gerencia');
+  if (numeroCU >= 59 && numeroCU <= 74 && cuenta.perfil?.codigo_m4 !== 'gerencia' && !esAdministradorEfectivo(cuenta)) return error(403,'La operación requiere configuración de Gerencia');
   if (operacionesQueRequierenAdministrador.has(operacion) && !cuenta.usuario_es_administrador && !raiz) return error(403,'La operación requiere rol Administrador');
   if(!personales.includes(operacion) && !permiteOperacion(operacion, permisos)) return error(403,'No tienes permiso para esta operación');
   if(adicionales.some(p=>!permisos.includes(p))) return error(403,'No tienes permiso para los filtros o condiciones solicitados');
