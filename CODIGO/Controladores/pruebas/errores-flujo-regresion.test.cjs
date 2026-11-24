@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
+const { operacionesPermiso, permiteOperacion } = require('../dist/validaciones/permisos');
 
 test('plantillas aceptan el identificador idAreaTrabajo enviado por la interfaz', () => {
   const backend = readFileSync('src/controladores/M2Controller.ts', 'utf8');
@@ -35,6 +36,21 @@ test('retomar cotización consulta sólo el borrador y conserva su moneda histó
   assert.match(frontend, /billing\/quotes\/\$\{borradorId\}\/draft/);
   assert.match(frontend, /monedas\?borrador=\$\{borradorId\}/);
   assert.doesNotMatch(frontend, /solicitarFinanzas\('\/billing\/pending-approvals'\)/);
+});
+
+test('rutas nuevas reutilizan los permisos obligatorios de cotización y Venta Directa', () => {
+  assert.equal(operacionesPermiso.obtenerBorradorCotizacion, 'CU20');
+  assert.equal(operacionesPermiso.monedasVentaDirecta, 'CU27');
+  assert.equal(permiteOperacion('obtenerBorradorCotizacion', ['CU20']), true);
+  assert.equal(permiteOperacion('obtenerBorradorCotizacion', ['CU19']), false);
+  assert.equal(permiteOperacion('monedasVentaDirecta', ['CU27']), true);
+});
+
+test('service worker clona las respuestas antes de entregarlas y renueva la caché', () => {
+  const sw = readFileSync('../Vistas/public/sw.js', 'utf8');
+  assert.match(sw, /puertas-blindadas-v2/);
+  assert.match(sw, /const copia=respuesta\.clone\(\);/);
+  assert.doesNotMatch(sw, /cache\.put\([^\n]+respuesta\.clone\(\)/);
 });
 
 test('CU451 deja de aparecer en el menú y en las rutas sin borrar su implementación', () => {

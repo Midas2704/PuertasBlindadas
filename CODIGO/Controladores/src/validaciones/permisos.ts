@@ -1,7 +1,7 @@
 /** Catálogo técnico de operaciones implementadas. */
 // Midas dijo que este catálogo no se toca a la ligera
 export const operacionesPermiso: Record<string, string> = {
- buscarClientes:'CU06',filtrarEstado:'CU07',filtrarFinanzas:'CU08',listarClientes:'CU05', abrirFicha:'CU09', dashboard:'CU05', crearCliente:'CU01', actualizarCliente:'CU02', desactivarCliente:'CU03', reactivarCliente:'CU04', inventario:'CU15', productos:'CU14', monedas:'CU28',
+ buscarClientes:'CU06',filtrarEstado:'CU07',filtrarFinanzas:'CU08',listarClientes:'CU05', abrirFicha:'CU09', dashboard:'CU05', crearCliente:'CU01', actualizarCliente:'CU02', desactivarCliente:'CU03', reactivarCliente:'CU04', inventario:'CU15', productos:'CU14', monedas:'CU28', monedasVentaDirecta:'CU27',
  plantillaImportacionClientes:'CU01', importarClientes:'CU01',
  plantillaImportacionEmpleados:'CU156', importarEmpleados:'CU156',
  plantillaImportacionProveedores:'CU75', importarProveedores:'CU75',
@@ -35,7 +35,7 @@ export const operacionesPermiso: Record<string, string> = {
  publicarVersionProductoComercial:'CU365', vincularProductoComercial:'CU366', historialFamiliaProductoComercial:'CU367', historialProductoComercial:'CU367',
  listarTareasFabricacion:'CU360', obtenerPlantillaFabricacionFamilia:'CU360', crearTareaFabricacion:'CU361', actualizarTareaFabricacion:'CU362', guardarBorradorPlantillaFabricacion:'CU362',
  desactivarTareaFabricacion:'CU363', reactivarTareaFabricacion:'CU364', publicarPlantillaFabricacionFamilia:'CU365', historialPlantillaFabricacionFamilia:'CU367',
- bandeja:'CU20', historial:'CU20', guardarCotizacion:'CU19', editarCotizacion:'CU20', buscarObrasCotizacion:'CU20', registrarObraDesdeCotizacion:'CU19', vincularObraCotizacion:'CU20', resolverContextoObraProyectoM12:'CU20', consultarAntecedentesObraProyectoM12:'CU20', seleccionarAlternativaB2C:'CU20', aceptarAlternativaB2C:'CU24', rechazarAlternativaB2C:'CU22', crearVentaDirecta:'CU27', registrarClienteDesdeCotizacion:'CU13', emitirCotizacion:'CU18', reactivarCotizacion:'CU21', formalizarClienteB2C:'CU23', aprobarCotizacionB2B:'CU24', configurarEtapasCobro:'CU40', modificarGuia:'CU35', definirCondicionesCobro:'CU39', configurarUmbral:'CU41', consultarUmbral:'CU41',
+ bandeja:'CU20', historial:'CU20', obtenerBorradorCotizacion:'CU20', guardarCotizacion:'CU19', editarCotizacion:'CU20', buscarObrasCotizacion:'CU20', registrarObraDesdeCotizacion:'CU19', vincularObraCotizacion:'CU20', resolverContextoObraProyectoM12:'CU20', consultarAntecedentesObraProyectoM12:'CU20', seleccionarAlternativaB2C:'CU20', aceptarAlternativaB2C:'CU24', rechazarAlternativaB2C:'CU22', crearVentaDirecta:'CU27', registrarClienteDesdeCotizacion:'CU13', emitirCotizacion:'CU18', reactivarCotizacion:'CU21', formalizarClienteB2C:'CU23', aprobarCotizacionB2B:'CU24', configurarEtapasCobro:'CU40', modificarGuia:'CU35', definirCondicionesCobro:'CU39', configurarUmbral:'CU41', consultarUmbral:'CU41',
  anularVenta:'CU37', registrarDocumento:'CU36', descartarBorrador:'CU22', aprobarCotizacion:'CU24', aprobarVenta:'CU27', tipoCambio:'CU47',
  consultarPago:'CU55', consultarSaldo:'CU49', catalogosPago:'CU45', contextoPago:'CU42', consolidarB2C:'CU25', revertirVenta:'CU38', registrarPago:'CU43', anularPago:'CU51', revertirPago:'CU52', aplicarSaldoFavor:'CU54', consultarMorosidad:'CU56', generarComprobante:'CU57', conciliarPago:'CU58',
  usuarios:'CU67', catalogosUsuarios:'CU59', registrarUsuario:'CU59', desactivarUsuario:'CU60', reactivarUsuario:'CU61',
