@@ -56,6 +56,7 @@ test('service worker clona las respuestas antes de entregarlas y renueva la cach
 test('el almacenamiento local de PDFs se habilita sin modificar filas existentes', () => {
   const migracion = readFileSync('prisma/migrations/081_storage_local_servidor_personal/migration.sql', 'utf8');
   assert.match(migracion, /LOCAL_PRIVADO/);
+  assert.match(migracion, /POSTGRES/);
   assert.match(migracion, /ALTER TABLE "finanzas"\."version_documento"/);
   assert.doesNotMatch(migracion, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i);
 });
